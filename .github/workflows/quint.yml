@@ -17,6 +17,8 @@ jobs:
       - run: quint run quint/protocol.qnt --invariant=forkSafety --max-steps=16 --max-samples=5000
       - run: quint run quint/protocol.qnt --invariant=revocationSafety --max-steps=16 --max-samples=5000
       - run: quint run quint/protocol.qnt --invariant=revokedExcludedFromOrgSecret --max-steps=16 --max-samples=5000
+      - run: quint run quint/protocol.qnt --invariant=tauWindow --max-steps=16 --max-samples=5000
+      - run: quint run quint/protocol.qnt --invariant=convergence --max-steps=16 --max-samples=5000
   apalache:
     runs-on: ubuntu-latest
     continue-on-error: true   # bounded verify is best-effort (slow, JVM-heavy)
@@ -27,14 +29,17 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: "temurin", java-version: "17" }
       - run: npm i -g @informalsystems/quint
-      # Abstract-root representation (roots are int tokens + a rootMembers table,
-      # not Snapshot maps) makes bounded verify tractable to depth ~5-6 (the
-      # concrete-Snapshot model topped out at depth 2). Depth 5 verifies in ~8s
-      # per invariant; the simulator covers greater breadth. See the abstract-root
-      # remodel design spec.
+      # Abstract-root representation (roots are int tokens + rootKeys table, not
+      # Snapshot maps) keeps bounded verify tractable. Measured depths on the M3
+      # model: forkSafety/revocationSafety/tauWindow/lemma verify at depth 5
+      # (~30-42s each); convergence is heavier (its reachableRoots transitive
+      # closure) and verifies at depth 3 (~21s), timing out at 5. The simulator
+      # covers greater breadth. See the M3 design spec.
       - run: quint verify quint/protocol.qnt --invariant=forkSafety --max-steps=5
       - run: quint verify quint/protocol.qnt --invariant=revocationSafety --max-steps=5
       - run: quint verify quint/protocol.qnt --invariant=revokedExcludedFromOrgSecret --max-steps=5
+      - run: quint verify quint/protocol.qnt --invariant=tauWindow --max-steps=5
+      - run: quint verify quint/protocol.qnt --invariant=convergence --max-steps=3
   mbt:
     runs-on: ubuntu-latest
     steps:

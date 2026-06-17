@@ -92,3 +92,37 @@ re-addition. Convergence and the τ-window property arrive in Milestone 3.
 
 Local Apalache run (outside CI) needs a JVM and a writable `$HOME`:
 `HOME=/tmp/fakehome JAVA_HOME=$(/usr/libexec/java_home) PATH=$JAVA_HOME/bin:$PATH quint verify quint/protocol.qnt --invariant=forkSafety --max-steps=5`.
+
+## Protocol layer (Milestone 3) — clock, τ-window, compromised key, convergence
+
+Milestone 3 adds the time-dependent parts. The model is **device-centric**: a small
+`DEVICES` set are the staleness-bearing principals; each device has its own local
+trie view (`local`) and `lastChecked` clock reading. Roots now commit to membership
+**and** per-member key generations (`rootKeys: int -> (str -> int)`), so both member
+removal and key rotation are trie updates a device learns of only when it next syncs.
+
+There is **one taint mechanism**: a device acting on a *stale trie view*. The
+τ-window bounds it. Properties (all simulator-checked; Apalache as noted):
+
+- `tauWindow` — a device accepts a *chain-invalid* write (author removed **or**
+  author key-gen ≠ current) only if its staleness `< TAU`. Checked under both
+  `POLICY = "MAX_AGE"` and `"PAUSE_ON_LEARN"` (flip the `POLICY` constant). The
+  **compromised-key** adversary is the gen-mismatch sub-case of this single property.
+- `convergence` — `quiescent implies (every current-member device holds the chain
+  root)`. Convergence is, by the untimed-model limitation the design notes, a
+  **quiescence-safety companion** to its real signal: the `convergedReachable`
+  witness in `ods_instances.qnt` (the converged state is reachable). It is not a
+  temporal-liveness `eventually`.
+- `forkSafety`/`revocationSafety` carry over, re-expressed over devices;
+  `revocationSafety`'s write-authorship guarantee moved to `tauWindow` (a stale
+  device may legitimately accept an ex-member's write within τ — exactly the taint
+  τ bounds), leaving `revocationSafety` as the CGKA-token-exclusion property.
+
+Apalache depths (measured on the M3 model): `forkSafety`, `revocationSafety`,
+`tauWindow`, `revokedExcludedFromOrgSecret` verify at **depth 5** (~30–42s each);
+`convergence` is heavier (its `reachableRoots` transitive closure) and verifies at
+**depth 3** (~21s). CI's `apalache` job uses those depths.
+
+Negative controls (documented, not committed): dropping the staleness guard in
+`deviceAcceptWrite` breaks `tauWindow`; dropping the `== chain.root` anchor in
+`deviceFetchAndApply` breaks `forkSafety`. Both produce simulator counterexamples.
