@@ -253,18 +253,18 @@ async fn connect_chain(
     admin_seed: [u8; 32],
     others: Vec<[u8; 32]>,
 ) -> Result<org_node::SubxtChainOps, String> {
-    use subxt::OnlineClient;
-    use subxt::config::PolkadotConfig;
     use subxt_signer::sr25519::Keypair;
 
-    let api: OnlineClient<PolkadotConfig> = OnlineClient::from_url(&ws_url)
-        .await
-        .map_err(|e| format!("subxt connect {ws_url}: {e}"))?;
-
-    let registry_client =
-        on_chain_client::OrgRegistryClient::from_client(api.clone(), contract_h160)
+    // Build the subxt client + registry reader via org-node's shared helper,
+    // which uses the LegacyBackend RPC group. The default `OnlineClient::from_url`
+    // backend (chainHead / new JSON-RPC) fails against the public Asset Hub
+    // endpoints with "Cannot construct OnlineClientAtBlock: cannot get the block
+    // header for block …", so the app must use the SAME LegacyBackend path as the
+    // preflight (`connect_chain_client`) and `on-chain-client`.
+    let (api, registry_client) =
+        org_node::service::connect_chain_client(&ws_url, contract_h160)
             .await
-            .map_err(|e| format!("OrgRegistryClient: {e}"))?;
+            .map_err(|e| format!("connect_chain {ws_url}: {e}"))?;
 
     // Build the admin SR25519 keypair from the raw 32-byte mini-secret seed.
     // subxt_signer::sr25519::SecretKeyBytes = [u8; 32].
