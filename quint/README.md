@@ -49,7 +49,14 @@ defaults.)
 - Protocol-layer properties (revocation/replay/τ-window/convergence) and the
   full adversary arrive in Milestone 2 (`protocol.qnt`).
 
-## Protocol layer (Milestone 2)
+## Protocol layer (Milestones 2–3)
+
+> **Scope disclaimer.** Everything below is verified about the Quint protocol
+> *model* only. There is **no Rust implementation of the protocol layer** — the
+> `org-members` crate is the sole code under conformance test (via `membership.qnt`
+> + the MBT harness). So `forkSafety`/`revocationSafety`/`tauWindow`/`convergence`
+> are statements about the model, not about a running system. "verify" here means
+> Apalache checked the *model*, not that an implementation was verified.
 
 `protocol.qnt` is the distributed state machine over `membership`: on-chain anchor
 (`chain`), per-member belief (`local`), an unordered tagged-envelope `network`,

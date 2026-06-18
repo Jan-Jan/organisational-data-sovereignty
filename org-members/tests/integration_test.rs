@@ -749,6 +749,22 @@ fn handle_digits_allowed() {
     assert!(leaf_with_handle("alice42").is_ok());
 }
 
+#[test]
+fn handle_too_long_rejected() {
+    // MAX_HANDLE_LEN is 128 bytes after NFC normalization. A 128-char ASCII
+    // handle is at the cap (valid); 129 exceeds it and must be rejected with
+    // InvalidHandle. This is the one validate_handle branch the fuzz strategy
+    // (capped at 64 chars) could never reach.
+    let at_cap = "a".repeat(128);
+    assert!(leaf_with_handle(&at_cap).is_ok());
+
+    let over_cap = "a".repeat(129);
+    assert!(matches!(
+        leaf_with_handle(&over_cap),
+        Err(OrgMembersError::InvalidHandle(_))
+    ));
+}
+
 // --- Confusable detection tests ---
 
 #[test]

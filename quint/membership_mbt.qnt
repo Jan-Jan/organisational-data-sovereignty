@@ -13,6 +13,8 @@ module membership_mbt {
   pure val IDS = Set("a", "b", "c")
   pure val HANDLES = Set("h1", "h2", "h3")
   pure val GENS = Set(0, 1, 2)
+  pure val NAMES = Set("n", "n2")
+  pure val SURNAMES = Set("s", "s2")
 
   /// Apply a Result: on Ok advance the trie and clear error; on Err keep the
   /// trie and record the tag.
@@ -43,6 +45,12 @@ module membership_mbt {
     nondet h  = HANDLES.oneOf()
     commit(updateHandle(trie, id, h, h))
 
+  action UpdateNameSurname =
+    nondet id = IDS.oneOf()
+    nondet nm = NAMES.oneOf()
+    nondet sn = SURNAMES.oneOf()
+    commit(updateNameSurname(trie, id, nm, sn))
+
   action RotateKey =
     nondet id = IDS.oneOf()
     nondet g  = GENS.oneOf()
@@ -67,6 +75,7 @@ module membership_mbt {
     AddMember,
     DeleteMember,
     UpdateHandle,
+    UpdateNameSurname,
     RotateKey,
     AddDevice,
     DeleteDevice,

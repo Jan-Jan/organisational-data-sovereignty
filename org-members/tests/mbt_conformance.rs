@@ -129,6 +129,34 @@ impl MembershipDriver {
                     Ok((t2, _delta)) => t2,
                     Err(_) => t,
                 };
+                // Delta-path conformance: for the real mutation old -> t, the crate's
+                // calculate_delta + apply_delta + verify_against must reproduce t's
+                // root. This realizes the model's round-trip law
+                // (applyDelta(s, calculateDelta(s, s')) == Ok(s')) against the REAL
+                // crate, cross-checking the canonical-form delta machinery — the
+                // crate's headline invariant — which the mutator action set never
+                // exercises directly. (Adversarial/rejection deltas remain covered by
+                // the crate's own `delta_canonicality_fuzz`, so we only check the
+                // positive direction here and never feed a malformed delta.)
+                if let Some(old) = &self.trie {
+                    if let (Ok(old_root), Ok(new_root)) = (old.root_hash(), t.root_hash()) {
+                        if old_root != new_root {
+                            let delta = t
+                                .calculate_delta(old)
+                                .expect("calculate_delta failed on a real mutation");
+                            let verified = old
+                                .apply_delta(&delta)
+                                .expect("apply_delta rejected a canonical delta from calculate_delta")
+                                .verify_against(&new_root)
+                                .expect("verify_against failed for the calculated delta");
+                            assert_eq!(
+                                verified.root_hash().expect("root_hash of verified trie"),
+                                new_root,
+                                "delta round-trip produced a different root than the direct mutation"
+                            );
+                        }
+                    }
+                }
                 self.trie = Some(t);
                 self.last_error = String::new();
             }
@@ -216,6 +244,10 @@ impl Driver for MembershipDriver {
             },
             UpdateHandle(id: String, h: String) => {
                 let res = self.cur().and_then(|t| t.update_handle(&real_id(&id), &h));
+                self.commit(res);
+            },
+            UpdateNameSurname(id: String, nm: String, sn: String) => {
+                let res = self.cur().and_then(|t| t.update_name_surname(&real_id(&id), &nm, &sn));
                 self.commit(res);
             },
             RotateKey(id: String, g: i64) => {
