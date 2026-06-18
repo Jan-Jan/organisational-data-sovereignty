@@ -46,7 +46,28 @@ to obtain/alter a member/device/org key is the (read-only) resolver — i.e. the
 
 ## 3. Guarantee 2 — trie-authorized document-ACL writes
 
-### 3.1 Authority model
+### 3.0 Effective membership — advisory ACL, authoritative trie (the authority model)
+
+The materialised ACL — the `GroupCrdt` membership ledger — is **advisory**; the **members trie
+(via the resolver) is authoritative**. A member's *effective* access to a document is
+
+> `effective = ledger-membership(member) ∧ resolver.is_member(member)`
+
+computed **live** via `DocAccess::effective_members(resolver)` / `is_effective(resolver, member)`,
+**independent of `reconcile`**. Consequences:
+
+- A member **revoked from the trie has no effective access immediately**, even before the doc is
+  reconciled. `reconcile` (§3.3) only *materialises* the advisory ledger toward the authoritative
+  trie to bound staleness — it is **not** the security boundary; the live intersection is.
+- **The owner/manager is not exempt.** A revoked manager has no effective access. The raw CRDT
+  ledger may still list them (the group root can't be removed), but the live intersection excludes
+  them — no owner exemption, no succession, fork-on-loss. (This subsumes item-1's "revoked manager"
+  edge: effective membership, not a manager skip, is the answer.)
+
+This matches the Keyhive track's finalised authority model (convergence): the on-chain trie is the
+single source of truth; the local-first ACL is a cache over it.
+
+### 3.1 Write authority
 
 An ACL mutation is valid iff its **author**:
 - **(a) is a current trie member** — `resolver.is_member(author)` — enforced by `org-acl`; and
@@ -80,8 +101,19 @@ impl DocAccess {
 
     /// `author` (Manage) changes `member`'s access level.
     fn set_access<R: MemberKeyResolver>(self, resolver: &R, author: MemberId, member: MemberId, role: AclRole) -> Result<Self, AclError>;
+
+    /// Effective members = advisory ledger ∩ authoritative trie, computed LIVE.
+    /// Independent of `reconcile`; the owner/manager is NOT exempt.
+    fn effective_members<R: MemberKeyResolver>(&self, resolver: &R) -> Vec<MemberId>;
+
+    /// True iff `member` is in the ledger AND currently vouched by the trie.
+    fn is_effective<R: MemberKeyResolver>(&self, resolver: &R, member: MemberId) -> bool;
 }
 ```
+
+`effective_members`/`is_effective` are the read-side authority check (§3.0): they intersect the
+advisory `member_ids()` ledger with `resolver.is_member` on every call — no caching, no manager
+special-case.
 
 Each mutation: **(1)** `if !resolver.is_member(&author) → Err(AclError::AuthorNotMember(author))`;
 **(2)** build the `AclOp` authored by `AuthMemberId(OrgMember{org, author})` with the `AclRole`→
@@ -93,12 +125,16 @@ access change at the pinned rev must be confirmed first** (`Promote`/`Demote` vs
 implementation plan's first task verifies it against `p2panda-auth` source (same approach item-1
 used for `GroupAction::Remove`/`Access::write`).
 
-### 3.3 `reconcile` stays manager-authored
+### 3.3 `reconcile` is lazy materialisation, not the boundary
 
-`DocAccess::reconcile` (item-1) prunes trie-revoked members as a **trie-driven cascade**, not a
-user action — it remains authored by the doc's manager (who holds `Manage`) and is *not* subject
-to the §3.1(a) author gate (it is the trie *enforcing* removal). Unchanged from item-1 except it
-now coexists with the author-aware mutators.
+`DocAccess::reconcile` (item-1) prunes trie-revoked members from the advisory ledger as a
+**trie-driven materialisation** — it bounds ledger staleness so reads stay cheap, but it is **not**
+the security boundary (§3.0's live `effective_members` is). It remains authored by the doc's
+manager and is *not* subject to the §3.1(a) author gate (the trie is *enforcing* removal, not a
+user). It keeps the item-1 behaviour of not removing the group root at the CRDT level (the root
+can't be removed); a revoked manager therefore lingers in the *raw* ledger until a fork, but
+`effective_members` already excludes them, so this is harmless. Otherwise unchanged from item-1,
+now coexisting with the author-aware mutators.
 
 ### 3.4 Errors
 
@@ -116,6 +152,9 @@ lacks `Manage`, or an invalid op). Distinct so callers/tests can tell "you're no
   false, so every mutation by them returns `AuthorNotMember`, even on a doc where they still
   appear in the (stale, pending-reconcile) ACL.
 - **A non-`Manage` member cannot add/remove/relevel** — the CRDT rejects it (`CrdtRejected`).
+- **Effective access tracks the trie live** — a member (incl. the owner/manager) revoked from the
+  trie is absent from `effective_members` *immediately*, before any `reconcile`; effective access
+  equals `ledger ∩ is_member` (§3.0).
 
 ## 5. Testing
 
@@ -123,6 +162,10 @@ lacks `Manage`, or an invalid op). Distinct so callers/tests can tell "you're no
   member (trie member) can add/remove/relevel; a `Write`-only member is rejected (`CrdtRejected`);
   a non-trie-member author is rejected (`AuthorNotMember`); a member **revoked from the trie**
   loses ACL-write authority (`AuthorNotMember`) even while still listed in the doc's ACL.
+- **Effective membership (§3.0):** `effective_members` = ledger ∩ `is_member`; a trie-revoked
+  member is excluded **before** reconcile; a **revoked owner/manager is excluded too** (not exempt);
+  `is_effective` agrees. After `reconcile` the advisory ledger shrinks but `effective_members` is
+  unchanged (idempotent w.r.t. the live answer).
 - **Guarantee-1 invariant:** a test/doc-assertion that no `org-acl` API mutates identity/key
   state (resolver is read-only; only `DocAccess` mutates, and only ACL membership/levels).
 - **Regression:** item-1's grant / revocation / reconcile / identity-takeover tests still pass
@@ -148,6 +191,12 @@ lacks `Manage`, or an invalid op). Distinct so callers/tests can tell "you're no
 `AclRole` joins `org-acl-core` as another shared neutral type (alongside `MemberKeyResolver`,
 `MembershipDelta`, `DocReconcileMark`) — the Keyhive track consumes the same role enum and the
 same author-gated authority model. The trie-author-gate + native-rights split is substrate-neutral.
+
+**Authority model converged with the Keyhive track:** advisory ACL / authoritative trie, effective
+access = `ledger ∩ is_member` recomputed live and independent of reconcile, owner not exempt (no
+root removal / succession; fork-on-loss). Divergence kept deliberate: the Keyhive track stamps a
+per-`(doc, org)` map (forward-looking for cross-org docs); the p2panda track keeps item-1's
+single-org `DocReconcileMark` (cross-org collaboration is an ODS non-goal).
 
 ## 8. Workflow / merge
 
