@@ -445,10 +445,20 @@ pub async fn connect_chain_client(
 > {
     use subxt::backend::LegacyBackend;
     use subxt::config::PolkadotConfig;
+    use subxt::rpcs::client::ReconnectingRpcClient;
 
-    let rpc_client = subxt::rpcs::RpcClient::from_insecure_url(ws_url)
+    // Use the reconnecting RPC client rather than `from_insecure_url`. Public RPC
+    // nodes close idle WS connections; with a plain client the next call after an
+    // idle period (e.g. submitting a genesis write minutes after startup) fails
+    // deep in subxt with "cannot get the current block: ... Error reason could not
+    // be found. This is a bug." (a jsonrpsee dead-connection error). The
+    // reconnecting client keeps the link alive with WS pings AND transparently
+    // reconnects, so reads at startup and writes much later both succeed.
+    let reconnecting = ReconnectingRpcClient::builder()
+        .build(ws_url)
         .await
         .map_err(|e| crate::error::OrgNodeError::Chain(format!("rpc connect: {e}")))?;
+    let rpc_client = subxt::rpcs::RpcClient::new(reconnecting);
     let backend: LegacyBackend<PolkadotConfig> = LegacyBackend::builder().build(rpc_client);
     let api = subxt::OnlineClient::from_backend(Arc::new(backend))
         .await

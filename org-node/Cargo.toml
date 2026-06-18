@@ -31,7 +31,7 @@ serde = { version = "1", features = ["derive"] }
 thiserror = { version = "2", default-features = false }
 rand_core = "0.6"
 # Features mirror on-chain-client's pins so the subxt types unify across crates.
-subxt = { version = "0.50", default-features = false, features = ["native", "jsonrpsee"], optional = true }
+subxt = { version = "0.50", default-features = false, features = ["native", "jsonrpsee", "reconnecting-rpc-client"], optional = true }
 subxt-signer = { version = "0.50", default-features = false, features = ["sr25519", "subxt"], optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
 on-chain-client = { path = "../on-chain-client", default-features = false, features = ["dev-rpc"], optional = true }
