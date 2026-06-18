@@ -48,19 +48,19 @@ org-acl-core/            # Apache-2.0; NO substrate deps; WASM-clean. The conver
   src/
     identity.rs    # MemberId, P2pMemberKey, P2pDeviceKey, OrgKey, Epoch, Principal
     resolver.rs    # MemberKeyResolver trait (minimal) + ResolverError
+    delta.rs       # MembershipDelta — neutral per-epoch change set (from/to epoch, removed/added/rotated)
     test_support.rs# StubResolver (cfg(test)/feature `testing`) — graduated from spike-common
   tests/
-    fuzz_identity_codec/ # bolero: Principal/MemberId postcard never-panic + round-trip
+    fuzz_identity_codec/ # bolero: Principal/MemberId/MembershipDelta postcard never-panic + round-trip
 
 org-acl-p2panda/         # GPL-3.0-only; the ONLY p2panda boundary crate.
   src/
-    lib.rs         # crate docs: Flow-B invariant + lazy-CGKA two-tier spine
+    lib.rs         # crate docs: Flow-B invariant + lazy-CGKA two-tier spine + epoch reconciliation
     auth_id.rs     # AuthMemberId(MemberId) + impl IdentityHandle (orphan-rule newtype)
     pki.rs         # ResolverPki<R>: impl IdentityRegistry<MemberId, Self>  (key-resolution half)
     actor.rs       # materialise_actor_id(resolver, principal) -> ActorId  (re-resolves; no cache)
-    acl.rs         # GroupCrdt<AuthMemberId> grant path, below p2panda-spaces' eager Manager
+    acl.rs         # DocAccess: per-document GroupCrdt<AuthMemberId> grant path + org_epoch stamp + reconcile
   tests/
-    acl_flow.rs                # stable-id ACL + lazy seam through live p2panda
     l3_revocation.rs           # exit criteria (promoted from spike-p2panda l3_revocation, item-1 slice)
     fuzz_resolver_key_boundary/# bolero: materialise/ResolverPki on arbitrary key bytes never-panic
 ```
@@ -94,10 +94,41 @@ and `materialise_actor_id` (the spaces `ActorId` seam) live in item-1 but feed t
 tier, which is computed lazily on first-online. The actual lazy DCGKA compute/trigger is
 **item-4**; item-1 delivers the ACL tier + resolver and keeps the two tiers **decoupled**.
 
-### 3.3 No trie-change observer in item-1
+### 3.3 Per-document ACL + epoch-stamped lazy reconciliation
 
-Revocation is reflected simply because the resolver reads the **current committed** trie.
-The trie-change observer (cache invalidation, rotation cascade) is **item-4**.
+ACLs and CGKAs are **per data object (per document)**, so item-1 introduces a per-document
+type **`DocAccess`** — one instance per document, holding **both** that document's ACL
+(its `GroupCrdt<AuthMemberId>` writer set, built now) and its CGKA (added in item-4),
+under a single `org_epoch` stamp.
+
+To avoid **thrashing every document** when the members trie changes, reconciliation is
+**lazy and epoch-stamped** (the ODS SKU-window minimization, §Scalability):
+
+- Each `DocAccess` stores an **`org_epoch`** = the members-trie epoch its ACL (and, in
+  item-4, its CGKA) was last reconciled against (`MemberKeyResolver::epoch()`).
+- On a trie advance, a document is reconciled **on demand** — open/active documents first
+  (the scheduling/ordering itself is Phase-5).
+- **Δepoch == 1 (contiguous):** apply a **`MembershipDelta`** to patch the ACL in place —
+  prune `removed` members present in this doc's ACL, then stamp `to_epoch`. (Member
+  *additions* are explicit grants, not org-wide auto-adds; key / org-key *rotations* are
+  CGKA-tier, item-4.)
+- **Δepoch > 1, non-contiguous, or no delta available:** **full rebuild** — drop any
+  current ACL member the resolver no longer vouches for (`is_member`), stamp
+  `resolver.epoch()`.
+
+The "merkle delta when Δ==1" is `org-node`'s existing single-step **`SignedDeltaEnvelope`**
+(guarded by `SeqGuard`/`parent_seq`); "Δ>1 → full trie" is the rebuild-from-committed-trie
+path. To keep the dependency arrow correct (`org-node → org-acl-core`, never the reverse),
+item-1's reconciler consumes a **neutral `MembershipDelta`** (defined in `org-acl-core`),
+**not** `org-node`'s concrete envelope. `org-node` mapping `SignedDeltaEnvelope →
+MembershipDelta` is the item-4 bridge.
+
+**Item-1 delivers:** `DocAccess` with the `org_epoch` stamp and the full `reconcile`
+function (both the Δ==1 delta path and the full-rebuild path), tested against synthetic
+`MembershipDelta`s and a `StubResolver`. **Deferred (item-4 / Phase-5):** the trie-change
+*observer* that auto-fires `reconcile` on the finalised epoch-bump signal; the
+open-documents-first scheduling; and the **CGKA-tier** reconcile (key rotations →
+`Dcgka` epoch advance / `Dcgka::remove`).
 
 ## 4. Convergence with the Keyhive track (the design's central concern)
 
@@ -160,6 +191,19 @@ pub trait MemberKeyResolver {
     fn epoch(&self) -> Epoch;
 }
 pub enum ResolverError { UnknownMember(MemberId), OrgKeyUnset }
+
+// delta.rs — neutral per-epoch change set; the Δ==1 reconciliation input.
+// org-node maps its SignedDeltaEnvelope onto this (item-4); item-1 tests build
+// it synthetically. `removed` drives the ACL-tier reconcile; `rotated`/
+// `org_key_rotated` are CGKA-tier signals consumed in item-4.
+pub struct MembershipDelta {
+    pub from_epoch: Epoch,
+    pub to_epoch: Epoch,
+    pub removed: Vec<MemberId>,
+    pub added: Vec<MemberId>,
+    pub rotated: Vec<MemberId>,
+    pub org_key_rotated: bool,
+}
 ```
 
 **Lazy-pending signal.** "In the trie but client not online yet" is `current_devices`
@@ -182,8 +226,12 @@ pub enum ResolverError { UnknownMember(MemberId), OrgKeyUnset }
 - **`materialise_actor_id(resolver, principal) -> ActorId`** (`actor.rs`) — the
   spaces seam. Re-resolves on **every call** ⇒ no cache ⇒ Flow-B holds structurally;
   rotation is picked up automatically.
-- **ACL grant** (`acl.rs`) — `GroupCrdt<AuthMemberId>::process` for the
-  Create/Add/Remove ACL ops, below `p2panda-spaces`' eager `Manager` (lazy CGKA).
+- **`DocAccess`** (`acl.rs`) — the per-document ACL: `GroupCrdt<AuthMemberId>::process` for
+  Create/Add/Remove ops, below `p2panda-spaces`' eager `Manager` (lazy CGKA). Stores
+  `org_epoch` (the trie epoch it was last reconciled to) and exposes
+  `reconcile(resolver, Option<&MembershipDelta>)`: Δ==1 contiguous → prune `removed` ∩
+  members and stamp `to_epoch`; else → full rebuild against `resolver.is_member` and stamp
+  `resolver.epoch()`.
 
 ### 5.3 Flow-B invariant
 
@@ -196,10 +244,11 @@ that rotates the member key and shows the next `materialise_actor_id` yields the
 
 - **Revocation (item-1 slice).** Member removed from trie → resolver returns
   `UnknownMember` → `materialise_actor_id`/`ResolverPki` resolve to nothing → no ACL
-  grant/encryption to the revoked principal is constructible. **The cryptographic
-  forward-security half (`Dcgka::remove`) and the lazy-CGKA recompute are item-4, out of
-  scope here** — this is the spike's documented `update`-vs-`remove` finding
-  (`spike-p2panda/src/evidence/s3.md`).
+  grant/encryption to the revoked principal is constructible; **and** `DocAccess::reconcile`
+  prunes the revoked member from the document's ACL (Δ==1 delta path *or* full rebuild),
+  stamping the new org epoch. **The cryptographic forward-security half (`Dcgka::remove`)
+  and the lazy-CGKA recompute are item-4, out of scope here** — this is the spike's
+  documented `update`-vs-`remove` finding (`spike-p2panda/src/evidence/s3.md`).
 - **Identity-takeover blocked.** The ACL binds to `MemberId` (handle@org) and keys
   resolve live through the trie only; an attacker's rotated/forged `VerifyingKey` the
   trie does not vouch for resolves to nothing — never authoritative.
@@ -209,8 +258,8 @@ that rotates the member key and shows the next `materialise_actor_id` yields the
 | P1 | p2panda is a *parallel track*, not the committed substrate | final pick deferred; decision.md §5 path |
 | P2 | Ride spike pin `41559b0`; no fork for item-1 | aligns with qualification evidence; fork is items 2/4 |
 | P3 | One resolver instance per org record | matches Phase 2 one-persona-per-org |
-| P4 | `Dcgka::remove` + lazy recompute deferred to item-4 | item-1 is the ACL/resolver tier only |
-| P5 | No `IdAdapter` cache; no trie-change observer | re-resolve gives Flow-B; observer is item-4 |
+| P4 | `DocAccess` holds the ACL now; the CGKA half + `Dcgka::remove`/recompute are item-4 | item-1 is the ACL/resolver tier only |
+| P5 | No `IdAdapter` cache; `reconcile` is pull-based (no auto-observer); open-docs-first scheduling = Phase-5 | re-resolve gives Flow-B; the observer/scheduler are item-4/Phase-5 |
 | P6 | Transport (`p2panda-sync`/WASM gate 0) untouched | transport = item-5; rides Phase 2 iroh |
 
 ## 7. Testing (AGENTS.md hard rule: unit + scenario + fuzz)

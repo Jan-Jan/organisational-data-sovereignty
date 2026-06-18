@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a p2panda-backed stable-ID ACL with trie-lookup key resolution — a neutral `org-acl-core` contract + an `org-acl-p2panda` boundary crate — so an ACL binds to immutable trie identities (`MemberId` = handle@org) while keys resolve live through the trie, blocking identity-takeover and making revocation effective at the ACL layer.
+**Goal:** Build a p2panda-backed stable-ID ACL with trie-lookup key resolution — a neutral `org-acl-core` contract + an `org-acl-p2panda` boundary crate — so a per-document access bundle (`DocAccess`) binds to immutable trie identities (`MemberId` = handle@org), keys resolve live through the trie (blocking identity-takeover), and revocation propagates lazily per document via an org-epoch-stamped `reconcile`.
 
-**Architecture:** Two new crates. `org-acl-core` (Apache-2.0, no substrate deps) graduates `spike-common`'s identity types + the minimal `MemberKeyResolver` contract — the convergence anchor `org-node` implements once. `org-acl-p2panda` (GPL-3.0-only, the sole p2panda boundary) productionises `spike-p2panda::s1_stable_id_acl`: `AuthMemberId` + `IdentityHandle`, `ResolverPki` (`IdentityRegistry`), `materialise_actor_id`, and a `GroupCrdt<AuthMemberId>` grant path driven **below** `p2panda-spaces`' eager `Manager` (lazy CGKA). No `IdAdapter` cache (re-resolve gives the Flow-B invariant for free); no trie-change observer (item-4).
+**Architecture:** Two new crates. `org-acl-core` (Apache-2.0, no substrate deps) graduates `spike-common`'s identity types + the minimal `MemberKeyResolver` contract + a neutral `MembershipDelta` — the convergence anchor `org-node` implements/produces once. `org-acl-p2panda` (GPL-3.0-only, the sole p2panda boundary) productionises `spike-p2panda::s1_stable_id_acl` (`AuthMemberId`+`IdentityHandle`, `ResolverPki`, `materialise_actor_id`) and adds `DocAccess`: a per-document `GroupCrdt<AuthMemberId>` writer set driven **below** `p2panda-spaces`' eager `Manager` (lazy CGKA), stamped with `org_epoch`, with a `reconcile` that patches in place on a Δ==1 `MembershipDelta` or rebuilds from the resolver otherwise. No `IdAdapter` cache (re-resolve gives Flow-B free). The CGKA half of `DocAccess`, the auto-observer that fires `reconcile`, and open-docs-first scheduling are item-4/Phase-5.
 
 **Tech Stack:** Rust (edition 2021, workspace), `ed25519-dalek` v2, `serde`/`postcard`, p2panda (`p2panda-core`/`-auth`/`-encryption`/`-spaces` at rev `41559b0dfc2d7d0e9e4fba251ceb7f8094ff8be1`), `bolero` (fuzz), `ciborium` (CBOR test).
 
@@ -25,6 +25,7 @@ org-acl-core/
   src/
     lib.rs            # module decls + crate docs
     identity.rs       # MemberId, P2pMemberKey, P2pDeviceKey, OrgKey, Epoch, Principal
+    delta.rs          # MembershipDelta — neutral per-epoch change set
     resolver.rs       # MemberKeyResolver trait, ResolverError
     test_support.rs   # StubResolver (behind feature `testing`)
   tests/
@@ -33,14 +34,14 @@ org-acl-core/
 org-acl-p2panda/
   Cargo.toml          # GPL-3.0-only; workspace member; p2panda pins; [[test]] fuzz_resolver_key_boundary
   src/
-    lib.rs            # crate docs: Flow-B invariant + lazy-CGKA two-tier spine
+    lib.rs            # crate docs: Flow-B invariant + lazy-CGKA two-tier spine + epoch reconciliation
     g1_probe.rs       # #[cfg(test)] reachability probe (unit test; sees [dependencies])
     auth_id.rs        # AuthMemberId(MemberId) + impl IdentityHandle + From<MemberId>
     pki.rs            # ResolverPki<R>: impl IdentityRegistry<MemberId, Self>
     actor.rs          # materialise_actor_id(resolver, principal) -> ActorId
-    acl.rs            # OpId, AclOp, OrgAcl: GroupCrdt<AuthMemberId> grant path
+    acl.rs            # OpId, AclOp, DocAccess: per-doc GroupCrdt<AuthMemberId> + org_epoch + reconcile
   tests/
-    l3_revocation.rs              # exit criteria: revocation + identity-takeover blocked
+    l3_revocation.rs              # exit criteria: revocation (incl. reconcile) + identity-takeover blocked
     fuzz_resolver_key_boundary/{fuzz_target.rs, corpus/.gitkeep, crashes/.gitkeep}
 ```
 
@@ -63,8 +64,7 @@ All `cargo`/`git` commands below run from inside that worktree. Prefix every car
 
 **Files:**
 - Create: `org-acl-core/Cargo.toml`, `org-acl-core/src/lib.rs`
-- Create: `org-acl-p2panda/Cargo.toml`, `org-acl-p2panda/src/lib.rs`
-- Create: `org-acl-p2panda/tests/g1_reachability.rs`
+- Create: `org-acl-p2panda/Cargo.toml`, `org-acl-p2panda/src/lib.rs`, `org-acl-p2panda/src/g1_probe.rs`
 - Modify: `Cargo.toml` (workspace `members`)
 
 - [ ] **Step 1: Minimal core crate**
@@ -172,16 +172,21 @@ harness = false
 //! always picked up and a forged key the trie does not vouch for resolves to
 //! nothing. This is the structural enforcement that blocks identity takeover.
 //!
-//! # Lazy-CGKA two-tier model
+//! # Lazy-CGKA two-tier model + per-document reconciliation
 //!
-//! * ACL tier — trie-anchored stable identity (`MemberId` = handle@org). The
-//!   grant runs on `p2panda_auth::GroupCrdt<AuthMemberId>` (see [`acl`]) BELOW
-//!   `p2panda-spaces`' eager `Manager`, so adding a member does NOT force
-//!   prekey/DCGKA placement at add-time.
-//! * CGKA tier — per-document `p2panda-encryption` DCGKA, computed lazily when
-//!   a member's client first comes online. `ResolverPki` ([`pki`]) and
-//!   `materialise_actor_id` ([`actor`]) feed this tier. The trigger itself is
-//!   item-4 and is out of scope here.
+//! * ACL tier — trie-anchored stable identity (`MemberId` = handle@org). A
+//!   document's writer set is a `GroupCrdt<AuthMemberId>` inside [`acl::DocAccess`],
+//!   driven BELOW `p2panda-spaces`' eager `Manager`, so adding a member does NOT
+//!   force prekey/DCGKA placement at add-time.
+//! * CGKA tier — per-document `p2panda-encryption` DCGKA, computed lazily on
+//!   first-online. `ResolverPki` and `materialise_actor_id` feed it. The CGKA
+//!   field of `DocAccess`, and the DCGKA triggers, are item-4.
+//!
+//! `DocAccess` stores `org_epoch` (the members-trie epoch it was last reconciled
+//! against) and reconciles LAZILY: a Δ==1 `MembershipDelta` patches it in place;
+//! a larger/absent delta forces a full rebuild from the resolver. The auto-observer
+//! that fires reconcile on the finalised epoch-bump signal, and the
+//! open-documents-first scheduling, are item-4/Phase-5.
 ```
 
 - [ ] **Step 3: Register both crates in the workspace**
@@ -419,7 +424,119 @@ git commit -m "feat(org-acl-core): simple single-org identity types"
 
 ---
 
-## Task 2: `org-acl-core` MemberKeyResolver + StubResolver
+## Task 2: `org-acl-core` MembershipDelta (the reconcile input)
+
+**Files:**
+- Create: `org-acl-core/src/delta.rs`
+- Modify: `org-acl-core/src/lib.rs`
+
+The neutral per-epoch change set. `org-node` will map its `SignedDeltaEnvelope` onto this (item-4); item-1 builds it synthetically in tests. `removed` drives the ACL-tier reconcile; `rotated`/`org_key_rotated` are CGKA-tier signals consumed in item-4.
+
+- [ ] **Step 1: Declare the module**
+
+Append to `org-acl-core/src/lib.rs`:
+
+```rust
+pub mod delta;
+pub use delta::MembershipDelta;
+```
+
+- [ ] **Step 2: Write the failing test**
+
+Create `org-acl-core/src/delta.rs`:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::identity::MemberId;
+
+    #[test]
+    fn membership_delta_postcard_roundtrip() {
+        let d = MembershipDelta {
+            from_epoch: Epoch(4),
+            to_epoch: Epoch(5),
+            removed: vec![MemberId([2; 32])],
+            added: vec![MemberId([3; 32])],
+            rotated: vec![MemberId([4; 32])],
+            org_key_rotated: true,
+        };
+        let bytes = postcard::to_allocvec(&d).unwrap();
+        let back: MembershipDelta = postcard::from_bytes(&bytes).unwrap();
+        assert_eq!(d, back);
+    }
+
+    #[test]
+    fn is_single_step_only_for_contiguous_increment() {
+        let one = MembershipDelta { from_epoch: Epoch(1), to_epoch: Epoch(2), removed: vec![], added: vec![], rotated: vec![], org_key_rotated: false };
+        let gap = MembershipDelta { from_epoch: Epoch(1), to_epoch: Epoch(3), removed: vec![], added: vec![], rotated: vec![], org_key_rotated: false };
+        assert!(one.is_single_step());
+        assert!(!gap.is_single_step());
+    }
+}
+```
+
+- [ ] **Step 3: Run to verify it fails**
+
+Run: `CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-core --lib delta`
+Expected: FAIL — `MembershipDelta` not defined.
+
+- [ ] **Step 4: Write the type (prepend above the test module)**
+
+```rust
+//! `MembershipDelta` — the neutral per-epoch change set.
+//!
+//! Substrate-agnostic input to the lazy reconciliation (see
+//! `org_acl_p2panda::acl::DocAccess::reconcile`). When the epoch advances by
+//! exactly one (`is_single_step`), this delta lets a `DocAccess` patch its ACL
+//! in place instead of rebuilding from the whole trie. `org-node` produces it
+//! from a `SignedDeltaEnvelope` (item-4); item-1 builds it synthetically.
+
+use serde::{Deserialize, Serialize};
+
+use crate::identity::{Epoch, MemberId};
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MembershipDelta {
+    /// The epoch this delta moves *from* (must equal the consumer's current epoch).
+    pub from_epoch: Epoch,
+    /// The epoch this delta moves *to*.
+    pub to_epoch: Epoch,
+    /// Members removed from the trie (revocation). Drives the ACL-tier reconcile.
+    pub removed: Vec<MemberId>,
+    /// Members added to the trie. (Not auto-added to any document's ACL — grants
+    /// are explicit; carried for completeness / item-4.)
+    pub added: Vec<MemberId>,
+    /// Members whose member-as-a-group key rotated. CGKA-tier signal (item-4).
+    pub rotated: Vec<MemberId>,
+    /// Whether the org pseudo-group key rotated. CGKA-tier signal (item-4).
+    pub org_key_rotated: bool,
+}
+
+impl MembershipDelta {
+    /// True iff this delta advances the epoch by exactly one (the only case a
+    /// consumer may apply it in place rather than rebuilding from the full trie).
+    pub fn is_single_step(&self) -> bool {
+        self.to_epoch.0 == self.from_epoch.0.saturating_add(1)
+    }
+}
+```
+
+- [ ] **Step 5: Run to verify it passes**
+
+Run: `CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-core --lib delta`
+Expected: PASS (2 tests).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add org-acl-core/src/delta.rs org-acl-core/src/lib.rs
+git commit -m "feat(org-acl-core): MembershipDelta — neutral per-epoch change set"
+```
+
+---
+
+## Task 3: `org-acl-core` MemberKeyResolver + StubResolver
 
 **Files:**
 - Create: `org-acl-core/src/resolver.rs`
@@ -500,7 +617,8 @@ pub trait MemberKeyResolver {
 
 ```rust
 //! In-memory `MemberKeyResolver` for tests — NOT a real SMT (the trie lives in
-//! `org-members`). Behind `--features testing`.
+//! `org-members`). Behind `--features testing`. Each mutator bumps `epoch`, so a
+//! test can read `epoch()` to drive `DocAccess` stamping.
 
 use std::collections::HashMap;
 
@@ -596,23 +714,21 @@ mod tests {
     }
 
     #[test]
-    fn revoke_removes_member() {
-        let alice = MemberId([1; 32]);
-        let r = StubResolver::new().add_member(alice, mkey(1), vec![]);
-        assert!(r.is_member(&alice));
-        let r = r.revoke(&alice);
-        assert!(!r.is_member(&alice));
-        assert_eq!(r.p2p_member_key(&alice), Err(ResolverError::UnknownMember(alice)));
+    fn mutators_bump_epoch() {
+        let r = StubResolver::new();
+        assert_eq!(r.epoch(), Epoch(0));
+        let r = r.add_member(MemberId([1; 32]), mkey(1), vec![]);
+        assert_eq!(r.epoch(), Epoch(1));
+        let r = r.revoke(&MemberId([1; 32]));
+        assert_eq!(r.epoch(), Epoch(2));
     }
 }
 ```
 
-`test_support.rs` references `ed25519-dalek` in its `#[cfg(test)]` module; it is already a normal dependency. (When compiled under `--features testing` for downstream crates, the `tests` module is `cfg(test)`-gated and does not build.)
-
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-core --lib`
-Expected: PASS (identity 3 + test_support 2).
+Expected: PASS (identity 3 + delta 2 + test_support 2).
 
 - [ ] **Step 5: Commit**
 
@@ -623,7 +739,7 @@ git commit -m "feat(org-acl-core): minimal MemberKeyResolver + StubResolver"
 
 ---
 
-## Task 3: `org-acl-core` fuzz — Principal/MemberId codec
+## Task 4: `org-acl-core` fuzz — Principal/MemberId/MembershipDelta codec
 
 **Files:**
 - Create: `org-acl-core/tests/fuzz_identity_codec/fuzz_target.rs`
@@ -634,37 +750,41 @@ git commit -m "feat(org-acl-core): minimal MemberKeyResolver + StubResolver"
 `org-acl-core/tests/fuzz_identity_codec/fuzz_target.rs`:
 
 ```rust
-//! Fuzz: the stable ID that indexes the ACL must round-trip exactly, and
-//! decoding arbitrary bytes must never panic. `harness = false` — a panic
-//! (bolero's failure signal) exits non-zero and fails `cargo test`.
+//! Fuzz: the stable ID that indexes the ACL and the delta that drives reconcile
+//! must round-trip exactly, and decoding arbitrary bytes must never panic.
+//! `harness = false` — a panic (bolero's failure signal) exits non-zero.
 //! Deep-fuzz: `cargo bolero test fuzz_identity_codec --engine libfuzzer`.
 
 use bolero::check;
-use org_acl_core::{MemberId, Principal};
+use org_acl_core::{Epoch, MemberId, MembershipDelta, Principal};
 
 fn main() {
-    // (1) Structured round-trip.
-    check!().with_type::<[u8; 32]>().cloned().for_each(|raw| {
-        let id = MemberId(raw);
+    // (1) Structured round-trips.
+    check!().with_type::<([u8; 32], [u8; 32], u64, u64, bool)>().cloned().for_each(|(a, b, fe, te, flag)| {
+        let id = MemberId(a);
         let bytes = postcard::to_allocvec(&id).expect("encode MemberId");
-        let back: MemberId = postcard::from_bytes(&bytes).expect("decode MemberId");
-        assert_eq!(id, back);
+        assert_eq!(postcard::from_bytes::<MemberId>(&bytes).expect("decode MemberId"), id);
 
         let p = Principal::Member(id);
         let pb = postcard::to_allocvec(&p).expect("encode Principal");
-        let pback: Principal = postcard::from_bytes(&pb).expect("decode Principal");
-        assert_eq!(p, pback);
+        assert_eq!(postcard::from_bytes::<Principal>(&pb).expect("decode Principal"), p);
+
+        let d = MembershipDelta {
+            from_epoch: Epoch(fe), to_epoch: Epoch(te),
+            removed: vec![MemberId(a)], added: vec![MemberId(b)], rotated: vec![], org_key_rotated: flag,
+        };
+        let db = postcard::to_allocvec(&d).expect("encode MembershipDelta");
+        assert_eq!(postcard::from_bytes::<MembershipDelta>(&db).expect("decode MembershipDelta"), d);
     });
 
     // (2) Never-panic on arbitrary bytes at the decode boundary.
     check!().for_each(|input: &[u8]| {
         let _ = postcard::from_bytes::<MemberId>(input);
         let _ = postcard::from_bytes::<Principal>(input);
+        let _ = postcard::from_bytes::<MembershipDelta>(input);
     });
 }
 ```
-
-`postcard` must be available to this test. It is already a normal dependency of `org-acl-core`.
 
 - [ ] **Step 2: Create corpus/crashes dirs**
 
@@ -682,12 +802,12 @@ Expected: PASS (bounded generated batch + empty corpus replay; no panic).
 
 ```bash
 git add org-acl-core/tests/fuzz_identity_codec/
-git commit -m "test(org-acl-core): bolero fuzz — Principal/MemberId codec never-panic + round-trip"
+git commit -m "test(org-acl-core): bolero fuzz — identity + MembershipDelta codec never-panic"
 ```
 
 ---
 
-## Task 4: `org-acl-p2panda` AuthMemberId + IdentityHandle
+## Task 5: `org-acl-p2panda` AuthMemberId + IdentityHandle
 
 **Files:**
 - Create: `org-acl-p2panda/src/auth_id.rs`
@@ -778,7 +898,7 @@ git commit -m "feat(org-acl-p2panda): AuthMemberId + IdentityHandle (orphan-rule
 
 ---
 
-## Task 5: `org-acl-p2panda` ResolverPki (the key-resolution half)
+## Task 6: `org-acl-p2panda` ResolverPki (the key-resolution half)
 
 **Files:**
 - Create: `org-acl-p2panda/src/pki.rs`
@@ -839,7 +959,7 @@ mod tests {
 
 - [ ] **Step 3: Run to verify it fails**
 
-Run: `CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-p2panda --features org-acl-core/testing --lib pki`
+Run: `CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-p2panda --lib pki`
 Expected: FAIL — `ResolverPki` not defined.
 
 - [ ] **Step 4: Write ResolverPki (prepend above the test module)**
@@ -911,7 +1031,7 @@ impl<R: MemberKeyResolver> IdentityRegistry<MemberId, ResolverPki<R>> for Resolv
 
 - [ ] **Step 5: Run to verify it passes**
 
-Run: `CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-p2panda --features org-acl-core/testing --lib pki`
+Run: `CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-p2panda --lib pki`
 Expected: PASS (3 tests). If `X25519PublicKey::from_bytes` signature differs at the pin, reconcile against the spike's `s1_stable_id_acl.rs` (same call).
 
 - [ ] **Step 6: Commit**
@@ -923,7 +1043,7 @@ git commit -m "feat(org-acl-p2panda): ResolverPki — IdentityRegistry over the 
 
 ---
 
-## Task 6: `org-acl-p2panda` materialise_actor_id (Flow-B witness)
+## Task 7: `org-acl-p2panda` materialise_actor_id (Flow-B witness)
 
 **Files:**
 - Create: `org-acl-p2panda/src/actor.rs`
@@ -986,7 +1106,7 @@ mod tests {
 
 - [ ] **Step 3: Run to verify it fails**
 
-Run: `CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-p2panda --features org-acl-core/testing --lib actor`
+Run: `CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-p2panda --lib actor`
 Expected: FAIL — `materialise_actor_id` not defined.
 
 - [ ] **Step 4: Write the function (prepend above the test module)**
@@ -1023,7 +1143,7 @@ pub fn materialise_actor_id<R: MemberKeyResolver>(
 
 - [ ] **Step 5: Run to verify it passes**
 
-Run: `CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-p2panda --features org-acl-core/testing --lib actor`
+Run: `CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-p2panda --lib actor`
 Expected: PASS (3 tests).
 
 - [ ] **Step 6: Commit**
@@ -1035,13 +1155,13 @@ git commit -m "feat(org-acl-p2panda): materialise_actor_id — re-resolving spac
 
 ---
 
-## Task 7: `org-acl-p2panda` ACL grant path (stable-id ACL, below spaces)
+## Task 8: `org-acl-p2panda` DocAccess — per-document ACL grant path + org_epoch
 
 **Files:**
 - Create: `org-acl-p2panda/src/acl.rs`
 - Modify: `org-acl-p2panda/src/lib.rs`
 
-The stable-id ACL: `GroupCrdt<AuthMemberId>` driven directly (below `p2panda-spaces`' eager `Manager`), so a grant carries only the stable identity — no CGKA/prekey at add-time.
+The per-document access bundle. Item-1 builds its **ACL half**: `GroupCrdt<AuthMemberId>` driven directly (below `p2panda-spaces`' eager `Manager`, so a grant carries only the stable identity — no CGKA/prekey at add-time). Stamped with `org_epoch`. (The CGKA half is added in item-4.)
 
 - [ ] **Step 1: Declare the module**
 
@@ -1049,7 +1169,7 @@ Append to `org-acl-p2panda/src/lib.rs`:
 
 ```rust
 pub mod acl;
-pub use acl::{AclOp, OpId, OrgAcl};
+pub use acl::{AclOp, DocAccess, OpId};
 ```
 
 - [ ] **Step 2: Write the failing tests**
@@ -1060,7 +1180,7 @@ Create `org-acl-p2panda/src/acl.rs`:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use org_acl_core::MemberId;
+    use org_acl_core::{Epoch, MemberId};
 
     const ALICE: MemberId = MemberId([0xa1; 32]);
     const BOB: MemberId = MemberId([0xb1; 32]);
@@ -1068,10 +1188,9 @@ mod tests {
 
     #[test]
     fn grant_stores_stable_ids_not_keys() {
-        // Alice creates a group; adds Bob. Membership is by stable MemberId.
-        let acl = OrgAcl::create(GROUP, ALICE).expect("create");
-        let acl = acl.add_member(BOB).expect("add bob");
-        let mut ids = acl.member_ids();
+        let doc = DocAccess::create(GROUP, ALICE, Epoch(1)).expect("create");
+        let doc = doc.add_member(BOB).expect("add bob");
+        let mut ids = doc.member_ids();
         ids.sort();
         let mut expected = vec![ALICE, BOB];
         expected.sort();
@@ -1079,16 +1198,21 @@ mod tests {
     }
 
     #[test]
-    fn revoked_member_drops_from_acl() {
-        let acl = OrgAcl::create(GROUP, ALICE).expect("create");
-        let acl = acl.add_member(BOB).expect("add bob");
-        let acl = acl.remove_member(BOB).expect("remove bob");
-        assert_eq!(acl.member_ids(), vec![ALICE]);
+    fn create_stamps_org_epoch() {
+        let doc = DocAccess::create(GROUP, ALICE, Epoch(7)).expect("create");
+        assert_eq!(doc.org_epoch(), Epoch(7));
+    }
+
+    #[test]
+    fn remove_member_drops_from_acl() {
+        let doc = DocAccess::create(GROUP, ALICE, Epoch(1)).expect("create")
+            .add_member(BOB).expect("add bob")
+            .remove_member(BOB).expect("remove bob");
+        assert_eq!(doc.member_ids(), vec![ALICE]);
     }
 
     #[test]
     fn acl_op_embeds_stable_id_bytes_not_ed25519_key() {
-        // CBOR of an Add op must contain Bob's 0xb1 stable-id bytes (and no key).
         let op = AclOp {
             id: OpId(1),
             author: AuthMemberId::from(ALICE),
@@ -1109,18 +1233,19 @@ mod tests {
 - [ ] **Step 3: Run to verify it fails**
 
 Run: `CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-p2panda --lib acl`
-Expected: FAIL — `OrgAcl`/`AclOp`/`OpId` not defined.
+Expected: FAIL — `DocAccess`/`AclOp`/`OpId` not defined.
 
 - [ ] **Step 4: Write the ACL types (prepend above the test module)**
 
 ```rust
-//! The stable-id ACL — `GroupCrdt<AuthMemberId>` driven directly.
+//! `DocAccess` — the per-document access bundle (ACL now; CGKA in item-4).
 //!
-//! This is the lazy-CGKA ACL tier: grants carry only the stable trie identity
-//! (`AuthMemberId`), BELOW `p2panda-spaces`' eager `Manager`, so adding a member
-//! does NOT force prekey/DCGKA placement. A minimal `AclOp` (no networking,
-//! signing, or async) drives `GroupCrdt::process`, matching the spike's gate-1
-//! reference (`l1_p2panda_auth` Test 2).
+//! The ACL is a `GroupCrdt<AuthMemberId>` driven directly: grants carry only the
+//! stable trie identity (`AuthMemberId`), BELOW `p2panda-spaces`' eager `Manager`,
+//! so adding a member does NOT force prekey/DCGKA placement (lazy CGKA). A minimal
+//! `AclOp` (no networking, signing, or async) drives `GroupCrdt::process`, matching
+//! the spike's gate-1 reference (`l1_p2panda_auth` Test 2). `DocAccess` is stamped
+//! with `org_epoch` and reconciles lazily (see `reconcile`, Task 9).
 
 use serde::{Deserialize, Serialize};
 
@@ -1129,7 +1254,7 @@ use p2panda_auth::group::{GroupAction, GroupCrdt, GroupCrdtState, GroupMember};
 use p2panda_auth::traits::{Operation, OperationId};
 use p2panda_auth::Access;
 
-use org_acl_core::MemberId;
+use org_acl_core::{Epoch, MemberId};
 
 use crate::auth_id::AuthMemberId;
 
@@ -1159,14 +1284,16 @@ impl Operation<AuthMemberId, OpId, ()> for AclOp {
 type AclState = GroupCrdtState<AuthMemberId, OpId, AclOp, ()>;
 type AclCrdt = GroupCrdt<AuthMemberId, OpId, AclOp, (), StrongRemove<AuthMemberId, OpId, AclOp, ()>>;
 
-/// A stable-id ACL bound to one group id, carrying the CRDT state and the
-/// op-sequence cursor. The manager (group creator) authors subsequent ops.
-pub struct OrgAcl {
+/// A per-document access bundle: the document's ACL (a `GroupCrdt` writer set),
+/// the op-sequence cursor, and the `org_epoch` it was last reconciled to.
+/// (The CGKA half is added in item-4.)
+pub struct DocAccess {
     group: AuthMemberId,
     manager: AuthMemberId,
     state: AclState,
     next_op: u32,
     last: Vec<OpId>,
+    org_epoch: Epoch,
 }
 
 /// ACL construction / processing failed at the CRDT layer.
@@ -1174,9 +1301,10 @@ pub struct OrgAcl {
 #[error("acl crdt rejected the operation")]
 pub struct AclError;
 
-impl OrgAcl {
-    /// Create a group with `manager` (a stable `MemberId`) as the sole manager.
-    pub fn create(group: MemberId, manager: MemberId) -> Result<Self, AclError> {
+impl DocAccess {
+    /// Create a document ACL with `manager` (a stable `MemberId`) as the sole
+    /// manager, stamped with the org epoch it is built against.
+    pub fn create(group: MemberId, manager: MemberId, at_epoch: Epoch) -> Result<Self, AclError> {
         let group = AuthMemberId::from(group);
         let manager = AuthMemberId::from(manager);
         let op = AclOp {
@@ -1189,26 +1317,20 @@ impl OrgAcl {
             },
         };
         let state = AclCrdt::process(AclCrdt::init(), &op).map_err(|_| AclError)?;
-        Ok(Self { group, manager, state, next_op: 1, last: vec![OpId(0)] })
+        Ok(Self { group, manager, state, next_op: 1, last: vec![OpId(0)], org_epoch: at_epoch })
     }
 
     fn apply(mut self, action: GroupAction<AuthMemberId, ()>) -> Result<Self, AclError> {
         let id = OpId(self.next_op);
-        let op = AclOp {
-            id,
-            author: self.manager,
-            dependencies: self.last.clone(),
-            group_id: self.group,
-            action,
-        };
+        let op = AclOp { id, author: self.manager, dependencies: self.last.clone(), group_id: self.group, action };
         self.state = AclCrdt::process(self.state, &op).map_err(|_| AclError)?;
         self.next_op += 1;
         self.last = vec![id];
         Ok(self)
     }
 
-    /// Delegate Write access to a member (handle@org) by stable id. No key,
-    /// no CGKA placement — the lazy ACL tier.
+    /// Delegate Write access to a member (handle@org) by stable id. No key, no
+    /// CGKA placement — the lazy ACL tier.
     pub fn add_member(self, member: MemberId) -> Result<Self, AclError> {
         self.apply(GroupAction::Add {
             member: GroupMember::Individual(AuthMemberId::from(member)),
@@ -1216,7 +1338,7 @@ impl OrgAcl {
         })
     }
 
-    /// Remove a member's ACL delegation by stable id (the ACL-tier of revocation).
+    /// Remove a member's ACL delegation by stable id.
     pub fn remove_member(self, member: MemberId) -> Result<Self, AclError> {
         self.apply(GroupAction::Remove {
             member: GroupMember::Individual(AuthMemberId::from(member)),
@@ -1227,26 +1349,189 @@ impl OrgAcl {
     pub fn member_ids(&self) -> Vec<MemberId> {
         self.state.members(self.group).into_iter().map(|(a, _)| a.0).collect()
     }
+
+    /// The org-trie epoch this document's ACL was last reconciled against.
+    pub fn org_epoch(&self) -> Epoch {
+        self.org_epoch
+    }
 }
 ```
 
-Note on the p2panda-auth API at the pin: the spike exercised `GroupAction::{Create, Add}`, `GroupMember::{Individual, Group}`, and `Access::{manage, read}` (`spike-p2panda/tests/l1_p2panda_auth.rs`). This task additionally uses **`GroupAction::Remove`** and **`Access::write()`** — confirm both exist with these shapes at rev `41559b0` before writing the impl. If `Remove`'s field name differs or `write()` is spelled differently, reconcile here (the Task 8 L3 test also depends on `remove_member`). The spike's gate finding "Group members must use Read or Write, not Manage" implies `Access::write()` is present.
+Note on the p2panda-auth API at the pin: the spike exercised `GroupAction::{Create, Add}`, `GroupMember::{Individual, Group}`, and `Access::{manage, read}` (`spike-p2panda/tests/l1_p2panda_auth.rs`). This task additionally uses **`GroupAction::Remove`** and **`Access::write()`** — confirm both exist with these shapes at rev `41559b0` before writing the impl. If `Remove`'s field name differs or `write()` is spelled differently, reconcile here (Task 9 reconcile and Task 10 L3 also depend on `remove_member`). The spike's gate finding "Group members must use Read or Write, not Manage" implies `Access::write()` is present.
 
 - [ ] **Step 5: Run to verify it passes**
 
 Run: `CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-p2panda --lib acl`
-Expected: PASS (3 tests).
+Expected: PASS (4 tests).
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add org-acl-p2panda/src/acl.rs org-acl-p2panda/src/lib.rs
-git commit -m "feat(org-acl-p2panda): stable-id ACL grant path (GroupCrdt, below spaces — lazy CGKA)"
+git commit -m "feat(org-acl-p2panda): DocAccess — per-doc stable-id ACL grant path + org_epoch"
 ```
 
 ---
 
-## Task 8: L3 acceptance — revocation passes + identity-takeover blocked
+## Task 9: `org-acl-p2panda` DocAccess::reconcile (lazy epoch reconciliation)
+
+**Files:**
+- Modify: `org-acl-p2panda/src/acl.rs`
+
+Δ==1 contiguous `MembershipDelta` → patch in place (prune `removed` ∩ members); else → full rebuild against the resolver. The reconciler consumes the **neutral** `MembershipDelta` (no `org-node` dependency).
+
+- [ ] **Step 1: Add the failing tests (inside the existing `#[cfg(test)] mod tests`)**
+
+Append these to the `tests` module in `org-acl-p2panda/src/acl.rs`:
+
+```rust
+    use org_acl_core::testing::StubResolver;
+    use org_acl_core::{MembershipDelta, P2pMemberKey};
+
+    fn mkey(seed: u8) -> P2pMemberKey {
+        P2pMemberKey(ed25519_dalek::SigningKey::from_bytes(&[seed; 32]).verifying_key())
+    }
+
+    #[test]
+    fn reconcile_noop_when_epoch_matches() {
+        let r = StubResolver::new().add_member(ALICE, mkey(0xa1), vec![]); // epoch 1
+        let doc = DocAccess::create(GROUP, ALICE, r.epoch()).unwrap();
+        let doc = doc.reconcile(&r, None).unwrap();
+        assert_eq!(doc.org_epoch(), Epoch(1));
+        assert_eq!(doc.member_ids(), vec![ALICE]);
+    }
+
+    #[test]
+    fn reconcile_delta_prunes_removed_member() {
+        let r = StubResolver::new()
+            .add_member(ALICE, mkey(0xa1), vec![])  // epoch 1
+            .add_member(BOB, mkey(0xb1), vec![]);    // epoch 2
+        let doc = DocAccess::create(GROUP, ALICE, r.epoch()).unwrap().add_member(BOB).unwrap();
+        assert_eq!(doc.org_epoch(), Epoch(2));
+
+        let r = r.revoke(&BOB); // epoch 3
+        let delta = MembershipDelta {
+            from_epoch: Epoch(2), to_epoch: Epoch(3),
+            removed: vec![BOB], added: vec![], rotated: vec![], org_key_rotated: false,
+        };
+        let doc = doc.reconcile(&r, Some(&delta)).unwrap();
+        assert!(!doc.member_ids().contains(&BOB));
+        assert_eq!(doc.member_ids(), vec![ALICE]);
+        assert_eq!(doc.org_epoch(), Epoch(3));
+    }
+
+    #[test]
+    fn reconcile_full_rebuild_on_epoch_gap() {
+        const CAROL: MemberId = MemberId([0xc2; 32]);
+        let r = StubResolver::new()
+            .add_member(ALICE, mkey(0xa1), vec![])  // epoch 1
+            .add_member(BOB, mkey(0xb1), vec![])     // epoch 2
+            .add_member(CAROL, mkey(0xc2), vec![]);  // epoch 3
+        let doc = DocAccess::create(GROUP, ALICE, r.epoch()).unwrap()
+            .add_member(BOB).unwrap().add_member(CAROL).unwrap();
+
+        let r = r.revoke(&BOB).revoke(&CAROL); // epoch 5 — a Δ=2 gap, no single delta
+        let doc = doc.reconcile(&r, None).unwrap();
+        assert_eq!(doc.member_ids(), vec![ALICE]);
+        assert_eq!(doc.org_epoch(), Epoch(5));
+    }
+
+    #[test]
+    fn reconcile_ignores_noncontiguous_delta_and_falls_back_to_full() {
+        let r = StubResolver::new()
+            .add_member(ALICE, mkey(0xa1), vec![])  // epoch 1
+            .add_member(BOB, mkey(0xb1), vec![]);    // epoch 2
+        let doc = DocAccess::create(GROUP, ALICE, r.epoch()).unwrap().add_member(BOB).unwrap();
+
+        let r = r.revoke(&BOB); // epoch 3
+        // Stale delta: from_epoch doesn't match the doc's org_epoch (2) → full path.
+        let stale = MembershipDelta {
+            from_epoch: Epoch(0), to_epoch: Epoch(3),
+            removed: vec![], added: vec![], rotated: vec![], org_key_rotated: false,
+        };
+        let doc = doc.reconcile(&r, Some(&stale)).unwrap();
+        // Full rebuild still prunes BOB (resolver no longer vouches for him).
+        assert_eq!(doc.member_ids(), vec![ALICE]);
+        assert_eq!(doc.org_epoch(), Epoch(3));
+    }
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-p2panda --lib acl`
+Expected: FAIL — `reconcile` not defined.
+
+- [ ] **Step 3: Add `reconcile` to the `impl DocAccess` block**
+
+Insert these methods into `impl DocAccess` (after `org_epoch`). They use `?` and guarded `if let` only — no `unwrap`/`expect`/`panic`, so the clippy `--lib` gate stays clean.
+
+```rust
+    /// Bring this document's ACL up to the resolver's current org epoch, lazily.
+    ///
+    /// * Δ==1 contiguous `delta` landing exactly on the resolver's epoch → patch
+    ///   in place: prune `removed` members present in the ACL, stamp `to_epoch`.
+    /// * Otherwise (gap, non-contiguous, or no delta) → full rebuild: drop any
+    ///   current ACL member the resolver no longer vouches for, stamp the epoch.
+    ///
+    /// The manager is never auto-pruned (manager-rotation is a separate flow).
+    pub fn reconcile<R: org_acl_core::MemberKeyResolver>(
+        self,
+        resolver: &R,
+        delta: Option<&org_acl_core::MembershipDelta>,
+    ) -> Result<Self, AclError> {
+        let target = resolver.epoch();
+        if self.org_epoch == target {
+            return Ok(self);
+        }
+        if let Some(d) = delta {
+            if d.is_single_step() && d.from_epoch == self.org_epoch && d.to_epoch == target {
+                return self.reconcile_delta(d);
+            }
+        }
+        self.reconcile_full(resolver, target)
+    }
+
+    fn reconcile_delta(mut self, d: &org_acl_core::MembershipDelta) -> Result<Self, AclError> {
+        let current = self.member_ids();
+        for m in &d.removed {
+            if *m != self.manager.0 && current.contains(m) {
+                self = self.remove_member(*m)?;
+            }
+        }
+        self.org_epoch = d.to_epoch;
+        Ok(self)
+    }
+
+    fn reconcile_full<R: org_acl_core::MemberKeyResolver>(
+        mut self,
+        resolver: &R,
+        target: Epoch,
+    ) -> Result<Self, AclError> {
+        for m in self.member_ids() {
+            if m != self.manager.0 && !resolver.is_member(&m) {
+                self = self.remove_member(m)?;
+            }
+        }
+        self.org_epoch = target;
+        Ok(self)
+    }
+```
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-p2panda --lib acl`
+Expected: PASS (8 tests — 4 grant + 4 reconcile).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add org-acl-p2panda/src/acl.rs
+git commit -m "feat(org-acl-p2panda): DocAccess::reconcile — Δ==1 delta patch / full-trie fallback"
+```
+
+---
+
+## Task 10: L3 acceptance — revocation passes (incl. reconcile) + identity-takeover blocked
 
 **Files:**
 - Create: `org-acl-p2panda/tests/l3_revocation.rs`
@@ -1260,8 +1545,9 @@ The ODS Roadmap.3 item-1 exit criteria (spec §6), promoted from `spike-p2panda/
 ```rust
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Exit criteria for Phase 3 item-1 (spec §6):
-//!  - revocation: a removed member resolves to nothing AND drops from the ACL;
-//!    no ActorId/key is obtainable for them.
+//!  - revocation: a removed member resolves to nothing AND is pruned from the
+//!    document's ACL by `reconcile` (Δ==1 delta path); no ActorId/key is
+//!    obtainable for them.
 //!  - identity-takeover blocked: a forged/rotated key the trie does not vouch
 //!    for is never authoritative (no cache; resolver is the only source).
 //!
@@ -1274,8 +1560,8 @@ The ODS Roadmap.3 item-1 exit criteria (spec §6), promoted from `spike-p2panda/
 use ed25519_dalek::SigningKey;
 
 use org_acl_core::testing::StubResolver;
-use org_acl_core::{MemberId, MemberKeyResolver, P2pMemberKey, Principal, ResolverError};
-use org_acl_p2panda::{materialise_actor_id, OrgAcl};
+use org_acl_core::{Epoch, MemberId, MemberKeyResolver, MembershipDelta, P2pMemberKey, Principal, ResolverError};
+use org_acl_p2panda::{materialise_actor_id, DocAccess};
 
 fn mkey(seed: u8) -> P2pMemberKey {
     P2pMemberKey(SigningKey::from_bytes(&[seed; 32]).verifying_key())
@@ -1286,28 +1572,31 @@ const BOB: MemberId = MemberId([0xb1; 32]);
 const GROUP: MemberId = MemberId([0xc1; 32]);
 
 #[test]
-fn revocation_makes_member_unresolvable_and_drops_from_acl() {
-    // Bob is a member with an ACL delegation.
+fn revocation_makes_member_unresolvable_and_reconcile_prunes_acl() {
     let resolver = StubResolver::new()
-        .add_member(ALICE, mkey(0xa1), vec![])
-        .add_member(BOB, mkey(0xb1), vec![]);
-    let acl = OrgAcl::create(GROUP, ALICE).unwrap().add_member(BOB).unwrap();
-    assert!(acl.member_ids().contains(&BOB));
+        .add_member(ALICE, mkey(0xa1), vec![])  // epoch 1
+        .add_member(BOB, mkey(0xb1), vec![]);    // epoch 2
+    let doc = DocAccess::create(GROUP, ALICE, resolver.epoch()).unwrap().add_member(BOB).unwrap();
+    assert!(doc.member_ids().contains(&BOB));
     assert!(materialise_actor_id(&resolver, &Principal::Member(BOB)).is_ok());
 
-    // Trie revokes Bob; the ACL manager removes his delegation.
+    // Trie revokes Bob (epoch 3); the document reconciles lazily via the Δ==1 delta.
     let resolver = resolver.revoke(&BOB);
-    let acl = acl.remove_member(BOB).unwrap();
+    let delta = MembershipDelta {
+        from_epoch: Epoch(2), to_epoch: Epoch(3),
+        removed: vec![BOB], added: vec![], rotated: vec![], org_key_rotated: false,
+    };
+    let doc = doc.reconcile(&resolver, Some(&delta)).unwrap();
 
-    // No key/ActorId is obtainable for the revoked member.
+    // No key/ActorId obtainable; Bob pruned from the ACL; epoch advanced.
     assert_eq!(resolver.p2p_member_key(&BOB), Err(ResolverError::UnknownMember(BOB)));
     assert!(matches!(
         materialise_actor_id(&resolver, &Principal::Member(BOB)),
         Err(ResolverError::UnknownMember(_))
     ));
-    // And he is gone from the ACL.
-    assert!(!acl.member_ids().contains(&BOB));
-    assert_eq!(acl.member_ids(), vec![ALICE]);
+    assert!(!doc.member_ids().contains(&BOB));
+    assert_eq!(doc.member_ids(), vec![ALICE]);
+    assert_eq!(doc.org_epoch(), Epoch(3));
 }
 
 #[test]
@@ -1333,19 +1622,19 @@ This integration test uses only `ed25519-dalek` (for `mkey`) plus the public API
 
 - [ ] **Step 2: Run it**
 
-Run: `CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-p2panda --features org-acl-core/testing --test l3_revocation`
+Run: `CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-p2panda --test l3_revocation`
 Expected: PASS (2 tests).
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add org-acl-p2panda/tests/l3_revocation.rs
-git commit -m "test(org-acl-p2panda): L3 acceptance — revocation + identity-takeover blocked"
+git commit -m "test(org-acl-p2panda): L3 acceptance — revocation (reconcile) + identity-takeover blocked"
 ```
 
 ---
 
-## Task 9: `org-acl-p2panda` fuzz — resolver→key boundary
+## Task 11: `org-acl-p2panda` fuzz — resolver→key boundary
 
 **Files:**
 - Create: `org-acl-p2panda/tests/fuzz_resolver_key_boundary/fuzz_target.rs`
@@ -1399,7 +1688,7 @@ touch org-acl-p2panda/tests/fuzz_resolver_key_boundary/corpus/.gitkeep org-acl-p
 
 - [ ] **Step 3: Run it**
 
-Run: `CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-p2panda --features org-acl-core/testing --test fuzz_resolver_key_boundary`
+Run: `CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-p2panda --test fuzz_resolver_key_boundary`
 Expected: PASS (no panic on the generated batch).
 
 - [ ] **Step 4: Commit**
@@ -1411,7 +1700,7 @@ git commit -m "test(org-acl-p2panda): bolero fuzz — resolver->key boundary nev
 
 ---
 
-## Task 10: READMEs + full suite + clippy gate
+## Task 12: READMEs + full suite + clippy gate
 
 **Files:**
 - Create: `org-acl-core/README.md`, `org-acl-p2panda/README.md`
@@ -1422,21 +1711,23 @@ git commit -m "test(org-acl-p2panda): bolero fuzz — resolver->key boundary nev
 # org-acl-core
 
 ODS organisation ACL — the neutral, substrate-agnostic contract. Identity types
-(`MemberId` = handle@org, `Principal`, key newtypes) + the minimal
-`MemberKeyResolver` trait. NO local-first-substrate dependencies.
+(`MemberId` = handle@org, `Principal`, key newtypes), the minimal
+`MemberKeyResolver` trait, and the neutral `MembershipDelta`. NO
+local-first-substrate dependencies.
 
 This is the convergence anchor: every ACL backend (`org-acl-p2panda`; a Keyhive
 `org-acl` later) shares it, and `org-node` implements `MemberKeyResolver` over
-its trie mirror exactly once. Backends extend the contract by wrapping or
-sub-trait-ing — never by adding substrate-specific methods here.
+its trie mirror exactly once (and maps its `SignedDeltaEnvelope` →
+`MembershipDelta`). Backends extend the contract by wrapping or sub-trait-ing —
+never by adding substrate-specific methods here.
 
 ## Test helper
 `StubResolver` (behind `--features testing`) is an in-memory resolver for tests
 in this crate, `org-acl-p2panda`, and `org-node`.
 
 ## Fuzzing
-`fuzz_identity_codec` (bolero) — `Principal`/`MemberId` postcard round-trip +
-never-panic. Deep lane: `cargo bolero test fuzz_identity_codec --engine libfuzzer`.
+`fuzz_identity_codec` (bolero) — `Principal`/`MemberId`/`MembershipDelta` postcard
+round-trip + never-panic. Deep lane: `cargo bolero test fuzz_identity_codec --engine libfuzzer`.
 ```
 
 - [ ] **Step 2: Write `org-acl-p2panda/README.md`**
@@ -1449,13 +1740,18 @@ track). The **only** crate that names `p2panda-*` (the GPL-3.0 boundary).
 Pinned at p2panda rev `41559b0`; no fork required for item-1.
 
 ## Core idea
-The ACL binds to the stable `MemberId` (handle@org) via
-`GroupCrdt<AuthMemberId>`, driven BELOW `p2panda-spaces`' eager `Manager` so the
-CGKA stays lazy (no prekey/DCGKA at grant-time). Keys resolve live through the
-trie: `ResolverPki` (`IdentityRegistry`) and `materialise_actor_id` re-query the
-resolver on every call — no cache — so a rotated key is picked up and a forged
-key the trie does not vouch for resolves to nothing (Flow-B). `Dcgka::remove`
-and lazy-CGKA recompute are item-4.
+`DocAccess` is the per-document access bundle. Its ACL binds to the stable
+`MemberId` (handle@org) via `GroupCrdt<AuthMemberId>`, driven BELOW
+`p2panda-spaces`' eager `Manager` so the CGKA stays lazy (no prekey/DCGKA at
+grant-time; the CGKA half of `DocAccess` is item-4). Keys resolve live through
+the trie: `ResolverPki` (`IdentityRegistry`) and `materialise_actor_id` re-query
+the resolver on every call — no cache — so a rotated key is picked up and a
+forged key the trie does not vouch for resolves to nothing (Flow-B).
+
+`DocAccess` carries `org_epoch` and reconciles lazily: a Δ==1 `MembershipDelta`
+patches the ACL in place; a larger/absent delta forces a full rebuild from the
+resolver. The auto-observer firing reconcile, open-docs-first scheduling, and
+`Dcgka::remove`/recompute are item-4/Phase-5.
 
 ## Fuzzing
 `fuzz_resolver_key_boundary` (bolero) — the ed25519→x25519 reinterpret + ActorId
@@ -1467,9 +1763,10 @@ construction never panic for arbitrary key bytes. Deep lane:
 
 ```bash
 CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-core --features testing
-CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-p2panda```
-Expected: `org-acl-core` — identity (3) + test_support (2) + fuzz_identity_codec.
-`org-acl-p2panda` — lib: g1_probe (2) + auth_id (2) + pki (3) + actor (3) + acl (3); integration: l3_revocation (2) + fuzz_resolver_key_boundary.
+CARGO_HOME=/tmp/cargo_home_fuzz cargo test -p org-acl-p2panda
+```
+Expected: `org-acl-core` — identity (3) + delta (2) + test_support (2) + fuzz_identity_codec.
+`org-acl-p2panda` — lib: g1_probe (2) + auth_id (2) + pki (3) + actor (3) + acl (8); integration: l3_revocation (2) + fuzz_resolver_key_boundary.
 
 - [ ] **Step 4: Clippy deny-gate (lib only) + default build**
 
@@ -1478,7 +1775,7 @@ CARGO_HOME=/tmp/cargo_home_fuzz cargo clippy -p org-acl-core --lib -- -D warning
 CARGO_HOME=/tmp/cargo_home_fuzz cargo clippy -p org-acl-p2panda --lib -- -D warnings
 CARGO_HOME=/tmp/cargo_home_fuzz cargo build -p org-acl-core -p org-acl-p2panda
 ```
-Expected: clean. The `--lib` gate enforces no `unwrap`/`expect`/`panic` in library code; test/fuzz code is exempt. (All library functions return `Result`/`Option`; there are no locks or unwraps to trip the gate.)
+Expected: clean. The `--lib` gate enforces no `unwrap`/`expect`/`panic` in library code; test/fuzz code is exempt. (All library functions return `Result`/`Option`; `reconcile` uses `?` and guarded `if let` only — no locks or unwraps.)
 
 - [ ] **Step 5: Commit**
 
@@ -1491,10 +1788,10 @@ git commit -m "docs(org-acl): READMEs — item-1 status, core idea, fuzzing"
 
 ## Final review
 
-- [ ] Dispatch a code reviewer over the whole item-1 diff (spec §3–§7 compliance: minimal neutral core trait; Flow-B enforced *structurally* by the no-cache re-resolve and asserted by `actor::rotation_is_picked_up_no_cache` + `l3_revocation`; ACL stores `AuthMemberId` not keys; lazy seam = grant carries no key; both fuzz targets wired; clippy `--lib` clean).
-- [ ] Confirm `org-node` is untouched (the resolver impl over its trie mirror is a follow-on — it implements `org_acl_core::MemberKeyResolver`, the shared anchor; not part of item-1's two crates).
+- [ ] Dispatch a code reviewer over the whole item-1 diff (spec §3–§7 compliance: minimal neutral core trait; Flow-B enforced *structurally* by the no-cache re-resolve and asserted by `actor::rotation_is_picked_up_no_cache` + `l3_revocation`; ACL stores `AuthMemberId` not keys; lazy seam = grant carries no key; `DocAccess::reconcile` Δ==1-delta vs full-rebuild both covered; both fuzz targets wired; clippy `--lib` clean).
+- [ ] Confirm `org-node` is untouched (its `MemberKeyResolver` impl over the trie mirror, and the `SignedDeltaEnvelope → MembershipDelta` bridge, are item-4 follow-ons against `org-acl-core`, the shared anchor — not part of item-1's two crates).
 - [ ] Then use **superpowers:finishing-a-development-branch**. Squash-merge `worktree-phase-3-item1-p2panda` to `master` as a single **user-signed** commit (AGENTS.md): gpg signing is disabled in the worktree, so squash and have the user sign the merge (`git commit --amend -S` from a regular terminal if the agent's merge lands unsigned).
 
 ## Notes on convergence (why this mirrors the Keyhive plan)
 
-This plan is the p2panda realisation of the same item-1; per the spec §4.2 SAME/ADAPT/DIVERGE map: Tasks 1–3 (core) are the ADAPTed `org-acl` identity/resolver/fuzz minus the composite and `ContactCard`; Tasks 4–9 are the DIVERGEd p2panda wiring (no `IdAdapter` — re-resolve gives Flow-B; no `ContactCard` — `GroupCrdt` is ID-generic); Task 8 L3 and Task 10 conventions are SAME shape. The single neutral `MemberKeyResolver` (Task 2) is the convergence point both backends and `org-node` share.
+This plan is the p2panda realisation of the same item-1; per the spec §4.2 SAME/ADAPT/DIVERGE map: Tasks 1–4 (core) are the ADAPTed `org-acl` identity/resolver/fuzz minus the composite and `ContactCard`, plus the neutral `MembershipDelta`; Tasks 5–9 are the DIVERGEd p2panda wiring (no `IdAdapter` — re-resolve gives Flow-B; no `ContactCard` — `GroupCrdt` is ID-generic) culminating in `DocAccess` + lazy `reconcile`; Task 10 L3 and Task 12 conventions are SAME shape. The single neutral `MemberKeyResolver` + `MembershipDelta` (Tasks 2–3) is the convergence point both backends and `org-node` share.
