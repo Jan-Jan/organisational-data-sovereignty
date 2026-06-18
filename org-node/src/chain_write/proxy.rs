@@ -8,11 +8,10 @@ use subxt::OnlineClient;
 use subxt::config::PolkadotConfig;
 use subxt::dynamic::Value;
 use subxt::ext::scale_value::{Composite, Primitive, ValueDef};
-use subxt::utils::H256;
 use subxt_signer::sr25519::Keypair;
 
 use crate::chain_write::WriteError;
-use crate::chain_write::multisig::dispatch_threshold_1;
+use crate::chain_write::multisig::dispatch_org_call;
 
 /// Abstraction over "make the chain advance so a just-submitted extrinsic is
 /// observable". Chopsticks tests implement this by calling dev_newBlock; a live
@@ -132,28 +131,21 @@ fn remove_proxy_call(delegate: [u8; 32]) -> Value {
     )
 }
 
-/// Create a pure proxy controlled by the 1-of-N multisig (`signer` +
-/// `others`). Submits via as_multi_threshold_1, settles one block via
-/// `sink.settle()`, and extracts P from the `Proxy.PureCreated` event.
-pub async fn create_pure_via_multisig(
+/// Create the org's pure proxy `P` under the current controller and return `P`.
+/// Single admin (`others` empty): the admin signs `Proxy.create_pure` directly
+/// and becomes `P`'s delegate. Threshold-1 multisig: the multisig creates `P`.
+/// `P` is read from the `Proxy.PureCreated` event of the executed extrinsic.
+pub async fn create_pure(
     sink: &dyn BlockSink,
     api: &OnlineClient<PolkadotConfig>,
     signer: &Keypair,
     others: &[[u8; 32]],
 ) -> Result<[u8; 32], WriteError> {
-    dispatch_threshold_1(api, signer, others, create_pure_call()).await?;
-    let block_hash = sink.settle().await?;
-
-    // After settling, read the exact block's events to find PureCreated.
-    let at = api
-        .at_block(H256(block_hash))
-        .await
-        .map_err(|e| WriteError::Subxt(format!("at_block: {e}")))?;
-    let events = at
-        .events()
-        .fetch()
-        .await
-        .map_err(|e| WriteError::Subxt(format!("events.fetch: {e}")))?;
+    // create_pure must EXECUTE to emit PureCreated; a (threshold-≥2) pending
+    // approval has no proxy to return, so `into_executed` rejects it.
+    let events = dispatch_org_call(sink, api, signer, others, create_pure_call())
+        .await?
+        .into_executed()?;
     for ev in events.iter() {
         let ev = ev.map_err(|e| WriteError::Subxt(format!("event iter: {e}")))?;
         if ev.pallet_name() == "Proxy" && ev.event_name() == "PureCreated" {
@@ -178,23 +170,12 @@ pub async fn rotate(
     old_multi: [u8; 32],
     new_multi: [u8; 32],
 ) -> Result<(), WriteError> {
-    dispatch_threshold_1(
-        api,
-        signer_old,
-        others_old,
-        proxied(pure_proxy, add_proxy_call(new_multi)),
-    )
-    .await?;
-    sink.settle().await?;
-
-    dispatch_threshold_1(
-        api,
-        signer_old,
-        others_old,
-        proxied(pure_proxy, remove_proxy_call(old_multi)),
-    )
-    .await?;
-    sink.settle().await?;
+    dispatch_org_call(sink, api, signer_old, others_old, proxied(pure_proxy, add_proxy_call(new_multi)))
+        .await?
+        .into_executed()?;
+    dispatch_org_call(sink, api, signer_old, others_old, proxied(pure_proxy, remove_proxy_call(old_multi)))
+        .await?
+        .into_executed()?;
     Ok(())
 }
 

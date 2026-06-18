@@ -183,7 +183,7 @@ mod subxt_impl {
     use crate::chain::OrgState;
     use crate::chain_write::WriteError;
     use crate::chain_write::calldata::revive_update_runtime_call;
-    use crate::chain_write::multisig::dispatch_threshold_1;
+    use crate::chain_write::multisig::dispatch_org_call;
     use crate::chain_write::proxy::{BlockSink, proxied};
     use crate::ceremony::genesis_ceremony;
     use crate::error::OrgNodeError;
@@ -220,7 +220,7 @@ mod subxt_impl {
     ///
     /// **Correctness note**: `settle()` is called AFTER the extrinsic has been
     /// submitted.  Its return value (a block hash) is consumed by
-    /// `create_pure_via_multisig` to look up the `Proxy.PureCreated` event.
+    /// `create_pure` to look up the `Proxy.PureCreated` event.
     /// We return the hash of the first *new* finalized block, which is
     /// guaranteed to be the block that included (or post-dates) our extrinsic,
     /// so the event query will find it.
@@ -400,15 +400,17 @@ mod subxt_impl {
                 org_pub_key,
                 u128::from(expected_epoch),
             );
-            dispatch_threshold_1(&self.api, &self.admin, &self.others, proxied(p, call))
-                .await
-                .map_err(write_err)?;
-
+            // dispatch_org_call submits, drives the chain via the sink, and
+            // waits for the update extrinsic to finalize successfully (surfacing
+            // ExtrinsicFailed), so no separate settle() is needed.
             let sink = self.sink();
-            // settle() is called for its side-effect (wait until the update is
-            // finalized on chain); the returned block hash is not needed here
-            // (only the genesis ceremony's create_pure uses it to read events).
-            sink.settle().await.map_err(write_err)?;
+            // The update must EXECUTE; a (threshold-≥2) pending approval is not a
+            // successful update, so `into_executed` rejects it.
+            dispatch_org_call(&sink, &self.api, &self.admin, &self.others, proxied(p, call))
+                .await
+                .map_err(write_err)?
+                .into_executed()
+                .map_err(write_err)?;
             Ok(())
         }
 

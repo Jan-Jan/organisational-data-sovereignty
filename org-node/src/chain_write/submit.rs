@@ -25,7 +25,7 @@ const STORAGE_DEPOSIT_LIMIT: u128 = 10_000_000_000_000;
 ///
 /// For admin writes that go through the proxy+multisig (genesis, updates from
 /// a multisig-controlled proxy), the call is wrapped via `proxied(P,
-/// revive_update_runtime_call(...))` and dispatched with `dispatch_threshold_1`.
+/// revive_update_runtime_call(...))` and dispatched with `dispatch_org_call`.
 /// This function is the **direct** single-signer path (useful when the admin
 /// account itself is the contract caller).
 pub async fn submit_update(

@@ -6,8 +6,8 @@ use subxt::{OnlineClient, config::PolkadotConfig};
 use subxt_signer::sr25519::Keypair;
 
 use crate::chain_write::calldata::revive_update_runtime_call;
-use crate::chain_write::multisig::{dispatch_threshold_1, fund, FUND_AMOUNT};
-use crate::chain_write::proxy::{create_pure_via_multisig, map_account_call, proxied, BlockSink};
+use crate::chain_write::multisig::{dispatch_org_call, fund, FUND_AMOUNT};
+use crate::chain_write::proxy::{create_pure, map_account_call, proxied, BlockSink};
 use crate::chain_write::WriteError;
 use crate::ids::OrgId;
 
@@ -19,16 +19,20 @@ pub struct GenesisOutcome {
     pub org_id: OrgId,
 }
 
-/// Run the full genesis ceremony for a single-admin (threshold-1) org.
+/// Run the full genesis ceremony for an org. The controller of the pure proxy
+/// `P` is selected by `others`: empty ⇒ the admin controls `P` directly (single
+/// admin, no multisig); non-empty ⇒ a threshold-1 ("any one of N") multisig.
 ///
-/// Steps (each followed by sink.settle()):
-/// 1. create pure proxy P via the admin's threshold-1 multisig
+/// Steps:
+/// 1. create pure proxy P (signed directly by the admin, or by the multisig)
 /// 2. fund P
-/// 3. map_account from P (pallet-revive prerequisite)
-/// 4. submit genesis update(root, orgPubKey, expectedEpoch=0) via proxied multisig
+/// 3. map_account from P (pallet-revive prerequisite), dispatched as P
+/// 4. submit genesis update(root, orgPubKey, expectedEpoch=0), dispatched as P
 ///
 /// `funder` pays for P's existential deposit / fees. `admin` is the sole signer;
-/// `others` are the multisig co-signatories (empty slice for a 1-of-1).
+/// `others` are the co-signatories of the controlling multisig (empty slice for a
+/// single-admin / direct org). Every step must EXECUTE (never be left pending), so
+/// each asserts `DispatchOutcome::Executed` via `into_executed()`.
 #[allow(clippy::too_many_arguments)]
 pub async fn genesis_ceremony(
     sink: &dyn BlockSink,
@@ -40,18 +44,22 @@ pub async fn genesis_ceremony(
     genesis_root: [u8; 32],
     org_pub_key: [u8; 32],
 ) -> Result<GenesisOutcome, WriteError> {
+    // Each step submits, drives the chain via `sink`, and waits for ITS extrinsic
+    // to finalize successfully (ExtrinsicFailed surfaces as an error) — no longer
+    // a separate fire-and-forget submit + sink.settle().
     // 1. Pure proxy.
-    let p = create_pure_via_multisig(sink, api, admin, others).await?;
+    let p = create_pure(sink, api, admin, others).await?;
     // 2. Fund P.
-    fund(api, funder, p, FUND_AMOUNT).await?;
-    sink.settle().await?;
+    fund(sink, api, funder, p, FUND_AMOUNT).await?;
     // 3. map_account from P.
-    dispatch_threshold_1(api, admin, others, proxied(p, map_account_call())).await?;
-    sink.settle().await?;
+    dispatch_org_call(sink, api, admin, others, proxied(p, map_account_call()))
+        .await?
+        .into_executed()?;
     // 4. Genesis update (expectedEpoch = 0).
     let call = revive_update_runtime_call(contract_h160, genesis_root, org_pub_key, 0);
-    dispatch_threshold_1(api, admin, others, proxied(p, call)).await?;
-    sink.settle().await?;
+    dispatch_org_call(sink, api, admin, others, proxied(p, call))
+        .await?
+        .into_executed()?;
 
     let org_id = OrgId::new(on_chain_client::h160_of(p));
     Ok(GenesisOutcome { p, org_id })

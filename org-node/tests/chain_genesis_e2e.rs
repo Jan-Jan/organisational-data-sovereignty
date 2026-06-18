@@ -1,9 +1,13 @@
-//! End-to-end chopsticks integration test for the org-node chain path.
+//! End-to-end chopsticks integration tests for the org-node chain path.
 //!
 //! Drives the full genesis ceremony + an admit-member update against a live
 //! chopsticks-Paseo fork, reads state back via OnChainReader, and verifies
 //! the received delta using verify_envelope_against_chain against the REAL
-//! on-chain root. This is the functional gate for Tasks 5 and 6.
+//! on-chain root.
+//!
+//! IMPORTANT: Both tests use port 8000. Run with --test-threads=1 to avoid
+//! port conflicts between genesis_then_admit_verifies_against_chain and
+//! single_admin_genesis_e2e.
 //!
 //! Run with:
 //!   pkill -f "chopsticks.*--config" 2>/dev/null
@@ -24,7 +28,7 @@ use org_members::{MemberId, MemberLeaf};
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
 use org_node::chain_write::multisig::multi_account_id;
-use org_node::chain_write::multisig::{dispatch_threshold_1, fund, FUND_AMOUNT};
+use org_node::chain_write::multisig::{dispatch_org_call, fund, FUND_AMOUNT};
 use org_node::chain_write::proxy::{proxied, BlockSink};
 use org_node::chain_write::calldata::revive_update_runtime_call;
 use org_node::chain_write::WriteError;
@@ -69,28 +73,42 @@ impl<'a> BlockSink for ChopsticksSink<'a> {
 // Contract deployment (same mechanics as off_chain_genesis_ceremony.rs)
 // ---------------------------------------------------------------------------
 
-/// Deploy OrgRegistry using the on-chain/scripts/sanity-deploy.mjs script.
-/// Returns the deployed contract H160. The script path is resolved relative
-/// to the org-node crate's manifest dir (going up to on-chain/).
+/// Deploy OrgRegistry's EVM bytecode (forge/solc output) to the chopsticks fork
+/// via `on-chain/scripts/deploy-chopsticks-evm.mjs` (pallet-revive's dual-VM
+/// `instantiateWithCode` accepts EVM creation bytecode — same VM backend as the
+/// live deploy; no resolc/PVM). Returns the deployed contract H160. Paths are
+/// resolved relative to the org-node crate's manifest dir (up to on-chain/).
 fn deploy_org_registry() -> [u8; 20] {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
     let on_chain_dir = std::path::PathBuf::from(&manifest_dir).join("../on-chain");
 
+    // Build the EVM artifact (out/OrgRegistry.sol/OrgRegistry.json) with forge's
+    // pinned solc 0.8.27. Idempotent; skips compilation if already up to date.
+    let build = Command::new("forge")
+        .arg("build")
+        .current_dir(&on_chain_dir)
+        .output()
+        .expect("spawn forge build (is Foundry installed?)");
+    assert!(
+        build.status.success(),
+        "forge build failed:\n{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
     let output = Command::new("node")
-        .arg("scripts/sanity-deploy.mjs")
+        .arg("scripts/deploy-chopsticks-evm.mjs")
         .current_dir(&on_chain_dir)
         .env("RPC_URL", "ws://localhost:8000")
-        .env("BLOB_PATH", "tmp/revive/OrgRegistry.sol:OrgRegistry.pvm")
         .output()
-        .expect("spawn sanity-deploy.mjs");
+        .expect("spawn deploy-chopsticks-evm.mjs");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    eprintln!("--- sanity-deploy stdout ---\n{stdout}--- end stdout ---");
+    eprintln!("--- deploy-chopsticks-evm stdout ---\n{stdout}--- end stdout ---");
     if !stderr.is_empty() {
-        eprintln!("--- sanity-deploy stderr ---\n{stderr}--- end stderr ---");
+        eprintln!("--- deploy-chopsticks-evm stderr ---\n{stderr}--- end stderr ---");
     }
-    assert!(output.status.success(), "sanity-deploy.mjs exited non-zero");
+    assert!(output.status.success(), "deploy-chopsticks-evm.mjs exited non-zero");
 
     let marker_line = stdout
         .lines()
@@ -169,13 +187,12 @@ async fn genesis_then_admit_verifies_against_chain() {
     let alice_bob_multi = multi_account_id(&[alice_pub, bob_pub], 1);
     eprintln!("alice+bob multi: 0x{}", hex::encode(alice_bob_multi));
 
-    // Fund the alice+bob multisig account before the genesis ceremony.
-    // Mine twice: once to flush the mempool lag, once to confirm inclusion.
-    fund(&api, &alice, alice_bob_multi, FUND_AMOUNT * 10)
+    // Fund the alice+bob multisig account before the genesis ceremony. `fund`
+    // now drives the chain via the sink (mining as needed) and waits for the
+    // transfer to finalize successfully, so no explicit mining is needed here.
+    fund(&sink, &api, &alice, alice_bob_multi, FUND_AMOUNT * 10)
         .await
         .expect("fund alice+bob multisig");
-    sink.settle().await.expect("mine fund-multisig (flush)");
-    sink.settle().await.expect("mine fund-multisig (confirm)");
 
     // ------------------------------------------------------------------
     // 3. Build the genesis trie with one admin member leaf
@@ -259,17 +276,19 @@ async fn genesis_then_admit_verifies_against_chain() {
     )
     .expect("build signed delta envelope");
 
-    // Submit the update: dispatch via proxied multisig, then settle.
+    // Submit the update: dispatch via proxied multisig. dispatch_org_call drives
+    // the chain via the sink and waits for the extrinsic to finalize.
     let update_call = revive_update_runtime_call(
         contract,
         *new_root.as_bytes(),
         org_pub_key,
         1, // expectedEpoch = current epoch = 1
     );
-    dispatch_threshold_1(&api, &alice, &[bob_pub], proxied(p, update_call))
+    dispatch_org_call(&sink, &api, &alice, &[bob_pub], proxied(p, update_call))
         .await
-        .expect("submit update via proxied multisig");
-    sink.settle().await.expect("mine update block");
+        .expect("submit update via proxied multisig")
+        .into_executed()
+        .expect("update executed (not left pending)");
 
     // Refresh the reader — should now be epoch 2, new_root.
     reader.refresh().await.expect("reader.refresh after update");
@@ -320,4 +339,175 @@ async fn genesis_then_admit_verifies_against_chain() {
     );
 
     eprintln!("=== chain_genesis_e2e PASSED ===");
+}
+
+// ---------------------------------------------------------------------------
+// Single-admin genesis e2e
+// ---------------------------------------------------------------------------
+
+/// Mirrors `genesis_then_admit_verifies_against_chain` but uses `others = &[]`
+/// so alice is the sole direct delegate of the pure proxy P (no multisig
+/// account involved). Alice is pre-funded by the chopsticks config; no
+/// alice+bob multisig pseudo-account funding step is needed.
+#[tokio::test(flavor = "multi_thread")]
+async fn single_admin_genesis_e2e() {
+    // ------------------------------------------------------------------
+    // 1. Fork + contract + client
+    // ------------------------------------------------------------------
+    let fork = spawn_fork().await.expect("spawn chopsticks fork");
+    eprintln!("[single_admin] chopsticks fork ready at {}", fork.ws_url);
+
+    let contract = deploy_org_registry();
+    eprintln!("[single_admin] contract deployed: 0x{}", hex::encode(contract));
+
+    let api = legacy_client(&fork.ws_url).await.expect("legacy subxt client");
+    let sink = ChopsticksSink { handle: &fork };
+
+    // ------------------------------------------------------------------
+    // 2. Dev accounts — alice only; no multisig, no bob co-signatory.
+    //    Alice is pre-funded by the chopsticks config and will be the
+    //    direct delegate of the pure proxy P (others = &[]).
+    // ------------------------------------------------------------------
+    let alice = dev::alice();
+
+    // ------------------------------------------------------------------
+    // 3. Build the genesis trie with one admin member leaf
+    // ------------------------------------------------------------------
+    let admin_kp = SigningKeypair::from_seed([0xA1u8; 32]);
+    let admin_device = SigningKeypair::from_seed([0xA2u8; 32]);
+    let org_pub_key: [u8; 32] = admin_kp.verifying_key().to_bytes();
+
+    let leaf_a = admin_leaf(&admin_kp, &admin_device);
+    let (genesis_trie, _genesis_delta) = Trie::genesis(vec![leaf_a])
+        .expect("genesis trie")
+        .recalculate()
+        .expect("recalculate genesis");
+    let genesis_root = genesis_trie.root_hash().expect("genesis root");
+    eprintln!("[single_admin] genesis root: {:?}", genesis_root);
+
+    // ------------------------------------------------------------------
+    // 4. Run genesis_ceremony with others = &[] (single-admin / direct)
+    //    Alice is both funder and admin signer. No multisig account exists
+    //    or needs to be funded — alice signs the proxy create directly.
+    // ------------------------------------------------------------------
+    let outcome = genesis_ceremony(
+        &sink,
+        &api,
+        contract,
+        &alice, // funder (alice pre-funded by chopsticks config)
+        &alice, // admin (signs directly — no multisig wrapper)
+        &[],    // others: empty ⇒ single-admin / direct dispatch
+        *genesis_root.as_bytes(),
+        org_pub_key,
+    )
+    .await
+    .expect("single-admin genesis ceremony");
+
+    let p = outcome.p;
+    let org_id: OrgId = outcome.org_id;
+    eprintln!("[single_admin] P = 0x{}", hex::encode(p));
+    eprintln!("[single_admin] org_id (h160) = 0x{}", hex::encode(org_id.as_bytes()));
+
+    // ------------------------------------------------------------------
+    // 5. OnChainReader: refresh and assert epoch 1 + genesis_root
+    // ------------------------------------------------------------------
+    let occ_client = OrgRegistryClient::from_client(api.clone(), contract)
+        .await
+        .expect("OrgRegistryClient");
+    let reader = OnChainReader::new(occ_client, org_id);
+    reader.refresh().await.expect("reader.refresh after genesis");
+
+    let state_after_genesis = reader
+        .get_org_state(&org_id)
+        .expect("get_org_state")
+        .expect("org state should be Some after genesis");
+    eprintln!("[single_admin] on-chain state after genesis: {:?}", state_after_genesis);
+    assert_eq!(state_after_genesis.epoch, 1, "epoch should be 1 after genesis");
+    assert_eq!(
+        state_after_genesis.root_hash.as_bytes(),
+        genesis_root.as_bytes(),
+        "on-chain root should equal genesis root"
+    );
+
+    // ------------------------------------------------------------------
+    // 6. ADMIT: add member B, submit update(new_root, org_pub_key, 1)
+    //    via dispatch_org_call with others = &[] (direct, no multisig)
+    // ------------------------------------------------------------------
+    let b_kp = SigningKeypair::from_seed([0xB1u8; 32]);
+    let b_device = SigningKeypair::from_seed([0xB2u8; 32]);
+    let leaf_b = member_b_leaf(&b_kp, &b_device);
+
+    let (new_trie, admit_delta) = genesis_trie
+        .add_member(leaf_b)
+        .expect("add member B")
+        .recalculate()
+        .expect("recalculate after admit");
+    let new_root = new_trie.root_hash().expect("new root after admit");
+    eprintln!("[single_admin] new root after admit: {:?}", new_root);
+
+    let env = SignedDeltaEnvelope::build(
+        org_id,
+        2, // parent_seq: strictly greater than last_seen=1
+        &admit_delta,
+        &admin_kp,
+    )
+    .expect("build signed delta envelope");
+
+    let update_call = revive_update_runtime_call(
+        contract,
+        *new_root.as_bytes(),
+        org_pub_key,
+        1, // expectedEpoch = current epoch = 1
+    );
+    // Single-admin: others = &[] — alice signs the proxied call directly.
+    dispatch_org_call(&sink, &api, &alice, &[], proxied(p, update_call))
+        .await
+        .expect("submit update via proxied single-admin")
+        .into_executed()
+        .expect("update executed (not left pending)");
+
+    // Refresh the reader — should now be epoch 2, new_root.
+    reader.refresh().await.expect("reader.refresh after update");
+    let state_after_update = reader
+        .get_org_state(&org_id)
+        .expect("get_org_state after update")
+        .expect("org state should be Some after update");
+    eprintln!("[single_admin] on-chain state after update: {:?}", state_after_update);
+    assert_eq!(state_after_update.epoch, 2, "epoch should be 2 after update");
+    assert_eq!(
+        state_after_update.root_hash.as_bytes(),
+        new_root.as_bytes(),
+        "on-chain root should equal new root after admit"
+    );
+
+    // ------------------------------------------------------------------
+    // 7. verify_envelope_against_chain
+    // ------------------------------------------------------------------
+    let ctx = VerifyContext {
+        expected_org_id: org_id,
+        author_member_key: &admin_kp.verifying_key(),
+        seq_guard: SeqGuard::from_last_seen(1),
+        last_committed_epoch: 1,
+    };
+
+    let verified = verify_envelope_against_chain(
+        &genesis_trie,
+        &env,
+        &ctx,
+        &reader,
+    )
+    .expect("verify_envelope_against_chain must succeed");
+
+    eprintln!("[single_admin] verified epoch: {}", verified.epoch);
+    eprintln!("[single_admin] verified seq: {}", verified.seq_guard.last_seen());
+
+    assert_eq!(verified.epoch, 2, "verified epoch should be 2");
+    assert_eq!(verified.seq_guard.last_seen(), 2, "seq guard should advance to 2");
+    assert_eq!(
+        verified.trie.root_hash().expect("committed trie root"),
+        new_root,
+        "committed trie root must equal the independently-read on-chain root"
+    );
+
+    eprintln!("=== single_admin_genesis_e2e PASSED ===");
 }
