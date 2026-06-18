@@ -139,7 +139,13 @@ impl AppState {
         // env vars were present AND the async connect inside block_on succeeded.
         let (chain, chain_ready): (Box<dyn ChainOps>, bool) = match build_chain_ops() {
             Ok(ops) => (ops, true),
-            Err(_) => (Box::new(ChainNotConfigured), false),
+            Err(e) => {
+                // Surface WHY chain mode didn't come up (missing/malformed env var
+                // or a failed connect) instead of silently degrading — otherwise the
+                // UI just shows "Chain NOT configured" with no diagnosable reason.
+                eprintln!("[ods] chain config failed; running ChainNotConfigured: {e}");
+                (Box::new(ChainNotConfigured), false)
+            }
         };
 
         // Transport mode: `ODS_TRANSPORT=loopback` → TransportMode::Loopback (relay
