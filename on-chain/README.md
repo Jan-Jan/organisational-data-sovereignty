@@ -74,11 +74,35 @@ forge --version
 No `resolc` and no standalone `solc` are needed for this path; Foundry uses the
 `solc 0.8.27` pinned in `foundry.toml`.
 
-#### Step 1 — Fund an Ethereum-style deployer
+#### Step 1 — Set up an Ethereum-style deployer key
 
 EVM transactions are signed by a **secp256k1 / Ethereum (H160)** key, not the
-sr25519 key the PVM script uses. Generate or reuse an Ethereum keypair (e.g.
-`cast wallet new`) and fund its address:
+sr25519 key the PVM script uses. For testnet the safest choice is a dedicated
+throwaway key rather than your main wallet's:
+
+```bash
+cast wallet new        # prints a fresh 0x address + private key
+```
+
+Alternatively, export the private key of an **Ethereum** account from a wallet
+(e.g. Talisman → *Export private key* — offered for Ethereum accounts only; a
+Substrate/sr25519 account has no EVM key to export).
+
+Import the key once into an encrypted Foundry keystore, so the raw secret never
+lands in your shell history or an environment variable:
+
+```bash
+cast wallet import deployer --interactive   # paste the 0x… key; set a password
+```
+
+The keystore is written to `~/.foundry/keystores/deployer`; the deploy command
+below references it with `--account deployer` and prompts for this password at
+sign time. To recreate it (e.g. you mistyped the password — there is no
+"change password", only re-import), `rm ~/.foundry/keystores/deployer` and run
+the import again; this is safe as long as you still hold the underlying key.
+
+Show the address to fund with `cast wallet address --account deployer`, then
+fund it:
 
 - **Paseo Asset Hub (testnet):** free PAS from <https://faucet.polkadot.io/>
   (select **Polkadot Hub TestNet**). PAS has no real-world value.
@@ -89,12 +113,6 @@ Because the account is already an Ethereum keypair, no account-mapping is
 required. (A native sr25519/ed25519 account would need [account
 mapping](https://docs.polkadot.com/smart-contracts/for-eth-devs/accounts/#account-mapping-for-native-polkadot-accounts);
 an Ethereum key avoids it.)
-
-Export the key (never commit it):
-
-```bash
-export PRIVATE_KEY=0x…            # 32-byte hex secp256k1 secret
-```
 
 #### Step 2 — Compile
 
@@ -116,7 +134,7 @@ chain ID `420420417`:
 cd on-chain
 forge create src/OrgRegistry.sol:OrgRegistry \
   --rpc-url https://eth-rpc-testnet.polkadot.io/ \
-  --private-key "$PRIVATE_KEY" \
+  --account deployer \
   --broadcast
 ```
 
@@ -127,13 +145,15 @@ chain ID `420420419`:
 cd on-chain
 forge create src/OrgRegistry.sol:OrgRegistry \
   --rpc-url https://eth-rpc.polkadot.io/ \
-  --private-key "$PRIVATE_KEY" \
+  --account deployer \
   --broadcast
 ```
 
 With Foundry nightly you can replace `--rpc-url …` with `--chain
 polkadot-testnet` (or `--chain polkadot`). On success `forge create` prints
-`Deployed to: 0x…`.
+`Deployed to: 0x…`. (If you'd rather not use a keystore, `--interactive`
+prompts for the key once, or `--private-key 0x…` passes it inline — but that
+leaves the secret in your shell history.)
 
 #### Step 4 — Confirm and verify
 
@@ -168,8 +188,9 @@ deployer account + nonce.)
 - **Finalization.** `forge create` waits for the transaction receipt
   (inclusion). For mainnet, re-check the address persists across a few blocks
   before trusting it.
-- **Secrets.** `PRIVATE_KEY` must never be committed; prefer exporting it in
-  your shell over writing it to a file.
+- **Secrets.** Prefer the encrypted `cast wallet import` keystore
+  (`--account`) over a raw key on the command line or in an env var. Never
+  commit a private key or keystore password.
 
 ### Advanced: deploy as a PolkaVM (PVM) contract
 
