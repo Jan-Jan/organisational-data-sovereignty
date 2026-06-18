@@ -226,28 +226,22 @@ fn build_chain_ops() -> Result<Box<dyn ChainOps>, String> {
         Err(_) => vec![],
     };
 
-    // Build SubxtChainOps by connecting to the chain.
-    // TODO(demo-wiring): This block_on is valid here because build_chain_ops is
-    // called from the Tauri setup hook (synchronous context).  If the setup hook
-    // ever becomes async in a future Tauri version, convert to .await directly.
-    // Clone before both closures to avoid dual-borrow issues across `map_or_else`.
-    let ws_url2 = ws_url.clone();
-    let others2 = others.clone();
-    let chain = tokio::runtime::Handle::try_current()
-        .map_or_else(
-            move |_| {
-                // No current runtime — build a temporary one for the connect.
-                tokio::runtime::Runtime::new()
-                    .map_err(|e| format!("tokio rt: {e}"))?
-                    .block_on(connect_chain(ws_url, contract_h160, admin_seed, others))
-            },
-            move |handle| {
-                // We're inside an existing runtime — use block_in_place.
-                tokio::task::block_in_place(|| {
-                    handle.block_on(connect_chain(ws_url2, contract_h160, admin_seed, others2))
-                })
-            },
-        )?;
+    // Build SubxtChainOps by connecting to the chain on Tauri's PERSISTENT async
+    // runtime. This must NOT use a temporary `tokio::runtime::Runtime` created
+    // here: the RPC client (reconnecting or not) spawns a background task for the
+    // WS connection, and if that task is spawned on a throwaway runtime that is
+    // dropped when this function returns, the task dies — so the first chain call
+    // made later (e.g. submitting a genesis write) fails with "The client was
+    // dropped" / "Error reason could not be found", even though reads issued
+    // during the connect succeeded. `tauri::async_runtime` lives for the whole
+    // app, so the background task (and the connection) survive until shutdown, and
+    // it is the same runtime the command handlers later use.
+    let chain = tauri::async_runtime::block_on(connect_chain(
+        ws_url,
+        contract_h160,
+        admin_seed,
+        others,
+    ))?;
     Ok(Box::new(chain))
 }
 
