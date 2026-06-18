@@ -33,6 +33,7 @@ What the smoke test does **not** cover, and this work must: the `ReviveApi::get_
 | RPC opt-in | A CLI flag **`--force-rpc`** (plus env mirror **`ODS_FORCE_RPC=1`** for headless/CI) selects the WS+`LegacyBackend` path. |
 | Operation scope | **All three** — reads, subscriptions, and tx submission — must work over smoldot. |
 | Cold-sync UX | **Async connect + live status.** Window opens immediately; smoldot syncs in the background; status flips to `Ready` when synced. |
+| Tx feedback | **Surface the full transaction lifecycle** to the user — `Submitted → InBlock → Finalised` (plus failure) — by consuming subxt's `TxProgress` stream, not the current drop-and-poll approach. |
 | Test harness | **Ultralight zombienet + `chain-spec-builder`** chain (fresh minimal genesis from the AH runtime WASM), not a zombie-bite full-state fork. |
 
 ## 4. Architecture
@@ -94,7 +95,21 @@ The client/event/write logic is unchanged; each operation rides the new `OnlineC
 
 **2. Event subscriptions — best + finalised lanes (medium risk).** The finalised lane (`stream_blocks`) is already exercised by the smoke test. The best lane (`stream_best_blocks` + `at_block(number)` gap-fill) backfills `seed.number+1 ..= head`; over a light client, blocks before the sync origin are unretrievable, so the "unbounded span" caveat already noted in `client.rs` turns from *slow* into a *hard failure* if the seed is ever stale. **Design change:** cap the best-lane backfill span and surface a resync rather than walking into unretrievable blocks.
 
-**3. Transaction submission — genesis/update writes (highest risk).** Maps to smoldot's `transactionWatch_v1` via the CombinedBackend; subxt's `sign_and_submit_then_watch` rides it. Nonce, genesis hash, mortal era, and runtime version for signing all come from light-client state reads (fine post-sync). Inclusion feedback is weaker/slower over a light client, so the **reliable signal is "seen in a finalised block,"** not the optimistic in-block notification.
+**3. Transaction submission — genesis/update writes.** Maps to smoldot's `transactionWatch_v1_submitAndWatch` via the CombinedBackend; subxt's `sign_and_submit_then_watch` rides it. Nonce, genesis hash, mortal era, and runtime version for signing all come from light-client state reads (fine post-sync). **smoldot's watch API already emits the full lifecycle** — `validated → broadcasted → bestChainBlockIncluded → finalized`, plus `invalid`/`dropped`/`error` — and subxt's `TxProgress` stream surfaces each. So the staged feedback in §5.1 is not new machinery: the events are already there; the current code simply discards the stream. The only nuance is the universal one — `bestChainBlockIncluded` ("in block") is provisional and can be retracted by a reorg, while `finalized` is authoritative — not a light-client-specific weakness.
+
+### 5.1 Transaction progress feedback
+
+The user must see the transaction lifecycle, not just a final ok/err. Today `chain_write/submit.rs` calls `sign_and_submit_then_watch_default`, captures the extrinsic hash, then **drops the `TxProgress` stream immediately** and tracks finality out-of-band by polling `FinalitySink::settle()` (a coarse "a new finalised block appeared" loop). That yields no submitted/in-block signal. This design replaces that, for the genesis/update submit calls, with **driving the `TxProgress` stream to completion** and emitting a stage at each transition. Because smoldot (and any chainHead node) already produces these transitions, the work is wiring them through, not generating them.
+
+**`TxStage` (app-facing enum, defined in `org-node`):**
+- `Submitted { ext_hash }` — accepted/broadcast by the network (subxt `Validated`/`Broadcasted`; smoldot `validated`/`broadcasted`).
+- `InBlock { ext_hash, block_hash, block_number }` — included in a best block (smoldot `bestChainBlockIncluded`); **provisional** — may be retracted on reorg.
+- `Finalised { ext_hash, block_hash, block_number }` — included in a finalised block (smoldot `finalized`); **authoritative** completion.
+- `Failed { ext_hash: Option, reason }` — `Invalid` / `Dropped` / `FinalityTimeout` / `error` / transport error.
+
+**Mechanism.** `ChainOps::submit_genesis` / `submit_update` gain a **progress sink** parameter — an `mpsc::UnboundedSender<TxStage>` (or a small `TxProgressSink` trait). `SubxtChainOps` maps each subxt `TxStatus` to a `TxStage` and sends it; the method still returns its final result once `Finalised` (or a failure) is reached. `ChainNotConfigured` ignores the sink (it errors before any stage). The app-layer Tauri command supplies a sink that forwards each `TxStage` to the frontend as a **`tx-progress` event** via `AppHandle::emit`; the Svelte UI renders submitted → in block → finalised (and surfaces failures). This reuses the push-status approach already chosen for connection state (§4.2).
+
+**Interaction with the proxy-event lookup.** `submit_genesis` currently needs the finalised block to find the `Proxy.PureCreated` event (via `FinalitySink`). Driving the `TxProgress` stream gives the `Finalised { block_hash }` directly, so the lookup block comes from the stream rather than a separate poll — a strict improvement. `FinalitySink` may remain for any path that still needs the standalone "next finalised block" probe; consolidating versus keeping both is a planning detail.
 
 ## 6. Testing strategy
 
@@ -113,7 +128,7 @@ Build a deterministic smoldot integration harness on a **fresh minimal chain**, 
 5. **Run the three acceptance flows over the light client** against the spawned chain:
    - read: `get_org_state` for a deployed org returns the expected decoded `OrgState`;
    - subscribe: both lanes stay live across N blocks and a `ContractEmitted` decodes;
-   - write: a submitted genesis (or update) reaches a finalised block.
+   - write: a submitted genesis (or update) emits the staged sequence `Submitted → InBlock → Finalised` (assert the stages are observed in order, not just final success) and lands in a finalised block.
 
 The harness is heavyweight (real node binaries) — it runs as an explicitly-invoked test (dedicated cargo feature / `#[ignore]`), never on a default `cargo test`.
 
@@ -128,18 +143,19 @@ A native build check: the app window opens immediately (does not block on connec
 ## 7. Components touched
 
 - `org-node/Cargo.toml` — already gained `reconnecting-rpc-client`; add a way for the `chain` feature to pull `on-chain-client/smoldot`.
-- `org-node/src/service.rs` — `connect_chain_smoldot` constructor (owns the relay `LightClient`); chain-ops swappability (or a forwarding shim). Best-lane backfill cap in `on-chain-client/src/client.rs`.
+- `org-node/src/service.rs` — `connect_chain_smoldot` constructor (owns the relay `LightClient`); chain-ops swappability (or a forwarding shim); `ChainOps::submit_genesis`/`submit_update` gain a `TxStage` progress-sink parameter (`ChainNotConfigured` ignores it); `TxStage` enum defined here. Best-lane backfill cap in `on-chain-client/src/client.rs`.
+- `org-node/src/chain_write/submit.rs` (and `multisig.rs`) — stop dropping the `TxProgress` stream; drive it to completion, mapping each `TxStatus` to a `TxStage` sent on the sink; derive the proxy-event lookup block from the `Finalised` status.
 - `app/src-tauri/Cargo.toml` — `on-chain-client` with `smoldot` + `dev-rpc`; `org-node` `app` feature.
 - `app/src-tauri/src/state.rs` — async background connect; swappable chain-ops slot; `Connecting→Syncing→Ready→Failed` status; `--force-rpc`/`ODS_FORCE_RPC` selection; chainspec `include_str!` + path overrides; remove the eager `block_on` in `setup`.
-- `app/src-tauri/src/commands.rs` — `connection_status` reports the status enum; chain commands gate on `Ready`.
-- Svelte UI — render the syncing/failed states (minimal: a status line).
+- `app/src-tauri/src/commands.rs` — `connection_status` reports the status enum; chain commands gate on `Ready`; submit commands pass a sink that forwards each `TxStage` to the frontend as a `tx-progress` event via `AppHandle::emit`.
+- Svelte UI — render the syncing/failed states (minimal: a status line) and the per-transaction `Submitted → InBlock → Finalised`/failure progress.
 - Tests — extended `smoldot_smoke.rs`; new ultralight zombienet harness (feature-gated).
 
 ## 8. Risks & open questions
 
 - **Local Asset Hub block production** under zombienet is a known rough edge (#11247, #5932). First harness milestone: get a fresh AH chain finalising blocks locally before any smoldot wiring.
 - **chainHead backend subscription parity.** Confirm `stream_best_blocks`/`stream_blocks` + the reorg/gap-fill logic behave correctly over the CombinedBackend/chainHead path (vs the LegacyBackend the suite was written against).
-- **tx submission over light client** is the highest-risk path; if subxt's `transactionWatch_v1` mapping or inclusion feedback proves unreliable, the `--force-rpc` escape hatch covers writes operationally while the issue is chased.
+- **tx submission over light client** — smoldot's `transactionWatch_v1` provides the full status stream natively, so the main work is consuming it (not generating feedback). Residual risks: correctly handling `bestChainBlockIncluded` retraction on reorg (don't report a provisional in-block as done), and the `--force-rpc` escape hatch covers writes operationally if any mapping issue surfaces.
 - **Runtime WASM provenance** for `chain-spec-builder` must match `spec_version 2_002_002` so existing decoders apply; if unavailable, add a decoder for whatever runtime the harness uses.
 - **PWA (future):** native smoldot does not unblock the browser target; the subxt 0.50.1 wasm lane remains blocked upstream and is out of scope here.
 
