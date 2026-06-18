@@ -35,6 +35,7 @@ What the smoke test does **not** cover, and this work must: the `ReviveApi::get_
 | Cold-sync UX | **Async connect + live status.** Window opens immediately; smoldot syncs in the background; status flips to `Ready` when synced. |
 | Tx feedback | **Surface the full transaction lifecycle** to the user — `Submitted → InBlock → Finalised` (plus failure) — by consuming subxt's `TxProgress` stream, not the current drop-and-poll approach. |
 | Test harness | **Ultralight zombienet + `chain-spec-builder`** chain (fresh minimal genesis from the AH runtime WASM), not a zombie-bite full-state fork. |
+| Contract VM | **All tests use the EVM (REVM) backend** — the contract is deployed/exercised as the stock `forge` EVM artifact over `eth-rpc`, never the PVM/`resolc` path. |
 
 ## 4. Architecture
 
@@ -123,7 +124,7 @@ Build a deterministic smoldot integration harness on a **fresh minimal chain**, 
 
 1. **Build genesis with `chain-spec-builder`** from the **Asset Hub runtime WASM** whose `spec_version` matches the pinned `decode/dispatch` decoders (Paseo AH `2_002_002`). Keeping the real runtime preserves `pallet-revive`, event formats, and `ReviveApi::get_storage`; only the *state* is fresh and tiny. Seed funded admin/co-signer accounts via a genesis patch.
 2. **Spawn with zombienet** (relay + AH collator). Real nodes → real GRANDPA finality, libp2p, and bootnode multiaddrs. ⚠️ Local Asset Hub block production has known gotchas (polkadot-sdk #11247 "AssetHub local does not produce blocks", #5932 manual-seal+AH); budget for getting the collator/omni-node setup right.
-3. **Deploy `OrgRegistry` fresh** onto the spawned chain via the existing `on-chain/scripts` deploy path.
+3. **Deploy `OrgRegistry` fresh via the EVM (REVM) backend** — the stock `forge build` artifact deployed with `forge create` over the chain's pallet-revive **`eth-rpc`** endpoint, signed by a secp256k1/H160 key (the recommended path per `on-chain/README.md` §"EVM path"). **Never** the PVM/`resolc`/`deploy-live.mjs` path. Harness implication: the ultralight chain must run the pallet-revive `eth-rpc` proxy alongside the collator so `forge create` can reach it. App *writes* remain subxt `Revive.call` extrinsics (the VM backend is transparent at the `call` level), so only the deploy step is EVM-specific.
 4. **Derive smoldot chainspecs** (relay + AH) from the spawned nodes' `cfg/` chainspecs, injecting the localhost bootnode multiaddrs. **No `lightSyncState` checkpoint needed** — for a short-lived chain smoldot header-syncs from genesis via the all-forks protocol (it can source starting chain info from genesis, a checkpoint, or GRANDPA runtime calls). Point smoldot at these via `ODS_RELAY_CHAINSPEC` / `ODS_PARA_CHAINSPEC`.
 5. **Run the three acceptance flows over the light client** against the spawned chain:
    - read: `get_org_state` for a deployed org returns the expected decoded `OrgState`;
