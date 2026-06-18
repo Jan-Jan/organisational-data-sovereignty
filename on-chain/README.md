@@ -18,9 +18,10 @@ See `docs/superpowers/specs/2026-05-13-ods-phase-1b-design.md` for the design.
 - `scripts/sanity-deploy.mjs` — Node.js deploy + verify script using
   `@polkadot/api`. Hard-coded to `//Alice`; works only against the
   chopsticks fork (`mock-signature-host`).
-- `scripts/deploy-live.mjs` — live-chain deploy + verify. Reads the signing
-  key from `$DEPLOYER_SEED`, waits for finalization, and prints the deployed
-  contract H160. Use this for Paseo / Polkadot Asset Hub.
+- `scripts/deploy-live.mjs` — **PVM-path** live-chain deploy + verify. Reads the
+  signing key from `$DEPLOYER_SEED`, waits for finalization, and prints the
+  deployed contract H160. Used by the advanced PolkaVM deploy path (the
+  recommended EVM path uses `forge create` directly — no script).
 - `scripts/wait-for-rpc.mjs` — WS readiness probe used by the sanity harness.
 - `scripts/package.json` / `scripts/package-lock.json` — pinned npm
   dependencies for the sanity script (chopsticks, polkadot-api).
