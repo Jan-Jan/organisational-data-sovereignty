@@ -25,6 +25,43 @@ It delivers exactly the two ODS Roadmap.3 item-1 exit criteria:
 Items 2–5 (org pseudo-group, write-authority lockout, CGKA triggers, p2p policy) are
 **out of scope** and untouched.
 
+## 1b. Revision R2 (2026-06-18) — `OrgMember` identity + root-anchored per-doc index
+
+This revision **supersedes** the "simple single-org" identity decision and the bare
+`org_epoch` stamp wherever they conflict below.
+
+- **ACL identity is the composite `OrgMember { org: OrgId, member: MemberId }`** (because
+  `MemberId` is unique only within one org's trie). `Principal::Member(OrgMember)` /
+  `Principal::Org(OrgId)`. `AuthMemberId` wraps `OrgMember`. This makes the p2panda identity
+  model identical to the Keyhive track (convergence).
+- **Per-document reconciliation index — a shared neutral type in `org-acl-core`:**
+  ```rust
+  pub struct RootHash(pub [u8; 32]);          // mirrors org_members::RootHash; org-node converts
+  pub struct DocReconcileMark {
+      pub org: OrgId,
+      pub acl_epoch: Epoch,   // trie epoch the ACL tier was last reconciled to (was `org_epoch`)
+      pub cgka_epoch: Epoch,  // trie epoch the CGKA tier was last reconciled to — item-4 drives it
+      pub root_hash: RootHash,// the on-chain-anchored trie root the ACL was reconciled against
+  }
+  ```
+  Hoisting it into core (not duplicating per backend) makes it the convergence artifact both
+  tracks share. Rationale: the two tiers reconcile at different cadences (so two epochs), and
+  an epoch is a reorg-able *derived* index whereas `root_hash` is the cryptographic anchor
+  (reorg-safe — a changed canonical root at that height ⇒ stored hash mismatch ⇒ re-reconcile).
+- **`MemberKeyResolver` gains `org_id() -> OrgId` and `root_hash() -> RootHash`** (trie-level
+  queries both backends need; forward key methods still take a bare `MemberId`, org implicit).
+- **`MembershipDelta` gains `from_root`/`to_root: RootHash`.** `org-node` derives these from its
+  `SignedDeltaEnvelope` (`base_root` + new root) in item-4; item-1 builds them synthetically.
+- **`DocAccess` embeds `DocReconcileMark`.** `create(doc_id, manager, resolver)` stamps the mark
+  from `resolver.org_id()/epoch()/root_hash()` (cgka_epoch initialised = acl_epoch). `reconcile`'s
+  Δ==1 delta path now requires `is_single_step && from_epoch==acl_epoch && from_root==root_hash &&
+  to_epoch==target_epoch && to_root==target_root`, and stamps both `acl_epoch` and `root_hash`;
+  the full-rebuild path stamps `acl_epoch=resolver.epoch()` + `root_hash=resolver.root_hash()`.
+  `cgka_epoch` is untouched in item-1.
+
+Scope unchanged otherwise: item-1 is still the ACL tier only; the CGKA tier (and thus
+`cgka_epoch` updates), the auto-observer, and the real `org-node` delta bridge remain item-4.
+
 ## 2. The gate (preconditions for execution)
 
 - **(a) Phase 2 `org-node` has landed.** ✅ Satisfied — `org-node` is on `master`
