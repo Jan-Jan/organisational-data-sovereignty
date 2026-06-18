@@ -7,6 +7,8 @@ use iroh::{
     EndpointAddr, EndpointId, RelayMode, TransportAddr,
     endpoint::{Connection, presets},
 };
+#[cfg(feature = "test-support")]
+use iroh::{RelayMap, address_lookup::MemoryLookup};
 use org_members::P2pDeviceKey;
 
 use crate::keys::SigningKeypair;
@@ -79,6 +81,51 @@ impl OrgEndpoint {
                     .map_err(|e| TransportError::Bind(e.to_string()))?
             }
         };
+        Ok(Self {
+            inner,
+            device_key: device.device_key(),
+        })
+    }
+
+    /// Bind a Networked-style endpoint whose ONLY relay is `relay_map` and
+    /// whose peer-address resolution comes from `lookup`, with direct UDP
+    /// paths filtered out so traffic is forced through the relay.
+    ///
+    /// This mirrors the `TransportMode::Networked` builder (same ALPN, same
+    /// secret-key-from-seed) but swaps `presets::N0`'s real n0 relay + DNS
+    /// discovery for an in-process relay and an in-memory address lookup.
+    /// It exists only to make the Networked dial-by-`EndpointId` path
+    /// hermetically testable; it is never used in production.
+    ///
+    /// Usage: bind both endpoints with a shared `MemoryLookup`, call
+    /// [`online`](iroh::Endpoint::online) on each, seed the lookup with each
+    /// endpoint's `addr()`, then dial with [`send_to_id`].
+    ///
+    /// `ca_roots_config(insecure_skip_verify())` is required because
+    /// `iroh::test_utils::run_relay_server()` serves a self-signed TLS cert;
+    /// without it `online()` never resolves (the relay TLS handshake fails).
+    /// This is exactly what iroh's own relay integration tests do. It is
+    /// test-only (gated behind `test-support`) and never compiled into
+    /// production builds.
+    ///
+    /// [`send_to_id`]: OrgEndpoint::send_to_id
+    #[cfg(feature = "test-support")]
+    pub async fn bind_with_relay(
+        device: &SigningKeypair,
+        relay_map: RelayMap,
+        lookup: MemoryLookup,
+    ) -> Result<Self, TransportError> {
+        let sk = iroh::SecretKey::from_bytes(&device.to_seed());
+        let inner = iroh::Endpoint::builder(presets::Minimal)
+            .relay_mode(RelayMode::Custom(relay_map))
+            .address_lookup(lookup)
+            .addr_filter(iroh::address_lookup::AddrFilter::relay_only())
+            .ca_roots_config(iroh::tls::CaRootsConfig::insecure_skip_verify())
+            .secret_key(sk)
+            .alpns(vec![ALPN.to_vec()])
+            .bind()
+            .await
+            .map_err(|e| TransportError::Bind(e.to_string()))?;
         Ok(Self {
             inner,
             device_key: device.device_key(),

@@ -426,7 +426,38 @@ mod subxt_impl {
 }
 
 #[cfg(feature = "chain")]
-pub use subxt_impl::SubxtChainOps;
+pub use subxt_impl::{FinalitySink, SubxtChainOps};
+
+/// Connect to a chain RPC over an explicit `LegacyBackend` (required for
+/// chopsticks; mirrors tests/common/conn.rs) and build an `OrgRegistryClient`
+/// for `contract`. Used by the preflight binary. Returns both so callers can
+/// run raw-chain checks (the `OnlineClient`) and contract checks (the
+/// `OrgRegistryClient`).
+pub async fn connect_chain_client(
+    ws_url: &str,
+    contract: [u8; 20],
+) -> Result<
+    (
+        subxt::OnlineClient<subxt::config::PolkadotConfig>,
+        on_chain_client::OrgRegistryClient,
+    ),
+    crate::error::OrgNodeError,
+> {
+    use subxt::backend::LegacyBackend;
+    use subxt::config::PolkadotConfig;
+
+    let rpc_client = subxt::rpcs::RpcClient::from_insecure_url(ws_url)
+        .await
+        .map_err(|e| crate::error::OrgNodeError::Chain(format!("rpc connect: {e}")))?;
+    let backend: LegacyBackend<PolkadotConfig> = LegacyBackend::builder().build(rpc_client);
+    let api = subxt::OnlineClient::from_backend(Arc::new(backend))
+        .await
+        .map_err(|e| crate::error::OrgNodeError::Chain(format!("online client: {e}")))?;
+    let registry = on_chain_client::OrgRegistryClient::from_client(api.clone(), contract)
+        .await
+        .map_err(|e| crate::error::OrgNodeError::Chain(format!("registry client: {e}")))?;
+    Ok((api, registry))
+}
 
 // ============================================================
 // Helper: rebuild a trie mirror from persisted MemberSnapshots.

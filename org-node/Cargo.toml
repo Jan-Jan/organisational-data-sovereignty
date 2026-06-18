@@ -16,6 +16,12 @@ chain = ["dep:subxt", "dep:subxt-signer", "dep:tokio", "dep:on-chain-client", "d
 transport = ["dep:iroh", "dep:tokio"]
 # Full node-app integration: chain + transport + encrypted persistence + out-of-band blobs.
 app = ["chain", "transport", "dep:chacha20poly1305", "dep:argon2", "dep:base64"]
+# Test-only seams (e.g. binding an iroh endpoint against an in-process relay).
+# Never enabled in production builds; gated constructors live behind this.
+# Pulls iroh's `test-utils` so `run_relay_server()` and the self-signed-relay
+# `CaRootsConfig::insecure_skip_verify()` are available in any build that
+# enables this feature (not just dev/test builds via the dev-dependency).
+test-support = ["transport", "iroh/test-utils"]
 
 [dependencies]
 org-members = { path = "../org-members", default-features = false, features = ["std", "serde"] }
@@ -44,6 +50,8 @@ rand = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 # bolero 0.13 matches the version used in on-chain-client (the repo's other fuzz targets).
 bolero = "0.13"
+# Enables iroh::test_utils::run_relay_server() for the hermetic Networked test.
+iroh = { version = "0.98", features = ["test-utils"] }
 # org-members is also a normal [dependency], but integration test crates cannot
 # see the library's normal deps directly — re-declared here so fuzz_verify_against_chain
 # can name org_members::trie::OrgTrie, org_members::MemberLeaf, etc.
@@ -61,6 +69,13 @@ subxt = { version = "0.50", default-features = false, features = ["native", "jso
 
 [lints]
 workspace = true
+
+# The preflight binary is #![cfg(feature = "app")]; without this gate cargo
+# would try to build it under feature sets lacking `app` (e.g. `--features
+# transport`) and fail with E0601 (empty file, no `main`).
+[[bin]]
+name = "preflight"
+required-features = ["app"]
 
 [[test]]
 name = "fuzz_envelope_decode"
@@ -85,4 +100,22 @@ required-features = ["transport"]
 [[test]]
 name = "service_stories"
 path = "tests/service_stories.rs"
+required-features = ["app"]
+
+[[test]]
+name = "preflight"
+path = "tests/preflight.rs"
+required-features = ["app"]
+
+[[test]]
+name = "transport_networked"
+path = "tests/transport_networked.rs"
+required-features = ["transport", "test-support"]
+
+[[test]]
+name = "finality_polling"
+path = "tests/finality_polling.rs"
+# FinalitySink is exported from the `app`-gated `service` module, so the test
+# is #![cfg(feature = "app")]. Requiring `app` here keeps cargo from building
+# it under bare `chain` (where it would compile to nothing and pass vacuously).
 required-features = ["app"]

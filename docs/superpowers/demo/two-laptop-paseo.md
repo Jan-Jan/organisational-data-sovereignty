@@ -48,6 +48,31 @@ Environment variables (see `app/README.md` for the full table). Seeds/pubkeys ar
 64-hex (32 bytes). `ODS_TRANSPORT` defaults to `Networked`, so you don't need to
 set it for the cross-laptop run.
 
+### 2a. Preflight (run on BOTH laptops first)
+
+Before launching the app, confirm each laptop can reach the relay, the chain, and
+the contract — a `FAIL` here explains an otherwise-mysterious hang during the live
+run. From the repo root:
+
+```bash
+ODS_TRANSPORT=networked \
+ODS_CHAIN_WS=wss://asset-hub-paseo-rpc.dwellir.com \
+ODS_CONTRACT_H160=$CONTRACT \
+ODS_ADMIN_H160=<org admin h160; any 0x-20-byte pre-genesis> \
+CARGO_HOME=/tmp/cargo_home_fuzz \
+  cargo run -p org-node --features app --bin preflight
+```
+
+Expected: every line `PASS` and a zero exit code. Interpreting failures:
+- `transport.online` FAIL → this laptop cannot reach the n0 relay; fix connectivity
+  before proceeding (the app will not be able to dial the peer).
+- `chain.live` FAIL → the RPC is unreachable or not finalizing; fix `ODS_CHAIN_WS`.
+- `contract.query` FAIL → wrong `ODS_CONTRACT_H160` / RPC lacks the revive pallet.
+  (Before genesis the org slot is uninitialised; that still reports `PASS` —
+  the check proves reachability, not membership.)
+
+### 2b. Launch
+
 **Laptop A (admin):**
 ```bash
 cd app

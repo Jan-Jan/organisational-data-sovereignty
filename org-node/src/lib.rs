@@ -28,6 +28,8 @@ pub mod blobs;
 pub mod store;
 #[cfg(feature = "app")]
 pub mod service;
+#[cfg(feature = "app")]
+pub mod preflight;
 
 #[cfg(feature = "app")]
 pub use service::{ChainOps, MockChainOps, OrgService, ReceiveOutcome, SelfDeleteOutcome};
