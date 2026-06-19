@@ -182,7 +182,7 @@ async fn five_stories_full_e2e() {
 
     tokio::time::timeout(
         Duration::from_secs(30),
-        svc_a.revoke_member(&mut OsRng, org_id, b_member_id, b_addr_revoke),
+        svc_a.revoke_member(&mut OsRng, org_id, b_member_id, Some(b_addr_revoke)),
     )
     .await
     .expect("revoke_member timed out")

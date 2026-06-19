@@ -1134,15 +1134,17 @@ impl OrgService {
     /// is called explicitly.
     ///
     /// For the PoC the admin pushes the revocation envelope to the member.
-    /// `peer_addr` is the revoked member's iroh address (used in `Loopback` mode
-    /// only — in `Networked` mode the peer's `EndpointId` is derived from
-    /// `member_id` which equals the revoked member's device key).
+    /// `peer_addr` is the revoked member's iroh address: REQUIRED in `Loopback`
+    /// mode (same-machine dial), and ignored in `Networked` mode, where the
+    /// peer's `EndpointId` is derived from the revoked member's device key in the
+    /// stored trie snapshot. Pass `None` when no address is available (the normal
+    /// Networked case).
     pub async fn revoke_member<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         org_id: OrgId,
         member_id: [u8; 32],
-        peer_addr: iroh::EndpointAddr,
+        peer_addr: Option<iroh::EndpointAddr>,
     ) -> Result<(), OrgNodeError> {
         let (trie, org_epoch, org_pub_key, admin_member_kp, last_seq, proxy_account) = {
             let org_rec = self.find_org(org_id)?;
@@ -1215,8 +1217,11 @@ impl OrgService {
         let ep = self.ensure_endpoint(&admin_persona_id).await?;
         match mode {
             TransportMode::Loopback => {
-                // Loopback/same-machine: dial the full EndpointAddr from the blob.
-                ep.send(peer_addr, &msg)
+                // Loopback/same-machine: dial the full EndpointAddr (required here).
+                let addr = peer_addr.ok_or_else(|| {
+                    OrgNodeError::Chain("Loopback revoke requires the peer's EndpointAddr".into())
+                })?;
+                ep.send(addr, &msg)
                     .await
                     .map_err(|e| OrgNodeError::Chain(format!("iroh send: {e}")))?;
             }

@@ -244,8 +244,11 @@ pub async fn admit_member(
     Ok(hex::encode(member_id))
 }
 
-/// Revoke a member by member_id (64 hex chars) and a peer_addr_blob (hex-encoded
-/// postcard bytes of the iroh EndpointAddr).
+/// Revoke a member by member_id (64 hex chars). `peer_addr_blob` (hex-encoded
+/// postcard bytes of the iroh EndpointAddr) is OPTIONAL: leave it empty in
+/// Networked mode, where the revoked member is reached by EndpointId (derived
+/// from its device key in the trie) via iroh discovery. It is only needed for
+/// same-machine Loopback dialing.
 #[tauri::command]
 pub async fn revoke_member(
     state: State<'_, AppState>,
@@ -264,10 +267,17 @@ pub async fn revoke_member(
     let mut member_id = [0u8; 32];
     member_id.copy_from_slice(&member_bytes);
 
-    let addr_bytes = hex::decode(peer_addr_blob.trim_start_matches("0x"))
-        .map_err(|e| format!("peer_addr_blob hex: {e}"))?;
-    let peer_addr: EndpointAddr =
-        postcard::from_bytes(&addr_bytes).map_err(|e| format!("peer_addr decode: {e}"))?;
+    // peer_addr is OPTIONAL: empty in Networked mode (the service reaches the
+    // revoked member by EndpointId, derived from its device key in the trie).
+    // Only Loopback needs the full EndpointAddr.
+    let trimmed = peer_addr_blob.trim().trim_start_matches("0x");
+    let peer_addr: Option<EndpointAddr> = if trimmed.is_empty() {
+        None
+    } else {
+        let addr_bytes =
+            hex::decode(trimmed).map_err(|e| format!("peer_addr_blob hex: {e}"))?;
+        Some(postcard::from_bytes(&addr_bytes).map_err(|e| format!("peer_addr decode: {e}"))?)
+    };
 
     let mut svc = state.service.lock().await;
     svc.revoke_member(&mut OsRng, oid, member_id, peer_addr)
