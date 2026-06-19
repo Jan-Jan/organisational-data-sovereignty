@@ -190,9 +190,10 @@ pub struct JoinRequestDto {
 
 /// Admit a new member from a join-request blob.
 ///
-/// The `node_addr_blob` is the hex-encoded `node_addr` field from the
-/// `JoinRequestDto` returned by `import_join_request`. If empty, the peer
-/// address is taken from the `join_request_blob` directly (same source).
+/// The blob's `node_addr` is OPTIONAL: in `Networked` transport the joiner is
+/// reached by its `EndpointId` (its device key) via iroh relay/DNS discovery, so
+/// the blob carries no embedded address and the service ignores `peer_addr`. We
+/// only need a full `EndpointAddr` for `Loopback` (same-machine) dialing.
 ///
 /// Returns the new member_id as 64 hex chars.
 #[tauri::command]
@@ -207,10 +208,19 @@ pub async fn admit_member(
     let oid = parse_org_id(&org_id)?;
     let jr = decode_join_request(&join_request_blob)?;
 
-    // Decode the iroh EndpointAddr from the join request's node_addr bytes.
-    let peer_addr: EndpointAddr = postcard::from_bytes(&jr.node_addr).map_err(|e| {
-        format!("node_addr decode (is the join_request_blob from a bound endpoint?): {e}")
-    })?;
+    // Resolve the joiner's iroh address. In Networked mode the blob carries no
+    // node_addr (empty) — the peer is reached by EndpointId (its device key) via
+    // relay/DNS discovery, and the service ignores peer_addr — so build an
+    // id-only EndpointAddr from the device key. In Loopback the blob carries the
+    // full EndpointAddr to dial.
+    let peer_addr: EndpointAddr = if jr.node_addr.is_empty() {
+        iroh::EndpointId::from_bytes(&jr.device_key)
+            .map_err(|e| format!("device_key is not a valid iroh EndpointId: {e}"))?
+            .into()
+    } else {
+        postcard::from_bytes(&jr.node_addr)
+            .map_err(|e| format!("node_addr decode: {e}"))?
+    };
 
     let org_secret: Option<[u8; 32]> = match org_secret_hex {
         Some(hex_str) => {
