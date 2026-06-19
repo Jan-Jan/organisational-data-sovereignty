@@ -206,6 +206,52 @@ single-org `DocReconcileMark` (cross-org collaboration is an ODS non-goal).
 - `commit.gpgsign false` in the worktree; squash-merge as one user-signed commit at the end.
 - `~/.cargo` read-only → `CARGO_HOME=/tmp/cargo_home_fuzz`.
 
+## Revision Rp (2026-06-19) — capability-gated reconcile + per-org mark (Keyhive parity)
+
+Closes the three remaining deltas vs the finalised Phase-3 design / the Keyhive `doc-access`
+track. **Supersedes** §3.2's `reconcile(resolver, Option<&MembershipDelta>)` and §1b's single-org
+`DocReconcileMark`. The kept-correct pieces (effective-membership gate, author-gated mutation,
+private mutation surface, root-anchored dispatch) are unchanged.
+
+1. **Capability-gated `reconcile` (unforgeable witness).** New `org-acl-core::witness`:
+   ```rust
+   pub struct VerifiedTrieChange(Inner);          // Inner is PRIVATE
+   enum Inner { Delta { org: OrgId, delta: MembershipDelta }, FullReload { org: OrgId, epoch: Epoch, root: RootHash } }
+   impl VerifiedTrieChange {
+       pub fn accept_delta(org: OrgId, delta: MembershipDelta) -> Self;        // org-node verify-accept calls these
+       pub fn accept_full_reload(org: OrgId, epoch: Epoch, root: RootHash) -> Self;
+       pub fn org(&self) -> OrgId; pub fn to_epoch(&self) -> Epoch; pub fn to_root(&self) -> RootHash;
+       pub fn delta(&self) -> Option<&MembershipDelta>;
+   }
+   ```
+   Constructible ONLY via `accept_*` (private inner, no pub fields, no public struct literal) →
+   it cannot be forged elsewhere; a trie-driven ACL write is impossible without proof of a
+   verified on-chain change. A **trybuild compile-fail** test proves the inner enum is unnameable.
+   `DocAccess::reconcile(self, resolver, &VerifiedTrieChange)` replaces the `Option<&MembershipDelta>`
+   arg; the carried `MembershipDelta` is authenticated by construction (drop the item-1
+   trust-assumption comment). Rejects `witness.org() != resolver.org_id()` → `AclError::WrongOrg`.
+   Δ==1 epoch+root chaining (from `witness.delta()`) still drives delta-vs-full dispatch; a
+   `FullReload` witness goes straight to full rebuild at `(epoch, root)`.
+
+2. **Defensive epoch monotonicity.** Reject a witness not strictly ahead of the org's cell:
+   `witness.to_epoch() < cell.acl_epoch`, or `==` with the *same* root → `AclError::StaleWitness`
+   (parity with Keyhive's `WitnessMismatch`). Keep the same-epoch-*different*-root reorg path
+   (re-reconcile, not a no-op).
+
+3. **Per-org reconcile mark.** New `org-acl-core::OrgEpochs { acl_epoch, cgka_epoch, root_hash }`
+   (+ `fresh()`); `DocReconcileMark { per_org: BTreeMap<OrgId, OrgEpochs> }` (the `DocId × OrgId`
+   matrix). `create` seeds `per_org[founder_org]`; `reconcile` updates ONLY `per_org[witness.org()]`
+   (each org's cell advances independently — parity with `advance_is_per_org_independent`).
+   `cgka_epoch` stays lockstep/reserved (item-4). Multi-org *writer* support is out of item-3
+   scope: the single-org writer path (all `add_member` grants within the founder's org) is explicit
+   and asserted; the per-org mark is the forward-looking matrix.
+
+4. **`member_ids()` footgun.** Rename to **`ledger_members()`** (the advisory CRDT ledger — NOT
+   the access answer; documented as such). `effective_members`/`is_effective` (live
+   `ledger ∩ is_member`) remain the ONLY authoritative access answer. Update all callers/tests.
+
+`AclError` gains `WrongOrg { expected: OrgId, got: OrgId }` and `StaleWitness { mark: Epoch, witness: Epoch }`.
+
 ## 9. References
 
 - [`Organisational Data Sovereignty p1.md`](../../../Organisational%20Data%20Sovereignty%20p1.md) — §"Key changes required" item 3.
