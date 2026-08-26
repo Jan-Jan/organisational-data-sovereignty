@@ -1,0 +1,113 @@
+# guardrails configuration — flat schema only:
+#   `key: value` scalars and two-space `- item` lists.
+# Parsed by .guardrails/scripts/lib.sh with awk; do not nest deeper.
+#
+# The schema is CLOSED and validated before any gate runs. Every rule below
+# exists because breaking it made a key invisible to the reader, which silently
+# disabled the gate that key configures while the run still exited 0:
+#
+#   * a key must be `identifier:` at column one — not `strict-paths:`, not
+#     ` strict_paths:`, not `strict_paths :`;
+#   * a key must be one of those below. Comment one out to disable it — and if
+#     it is a list key, comment its `  - items` out too, or they are orphaned
+#     and rejected. Never misspell one;
+#   * list items are indented (`  - src`), never at column zero;
+#   * the file must be plain UTF-8 with no byte-order mark;
+#   * `id_prefixes` must name at least one prefix with a traceability gate:
+#     REQ, HAZ, RC, SDD, LLR, PR. Others may be listed alongside them and are
+#     covered by DANGLING-REF and DUPLICATE-ID, just not by a gate of their
+#     own. With none of the six, only those checks remain;
+#   * a declared prefix needs the documents its gates READ, which is not always
+#     the document it is defined in: `RC` needs `doc_srs`, because
+#     UNIMPLEMENTED-CONTROL looks for a REQ that implements each control;
+#   * a declared prefix also needs the one document it may be DEFINED in —
+#     REQ `doc_srs`, HAZ/RC `doc_rmf`, SDD/LLR `doc_sad`, PR `doc_problems`.
+#     This one is not about a key the reader cannot see: MISPLACED-ITEM reads
+#     that document to decide whether each item is filed where the gate keyed
+#     on it can parse the item's block. `RC` therefore needs BOTH doc_srs and
+#     doc_rmf. The rejection happens before any gate runs, so the alternative
+#     it forecloses is never observed: were the key merely absent, the gate
+#     would not be skipped, it would condemn every item of the prefix once
+#     each while naming a key that was never set.
+#
+# NOT VALIDATED, and listed apart from the rules above for that reason: a
+# `doc_*` value pointing inside `.guardrails/scripts/`, inside `.git/`, at a
+# gitignored path, or through a symlink leaving the repository is ACCEPTED.
+# `checked:` counts its items as zero and finalize-docs.sh renames a draft
+# ledger there just as it would anywhere else. Whether anything warns you first
+# depends on the location, on whether git tracks or ignores the file, and on
+# whether the ledger still carries its DRAFT- name: some combinations are
+# silent throughout, others raise a complaint that names no cause and that the
+# rename removes.
+# Do not do it. (A symlink to a directory INSIDE the repository is scanned
+# normally, under the target real path.)
+#
+# A trailing ` # comment` after a value is stripped, for EVERY key — paths and
+# path-list entries as well as commands. It cannot be escaped, so any value
+# whose own whitespace-delimited token starts with `#` is truncated silently.
+# A directory literally named `docs/req #1` cannot be configured here.
+#
+# A duplicate key, or a second list block for the same key, is accepted and the
+# later one ignored. Do not rely on overriding a key by repeating it.
+guardrails_version: 0.4.0
+
+# IEC 62304 software safety class: A, B, or C. Set by /ratchet.
+# Per-item overrides: document them in the SAD next to the SDD item.
+safety_class: B
+
+# ID prefixes managed by the check/finalize scripts.
+# LLR = low-level requirements (design data, live in the SAD).
+# PR  = problem reports (docs/problems/log.md).
+id_prefixes: REQ HAZ RC SDD LLR PR
+
+# Canonical document locations.
+doc_srs: docs/requirements
+doc_rmf: docs/risk
+doc_sad: docs/architecture
+doc_soup: docs/architecture/soup.md
+doc_problems: docs/problems
+
+# Where merge-change writes one verification record per change. THE ONLY doc_*
+# key with a default — `docs/verification`, which /ratchet creates — because
+# this key arrived after projects were already configured. The default cannot
+# hide a gate: an absent directory, or one holding no *.md, is exit 2 rather
+# than an empty scan. Set it if your records live anywhere else.
+doc_verification: docs/verification
+
+# Paths where traceability is enforced. On retrofit projects this list
+# starts small and grows as untraced code is brought under guardrails.
+strict_paths:
+  - org-members/src
+  - on-chain-client/src
+
+# Paths searched for `verifies:` test annotations.
+test_paths:
+  - org-members/tests
+  - on-chain-client/tests
+
+# Commands merge-change and verify-before-merge must run and pass.
+verify_commands:
+  - cargo test -p org-members
+  - cargo test --manifest-path on-chain-client/Cargo.toml --lib --test fuzz_decode_org_state --test fuzz_parse_revive_event --test fuzz_event_round_trip
+  - quint typecheck quint/membership.qnt
+  - quint typecheck quint/protocol.qnt
+
+# Problem-report triage limits. Both are whole numbers, both mean "more than",
+# and both are OPTIONAL — comment one out and that dimension has no limit.
+#
+# They are shipped SET rather than commented out on purpose. The finding these
+# answer is that `UNRESOLVED-PR` had become something to scroll past; an
+# enforcement mechanism that defaults to off does not answer it. The values are
+# policy, they live here, one line changes either, and check-trace.sh prints
+# both on every run — set or not — next to the backlog they hold down.
+#
+# A value that is not a non-negative whole number is exit 2, not "no limit": a
+# limit the reader cannot parse would be a gate disabling itself on a typo.
+problem_age_days: 30
+problem_open_max: 10
+
+# Optional: structural-coverage report command, judged against the class
+# target (A: none required, B: statement, C: statement + decision).
+# Uncomment and adapt to enable the coverage gate:
+# coverage_command:
+#   - make coverage
