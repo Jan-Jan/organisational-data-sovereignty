@@ -6,20 +6,14 @@ Human actions that `/ratchet` cannot perform. Installed toolkit:
 is open`). Safety class **B** (`docs/adr/2026-08-26-safety-class-b.md`).
 Adoption order: `docs/plans/2026-08-26-ratchet-gap-analysis.md`.
 
-- [ ] **Commit signing — remove the override, do not add a key.** A GPG
-      `user.signingkey` (`0x224A50748E1745B8E1CC9A284FD03A5A7780F634`) is
-      configured and `commit.gpgsign=true` is already set globally in
-      `~/.gitconfig`. What makes every commit on `master` unsigned is
-      `commit.gpgsign=false` in the **shared repository config**, which
-      overrides the global. Remove that line
-      (`git config --unset commit.gpgsign` from the primary checkout) and keep
-      the per-worktree `false` — that combination is exactly this project's own
-      stated rule, which also forbids writing `commit.gpgsign` into the shared
-      config from a worktree in the first place. If a merge lands unsigned from
-      an agent session, re-sign with `git commit --amend -S` from a regular
-      terminal. For SSH signing instead: `git config gpg.format ssh` and
-      `git config user.signingkey <path-to-pubkey>`. Hardware keys need a
-      physical touch per signature.
+- [x] **Commit signing — remove the override, do not add a key.** DONE
+      2026-08-26: `git config --unset commit.gpgsign` in the primary checkout,
+      so the global `commit.gpgsign=true` now applies and the per-worktree
+      `false` stays — the combination this project's own rule prescribes. The
+      first guardrails merge (`a120f14`) carries a PGP signature from key
+      `0x224A50748E1745B8E1CC9A284FD03A5A7780F634`. Signing is on; VERIFYING it
+      is the next item. If a merge ever lands unsigned from an agent session,
+      re-sign with `git commit --amend -S` from a regular terminal.
 - [ ] **Signature verification.** Create an allowed_signers file listing each
       committer (`<email> <key-type> <public-key>`), then
       `git config gpg.ssh.allowedSignersFile <path>`. Until it exists,
@@ -28,26 +22,42 @@ Adoption order: `docs/plans/2026-08-26-ratchet-gap-analysis.md`.
       instead; the allowed_signers file is the SSH-signing equivalent.)
 - [ ] **Branch protection on `master`.** No direct pushes, require signed
       commits. This is the mechanical half of guardrails non-negotiable 1.
-- [ ] **CI.** Add a **general** Rust job. One already exists but is narrow:
-      `.github/workflows/quint.yml` has an `mbt` job that installs a Rust
-      toolchain and runs `cargo test --test mbt_conformance` in `org-members` —
-      one test target in one crate. The new job should run the
-      `verify_commands` from `.guardrails/config.yaml` plus
-      `.guardrails/scripts/check-ids.sh`, `.guardrails/scripts/check-trace.sh`,
-      and `.guardrails/scripts/check-signing.sh --strict <base>..HEAD` on every
-      merge, and ideally `cargo clippy` over the workspace (the root
-      `Cargo.toml` already denies `unwrap_used`, `expect_used` and `panic` at
-      the workspace level, so this is enforcement of a rule already written).
-      **Do not add `check-review.sh` to the base-branch job** — it asks about
-      the change under merge, so on `master` it exits 2 rather than reporting a
-      pass over no question. It runs from the change worktree at
-      `merge-change` step 6c; to gate it on a pull request, name the branch:
-      `check-review.sh --branch <head-branch>`.
-- [ ] **Coverage tooling (Class B target: statement coverage).** Install
-      `cargo-llvm-cov` and the `llvm-tools-preview` component, then set
-      `coverage_command` in `.guardrails/config.yaml`. It is unset today
-      because the tool is absent (`cargo llvm-cov --version` → "no such
-      command"), which leaves the class target stated but unmeasured.
+- [x] **CI.** DONE 2026-08-26 — `.github/workflows/rust.yml` adds five jobs:
+      `test` (the two cargo entries of `verify_commands`, with quint installed
+      because `mbt_conformance` fails rather than skips without it), `clippy`
+      (lib targets, `-D warnings`), `no-std` (org-members' documented wasm32
+      matrix), `coverage`, and `guardrails`. Three scoping decisions are
+      argued in the workflow's own comments, and each is a limit worth knowing:
+      check-signing runs on the BASE BRANCH only and non-strict — on a pull
+      request it would fail every change, because worktree commits are
+      deliberately unsigned by this project's own rule, and a runner holds no
+      key to verify with; check-ids takes `--allow-draft-files` on pull
+      requests only, since a draft ledger file is legitimate mid-change and a
+      defect once merged; and clippy covers lib targets only, which is partly
+      the project's rule ("no exceptions in lib code; `unwrap()` is fine in
+      tests" — `--all-targets` reports 144 lint errors across on-chain-client's
+      13 test targets) and partly a concession, since it also suppresses one
+      ordinary `manual_contains` lint in org-members' own test code that ought
+      simply to be fixed.
+      **`check-review.sh` runs on pull requests only**, and this project merges
+      locally without PRs — so today that gate, the class B independent-review
+      evidence check, executes nowhere. Adopting PRs or landing the upstream
+      awk fix is what closes it.
+- [x] **Coverage tooling (Class B target: statement coverage).** DONE
+      2026-08-26 — `cargo-llvm-cov` 0.9.0 and `llvm-tools-preview` installed;
+      `coverage_command: make coverage` is set, and the `coverage` job in CI
+      is what enforces it mechanically (no guardrails check script reads that
+      key; locally it is verify-before-merge step 5, i.e. discipline).
+      Measured: org-members 93.50% lines / 92.20% regions; on-chain-client
+      53.57% / 59.19%. BOTH metrics are gated, because line coverage
+      over-credits multi-statement lines and region coverage is the closer
+      analogue of the class B statement target. Floors sit a point below the
+      measurements to absorb platform drift, and ratchet upward only.
+      on-chain-client's figure is a **class B shortfall, not a target met** —
+      `client.rs` is at 12.75% and `decode/mod.rs` at 0.00%, both waiting on
+      the chopsticks lane. The shortfall is accepted explicitly in this
+      change's verification record; the provisioning item below is what
+      retires it.
 - [ ] **Human review policy.** Decide who signs off a merge, and who acts as
       the independent reviewer at `merge-change` step 6a when a human is
       preferred over a fresh agent. Class B calls for one reviewer. Whoever it

@@ -106,8 +106,27 @@ verify_commands:
 problem_age_days: 30
 problem_open_max: 10
 
-# Optional: structural-coverage report command, judged against the class
-# target (A: none required, B: statement, C: statement + decision).
-# Uncomment and adapt to enable the coverage gate:
-# coverage_command:
-#   - make coverage
+# Structural-coverage report command, judged against the class target
+# (A: none required, B: statement, C: statement + decision). This project is
+# class B, so statement coverage is the target.
+#
+# What setting this key does, precisely: no check script reads it. It is
+# consumed by verify-before-merge step 5 — an instruction to run the command
+# and judge the report — and by the `coverage` job in
+# .github/workflows/rust.yml, which is the mechanical half. Do not read a set
+# `coverage_command` as "coverage is enforced at merge"; the enforcement is
+# CI's, and locally it is discipline.
+#
+# `make coverage` measures the two strict_paths crates separately and enforces
+# both a line and a REGION floor per crate — region coverage being the closer
+# analogue of statement coverage. Measured 2026-08-26: org-members 93.50%
+# lines / 92.20% regions; on-chain-client 53.57% / 59.19%. The floors sit a
+# point below those, and the reasoning — including why on-chain-client's is a
+# class B shortfall rather than a target met, and what raises it — is in the
+# Makefile.
+#
+# Requires cargo-llvm-cov and the llvm-tools-preview component on the machine
+# running the merge. That is a real prerequisite of merging here, chosen
+# deliberately over measuring coverage only in CI.
+coverage_command:
+  - make coverage

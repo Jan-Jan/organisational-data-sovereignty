@@ -1,0 +1,157 @@
+# Rust + guardrails CI.
+#
+# The two `cargo` jobs run `verify_commands` from .guardrails/config.yaml
+# verbatim, so that CI and the local merge gate cannot disagree about what
+# "passing" means. `clippy` and `no-std` are additional contracts that exist
+# only here — see the note on each about why, and about the cost of that.
+#
+# The quint models and the Apalache bounded verify live in quint.yml.
+name: rust
+
+on: [push, pull_request]
+
+jobs:
+  # verify_commands entries 1 and 2. Entries 3 and 4 (quint typecheck) are
+  # covered by the `quint` job in quint.yml.
+  #
+  # quint is installed because `cargo test -p org-members` includes the
+  # `mbt_conformance` target, which shells out to it. That test does NOT skip
+  # when quint is absent, despite what its own header comment says: measured
+  # with quint off PATH, it panics with "Failed to execute Quint command" and
+  # the test binary exits non-zero. So a job that ran this entry without quint
+  # would be red on every push.
+  #
+  # This does duplicate quint.yml's `mbt` job, which installs quint and runs
+  # the same target. That job is now redundant and could be dropped — left
+  # alone here because this change does not own quint.yml.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - run: npm i -g @informalsystems/quint
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test -p org-members
+      - run: |
+          cargo test --manifest-path on-chain-client/Cargo.toml --lib \
+            --test fuzz_decode_org_state \
+            --test fuzz_parse_revive_event \
+            --test fuzz_event_round_trip
+
+  # Lib targets only. Two separate reasons, and only the first is principled:
+  #
+  # 1. on-chain-client's test code is ALLOWED to panic. Measured today,
+  #    `--all-targets -- -D warnings` reports 144 lint errors across 13 test
+  #    targets: 123 `expect()` on Result, 18 on Option, and 3 `panic`. The
+  #    project's rule (org-members/AGENTS.md) is "no exceptions in lib code;
+  #    unwrap() is fine in tests", so those are not defects.
+  # 2. org-members' test code also fails --all-targets, but on ONE ordinary
+  #    lint that has nothing to do with that rule: `manual_contains` in
+  #    tests/fuzz_tests.rs. `--lib` suppresses it too. That is a concession,
+  #    not a principle, and it should be fixed and the scope widened.
+  #
+  # Where the deny rules come from, since it is easy to assume wrongly:
+  # org-members has NO [lints] section and does not inherit the workspace
+  # lints — it denies via #![deny(...)] in src/lib.rs. on-chain-client has its
+  # own [lints.clippy]. The root [workspace.lints.clippy] reaches only crates
+  # that opt in with `[lints] workspace = true`.
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: clippy }
+      - run: cargo clippy -p org-members --lib -- -D warnings
+      - run: cargo clippy --manifest-path on-chain-client/Cargo.toml --lib -- -D warnings
+
+  # org-members' documented build matrix (org-members/AGENTS.md): no_std is a
+  # hard requirement for it, and the wasm32 check is what proves the dependency
+  # graph stayed no_std-compatible. Compile-check only — it does not prove the
+  # crate RUNS under wasm32.
+  no-std:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: wasm32-unknown-unknown }
+      - run: cargo check -p org-members --no-default-features
+      - run: cargo check -p org-members --no-default-features --features serde
+      - run: |
+          cargo check -p org-members --no-default-features --features serde \
+            --target wasm32-unknown-unknown
+
+  # The class B coverage gate, running the same `make coverage` the merge gate
+  # runs. Floors live in the Makefile and ratchet upward only.
+  #
+  # Note that the floors were calibrated on aarch64-darwin and are enforced
+  # here on x86_64-linux, against a floating `stable` toolchain and an
+  # untracked root Cargo.lock. LLVM's line mapping can differ across those, so
+  # the floors carry a point of slack; if this job ever fails on a percentage
+  # that looks identical to the local one, that difference is the first thing
+  # to check, not the last.
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: llvm-tools-preview }
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - run: make coverage
+
+  # fetch-depth: 0 is for the pull-request steps below, which resolve
+  # `origin/<base>` and ask which files the branch touched. check-ids.sh needs
+  # no history of its own — it has no base gate and scans the working tree.
+  guardrails:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: .guardrails/scripts/check-trace.sh
+
+      # --allow-draft-files on a pull request and NOT on a push, because the
+      # two ask different questions. A DRAFT-<branch>-<slug>.md ledger file is
+      # legitimate for the whole life of a change and is renamed by
+      # finalize-docs.sh at merge-change step 3 — so failing a PR for one would
+      # redden every change that adds an item. On the base branch a draft file
+      # means the rename did not happen, which is a real defect.
+      - if: github.event_name == 'pull_request'
+        run: .guardrails/scripts/check-ids.sh --allow-draft-files
+      - if: github.event_name != 'pull_request'
+        run: .guardrails/scripts/check-ids.sh
+
+      # Signature checking belongs on the BASE BRANCH, not on the pull request.
+      # Non-negotiable 2 requires the squash commit on master to be signed and
+      # says nothing about the commits behind it; the project rule
+      # (AGENTS.md, user preferences) makes worktree commits deliberately
+      # UNSIGNED. Running this over a PR range would therefore fail every
+      # change for doing exactly what the rules prescribe — measured on this
+      # change: `check-signing.sh master..HEAD` → UNSIGNED, exit 1.
+      #
+      # With no range argument the script checks HEAD alone, which on a push to
+      # master is precisely the squash commit that must be signed.
+      #
+      # Non-strict, because --strict fails anything git cannot VERIFY and a
+      # runner holds neither the signer's public key nor an allowed_signers
+      # file. It still catches the failure that actually threatens this
+      # repository: a commit with no signature at all. To tighten: publish the
+      # committers' public keys to the workflow, then add --strict.
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        run: .guardrails/scripts/check-signing.sh
+
+      # The verification-record gate. It asks about the change under review, so
+      # it can only run on a pull request; on a push to the base branch it
+      # exits 2, there being no change under review there.
+      #
+      # Worth having beyond the usual reason: this gate cannot run on macOS at
+      # all (check-review.sh passes a newline-separated list through `awk -v`,
+      # which the BWK awk shipped with macOS rejects), so on that platform CI
+      # is the only place it executes.
+      #
+      # The catch, stated plainly: this project's working practice is a local
+      # signed squash merge straight onto master, with no pull request. Under
+      # that practice this step never fires and the class B independent-review
+      # evidence gate has NO mechanical enforcement anywhere. Adopting PRs, or
+      # the upstream awk fix, is what closes that.
+      - if: github.event_name == 'pull_request'
+        run: .guardrails/scripts/check-review.sh --branch "${{ github.head_ref }}"
