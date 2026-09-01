@@ -46,6 +46,7 @@ fn make_member(handle: &str, variant: u8) -> Option<MemberLeaf> {
 // ============================================================
 
 proptest! {
+    /// verifies: REQ-ds8ryr, REQ-h5ret5
     #[test]
     fn handle_validation_never_panics(s in "\\PC{0,64}") {
         if let Ok(normalized) = validate_handle(&s) {
@@ -84,6 +85,7 @@ fn arb_op() -> impl Strategy<Value = Op> {
 }
 
 proptest! {
+    /// verifies: REQ-ds8ryr
     #[test]
     fn trie_ops_never_panic_and_count_consistent(ops in proptest::collection::vec(arb_op(), 0..30)) {
         let mut trie = TestTrie::genesis(vec![]).unwrap();
@@ -156,6 +158,7 @@ fn arb_delta_op() -> impl Strategy<Value = DeltaOp> {
 }
 
 proptest! {
+    /// verifies: REQ-4umsuz
     #[test]
     fn delta_roundtrip(
         initial_indices in proptest::collection::vec(arb_handle_idx(), 0..6),
@@ -291,6 +294,7 @@ proptest! {
 // ============================================================
 
 proptest! {
+    /// verifies: REQ-d3prca
     #[test]
     fn mutations_preserve_original(
         initial_indices in proptest::collection::vec(arb_handle_idx(), 1..4),

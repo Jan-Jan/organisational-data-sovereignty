@@ -92,6 +92,10 @@ fn genesis_single_member() {
     assert!(!trie.contains(&member_id("bob-id")));
 }
 
+/// verifies: REQ-m8aexh, REQ-kmvc96
+///
+/// The normal case for both: distinct, non-confusable handles are accepted.
+/// Without it those two requirements would be evidenced only by rejections.
 #[test]
 fn genesis_multiple_members() {
     let trie = TestTrie::genesis(vec![alice(), bob(), charlie(), jan_jan(), diana()]).unwrap();
@@ -103,12 +107,14 @@ fn genesis_multiple_members() {
     assert!(trie.contains_handle("diana"));
 }
 
+/// verifies: REQ-crjxk8
 #[test]
 fn genesis_duplicate_id_fails() {
     let err = TestTrie::genesis(vec![alice(), alice()]);
     assert_eq!(err.unwrap_err(), OrgMembersError::DuplicateId);
 }
 
+/// verifies: REQ-kmvc96
 #[test]
 fn genesis_duplicate_handle_different_id_fails() {
     let m1 = alice();
@@ -133,6 +139,9 @@ fn genesis_empty_is_ok() {
 
 // --- Insert tests ---
 
+// No `verifies:` annotation: this asserts member count, handle presence and
+// delta shape, and nothing about the identifier — neither clause of REQ-crjxk8
+// could break and make it fail.
 #[test]
 fn insert_adds_member() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -147,6 +156,7 @@ fn insert_adds_member() {
     assert!(delta.removed().is_empty());
 }
 
+/// verifies: REQ-crjxk8
 #[test]
 fn insert_duplicate_id_fails() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -154,6 +164,7 @@ fn insert_duplicate_id_fails() {
     assert_eq!(err.unwrap_err(), OrgMembersError::DuplicateId);
 }
 
+/// verifies: REQ-kmvc96
 #[test]
 fn insert_duplicate_handle_different_id_fails() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -211,6 +222,10 @@ fn update_name_surname_nonexistent_fails() {
 
 // --- update_handle tests ---
 
+/// verifies: REQ-crjxk8, REQ-kmvc96
+///
+/// The member id is unchanged by a rename, which is what makes a grant made
+/// to the member survive the rename instead of following the handle.
 #[test]
 fn update_handle_renames_member() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -230,6 +245,7 @@ fn update_handle_nonexistent_fails() {
     assert_eq!(err.unwrap_err(), OrgMembersError::IdNotFound);
 }
 
+/// verifies: REQ-h5ret5
 #[test]
 fn update_handle_rejects_invalid() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -240,6 +256,7 @@ fn update_handle_rejects_invalid() {
     ));
 }
 
+/// verifies: REQ-kmvc96
 #[test]
 fn update_handle_rejects_collision() {
     let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
@@ -249,6 +266,11 @@ fn update_handle_rejects_collision() {
 
 // --- rotate_p2p_key tests ---
 
+/// verifies: REQ-crjxk8
+///
+/// The identifier is unchanged by a key replacement, which is the other half of
+/// REQ-crjxk8's independence claim; `update_handle_renames_member` covers
+/// independence from the handle.
 #[test]
 fn rotate_p2p_key_changes_only_key() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -278,6 +300,7 @@ fn rotate_p2p_key_nonexistent_fails() {
 
 // --- add_p2p_device tests ---
 
+/// verifies: REQ-xdx2c2
 #[test]
 fn add_p2p_device_adds_a_device() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -296,6 +319,7 @@ fn add_p2p_device_adds_a_device() {
     assert_eq!(member.p2p_key(), &member_key("alice-mk"));
 }
 
+/// verifies: REQ-xdx2c2
 #[test]
 fn add_p2p_device_rejects_duplicate() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -303,6 +327,11 @@ fn add_p2p_device_rejects_duplicate() {
     assert_eq!(err.unwrap_err(), OrgMembersError::DuplicateDevice);
 }
 
+/// verifies: REQ-xdx2c2
+///
+/// The bound itself (MAX_DEVICES, 4 today) is design data, not part of the
+/// requirement — see the note on REQ-xdx2c2 in the requirements ledger. This
+/// test is the only place the number is currently exercised.
 #[test]
 fn add_p2p_device_rejects_when_full() {
     // alice starts with 1 device; add 3 more to fill (max 4)
@@ -330,6 +359,7 @@ fn add_p2p_device_nonexistent_member_fails() {
 
 // --- delete_p2p_device tests ---
 
+/// verifies: REQ-ewdg2q
 #[test]
 fn delete_p2p_device_removes_and_rotates_key() {
     let trie = TestTrie::genesis(vec![jan_jan()]).unwrap();
@@ -352,6 +382,7 @@ fn delete_p2p_device_removes_and_rotates_key() {
     assert_eq!(member.p2p_key(), &new_key);
 }
 
+/// verifies: REQ-r784fu, REQ-ewdg2q
 #[test]
 fn delete_p2p_device_last_device_isolates() {
     // alice has 1 device. Removing it leaves her in isolated state (0 devices).
@@ -372,6 +403,9 @@ fn delete_p2p_device_last_device_isolates() {
     assert_eq!(member.p2p_key(), &new_key);
 }
 
+// No `verifies:` annotation: this exercises the operation's abnormal input,
+// not REQ-ewdg2q's behaviour. Removing the key replacement from
+// delete_p2p_device leaves this test passing.
 #[test]
 fn delete_p2p_device_unknown_device_fails() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -396,6 +430,7 @@ fn delete_p2p_device_nonexistent_member_fails() {
 
 // --- emergency_isolate_member tests ---
 
+/// verifies: REQ-r784fu
 #[test]
 fn emergency_isolate_member_removes_all_devices_and_rotates_key() {
     let trie = TestTrie::genesis(vec![jan_jan()]).unwrap();
@@ -417,6 +452,7 @@ fn emergency_isolate_member_removes_all_devices_and_rotates_key() {
     assert_eq!(member.surname(), "Gödel");
 }
 
+/// verifies: REQ-r784fu
 #[test]
 fn emergency_isolate_member_keeps_member_in_trie() {
     let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
@@ -430,6 +466,7 @@ fn emergency_isolate_member_keeps_member_in_trie() {
     assert!(trie.contains_handle("alice"));
 }
 
+/// verifies: REQ-r784fu
 #[test]
 fn emergency_isolate_member_then_readd_device_unisolates() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -447,6 +484,7 @@ fn emergency_isolate_member_then_readd_device_unisolates() {
     assert_eq!(member.p2p_key(), &member_key("recovered"));
 }
 
+/// verifies: REQ-r784fu
 #[test]
 fn emergency_isolate_member_nonexistent_fails() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -477,6 +515,7 @@ fn delete_nonexistent_fails() {
 
 // --- Immutability tests ---
 
+/// verifies: REQ-d3prca
 #[test]
 fn insert_does_not_mutate_original() {
     let original = TestTrie::genesis(vec![alice()]).unwrap();
@@ -488,6 +527,7 @@ fn insert_does_not_mutate_original() {
     assert!(!original.contains_handle("bob"));
 }
 
+/// verifies: REQ-d3prca
 #[test]
 fn delete_does_not_mutate_original() {
     let original = TestTrie::genesis(vec![alice(), bob()]).unwrap();
@@ -501,6 +541,7 @@ fn delete_does_not_mutate_original() {
 
 // --- Delta and CandidateTrie tests ---
 
+/// verifies: REQ-4umsuz
 #[test]
 fn delta_apply_and_verify() {
     let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
@@ -519,6 +560,7 @@ fn delta_apply_and_verify() {
     assert!(verified.contains_handle("charlie"));
 }
 
+/// verifies: REQ-4umsuz
 #[test]
 fn delta_base_mismatch_fails() {
     let parity_trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -531,6 +573,7 @@ fn delta_base_mismatch_fails() {
     assert_eq!(err.unwrap_err(), OrgMembersError::DeltaBaseMismatch);
 }
 
+/// verifies: REQ-4umsuz
 #[test]
 fn candidate_verify_wrong_root_fails() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -592,6 +635,11 @@ fn calculate_delta_empty_when_tries_identical() {
     assert_eq!(delta.base_root(), &trie_b.root_hash().unwrap());
 }
 
+// Deliberately carries no `verifies:` annotation. It reads like REQ-avmu3j
+// coverage and is not: `calculate_delta` has its own is_calculated() guard, so
+// this test passes unchanged even with the root-reporting behaviour REQ-avmu3j
+// requires removed entirely. `root_hash_errs_until_recalculated` is the test
+// that fails under that mutation.
 #[test]
 fn calculate_delta_fails_when_hashes_not_calculated() {
     let trie_a = TestTrie::genesis(vec![alice()]).unwrap();
@@ -658,6 +706,7 @@ fn apply_delta_to_wrong_side_after_reversed_calc_fails() {
     assert_eq!(err.unwrap_err(), OrgMembersError::DeltaBaseMismatch);
 }
 
+/// verifies: REQ-4umsuz
 #[test]
 fn apply_delta_stale_delta_fails() {
     // Realistic scenario: trie evolves v1 -> v2 -> v3. A delta computed for
@@ -699,28 +748,33 @@ fn leaf_with_handle(handle: &str) -> Result<MemberLeaf, OrgMembersError> {
         vec![device_key("d")])
 }
 
+/// verifies: REQ-h5ret5
 #[test]
 fn handle_valid_ascii() {
     assert!(leaf_with_handle("alice").is_ok());
     assert!(leaf_with_handle("bob-jones").is_ok());
 }
 
+/// verifies: REQ-h5ret5
 #[test]
 fn handle_empty_rejected() {
     assert!(leaf_with_handle("").is_err());
 }
 
+/// verifies: REQ-h5ret5
 #[test]
 fn handle_dot_rejected() {
     assert!(leaf_with_handle("alice.bob").is_err());
 }
 
+/// verifies: REQ-h5ret5
 #[test]
 fn handle_uppercase_rejected() {
     assert!(leaf_with_handle("Alice").is_err());
     assert!(leaf_with_handle("BOB").is_err());
 }
 
+/// verifies: REQ-h5ret5
 #[test]
 fn handle_nfc_normalized() {
     let m1 = leaf_with_handle("e\u{0301}ric").unwrap();
@@ -728,17 +782,20 @@ fn handle_nfc_normalized() {
     assert_eq!(m1.handle(), m2.handle());
 }
 
+/// verifies: REQ-h5ret5
 #[test]
 fn handle_mixed_script_rejected() {
     let mixed = "\u{0430}lice"; // Cyrillic а + Latin lice
     assert!(leaf_with_handle(mixed).is_err());
 }
 
+/// verifies: REQ-h5ret5
 #[test]
 fn handle_single_script_unicode_ok() {
     assert!(leaf_with_handle("\u{0430}\u{043B}\u{0438}\u{0441}\u{0430}").is_ok());
 }
 
+/// verifies: REQ-h5ret5
 #[test]
 fn handle_hyphen_allowed() {
     assert!(leaf_with_handle("jan-jan").is_ok());
@@ -749,6 +806,10 @@ fn handle_digits_allowed() {
     assert!(leaf_with_handle("alice42").is_ok());
 }
 
+/// verifies: REQ-h5ret5
+///
+/// The 128-byte clause. The annotated proptest cannot reach it: its strategy
+/// caps generated handles at 64 characters.
 #[test]
 fn handle_too_long_rejected() {
     // MAX_HANDLE_LEN is 128 bytes after NFC normalization. A 128-char ASCII
@@ -767,6 +828,7 @@ fn handle_too_long_rejected() {
 
 // --- Confusable detection tests ---
 
+/// verifies: REQ-m8aexh
 #[test]
 fn genesis_rejects_confusables() {
     // Find two handles whose UTS#39 skeletons match by probing candidates at runtime.
@@ -796,6 +858,7 @@ fn genesis_rejects_confusables() {
     assert_eq!(err, OrgMembersError::ConfusableHandle);
 }
 
+/// verifies: REQ-m8aexh
 #[test]
 fn insert_rejects_confusable_handle() {
     let (h1, h2) =
@@ -822,6 +885,7 @@ fn insert_rejects_confusable_handle() {
     assert_eq!(err, OrgMembersError::ConfusableHandle);
 }
 
+/// verifies: REQ-m8aexh
 #[test]
 fn update_rejects_confusable_handle() {
     let (h1, h2) =
@@ -1163,6 +1227,7 @@ fn orgtrie_is_send_sync() {
 // --- Serde validation (C-1) ---
 
 #[cfg(feature = "serde")]
+/// verifies: REQ-shk82j, REQ-h5ret5
 #[test]
 fn deserialize_rejects_invalid_handle() {
     use postcard::{from_bytes, to_allocvec};
@@ -1386,6 +1451,7 @@ fn update_name_surname_rejects_oversized_surname() {
 // --- H-2: P2pDeviceSlots deserialize rejects non-canonical wire form ---
 
 #[cfg(feature = "serde")]
+/// verifies: REQ-shk82j
 #[test]
 fn deserialize_rejects_unsorted_devices() {
     use postcard::{from_bytes, to_allocvec};
@@ -1399,6 +1465,7 @@ fn deserialize_rejects_unsorted_devices() {
 }
 
 #[cfg(feature = "serde")]
+/// verifies: REQ-shk82j
 #[test]
 fn deserialize_rejects_duplicate_devices() {
     use postcard::{from_bytes, to_allocvec};
@@ -1410,6 +1477,7 @@ fn deserialize_rejects_duplicate_devices() {
 }
 
 #[cfg(feature = "serde")]
+/// verifies: REQ-shk82j, REQ-xdx2c2
 #[test]
 fn deserialize_rejects_too_many_devices() {
     use postcard::{from_bytes, to_allocvec};
@@ -1423,6 +1491,7 @@ fn deserialize_rejects_too_many_devices() {
 }
 
 #[cfg(feature = "serde")]
+/// verifies: REQ-shk82j
 #[test]
 fn deserialize_accepts_sorted_unique_devices() {
     use postcard::{from_bytes, to_allocvec};
@@ -1552,3 +1621,33 @@ fn apply_delta_canonical_delta_still_works() {
     let verified = candidate.verify_against(&updated.root_hash().unwrap()).unwrap();
     assert_eq!(verified.root_hash().unwrap(), updated.root_hash().unwrap());
 }
+
+/// verifies: REQ-avmu3j
+///
+/// The abnormal case: a mutated trie must refuse to report a root at all,
+/// rather than reporting the pre-mutation one. `root_hash()` is called by most
+/// tests in this file, so the function was thoroughly EXECUTED before this
+/// test existed -- but only ever on a calculated trie. Nothing asserted the
+/// error, which is the half the requirement is about.
+#[test]
+fn root_hash_errs_until_recalculated() {
+    let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
+    let (trie, _) = trie.recalculate().unwrap();
+    let published = trie.root_hash().unwrap();
+
+    let mutated = trie.add_member(charlie()).unwrap();
+    assert!(!mutated.is_calculated());
+    assert_eq!(mutated.root_hash().unwrap_err(), OrgMembersError::HashesNotCalculated);
+
+    // And the normal case: recalculation produces a root, and it is not the
+    // one the pre-mutation trie published.
+    let (mutated, _) = mutated.recalculate().unwrap();
+    assert_ne!(mutated.root_hash().unwrap(), published);
+}
+
+// A `deserialize_revalidates_handle` test stood here briefly. It was removed:
+// `deserialize_rejects_invalid_handle`, above, already asserted the same
+// invariant and had done so since before the requirements work began. Writing
+// a second one was a mistake made by trusting a doc-comment ("gated so a plain
+// cargo test skips") over the file it describes; the annotation it was written
+// to carry now sits on the existing test instead.
