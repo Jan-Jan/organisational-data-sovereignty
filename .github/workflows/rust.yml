@@ -143,15 +143,18 @@ jobs:
       # it can only run on a pull request; on a push to the base branch it
       # exits 2, there being no change under review there.
       #
-      # Worth having beyond the usual reason: this gate cannot run on macOS at
-      # all (check-review.sh passes a newline-separated list through `awk -v`,
-      # which the BWK awk shipped with macOS rejects), so on that platform CI
-      # is the only place it executes.
+      # History worth keeping, because it explains why this step was added:
+      # under guardrails 0.4.0 this gate could not run on macOS at all —
+      # check-review.sh passed a newline-separated list through `awk -v`, which
+      # the BWK awk shipped with macOS rejects — so CI was the only place it
+      # could execute. The 0.5.1 upgrade fixed that, and it now runs locally at
+      # merge-change step 6c.
       #
-      # The catch, stated plainly: this project's working practice is a local
-      # signed squash merge straight onto master, with no pull request. Under
-      # that practice this step never fires and the class B independent-review
-      # evidence gate has NO mechanical enforcement anywhere. Adopting PRs, or
-      # the upstream awk fix, is what closes that.
+      # The catch that remains: this project's working practice is a local
+      # signed squash merge straight onto master, with no pull request, so this
+      # step never fires. That is no longer a gap in enforcement (step 6c
+      # covers it on the merging machine) but it does mean CI provides no
+      # independent backstop for the class B review evidence. Adopting pull
+      # requests is what would close that.
       - if: github.event_name == 'pull_request'
         run: .guardrails/scripts/check-review.sh --branch "${{ github.head_ref }}"
