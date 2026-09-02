@@ -7,19 +7,43 @@ hazard impact rather than merely noted, and `check-trace.sh` enforces the
 mention (`UNANALYZED-DERIVED`).
 
 **What this file is not.** These are impact assessments of derived
-requirements, not a hazard analysis. No hazard is enumerated here, no severity
-or probability is assigned, and the acceptability matrix in this ledger's
-README is still `TBD` — filling it is a quality-manual decision and is tooth 5
-(`analyze-risks`). Read every "Hazard impact: mitigates" below as shorthand for
-"mitigates a hazard that has not been enumerated yet": each names a mechanism
-and a pathway, and none of them is anchored to a HAZ item, because none exists.
-The safety-class ADR (`docs/adr/2026-08-26-safety-class-b.md`) rests on an
-injury pathway that tooth 5 must substantiate, and these are the requirements
-that pathway runs through.
+requirements, not a hazard analysis. No hazard is enumerated here, and no
+severity or probability is assigned in the assessments below.
 
-The two harms in view throughout, from the class B rationale: a member wrongly
-denied access cannot reach organisational data when a decision needs it, and a
-member wrongly granted or retaining access acts on data they should not hold.
+**Amended 2026-09-02, and the superseded text is quoted rather than deleted.**
+As written on 2026-08-31 this note said:
+
+> No hazard is enumerated here, no severity or probability is assigned, and the
+> acceptability matrix in this ledger's README is still `TBD` — filling it is a
+> quality-manual decision and is tooth 5 (`analyze-risks`). Read every "Hazard
+> impact: mitigates" below as shorthand for "mitigates a hazard that has not
+> been enumerated yet": each names a mechanism and a pathway, and none of them
+> is anchored to a HAZ item, because none exists. The safety-class ADR
+> (`docs/adr/2026-08-26-safety-class-b.md`) rests on an injury pathway that
+> tooth 5 must substantiate, and these are the requirements that pathway runs
+> through.
+
+Every part of that has happened, in
+`docs/risk/2026-09-02-membership-hazards.md`: the matrix is set, the hazards are
+enumerated, and every requirement assessed below now carries a risk control it
+implements. So the shorthand is no longer needed — each "Hazard impact:
+mitigates" below names a mechanism and a pathway that a HAZ item now exists
+for. Three of the assessments called their own shots and were right:
+REQ-m8aexh's is now HAZ-jkc6tj, REQ-4umsuz's is now HAZ-y8h835 and HAZ-h58jn6,
+and the warning under REQ-ewdg2q that its control's effectiveness was unverified
+is now the residual-risk statement for HAZ-s39gbh.
+
+The class citation above is also superseded: the injury pathway the class B ADR
+asserted was substantiated further than that ADR allowed, and the project is
+Class C as of 2026-09-01 (`docs/adr/2026-09-01-safety-class-c.md`). The
+assessments themselves are unchanged and stand as written — the class governs
+verification rigour, not whether a derived requirement affects a hazard.
+
+The two harms in view throughout: a member wrongly denied access cannot reach
+organisational data when a decision needs it, and a member wrongly granted or
+retaining access acts on data they should not hold. The hazard analysis keeps
+both and states their severity — disclosure S3, unavailability S3 at its worst
+credible outcome.
 
 ## Identity and naming
 

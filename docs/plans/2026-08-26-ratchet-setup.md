@@ -8,7 +8,9 @@ with their evidence as they close.
   `bb7eee5`). The signing items moved from "later tooth" to **gate on the
   ratchet itself** — see the box below — and a new proof step was added.
 
-Safety class **B** (`docs/adr/2026-08-26-safety-class-b.md`). Adoption order:
+Safety class **C** as of 2026-09-01
+(`docs/adr/2026-09-01-safety-class-c.md`, superseding the Class B ADR).
+Adoption order:
 `docs/plans/2026-08-26-ratchet-gap-analysis.md`.
 
 ## Signing is a gate, not a later tooth
@@ -19,44 +21,41 @@ branch. Strictness begins at the first merge, not in CI. A project that defers
 signing completes each merge and is then refused the cleanup, accumulating
 worktrees with no obvious cause.
 
-**This project is not there yet.** Measured 2026-09-01:
-`check-signing.sh --setup` → **exit 1**, naming two missing pieces. Until it
-exits 0, adoption of guardrails is not finished, whatever else is ticked.
+**This project is there.** Measured by the project owner on their own
+terminal, 2026-09-01: `check-signing.sh --setup` → **exit 0**, and the
+`finish-merge.sh` run for the 0.5.1 upgrade passed guard 1
+(`check-signing --strict`) and completed cleanup. That is the ratchet's own
+completion condition met.
 
-- [ ] **`gpg.format` is not set.** Git defaults to openpgp when it is unset, so
-      signing works today and `--setup` still refuses it: configuration that is
-      merely implied cannot be proved. Set it explicitly —
-      `git config --global gpg.format openpgp` — rather than in the shared repo
-      config, which is where this project already had one signing key cause
-      trouble.
-- [ ] **Run `--setup` from the primary checkout, never a worktree.** It also
-      reported `commit.gpgsign` missing, which is an artefact of where it ran:
-      this project deliberately sets `commit.gpgsign=false` per worktree (its
-      own rule, and the right one), so the effective value inside a worktree is
-      `false`. `--setup` asks what this machine can do, and only the primary
-      checkout answers that question.
-- [ ] **Signature verification — now load-bearing.** Create an allowed_signers
-      file listing each committer (`<email> <key-type> <public-key>`) and set
-      `gpg.ssh.allowedSignersFile`, or make the GPG keyring able to verify the
-      committer's own key. Without it every signature reads as unverifiable,
-      which `--strict` rejects — and `--strict` is now what stands between a
-      merge and its cleanup. Note that `--strict` has **never** passed in this
-      project, and that is measured rather than assumed: non-strict runs report
-      `WARN-UNVERIFIED` and exit 0, while `check-signing.sh --strict
-      067e56c~3..067e56c` over the three existing merges reports three
-      `UNVERIFIED` lines and exits 1.
-- [ ] **Prove the chain, and only then is the ratchet done:**
-      `.guardrails/scripts/check-signing.sh --setup` must exit 0. It checks
-      `gpg.format`, `user.signingkey`, `commit.gpgsign` and the format's trust
-      root, then makes a real signed commit in a throwaway repository and
-      confirms it reads `%G?` = `G`. Configuration being present says nothing
-      about whether the key can sign or the signature verifies.
+- [x] **Commit signing proved end to end.** DONE 2026-09-01. `--setup` exits 0
+      from the primary checkout: signing key present, format resolved, and a
+      real signed commit in a throwaway repository reads `%G?` = `G`.
+- [x] **Signature verification works.** DONE 2026-09-01, by the same proof.
+      `--strict` verifies against the GPG keyring; no allowed_signers file is
+      needed because this project signs with GPG rather than SSH.
 
-What is already in place: a GPG `user.signingkey`
+**A correction, recorded rather than quietly fixed.** An earlier revision of
+this document stated that `--strict` "has **never** passed in this project", and
+called it measured. Every such measurement had been taken inside an agent
+sandbox that cannot open `~/.gnupg/trustdb.gpg`, where gpg fails closed and a
+valid signature reads as unverifiable. An independent reviewer measured the same
+thing and it was treated as confirmation — it ran in the same sandbox, so it was
+one blind spot counted twice. The measurements were real; the scope claimed for
+them was not. `docs/verification/2026-09-01-worktree-guardrails-051.md` carries
+the same error and is left unedited, because a verification record is evidence
+for a completed change: corrections belong in the next record, which is this
+change's.
+
+The configuration behind that: a GPG `user.signingkey`
 (`0x224A50748E1745B8E1CC9A284FD03A5A7780F634`), `commit.gpgsign=true` globally
-with the shared-repo override removed on 2026-08-26, and three signed merges on
-`master` — `a120f14`, `4bb5509`, `067e56c` — with this change due to be the
-fourth.
+with the shared-repo override removed on 2026-08-26, `commit.gpgsign=false` per
+worktree by this project's own rule, and four signed merges on `master`
+(`a120f14`, `4bb5509`, `067e56c`, `4da12d3`).
+
+One operational note, since it cost a false diagnosis: run `--setup` from the
+**primary checkout**. Inside a worktree the deliberate `commit.gpgsign=false`
+makes it report that key as missing, which is an artefact of where it ran and
+not a finding about the machine.
 
 ## Remaining items
 
@@ -73,20 +72,53 @@ fourth.
       the weaker of the two — worth tightening once the item above closes.
       `check-review.sh` runs on pull requests only, and this project merges
       locally without PRs, so that gate still executes nowhere in CI.
-- [x] **Coverage tooling (Class B target: statement coverage).** DONE
-      2026-08-26 — `cargo-llvm-cov` 0.9.0 and `llvm-tools-preview` installed;
-      `coverage_command: make coverage` set. Measured: org-members 93.50% lines
-      / 92.20% regions, on-chain-client 53.57% / 59.19%. Both metrics gated,
-      floors a point below measurement, ratcheting upward only. on-chain-client
-      is an accepted class B shortfall — see the tooth 3 verification record.
-- [ ] **Human review policy.** Decide who signs off a merge, and who acts as
-      the independent reviewer at `merge-change` step 6a when a human is
-      preferred over a fresh agent. Class B calls for one reviewer. Every
-      change so far has used a fresh subagent, recorded by name in the record.
-- [ ] **Risk acceptability matrix.** `docs/risk/README.md` ships with every
-      cell as `TBD`. Fill each with ACCEPTABLE or UNACCEPTABLE per the quality
-      manual before `analyze-risks` runs (tooth 5). Tooth 5 also has to
-      substantiate or retract the injury pathway the safety-class ADR asserts.
+- [x] **Statement coverage.** DONE 2026-08-26 — `cargo-llvm-cov` 0.9.0 and
+      `llvm-tools-preview` installed; `coverage_command: make coverage` set.
+      Measured: org-members 93.50% lines / 92.20% regions, on-chain-client
+      53.57% / 59.19%. Both metrics gated, floors a point below measurement,
+      ratcheting upward only. on-chain-client is an accepted shortfall — see the
+      tooth 3 verification record.
+- [ ] **Decision coverage — NEW, and now mandatory.** Class C requires
+      statement **and** decision coverage. Decision coverage is not measured and
+      cannot be on the current toolchain: `cargo llvm-cov --branch` is unstable
+      and fails under stable rustc. A nightly toolchain is installed but lacks
+      the component. Needed:
+      `rustup component add llvm-tools-preview --toolchain nightly`, then a
+      `--branch` lane in the Makefile and in CI's `coverage` job, with floors
+      set from the first measurement. Until then this is a gap against a
+      mandatory requirement, not a stretch target — the distinction the class
+      change introduces.
+- [ ] **Human review policy — re-opened by the class change.** Decide who
+      signs off a merge, and who acts as the independent reviewer at
+      `merge-change` step 6a when a human is preferred over a fresh agent.
+      Class C calls for a **thorough** review, and for considering **two**
+      independent reviewers on critical items; Class B's one reviewer is no
+      longer the standard. Every change so far has used one fresh subagent,
+      recorded by name in the record — and those reviews have each found real
+      defects, including annotations that verified nothing, so the mechanism
+      works and the question is only how much of it to require.
+- [x] **Risk acceptability matrix.** DONE 2026-09-01, by the project owner:
+      S3 UNACCEPTABLE at every probability, S2 acceptable only at P1, S1
+      acceptable throughout. The injury pathway the class B ADR asserted was
+      substantiated harder than that ADR allowed and the class moved to C.
+- [ ] **Publish the restriction on use.** The hazard analysis
+      (`docs/risk/2026-09-02-membership-hazards.md`) concludes that nine of
+      twelve hazards carry residual risk the matrix calls unacceptable, and that
+      overall residual risk against the intended use is UNACCEPTABLE: the
+      software has not reached the use that makes it Class C. A restriction —
+      no production deployment in the journalism, clinical or government
+      context — has to be written where a user meets it (repository README and
+      crate documentation at minimum) before it counts as an implemented
+      control under ISO 14971 clause 7.2. Today it exists only inside the risk
+      ledger, which is the one place a user will not look. Owner's decision,
+      not an agent's.
+- [ ] **Overall residual-risk criteria.** ISO 14971 clause 8 wants the overall
+      evaluation made against criteria set out in a risk management plan. This
+      project has no plan: `docs/risk/README.md` holds a per-hazard matrix and
+      says nothing about the whole. So the register's overall verdict is a
+      reasoned conclusion rather than the output of a stated criterion. Write
+      the criteria — including what would let the restriction above be lifted —
+      into the risk ledger README.
 - [ ] **Problem-report limits.** `problem_age_days: 30`, `problem_open_max: 10`.
       One item is open (PR-zz4exm, opened 2026-08-31), so the age limit now has
       a live subject. Re-check both numbers at tooth 8's backfill.

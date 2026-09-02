@@ -81,8 +81,10 @@ jobs:
           cargo check -p org-members --no-default-features --features serde \
             --target wasm32-unknown-unknown
 
-  # The class B coverage gate, running the same `make coverage` the merge gate
-  # runs. Floors live in the Makefile and ratchet upward only.
+  # The statement-coverage gate, running the same `make coverage` the merge gate
+  # runs. Floors live in the Makefile and ratchet upward only. This covers the
+  # statement half of the class C target; decision coverage is not measured
+  # anywhere yet (docs/adr/2026-09-01-safety-class-c.md).
   #
   # Note that the floors were calibrated on aarch64-darwin and are enforced
   # here on x86_64-linux, against a floating `stable` toolchain and an
@@ -154,7 +156,8 @@ jobs:
       # signed squash merge straight onto master, with no pull request, so this
       # step never fires. That is no longer a gap in enforcement (step 6c
       # covers it on the merging machine) but it does mean CI provides no
-      # independent backstop for the class B review evidence. Adopting pull
+      # independent backstop for the review evidence — which matters more under
+      # class C, where the review must be thorough. Adopting pull
       # requests is what would close that.
       - if: github.event_name == 'pull_request'
         run: .guardrails/scripts/check-review.sh --branch "${{ github.head_ref }}"

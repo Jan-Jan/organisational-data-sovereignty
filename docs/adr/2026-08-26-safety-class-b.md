@@ -1,9 +1,18 @@
 # ADR: IEC 62304 software safety class B
 
 - **Date:** 2026-08-26
-- **Status:** accepted
+- **Status:** **SUPERSEDED 2026-09-01 by
+  `docs/adr/2026-09-01-safety-class-c.md`.** The injury pathway this ADR
+  asserted and left unproven was examined at the start of the risk analysis.
+  It substantiated further than this document allowed for: the intended
+  deployments include journalism and government secrets, where wrongful
+  disclosure can lead to serious injury. That is S3, and this ADR's own
+  reasoning — that serious injury is not reachable — is what fails. Left in
+  place unedited below, because it records the decision that was actually
+  taken on 2026-08-26 and the open item that caught it.
 - **Decision maker:** Jan-Jan (project owner), interviewed by `/ratchet`
-- **Recorded in:** `.guardrails/config.yaml` → `safety_class: B`
+- **Recorded in:** `.guardrails/config.yaml` → `safety_class: B` (changed to
+  `C` on 2026-09-01)
 
 ## Context
 

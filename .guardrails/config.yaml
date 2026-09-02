@@ -75,7 +75,7 @@ guardrails_version: 0.5.1
 
 # IEC 62304 software safety class: A, B, or C. Set by /ratchet.
 # Per-item overrides: document them in the SAD next to the SDD item.
-safety_class: B
+safety_class: C
 
 # ID prefixes managed by the check/finalize scripts.
 # LLR = low-level requirements (design data, live in the SAD).
@@ -130,7 +130,10 @@ problem_open_max: 10
 
 # Structural-coverage report command, judged against the class target
 # (A: none required, B: statement, C: statement + decision). This project is
-# class B, so statement coverage is the target.
+# class C as of 2026-09-01, so statement AND decision coverage are the target.
+# `make coverage` measures statement (line and region) coverage only; decision
+# coverage is unmeasured and now mandatory rather than a stretch goal. See
+# docs/adr/2026-09-01-safety-class-c.md.
 #
 # What setting this key does, precisely: no check script reads it. It is
 # consumed by verify-before-merge step 5 — an instruction to run the command
@@ -144,8 +147,9 @@ problem_open_max: 10
 # analogue of statement coverage. Measured 2026-08-26: org-members 93.50%
 # lines / 92.20% regions; on-chain-client 53.57% / 59.19%. The floors sit a
 # point below those, and the reasoning — including why on-chain-client's is a
-# class B shortfall rather than a target met, and what raises it — is in the
-# Makefile.
+# shortfall rather than a target met, and what raises it — is in the Makefile.
+# Under class C that shortfall awaits the owner's explicit acceptance at a
+# merge; it is not a gap an agent may accept.
 #
 # Requires cargo-llvm-cov and the llvm-tools-preview component on the machine
 # running the merge. That is a real prerequisite of merging here, chosen

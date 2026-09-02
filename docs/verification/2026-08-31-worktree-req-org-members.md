@@ -1,5 +1,19 @@
 # Verification — first requirements, organisation membership (2026-08-31)
 
+> **Corrected 2026-09-02, body left unedited.** Finding 13 of this record
+> states that there is no arbitrary-bytes fuzz target for the `org-members`
+> deserialisation path. That is false: `org-node/tests/fuzz_envelope_decode`
+> feeds arbitrary bytes to a `SignedDeltaEnvelope` decode and then calls
+> `decode_delta()`, which deserialises `org_members::delta::Delta` through the
+> validating `Deserialize` impls. The target predates that record. The claim
+> was carried forward unchecked into the Class C ADR and into the first draft of
+> the hazard analysis before an independent reviewer caught it; the corrected
+> statement — the target exists, is outside `test_paths`, is unannotated, has an
+> empty corpus and is run by no lane — is in
+> `docs/risk/2026-09-02-membership-hazards.md`. The body below is left as
+> written for the same reason as any other record.
+
+
 branch: worktree-req-org-members
 reviewer: fresh general-purpose subagent, dispatched at merge-change step 6a with only the diff, the item grammars, the project rules and the class B ADR — no implementation narrative and no session history
 verdict: fit to merge with conditions, 32 findings. The reviewer mutation-tested every verifies: annotation rather than reading them, and found three that did not verify the requirement they named plus three false factual claims of mine. All conditions met; the findings and their dispositions are below.

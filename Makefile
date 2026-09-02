@@ -13,7 +13,8 @@
 
 .PHONY: coverage coverage-org-members coverage-on-chain-client
 
-# TWO metrics, because the class B target is STATEMENT coverage and the two
+# TWO metrics, because the STATEMENT-coverage half of the class target (class
+# C: statement AND decision) is measured two ways here and the two
 # are not the same thing. LLVM line coverage credits a whole source line if
 # any region on it executed, so `?`-chains, match arms and multi-statement
 # lines over-credit. Region coverage is the closer analogue of statement
@@ -73,7 +74,7 @@ coverage-org-members:
 # Mirrors the on-chain-client entry in verify_commands, fuzz targets included:
 # the corpora are part of what covers the decoders.
 #
-# This floor is LOW, and it is a class B shortfall rather than a target met:
+# This floor is LOW, and it is a shortfall rather than a target met:
 # client.rs sits at 12.75% because it is exercised almost entirely by the
 # chopsticks/anvil integration tests, which need on-chain/scripts/node_modules
 # and are outside both verify_commands and this measurement. The floor records

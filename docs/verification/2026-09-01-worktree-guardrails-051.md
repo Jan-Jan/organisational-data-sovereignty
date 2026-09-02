@@ -1,5 +1,18 @@
 # Verification — guardrails toolkit upgrade 0.4.0 → 0.5.1 (2026-09-01)
 
+> **Corrected 2026-09-02, body left unedited.** This record states that
+> `check-signing --strict` "has never passed here" and presents it as measured.
+> The measurement was real but its scope was not: every such run had been taken
+> inside an agent sandbox that cannot open the GPG trustdb, where a valid
+> signature reads as unverifiable, and an independent reviewer's confirmation
+> ran in the same sandbox — one blind spot counted twice. On the owner's own
+> terminal `--strict` passes and `--setup` exits 0. The correction is recorded
+> in `docs/plans/2026-08-26-ratchet-setup.md`. The body below is left as
+> written, because a verification record is the evidence for a completed
+> change; this pointer exists so a reader meets the correction before the
+> claim, the same treatment the superseded Class B ADR was given.
+
+
 branch: worktree-guardrails-051
 reviewer: fresh general-purpose subagent, dispatched at merge-change step 6a with the diff, the upstream source tree for comparison, and the SKILL.md upgrade procedure as acceptance criteria — no implementation narrative and no session history
 verdict: fit to merge with conditions, 11 findings. The mechanical upgrade was found clean on every check that mattered — scripts byte-identical to upstream, correct modes, managed block replaced within its markers and nothing else. What it found was prose the upgrade itself falsified: four documents describing a toolkit that no longer behaves that way. Conditions met.
