@@ -52,18 +52,34 @@ set -u
 gr_repo_root=$(gr_root) || exit 2
 cd "$gr_repo_root" || exit 2
 
-gr_check_config
+# The review artefact is REPOSITORY-LEVEL (architecture item 9): one change,
+# one signed squash, one record, whatever units the change touched. In a
+# manifest repository there is no root config to validate — the manifest's
+# exclusivity rule removed it — so the manifest itself is validated in its
+# place, and the records live at the defaulted root location. Everything
+# branch-shaped below is untouched.
+if gr_units_present; then
+    gr_check_units
+    dir=docs/verification
+    [ -d "$dir" ] || gr_die \
+"docs/verification does not exist — in a multi-unit repository the
+  verification records live at the repository root (one record per change;
+  the record's subject is the change, not a unit). Create the directory."
+else
+    gr_check_config
+    dir=$(gr_verification_dir) || exit 2
+fi
 
 branch=""
 named=0
 while [ $# -gt 0 ]; do
     case "$1" in
-        --branch)
+        (--branch)
             shift
             [ $# -gt 0 ] || gr_die "--branch needs a branch name"
             branch="$1"
             named=1 ;;
-        *) gr_die "unknown argument: $1" ;;
+        (*) gr_die "unknown argument: $1" ;;
     esac
     shift
 done
@@ -104,8 +120,6 @@ else
   This gate runs in the change's worktree, at merge-change step 6c. To check a
   record for a change that is already merged, name it with --branch NAME."
 fi
-
-dir=$(gr_verification_dir) || exit 2
 
 # A directory with no records at all is an environment error, never an empty
 # scan, and that rule has ONE definition — gr_md_files, which gr_doc_files uses
@@ -334,13 +348,13 @@ for f in $records; do
     done
     for _l in $_facts; do
         case "$_l" in
-            "U "*)
+            ("U "*)
                 echo "UNDISPOSED-FINDING $f:${_l#U }"
                 fail=1 ;;
-            "M "*)
+            ("M "*)
                 echo "MALFORMED-FINDING $f:${_l#M } (shaped like a finding header, opens no finding)"
                 fail=1 ;;
-            "O "*)
+            ("O "*)
                 echo "ORPHAN-DISPOSITION $f:${_l#O } (belongs to no finding)"
                 fail=1 ;;
         esac

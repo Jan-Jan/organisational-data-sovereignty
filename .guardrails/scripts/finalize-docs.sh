@@ -31,11 +31,18 @@ cd "$gr_repo_root" || exit 2
 dry=0
 while [ $# -gt 0 ]; do
     case "$1" in
-        --dry-run) dry=1 ;;
-        *) gr_die "unknown argument: $1" ;;
+        (--dry-run) dry=1 ;;
+        (*) gr_die "unknown argument: $1" ;;
     esac
     shift
 done
+
+# Unit-scoped by nature: this renames drafts inside ONE config's doc_*
+# directories. merge-change runs it once per touched unit of the impact set,
+# GR_CONFIG pointing at each (architecture item 9) — so in a manifest
+# repository a bare invocation must refuse rather than rename nothing and
+# report success.
+gr_unit_engage
 
 # A typo'd doc_* key makes the rename loop below skip that ledger entirely and
 # still exit 0 — a silent no-op reported as success. gr_check_config validates
@@ -68,7 +75,7 @@ for key in doc_srs doc_rmf doc_sad doc_problems; do
     for f in "$dir"/DRAFT-*.md; do
         [ -f "$f" ] || continue
         case "$f" in
-            *" "* | *"	"*)
+            (*" "* | *"	"*)
                 gr_die "draft ledger file name contains whitespace: $f" ;;
         esac
         slug=${f##*/}

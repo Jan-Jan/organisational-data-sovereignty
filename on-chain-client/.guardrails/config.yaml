@@ -1,0 +1,67 @@
+# guardrails configuration for the `on-chain-client` unit — flat schema only:
+#   `key: value` scalars and two-space `- item` lists, every key at column one,
+#   set once, in its own form (LIST keys: strict_paths, test_paths,
+#   verify_commands, coverage_command, depends_on, segregated_from; everything
+#   else a scalar). The schema is CLOSED and validated before any gate runs;
+#   the full rule list, with the reason each rule exists, is the header of
+#   templates/config.yaml in the guardrails repository this was copied from.
+#
+# This is a UNIT config (.guardrails/units.yaml at the repository root names
+# the units). Every doc_* value and every strict_paths/test_paths entry must
+# sit inside this unit's own directory, and doc_verification must NOT be set —
+# the verification record is repository-level (docs/verification).
+#
+# Scripts run from the repository root, so paths and commands below are
+# repository-relative.
+guardrails_version: 0.5.1
+guardrails_commit: e2eac86ff8db2157735b9604b7ade190d4f465f3
+
+# IEC 62304 software safety class. C: this crate decides what the chain says
+# the membership is (decoding org state and revive events); a wrong or stale
+# reading feeds every consumer's access decision. See
+# docs/adr/2026-09-05-units-and-per-unit-classes.md.
+safety_class: C
+
+id_prefixes: REQ HAZ RC SDD LLR PR
+
+# Canonical document locations. README-only ledgers as of 2026-09-05: this
+# unit has no items yet. The hazards touching it (two mentions) are still in
+# org-members' RMF and move here at the hazard-redistribution tooth.
+doc_srs: on-chain-client/docs/requirements
+doc_rmf: on-chain-client/docs/risk
+doc_sad: on-chain-client/docs/architecture
+doc_soup: on-chain-client/docs/architecture/soup.md
+doc_problems: on-chain-client/docs/problems
+
+strict_paths:
+  - on-chain-client/src
+
+test_paths:
+  - on-chain-client/tests
+
+# --lib drops the nine chopsticks/anvil integration targets, which need
+# on-chain/scripts/node_modules; the three libfuzzer targets are named back
+# in explicitly so that restriction does not silently drop them (project
+# rule: always include fuzz testing).
+verify_commands:
+  - cargo test --manifest-path on-chain-client/Cargo.toml --lib --test fuzz_decode_org_state --test fuzz_parse_revive_event --test fuzz_event_round_trip
+
+problem_age_days: 30
+problem_open_max: 10
+
+# Structural coverage against the class C target. `make coverage-on-chain-client`
+# enforces line and region floors (Makefile; measured 2026-08-26: 53.57% lines
+# / 59.19% regions). That floor is an accepted SHORTFALL, not a target met:
+# client.rs is exercised almost entirely by the integration tests outside
+# verify_commands. Decision coverage is unmeasured. Both gaps are tracked in
+# docs/plans/2026-09-05-ratchet-setup.md.
+coverage_command:
+  - make coverage-on-chain-client
+
+expectation_age_days: 90
+expectation_open_max: 10
+
+# depends_on:
+#   - <unit>
+# segregated_from:
+#   - <unit> (RC-xxxxxx)

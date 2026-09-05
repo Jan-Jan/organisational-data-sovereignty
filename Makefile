@@ -1,7 +1,9 @@
 # Guardrails verification targets.
 #
-# `coverage` is the target named by `coverage_command` in
-# .guardrails/config.yaml. Note what that does and does not mean: NO check
+# `coverage-org-members` and `coverage-on-chain-client` are the targets named
+# by `coverage_command` in org-members/.guardrails/config.yaml and
+# on-chain-client/.guardrails/config.yaml (per-unit configs since 2026-09-05;
+# `coverage` runs both and is what CI calls). Note what that does and does not mean: NO check
 # script reads `coverage_command` — `grep -rn coverage_command
 # .guardrails/scripts/` finds it only in lib.sh's schema key list. The gate is
 # an instruction to whoever runs `verify-before-merge` (step 5: run it and

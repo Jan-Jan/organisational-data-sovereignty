@@ -1,0 +1,87 @@
+# guardrails configuration for the `org-members` unit — flat schema only:
+#   `key: value` scalars and two-space `- item` lists, every key at column one,
+#   set once, in its own form (LIST keys: strict_paths, test_paths,
+#   verify_commands, coverage_command, depends_on, segregated_from; everything
+#   else a scalar). The schema is CLOSED and validated before any gate runs;
+#   the full rule list, with the reason each rule exists, is the header of
+#   templates/config.yaml in the guardrails repository this was copied from.
+#
+# This is a UNIT config (.guardrails/units.yaml at the repository root names
+# the units). Two constraints follow that a single-unit config does not have:
+# every doc_* value and every strict_paths/test_paths entry must sit inside
+# this unit's own directory, and doc_verification must NOT be set — the
+# verification record is repository-level (docs/verification, one record per
+# change, read by check-review.sh by branch).
+#
+# Scripts run from the repository root, so paths and commands below are
+# repository-relative, exactly as they were in the root config this replaces.
+guardrails_version: 0.5.1
+
+# The commit the installed scripts were copied from — the checkable half of
+# the tool-qualification basis (docs/plans/2026-09-05-ratchet-setup.md).
+guardrails_commit: e2eac86ff8db2157735b9604b7ade190d4f465f3
+
+# IEC 62304 software safety class. C: org-members is the membership authority
+# — the record every access decision derives from. See
+# docs/adr/2026-09-05-units-and-per-unit-classes.md and, for the pathway to
+# serious injury, docs/adr/2026-09-01-safety-class-c.md.
+safety_class: C
+
+# ID prefixes managed by the check/finalize scripts.
+# LLR = low-level requirements (design data, live in the SAD).
+# PR  = problem reports.
+id_prefixes: REQ HAZ RC SDD LLR PR
+
+# Canonical document locations — the ledgers moved here from docs/ on
+# 2026-09-05 with their history; the item IDs are unchanged.
+doc_srs: org-members/docs/requirements
+doc_rmf: org-members/docs/risk
+doc_sad: org-members/docs/architecture
+doc_soup: org-members/docs/architecture/soup.md
+doc_problems: org-members/docs/problems
+
+# Paths where traceability is enforced.
+strict_paths:
+  - org-members/src
+
+# Paths searched for `verifies:` test annotations.
+test_paths:
+  - org-members/tests
+
+# Commands merge-change and verify-before-merge must run and pass.
+# `cargo test -p org-members` includes the mbt_conformance target, which
+# shells out to the quint CLI and FAILS (not skips) when quint is absent or
+# ~/.quint is unwritable. protocol.qnt models the protocol org-node runs; its
+# typecheck is kept here as well as in org-node's config so this tooth
+# loosens nothing relative to the root config it replaces.
+verify_commands:
+  - cargo test -p org-members
+  - quint typecheck quint/membership.qnt
+  - quint typecheck quint/protocol.qnt
+
+# Problem-report triage limits: whole numbers, both mean "more than".
+problem_age_days: 30
+problem_open_max: 10
+
+# Structural coverage, judged against the class C target (statement AND
+# decision). No check script reads this key: it is consumed by
+# verify-before-merge step 5 and by the `coverage` job in
+# .github/workflows/rust.yml. `make coverage-org-members` enforces a line and a
+# region floor (Makefile; measured 2026-08-26: 93.50% lines / 92.20%
+# regions, floors one point below, ratcheting upward only). Decision coverage
+# is still unmeasured — a gap against a mandatory class C requirement, tracked
+# in docs/plans/2026-09-05-ratchet-setup.md. Requires cargo-llvm-cov and
+# llvm-tools-preview on the merging machine.
+coverage_command:
+  - make coverage-org-members
+
+# Expectation triage limits (consumer REQs carrying `expects: <unit>`). Shipped
+# set; meaningful once this unit declares a dependency.
+expectation_age_days: 90
+expectation_open_max: 10
+
+# Multi-unit keys. No edges declared in this tooth — see units.yaml.
+# depends_on:
+#   - <unit>
+# segregated_from:
+#   - <unit> (RC-xxxxxx)

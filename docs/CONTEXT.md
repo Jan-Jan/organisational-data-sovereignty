@@ -12,10 +12,19 @@ Glossary of the project's ubiquitous language. Definitions only — no
 implementation details, no specs.
 
 **Partial.** These are the terms settled while writing the first requirements
-(`docs/requirements/`), which is why they cluster around membership. The
-remaining vocabulary — already well developed in `org-members/AGENTS.md`, and
-the authority for crate-level terms until then — is migrated at tooth 9 of
+(`org-members/docs/requirements/`, moved there from `docs/requirements/` on
+2026-09-05), which is why they cluster around membership. The remaining
+vocabulary — already well developed in `org-members/AGENTS.md`, and the
+authority for crate-level terms until then — is migrated at tooth 9 of
 `docs/plans/2026-08-26-ratchet-gap-analysis.md`.
+
+**Scope since 2026-09-05.** This is the repository's *interface* glossary: the
+terms that cross a unit boundary (`.guardrails/units.yaml`). Each unit keeps
+its own `<unit>/docs/CONTEXT.md` for internal vocabulary, and a term is
+escalated here the moment it appears in an exported requirement or an
+`expects:` item. Every term below is interface vocabulary — the membership
+record and its parts are exactly what org-node and the app consume from
+org-members — so nothing moved down when the unit glossaries were created.
 
 **Organisation**:
 The entity that owns a membership record and whose data is being governed.

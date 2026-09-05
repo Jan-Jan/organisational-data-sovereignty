@@ -7,6 +7,10 @@ with their evidence as they close.
 - **Revised 2026-09-01 for `guardrails_version: 0.5.1`** (upstream
   `bb7eee5`). The signing items moved from "later tooth" to **gate on the
   ratchet itself** — see the box below — and a new proof step was added.
+- **Superseded 2026-09-05** by `docs/plans/2026-09-05-ratchet-setup.md`,
+  written when the repository became multi-unit (upstream `e2eac86`). Open
+  items below were carried there; this file is kept as the record of the
+  single-unit period and is not updated further.
 
 Safety class **C** as of 2026-09-01
 (`docs/adr/2026-09-01-safety-class-c.md`, superseding the Class B ADR).

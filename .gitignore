@@ -8,3 +8,8 @@ Cargo.lock
 # Guardrails: worktrees and sed backups (managed by /ratchet)
 .worktrees/
 *.bak
+
+# Local tool output. Untracked-but-not-ignored directories read as
+# UNCLAIMED-PATH to check-units.sh, which scans `git ls-files --others`.
+.claire/
+_apalache-out/

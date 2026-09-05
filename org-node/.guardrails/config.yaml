@@ -1,0 +1,89 @@
+# guardrails configuration for the `org-node` unit — flat schema only:
+#   `key: value` scalars and two-space `- item` lists, every key at column one,
+#   set once, in its own form (LIST keys: strict_paths, test_paths,
+#   verify_commands, coverage_command, depends_on, segregated_from; everything
+#   else a scalar). The schema is CLOSED and validated before any gate runs;
+#   the full rule list, with the reason each rule exists, is the header of
+#   templates/config.yaml in the guardrails repository this was copied from.
+#
+# This is a UNIT config (.guardrails/units.yaml at the repository root names
+# the units). Every doc_* value and every strict_paths/test_paths entry must
+# sit inside this unit's own directory, and doc_verification must NOT be set —
+# the verification record is repository-level (docs/verification).
+#
+# Scripts run from the repository root, so paths and commands below are
+# repository-relative.
+guardrails_version: 0.5.1
+guardrails_commit: e2eac86ff8db2157735b9604b7ade190d4f465f3
+
+# IEC 62304 software safety class. C: org-node holds the keys, makes the trust
+# decisions, and does the chain and p2p I/O through which a member's access is
+# granted or withdrawn. See docs/adr/2026-09-05-units-and-per-unit-classes.md.
+safety_class: C
+
+id_prefixes: REQ HAZ RC SDD LLR PR
+
+# Canonical document locations. README-only ledgers as of 2026-09-05. Two
+# things about org-node are filed in org-members' ledgers and stay there this
+# tooth: PR-hvg2dy (chain_read.rs finality documentation), which cites
+# org-members items and so cannot move without a declared edge — measured
+# 2026-09-05: moved here it drew UNDECLARED-DEPENDENCY on both sides — and
+# the eight hazard mentions of org-node in the RMF. Both move at the
+# redistribution tooth, after depends_on: is declared.
+doc_srs: org-node/docs/requirements
+doc_rmf: org-node/docs/risk
+doc_sad: org-node/docs/architecture
+doc_soup: org-node/docs/architecture/soup.md
+doc_problems: org-node/docs/problems
+
+# First time under trace discipline (this was tooth 7 of the 2026-08-26 plan).
+# There are no item references in org-node yet, so this costs nothing today
+# and stops new code being born untraced.
+strict_paths:
+  - org-node/src
+
+test_paths:
+  - org-node/tests
+
+# The three chopsticks-dependent targets (chain_genesis_e2e, finality_polling,
+# preflight) are excluded: they spawn a chopsticks fork and need
+# on-chain/scripts/node_modules. The remaining targets are named explicitly so
+# that a future chopsticks target added to the crate is not silently pulled
+# in — and so the two fuzz targets cannot silently drop out.
+# `--features app,test-support` is REQUIRED: the named targets carry
+# `required-features` (app for service_stories, transport for
+# transport_handshake, transport+test-support for transport_networked) and
+# cargo refuses an explicit `--test` whose features are off. The first draft
+# of this line omitted it and failed closed at the verification gate on
+# 2026-09-05. `--lib` therefore compiles the library with `app` plus
+# `test-support` — `app` is the configuration org-node ships in;
+# `test-support` is never enabled in production builds (Cargo.toml) and exists
+# only to expose gated test constructors, so the lib under test differs from
+# the shipped lib by that feature alone.
+# Measured 2026-09-05 (agent sandbox, CARGO_HOME=/tmp/cargo_home_fuzz):
+# 38 passed, 0 failed.
+verify_commands:
+  - cargo test -p org-node --features app,test-support --lib --test service_stories --test transport_handshake --test transport_networked --test fuzz_envelope_decode --test fuzz_verify_against_chain
+  - quint typecheck quint/protocol.qnt
+
+problem_age_days: 30
+problem_open_max: 10
+
+# No coverage_command: org-node's coverage has never been measured. Under
+# class C statement AND decision coverage are required, so this is a gap
+# against a mandatory requirement, recorded in
+# docs/plans/2026-09-05-ratchet-setup.md, not a decision that coverage is
+# not needed. Adding a `coverage-org-node` Makefile target is what closes it.
+# coverage_command:
+#   - make coverage-org-node
+
+expectation_age_days: 90
+expectation_open_max: 10
+
+# The code depends on org-members and on-chain-client. The edges are declared
+# in a later tooth, each with its dependency assessment — see units.yaml.
+# depends_on:
+#   - org-members
+#   - on-chain-client
+# segregated_from:
+#   - <unit> (RC-xxxxxx)

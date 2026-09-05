@@ -1,0 +1,56 @@
+# guardrails unit manifest — .guardrails/units.yaml at the repository root.
+# Its PRESENCE switches the repository to multi-unit mode; delete it and
+# every script behaves exactly as a single-unit repository. Written by
+# /ratchet on 2026-09-05 (docs/plans/2026-09-05-ratchet-gap-analysis.md);
+# validated before any gate runs (same flat grammar as config.yaml: `key:`
+# at column one, two-space `- item` lists, LF/CRLF, no BOM, every key set
+# once).
+#
+# Exactly two keys, both lists:
+#
+#   * `units:` (required) — each entry a repository-relative directory holding
+#     its own valid .guardrails/config.yaml. A unit is one IEC 62304 software
+#     system: its own class, ledgers, tests.
+#   * `not_a_unit:` (optional) — directories deliberately OUTSIDE compliance.
+#     This list is what distinguishes "not yet ratcheted" (loud:
+#     UNCLAIMED-PATH) from "deliberately outside" (recorded here, reviewable).
+#     Draft tokens and DRAFT-named files under these paths still convict
+#     (DISCLAIMED-DRAFT): parked work is not disclaimed work.
+#
+# Entry rules, each refused at exit 2: literal directory paths only (no
+# globs, no trailing slash, never `.` or anything leaving the repository, no
+# whitespace); no path listed twice; no entry nested inside another. Matching
+# is by whole path components. Files directly at the repository root, and
+# this directory itself, are implicitly outside every unit.
+#
+# With a manifest present there is NO root .guardrails/config.yaml — two
+# authorities over one tree is refused. Each unit's own config carries its
+# class, its documents (all inside the unit's subtree), its depends_on: and
+# — where a lower-class provider is argued safe — its segregated_from:.
+#
+# The verification records (docs/verification), the ADRs (docs/adr), the
+# plans (docs/plans) and the interface glossary (docs/CONTEXT.md) are
+# repository-level and live under the disclaimed `docs` below on purpose:
+# check-review.sh reads docs/verification by branch, not by unit.
+#
+# No unit declares depends_on: yet. The code has four edges (org-node uses
+# org-members and on-chain-client; app uses org-node and on-chain-client);
+# each is declared in a later tooth with its dependency assessment
+# (grill-requirements, "Declaring a dependency"). Until then every unit is a
+# freestanding guardrails project sharing this repository — visible here,
+# not a switched-off gate.
+
+units:
+  - org-members
+  - on-chain-client
+  - org-node
+  - app
+
+not_a_unit:
+  - on-chain          # Foundry contracts (OrgRegistry.sol); separate toolchain — later tooth
+  - quint             # formal models: verification evidence, no shipped code; typechecked from unit verify_commands
+  - spike-common      # Phase 1.d spike, salvage-only (no upstream PRs until value demonstrated)
+  - spike-keyhive     # Phase 1.d spike, salvage-only
+  - spike-p2panda     # Phase 1.d spike, salvage-only
+  - docs              # repository-level: adr, plans, verification records, interface glossary, superpowers specs, phase-1d reports
+  - .github           # CI definitions

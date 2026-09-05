@@ -1,9 +1,20 @@
 # Rust + guardrails CI.
 #
-# The two `cargo` jobs run `verify_commands` from .guardrails/config.yaml
+# Multi-unit repository since 2026-09-05 (.guardrails/units.yaml): each unit's
+# `verify_commands` live in `<unit>/.guardrails/config.yaml`. The `test` job
+# runs the cargo entries of org-members, on-chain-client and org-node
 # verbatim, so that CI and the local merge gate cannot disagree about what
-# "passing" means. `clippy` and `no-std` are additional contracts that exist
-# only here — see the note on each about why, and about the cost of that.
+# "passing" means. The app unit's two verify_commands
+# (`cargo test --manifest-path app/src-tauri/Cargo.toml`,
+# `npm --prefix app run check`) run NOWHERE in CI yet, for two different
+# reasons: the cargo entry needs Tauri's Linux system packages (webkit2gtk,
+# libsoup, …) this workflow does not install; the npm entry needs
+# `npm --prefix app ci` first (app/node_modules is gitignored) — node itself is
+# already set up in the `test` job. So for app the merge gate is the only
+# gate. The gap is recorded in
+# docs/plans/2026-09-05-ratchet-setup.md. `clippy` and `no-std` are
+# additional contracts that exist only here — see the note on each about why,
+# and about the cost of that.
 #
 # The quint models and the Apalache bounded verify live in quint.yml.
 name: rust
@@ -11,8 +22,9 @@ name: rust
 on: [push, pull_request]
 
 jobs:
-  # verify_commands entries 1 and 2. Entries 3 and 4 (quint typecheck) are
-  # covered by the `quint` job in quint.yml.
+  # The cargo entries of org-members', on-chain-client's and org-node's
+  # verify_commands. The quint typecheck entries are covered by the `quint`
+  # job in quint.yml.
   #
   # quint is installed because `cargo test -p org-members` includes the
   # `mbt_conformance` target, which shells out to it. That test does NOT skip
@@ -38,6 +50,13 @@ jobs:
             --test fuzz_decode_org_state \
             --test fuzz_parse_revive_event \
             --test fuzz_event_round_trip
+      # org-node's verify_commands entry. The chopsticks-dependent targets are
+      # excluded there too, and the feature flags are required by the targets'
+      # `required-features`.
+      - run: |
+          cargo test -p org-node --features app,test-support --lib \
+            --test service_stories --test transport_handshake --test transport_networked \
+            --test fuzz_envelope_decode --test fuzz_verify_against_chain
 
   # Lib targets only. Two separate reasons, and only the first is principled:
   #
@@ -81,10 +100,12 @@ jobs:
           cargo check -p org-members --no-default-features --features serde \
             --target wasm32-unknown-unknown
 
-  # The statement-coverage gate, running the same `make coverage` the merge gate
-  # runs. Floors live in the Makefile and ratchet upward only. This covers the
-  # statement half of the class C target; decision coverage is not measured
-  # anywhere yet (docs/adr/2026-09-01-safety-class-c.md).
+  # The statement-coverage gate, running both per-unit coverage targets the
+  # merge gates run (`make coverage` = coverage-org-members +
+  # coverage-on-chain-client). Floors live in the Makefile and ratchet upward
+  # only. This covers the statement half of the class C target; decision
+  # coverage is not measured anywhere yet
+  # (docs/adr/2026-09-01-safety-class-c.md).
   #
   # Note that the floors were calibrated on aarch64-darwin and are enforced
   # here on x86_64-linux, against a floating `stable` toolchain and an
@@ -109,7 +130,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - run: .guardrails/scripts/check-trace.sh
+      # Multi-unit repository since 2026-09-05 (.guardrails/units.yaml). The
+      # repository-level gates run once; the unit gates run per unit over the
+      # UNION of declared units — this is the base-branch shape, where there is
+      # no change under review and so no impact set to narrow to. The unit
+      # list comes from --list, never a hand-written matrix, so a unit added to
+      # the manifest is gated here the same day. A bare `check-trace.sh` with
+      # no GR_CONFIG is exit 2 in a manifest repository, deliberately.
+      - run: .guardrails/scripts/check-units.sh
+      # A failed `--list` inside a for-list is not caught by `set -e`: the loop
+      # would run zero times and the step would pass — a skipped suite wearing
+      # a green light. Hence the explicit capture and exit 2.
+      - run: |
+          set -e
+          units=$(.guardrails/scripts/check-units.sh --list) || exit 2
+          for u in $units; do
+            echo "== $u"
+            GR_CONFIG="$u/.guardrails/config.yaml" .guardrails/scripts/check-trace.sh
+          done
 
       # --allow-draft-files on a pull request and NOT on a push, because the
       # two ask different questions. A DRAFT-<branch>-<slug>.md ledger file is
@@ -118,9 +156,19 @@ jobs:
       # redden every change that adds an item. On the base branch a draft file
       # means the rename did not happen, which is a real defect.
       - if: github.event_name == 'pull_request'
-        run: .guardrails/scripts/check-ids.sh --allow-draft-files
+        run: |
+          set -e
+          units=$(.guardrails/scripts/check-units.sh --list) || exit 2
+          for u in $units; do
+            GR_CONFIG="$u/.guardrails/config.yaml" .guardrails/scripts/check-ids.sh --allow-draft-files
+          done
       - if: github.event_name != 'pull_request'
-        run: .guardrails/scripts/check-ids.sh
+        run: |
+          set -e
+          units=$(.guardrails/scripts/check-units.sh --list) || exit 2
+          for u in $units; do
+            GR_CONFIG="$u/.guardrails/config.yaml" .guardrails/scripts/check-ids.sh
+          done
 
       # Signature checking belongs on the BASE BRANCH, not on the pull request.
       # Non-negotiable 2 requires the squash commit on master to be signed and

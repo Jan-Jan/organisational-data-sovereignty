@@ -1,5 +1,11 @@
 # Ratchet gap analysis — 2026-08-26
 
+> **Superseded 2026-09-05** by `docs/plans/2026-09-05-ratchet-gap-analysis.md`:
+> the repository became a multi-unit guardrails project (four units, a root
+> manifest, no root config), and the adoption order below was re-cut per unit.
+> The ledgers this document names under `docs/` now live under
+> `org-members/docs/`. Kept unedited as the record of the single-unit period.
+
 Retrofit of guardrails (IEC 62304 / ISO 14971 discipline) onto the two-tier
 access-control project. Source toolkit: `~/Coding/guardrails` at
 `guardrails_version: 0.4.0`. Mode: **retrofit** — 75 commits on `master`,
