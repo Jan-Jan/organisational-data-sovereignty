@@ -32,11 +32,13 @@ keys are replaced, and shall reject an attempt to admit a member whose
 identifier is already present in the organisation.
 (implements: RC-4u22ba)
 satisfies: derived
+exported: yes
 
 **REQ-kmvc96**: The software shall reject an attempt to admit or rename a
 member to a handle already held by another member of the organisation.
 (implements: RC-n2taat)
 satisfies: derived
+exported: yes
 
 **REQ-h5ret5**: The software shall normalize every member handle to NFC and
 shall reject a handle that, after normalization, is empty, exceeds 128 bytes,
@@ -44,12 +46,14 @@ contains an uppercase character, contains `.`, or mixes Unicode scripts (`-`
 being permitted alongside any script).
 (implements: RC-n2taat)
 satisfies: derived
+exported: yes
 
 **REQ-m8aexh**: The software shall reject a member handle whose UTS#39
 confusable skeleton matches that of a handle already held by another member,
 so that two members cannot hold handles that render alike.
 (implements: RC-n2taat)
 satisfies: derived
+exported: yes
 
 ## Member keys and devices
 
@@ -58,6 +62,7 @@ hold, shall reject an attempt to add a device key the member already holds, and
 shall reject an attempt to add a device key to a member already at that bound.
 (implements: RC-3ppkf6)
 satisfies: derived
+exported: yes
 
 The bound is 4 today, and that number is deliberately NOT stated in the
 requirement: it follows from the fixed depth-2 device sub-trie, so it is design
@@ -77,6 +82,7 @@ a removal whose replacement key is the key being replaced, so that a removed
 device cannot derive access from the key it held while enrolled.
 (implements: RC-mqtks7)
 satisfies: derived
+exported: yes
 
 The second clause is **not met today**: the replacement key is stored without
 being compared to the outgoing one, so a caller that passes the current key back
@@ -91,6 +97,7 @@ shall retain the member in the organisation when it does so, and shall restore
 the member's access when a device key is next added.
 (implements: RC-sq3yhp)
 satisfies: derived
+exported: yes
 
 ## Integrity of the membership record
 
@@ -99,6 +106,7 @@ membership record whose hashes have not been computed since its last
 modification, reporting an error instead.
 (implements: RC-ty8qdw)
 satisfies: derived
+exported: yes
 
 **REQ-d3prca**: The software shall leave an existing membership record
 unchanged when a modification is applied, producing the modified membership as
@@ -106,6 +114,7 @@ a separate value, so that a record already published cannot be altered in
 place.
 (implements: RC-3qn5xg)
 satisfies: derived
+exported: yes
 
 **REQ-4umsuz**: The software shall reject a set of membership changes whose
 declared base does not match the membership record it is applied to, and shall
@@ -113,6 +122,7 @@ reject the result of applying a change set whose membership root does not
 match the root the change set was expected to produce.
 (implements: RC-9z65hw)
 satisfies: derived
+exported: yes
 
 **REQ-shk82j**: The software shall re-validate every member handle and device
 key set that it receives from outside the process — handle validity per
@@ -128,6 +138,7 @@ when the change set is applied rather than when it is decoded. Both are existing
 behaviour with tests; naming them here keeps the requirement from asserting an
 equivalence the software does not implement.
 satisfies: derived
+exported: yes
 
 ## Robustness
 
@@ -136,3 +147,4 @@ as an error and shall not panic, for any input, including input that is
 malformed, hostile, or exceeds a documented limit.
 (implements: RC-c4truv)
 satisfies: derived
+exported: yes

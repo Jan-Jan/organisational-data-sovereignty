@@ -68,10 +68,14 @@ problem_open_max: 10
 expectation_age_days: 90
 expectation_open_max: 10
 
-# The code depends on org-node and on-chain-client. The edges are declared in
-# a later tooth, each with its dependency assessment — see units.yaml.
-# depends_on:
-#   - org-node
-#   - on-chain-client
+# Declared 2026-09-06 after the dependency assessment in
+# docs/plans/2026-09-06-dependency-edges.md. Both providers are class C, so
+# the class floor (MISCLASSED-DEPENDENCY) has nothing to convict and no
+# segregated_from: entry is needed. The app has no requirements yet, so it
+# records no expects: items; the gaps the assessment found are listed in the
+# plan for the app's own requirements change.
+depends_on:
+  - org-node
+  - on-chain-client
 # segregated_from:
 #   - <unit> (RC-xxxxxx)

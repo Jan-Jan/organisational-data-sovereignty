@@ -33,12 +33,17 @@
 # repository-level and live under the disclaimed `docs` below on purpose:
 # check-review.sh reads docs/verification by branch, not by unit.
 #
-# No unit declares depends_on: yet. The code has four edges (org-node uses
-# org-members and on-chain-client; app uses org-node and on-chain-client);
-# each is declared in a later tooth with its dependency assessment
-# (grill-requirements, "Declaring a dependency"). Until then every unit is a
-# freestanding guardrails project sharing this repository — visible here,
-# not a switched-off gate.
+# Four depends_on: edges are declared (2026-09-06): org-node -> org-members,
+# org-node -> on-chain-client, app -> org-node, app -> on-chain-client. Each
+# was preceded by the dependency assessment in
+# docs/plans/2026-09-06-dependency-edges.md (grill-requirements, "Declaring a
+# dependency"). org-members exports all twelve of its requirements. org-node
+# has two requirements, both `expects:` items, and an expectation is not an
+# export; on-chain-client and app have none. So all three export surfaces are
+# empty and every cross-unit reference to them is UNDECLARED- or
+# NON-EXPORTED-REF until one of them writes an `exported: yes` requirement.
+# A change to org-members now runs org-node's and
+# app's gates too (check-units.sh --impact).
 
 units:
   - org-members

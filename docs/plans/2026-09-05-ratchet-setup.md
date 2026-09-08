@@ -132,3 +132,18 @@ about the sandbox, in both directions.
   `finding-2..4` range header is not a finding).
 - `guardrails_commit` was never recorded in the 0.5.1 config. It is now set in
   every unit config, which is what makes the qualification basis checkable.
+
+## Added 2026-09-06 — dependency edges (`docs/plans/2026-09-06-dependency-edges.md`)
+
+- [ ] **Deliver REQ-ysyu9g in on-chain-client** before 2026-12-05: an
+  exported requirement stating that `get_org_state` with no block named reads
+  the latest finalised block, carrying `satisfies: REQ-ysyu9g`, with a test.
+  Until then org-node's run reports `UNMET-EXPECTATION`; after that date it
+  fails (`expectation_age_days: 90`). Owner: Jan-Jan.
+- [ ] **Deliver REQ-q92yac in org-members** before 2026-12-05: an exported
+  requirement that a change set removing a device key without replacing the
+  member-as-a-group key is rejected, `satisfies: REQ-q92yac`, with a test —
+  or REQ-ewdg2q amended in place with that `satisfies:` line and a wire-path
+  test; either meets the expectation. Same clock. This is org-members' not-minted control 2 given a requester.
+- [ ] **SOUP tables** are empty in all four units; every consumer inherits its
+  providers' SOUP (assessments, all four edges). Tooth 4.

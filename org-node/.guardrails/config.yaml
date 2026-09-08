@@ -80,10 +80,14 @@ problem_open_max: 10
 expectation_age_days: 90
 expectation_open_max: 10
 
-# The code depends on org-members and on-chain-client. The edges are declared
-# in a later tooth, each with its dependency assessment — see units.yaml.
-# depends_on:
-#   - org-members
-#   - on-chain-client
+# Declared 2026-09-06 after the dependency assessment in
+# docs/plans/2026-09-06-dependency-edges.md. Both providers are class C, so
+# the class floor (MISCLASSED-DEPENDENCY) has nothing to convict and no
+# segregated_from: entry is needed. What org-node relies on that neither
+# provider states as a requirement is recorded as expects: items in this
+# unit's SRS (REQ-ysyu9g on on-chain-client, REQ-q92yac on org-members).
+depends_on:
+  - org-members
+  - on-chain-client
 # segregated_from:
 #   - <unit> (RC-xxxxxx)

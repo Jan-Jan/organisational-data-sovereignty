@@ -79,3 +79,16 @@ A set of membership changes anchored to the Membership record it was computed
 against, exchanged between administrators. Rejected if applied to a record
 other than the one it declares.
 _Avoid_: delta, patch, diff
+
+**Organisation state**:
+The record an Organisation publishes on-chain: its current Membership root,
+its signing key, and the epoch counter that orders successive publications.
+The only thing about an Organisation the chain is asked.
+_Avoid_: org state, registry slot, on-chain record
+
+**Finalised block**:
+A block the chain has committed to irrevocably, so that a value read from it
+cannot be discarded by a later reorganisation. The Organisation state a
+Change set is verified against is read from one.
+_Avoid_: best block, latest block, head (each names a block that can still
+be discarded)
