@@ -40,35 +40,3 @@ pub fn decode_body(body: &[u8]) -> Result<WireMessage, TransportError> {
     postcard::from_bytes(body).map_err(|_| TransportError::Malformed)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ids::OrgId;
-    use crate::keys::SigningKeypair;
-    use crate::test_fixtures::admit_member_delta;
-
-    fn sample_msg() -> WireMessage {
-        let admin = SigningKeypair::from_seed([1u8; 32]);
-        let (delta, _) = admit_member_delta(&admin);
-        let env = SignedDeltaEnvelope::build(OrgId::new([5u8; 20]), 2, &delta, &admin).unwrap();
-        WireMessage { envelope: env, org_secret: Some([9u8; 32]), genesis_snapshot: None }
-    }
-
-    #[test]
-    fn frame_round_trips() {
-        let msg = sample_msg();
-        let framed = encode_frame(&msg).unwrap();
-        // strip the 4-byte length prefix
-        let len = u32::from_le_bytes(framed[0..4].try_into().unwrap()) as usize;
-        assert_eq!(len, framed.len() - 4);
-        let back = decode_body(&framed[4..]).unwrap();
-        assert_eq!(back, msg);
-    }
-
-    #[test]
-    fn oversize_body_is_rejected() {
-        // A body claiming > MAX_FRAME must be rejected by decode_body.
-        let big = vec![0u8; MAX_FRAME + 1];
-        assert!(matches!(decode_body(&big), Err(TransportError::FrameTooLarge(_))));
-    }
-}

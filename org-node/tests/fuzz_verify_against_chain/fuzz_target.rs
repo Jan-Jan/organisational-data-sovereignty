@@ -8,6 +8,8 @@
 //! non-zero and fails `cargo test`. Run with
 //! `cargo test -p org-node --test fuzz_verify_against_chain`; deep-fuzz with
 //! `cargo bolero test fuzz_verify_against_chain --engine libfuzzer`.
+//!
+//! verifies: REQ-bcxz96
 
 use std::panic::AssertUnwindSafe;
 

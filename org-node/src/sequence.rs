@@ -46,24 +46,3 @@ impl SeqGuard {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rejects_equal_and_lower_seq() {
-        let g = SeqGuard::from_last_seen(5);
-        assert!(g.check(6).is_ok());
-        assert_eq!(g.check(5), Err(OrgNodeError::StaleSeq { got: 5, last_seen: 5 }));
-        assert_eq!(g.check(4), Err(OrgNodeError::StaleSeq { got: 4, last_seen: 5 }));
-    }
-
-    #[test]
-    fn advance_moves_high_water_mark_forward_only() {
-        let mut g = SeqGuard::new();
-        g.advance(3);
-        assert_eq!(g.last_seen(), 3);
-        g.advance(2); // ignored
-        assert_eq!(g.last_seen(), 3);
-    }
-}

@@ -56,7 +56,9 @@ jobs:
       - run: |
           cargo test -p org-node --features app,test-support --lib \
             --test service_stories --test transport_handshake --test transport_networked \
-            --test fuzz_envelope_decode --test fuzz_verify_against_chain
+            --test fuzz_envelope_decode --test fuzz_verify_against_chain \
+            --test verify_against_chain --test wire_frame_bound --test store_at_rest \
+            --test admission_sender
 
   # Lib targets only. Two separate reasons, and only the first is principled:
   #

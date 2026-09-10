@@ -147,3 +147,63 @@ about the sandbox, in both directions.
   test; either meets the expectation. Same clock. This is org-members' not-minted control 2 given a requester.
 - [ ] **SOUP tables** are empty in all four units; every consumer inherits its
   providers' SOUP (assessments, all four edges). Tooth 4.
+
+## Added 2026-09-09 — org-node risk analysis (`docs/plans/2026-09-09-org-node-risk-analysis.md`)
+
+- [ ] **Fix PR-vt244s (publish before persist)** by a `resolve-problem` change:
+  reproducing test first (chain write succeeds, send to an unreachable address
+  fails, the record's epoch must equal the chain's), then persist the record
+  on chain confirmation and make delivery retryable. Age limit 2026-10-09.
+- [ ] **Fix PR-2dmjzj (loopback admission unbound to the joiner's Device
+  key)** the same way: refuse a peer address whose identity is not the join
+  request's Device key, or dial by the key as the networked branch does. Age
+  limit 2026-10-09.
+- [ ] **Fix PR-u4c2vp (the revocation receive path cross-checks no sender)**
+  the same way: apply RC-b6mydy's membership cross-check on the revocation
+  receive path, so the `UpdatedNotRevoked` branch cannot commit a record from
+  a sender it did not check; reproducing test first (an update relayed to that
+  path by a non-member device must be rejected and commit nothing). Age limit
+  2026-10-09.
+- [ ] **Resolve PR-hvg2dy** (now in org-node's ledger): correct the
+  `chain_read.rs` doc-comment and the README's "current best". Age limit
+  2026-10-02 — the oldest open item in any unit after PR-zz4exm.
+- [ ] **Resolve PR-w88sr9** (org-node's ledger, opened 2026-09-10 by review
+  round 7): the `WireMessage::genesis_snapshot` doc-comment says the field is
+  `None` for non-admission messages while the revocation send path sets it.
+  Correct the comment on the struct and on the field; the behaviour is right
+  and must not change, and whether to omit the snapshot on the revocation path
+  is not-minted control 15's question, not this report's. Age limit
+  2026-10-10.
+- [ ] **Problem budget re-check.** org-node holds five open reports,
+  org-members one (PR-zz4exm, limit 2026-09-30). Both under
+  `problem_open_max: 10`; both age limits bite within a month.
+- [ ] **Run the chopsticks lane in CI and add a reorganisation test**, so the
+  finalised-publish control can be minted with gated evidence (register,
+  not-minted control 12). `chopsticks_reorg.rs` reorganises nothing today.
+- [ ] **Deep-fuzz lane with a seed corpus** for the two org-node bolero
+  targets (not-minted control 13).
+- [ ] **Run clippy on org-node and on the app** (not-minted control 14, added
+  in fix round 2). No `verify_commands` entry and no CI job lints either
+  crate, so org-node's panic-freedom denial — the structural half of
+  RC-e2uvje — is asserted and never checked; this change itself broke it and
+  passed every gate. Add both feature sets to org-node's `verify_commands`,
+  add org-node to the CI `clippy` job, and give `app/src-tauri` a `[lints]`
+  section plus a clippy entry of its own.
+- [ ] **Bound or omit the membership snapshot on the send path** (not-minted
+  control 15, added in fix round 5). Both Wire messages carry the whole
+  pre-change record, so the 1 MiB frame is a bound on the Organisation, and it
+  bites after the chain write — inside the publish-before-persist window, on
+  admission and revocation alike. The revocation half is free: the receiver
+  rebuilds from its own store and never reads the snapshot. Do it with
+  PR-vt244s.
+- [ ] **A recovery path for a lost store passphrase, and a documented
+  re-enrolment procedure** (not-minted control 16, added in fix round 5).
+  A forgotten passphrase today loses every key on the device; the harm is the
+  same as the crash that truncates the store, which is why this belongs with
+  the atomic-write item (control 10).
+- [ ] **The restriction on use** (carried over) now has a second register
+  behind it: org-node's overall residual risk is UNACCEPTABLE against the
+  intended use, for the reasons its register gives — including all three of
+  the hazards its own controls introduce, each re-assessed as unacceptable in
+  its own right in the fix round that followed the review round which found
+  the defect.

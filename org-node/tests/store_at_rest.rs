@@ -1,0 +1,115 @@
+#![cfg(feature = "app")]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+//! Encrypted-at-rest evidence for `PersonaStore` (REQ-hzm4kt): the store
+//! round-trips through disk, a wrong passphrase yields an error rather than
+//! data, and neither a persona secret nor an Organisation secret appears in
+//! the clear in the file.
+
+use std::path::PathBuf;
+
+use org_node::ids::OrgId;
+use org_node::store::{OrgRecord, PersonaRecord, PersonaStatus, PersonaStore};
+use rand::rngs::OsRng;
+
+/// A fresh, per-test file path under the OS temp dir (any stale file removed).
+fn tmp_path(suffix: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("ods-store-at-rest-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("store-{suffix}.bin"));
+    let _ = std::fs::remove_file(&path);
+    path
+}
+
+fn persona(member_seed: [u8; 32], device_seed: [u8; 32]) -> PersonaRecord {
+    PersonaRecord {
+        persona_id: "p1".into(),
+        org_id: None,
+        handle: "alice".into(),
+        name: "A".into(),
+        surname: "U".into(),
+        member_seed,
+        device_seed,
+        member_id: None,
+        status: PersonaStatus::Proposed,
+    }
+}
+
+/// An org record carrying `org_secret`, with the remaining fields fixed.
+fn org_record(org_secret: Option<[u8; 32]>) -> OrgRecord {
+    OrgRecord {
+        org_id: OrgId::new([5u8; 20]),
+        root_hash: [0x11u8; 32],
+        org_pub_key: [0x22u8; 32],
+        epoch: 3,
+        org_secret,
+        last_seq: 2,
+        admin_member_key: [0x33u8; 32],
+        trie_members: Vec::new(),
+        proxy_account: None,
+    }
+}
+
+fn contains(hay: &[u8], needle: &[u8]) -> bool {
+    hay.windows(needle.len()).any(|w| w == needle)
+}
+
+// verifies: REQ-hzm4kt
+#[test]
+fn round_trips_encrypted_through_disk() {
+    let path = tmp_path("roundtrip");
+
+    let mut s = PersonaStore::open(path.clone(), "hunter2").unwrap();
+    s.data_mut().personas.push(persona([1u8; 32], [2u8; 32]));
+    s.save(&mut OsRng).unwrap();
+
+    // Reopen with the correct passphrase.
+    let s2 = PersonaStore::open(path.clone(), "hunter2").unwrap();
+    assert_eq!(s2.data().personas.len(), 1);
+    assert_eq!(s2.data().personas[0].handle, "alice");
+
+    // Wrong passphrase must fail.
+    assert!(PersonaStore::open(path.clone(), "wrong").is_err());
+
+    let _ = std::fs::remove_file(&path);
+}
+
+// verifies: REQ-hzm4kt
+#[test]
+fn wrong_passphrase_yields_error_not_data() {
+    let path = tmp_path("wrongpw");
+    let mut s = PersonaStore::open(path.clone(), "correct horse").unwrap();
+    s.data_mut().personas.push(persona([7u8; 32], [8u8; 32]));
+    s.save(&mut OsRng).unwrap();
+    let err = PersonaStore::open(path.clone(), "wrong").err().expect("must fail");
+    assert!(err.to_string().contains("decrypt failed"), "got {err}");
+    let _ = std::fs::remove_file(&path);
+}
+
+// verifies: REQ-hzm4kt
+#[test]
+fn seeds_do_not_appear_in_the_file() {
+    let path = tmp_path("plaintext");
+    let mut s = PersonaStore::open(path.clone(), "pw").unwrap();
+    let member_seed = [0x5au8; 32];
+    let device_seed = [0xa5u8; 32];
+    s.data_mut().personas.push(persona(member_seed, device_seed));
+    s.save(&mut OsRng).unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    assert!(!contains(&bytes, &member_seed), "member seed in clear");
+    assert!(!contains(&bytes, &device_seed), "device seed in clear");
+    assert!(!contains(&bytes, b"alice"), "handle in clear");
+    let _ = std::fs::remove_file(&path);
+}
+
+// verifies: REQ-hzm4kt
+#[test]
+fn organisation_secret_does_not_appear_in_the_file() {
+    let path = tmp_path("orgsecret");
+    let mut s = PersonaStore::open(path.clone(), "pw").unwrap();
+    let org_secret = [0x7eu8; 32];
+    s.data_mut().orgs.push(org_record(Some(org_secret)));
+    s.save(&mut OsRng).unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    assert!(!contains(&bytes, &org_secret), "org secret in clear");
+    let _ = std::fs::remove_file(&path);
+}

@@ -1,5 +1,13 @@
-//! Shared deterministic fixtures for org-node tests. Only compiled under test.
-#![cfg(test)]
+//! Shared deterministic fixtures for org-node tests. Compiled under `cfg(test)`
+//! for the crate's unit tests and under the `test-support` feature for the
+//! integration tests in `tests/`; never part of a production build.
+//!
+//! The `unwrap`/`expect` allow below is deliberate: these are deterministic
+//! fixture constructors whose inputs are fixed constants, the module is never
+//! part of a production build, and the crate's panic-freedom denial at
+//! `lib.rs:2` continues to govern every shipped module.
+#![cfg(any(test, feature = "test-support"))]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use org_members::delta::Delta;
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;

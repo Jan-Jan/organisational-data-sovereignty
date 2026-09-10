@@ -119,3 +119,30 @@ path = "tests/finality_polling.rs"
 # is #![cfg(feature = "app")]. Requiring `app` here keeps cargo from building
 # it under bare `chain` (where it would compile to nothing and pass vacuously).
 required-features = ["app"]
+
+# The four targets below were added 2026-09-09 by org-node's risk analysis
+# (docs/plans/2026-09-09-org-node-risk-analysis.md). They carry the
+# `verifies:` annotations the traceability gate reads from `tests/`; the
+# verify-path, frame and store cases were relocated here from `src` unit
+# tests, the sender-check cases are new. `test-support` exposes
+# `org_node::test_fixtures` to them.
+
+[[test]]
+name = "verify_against_chain"
+path = "tests/verify_against_chain.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "wire_frame_bound"
+path = "tests/wire_frame_bound.rs"
+required-features = ["transport", "test-support"]
+
+[[test]]
+name = "store_at_rest"
+path = "tests/store_at_rest.rs"
+required-features = ["app"]
+
+[[test]]
+name = "admission_sender"
+path = "tests/admission_sender.rs"
+required-features = ["app", "test-support"]

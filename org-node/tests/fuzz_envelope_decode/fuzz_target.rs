@@ -6,6 +6,8 @@
 //! non-zero and fails `cargo test`. Run a single target with
 //! `cargo test -p org-node --test fuzz_envelope_decode`; deep-fuzz with
 //! `cargo bolero test fuzz_envelope_decode --engine libfuzzer`.
+//!
+//! verifies: REQ-9g6as6
 
 use bolero::check;
 use org_node::envelope::SignedDeltaEnvelope;

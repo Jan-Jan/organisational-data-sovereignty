@@ -25,9 +25,11 @@ use org_members::{MemberId, MemberLeaf};
 
 type Trie = OrgTrie<Blake3Hasher>;
 
-// Inline genesis_and_admit (test_fixtures is lib-private). Admin keypair
-// doubles as device key, matching the fixture convention. Returns
-// (genesis_trie, new_trie_with_bob, delta).
+// Inline genesis_and_admit. Written before `test_fixtures` was reachable from
+// an integration test; since 2026-09-09 it is `pub mod` under `test-support`,
+// which this target already requires, so this helper is kept inline only to
+// leave the test unchanged. Admin keypair doubles as device key, matching the
+// fixture convention. Returns (genesis_trie, new_trie_with_bob, delta).
 fn genesis_and_admit(admin: &SigningKeypair) -> (Trie, Trie, org_members::delta::Delta) {
     let admin_leaf = MemberLeaf::new(
         MemberId::new([1u8; 32]),

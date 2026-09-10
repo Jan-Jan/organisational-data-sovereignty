@@ -23,13 +23,13 @@ safety_class: C
 
 id_prefixes: REQ HAZ RC SDD LLR PR
 
-# Canonical document locations. README-only ledgers as of 2026-09-05. Two
-# things about org-node are filed in org-members' ledgers and stay there this
-# tooth: PR-hvg2dy (chain_read.rs finality documentation), which cites
-# org-members items and so cannot move without a declared edge — measured
-# 2026-09-05: moved here it drew UNDECLARED-DEPENDENCY on both sides — and
-# the eight hazard mentions of org-node in the RMF. Both move at the
-# redistribution tooth, after depends_on: is declared.
+# Canonical document locations. Ledgers populated 2026-09-09 by org-node's own
+# risk analysis (tooth 3, docs/plans/2026-09-09-org-node-risk-analysis.md):
+# six hazards and nine controls in doc_rmf, fifteen requirements in doc_srs,
+# five open problem reports in doc_problems — one of them the chain-reader
+# finality report, moved here from org-members' ledger (D14) with its
+# `affects:` retargeted to an org-node control, because a consumer may not
+# cite a provider's controls and a provider may not cite a consumer's items.
 doc_srs: org-node/docs/requirements
 doc_rmf: org-node/docs/risk
 doc_sad: org-node/docs/architecture
@@ -60,10 +60,22 @@ test_paths:
 # `test-support` is never enabled in production builds (Cargo.toml) and exists
 # only to expose gated test constructors, so the lib under test differs from
 # the shipped lib by that feature alone.
-# Measured 2026-09-05 (agent sandbox, CARGO_HOME=/tmp/cargo_home_fuzz):
-# 38 passed, 0 failed.
+# Measured 2026-09-05 (agent sandbox, CARGO_HOME=/tmp/cargo_home_fuzz), on
+# the shorter line this comment then described: 38 passed, 0 failed.
+# 2026-09-09: four targets added by org-node's risk analysis. Three hold unit
+# tests relocated out of `src` into `tests/`, where `test_paths` reads their
+# `verifies:` annotations, each from its own module: verify_against_chain from
+# `verify.rs` and `sequence.rs`, wire_frame_bound from `transport/wire.rs`, and
+# store_at_rest from `store.rs`. The fourth, admission_sender, is new: the
+# sender cross-check tests, written against the service API.
+# Measured 2026-09-10 (agent sandbox, CARGO_HOME=/tmp/cargo_home_fuzz) on the
+# line below: 51 passed, 0 failed — lib 23, verify_against_chain 13,
+# store_at_rest 4, wire_frame_bound 3, admission_sender 3, service_stories 3,
+# transport_handshake 1, transport_networked 1. The two bolero targets report
+# no pass count: each prints its iteration total and exits on its one-second
+# budget.
 verify_commands:
-  - cargo test -p org-node --features app,test-support --lib --test service_stories --test transport_handshake --test transport_networked --test fuzz_envelope_decode --test fuzz_verify_against_chain
+  - cargo test -p org-node --features app,test-support --lib --test service_stories --test transport_handshake --test transport_networked --test fuzz_envelope_decode --test fuzz_verify_against_chain --test verify_against_chain --test wire_frame_bound --test store_at_rest --test admission_sender
   - quint typecheck quint/protocol.qnt
 
 problem_age_days: 30

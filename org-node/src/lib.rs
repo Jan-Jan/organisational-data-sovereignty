@@ -36,8 +36,11 @@ pub use service::{ChainOps, MockChainOps, OrgService, ReceiveOutcome, SelfDelete
 #[cfg(feature = "app")]
 pub use service::SubxtChainOps;
 
-#[cfg(test)]
-mod test_fixtures;
+// Deterministic fixtures for this crate's unit tests and, under the
+// `test-support` feature (never enabled in production builds), for the
+// integration tests in `tests/` that carry the traceability annotations.
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_fixtures;
 
 pub use chain::{ChainReader, OrgState};
 pub use envelope::SignedDeltaEnvelope;

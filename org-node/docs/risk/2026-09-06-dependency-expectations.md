@@ -8,6 +8,11 @@ assesses it in the risk management file (UNANALYZED-DERIVED). Read each entry
 as "hazard impact against the hazards org-members' register already
 enumerates", because org-node has enumerated none of its own yet.
 
+(Corrected 2026-09-09: org-node's hazard analysis now exists —
+`org-node/docs/risk/2026-09-09-org-node-hazards.md` — so org-node has six
+hazards of its own, and the two entries below are read against org-members'
+register only because that is the frame in which they were assessed.)
+
 The two items assessed are the expectations in
 `org-node/docs/requirements/2026-09-06-dependency-expectations.md`.
 Both are derived: they exist because the system is partitioned into units and
@@ -62,3 +67,14 @@ items above are candidates for `(implements: RC-…)` in that register, and
 their `expects:` clock — 90 days from 2026-09-06, per
 `expectation_age_days` — is what keeps them from being forgotten in the
 meantime.
+
+(Corrected 2026-09-09: org-node's register is written —
+`org-node/docs/risk/2026-09-09-org-node-hazards.md` — and it does evaluate
+against the matrix. It also names the hazard each expectation was written
+toward: REQ-ysyu9g stands against HAZ-tawvm2, a Change set accepted on its
+sender's word, and REQ-q92yac against HAZ-vxabf9, a device removed from the
+record that keeps acting as a member. Neither carries `(implements: RC-…)`,
+and the annotation is still deliberately withheld: an unmet expectation
+carrying it fails this unit's gate on every run, and the providers' ninety
+days run to 2026-12-05. The clock in this paragraph is therefore still what
+keeps the two items from being forgotten.)

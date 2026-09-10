@@ -234,7 +234,18 @@ must be met upstream of it. An earlier draft of this control asserted the
 independence; it has been removed and appears in the not-minted list.
 
 Residual risk: reduced, **not acceptable**, because the decisive part of this
-control is neither stated as a requirement nor under any gate.
+control is neither stated as a requirement nor under any gate. (Corrected
+2026-09-09: it is now both, on the consumer's side. org-node's risk analysis
+(`org-node/docs/risk/2026-09-09-org-node-hazards.md`) and its requirements
+ledger (`org-node/docs/requirements/2026-09-09-verify-and-commit.md`) state
+the independence of the expected root as a requirement of org-node's — the
+recomputed root must equal the root read from the chain, not a root the
+caller supplies — and a test in
+`org-node/tests` carries a `verifies:` annotation for it that runs under
+org-node's gate at every merge. What is still not acceptable is this crate's
+half: `verify_against` still compares against whatever the caller passes, and
+nothing in `org-members` enforces the provenance, so the property holds only
+for callers that do what org-node does.)
 
 What makes the expected root trustworthy is `verify_envelope_against_chain` in
 `org-node/src/verify.rs`. It checks org binding, then the author's signature,
@@ -248,13 +259,30 @@ correct. Two qualifications, both of which an earlier draft got wrong:
   targets exist for this path. `org-node` appears in no `verify_commands`, no
   `Makefile` target and no CI job, and is in neither `strict_paths` nor
   `test_paths`. The code is exercised only by someone who runs it by hand.
+  (Corrected 2026-09-09: this was already wrong when it was written. The
+  multi-unit conversion of 2026-09-05 gave org-node its own
+  `.guardrails/config.yaml` with `strict_paths`, `test_paths`, a
+  `verify_commands` entry naming every non-chopsticks test target, and a step
+  in `.github/workflows/rust.yml`, so the path has been run at every merge
+  since that date. Since 2026-09-09 the tests that exercise it also carry
+  `verifies:` annotations, and the verify-path tests were relocated out of
+  `org-node/src` unit tests into `org-node/tests`, where `test_paths` reads
+  them — see org-node's risk analysis
+  (`org-node/docs/risk/2026-09-09-org-node-hazards.md`) and its requirements
+  ledger (`org-node/docs/requirements/2026-09-09-verify-and-commit.md`). The
+  one part of the bullet that remains true is the `Makefile` target: there is
+  no `coverage-org-node`, and org-node's coverage has never been measured.)
 - **At verify time no block is read.** The only non-mock reader,
   `OnChainReader`, returns a cached snapshot refreshed when a caller awaits
   `refresh()`. The underlying client read is a finalised-head read, but the
   reader's own doc-comment calls it "current best", contradicting both
   `preflight.rs` and the client's documented `at = None` semantics. That
   contradiction sits on the one control the whole anchor depends on, so it is
-  filed as **PR-hvg2dy** rather than noted in passing.
+  filed as a problem report rather than noted in passing. (Corrected
+  2026-09-09: the report was filed in this ledger by ID here; it moved to
+  org-node's problems ledger with org-node's own risk analysis, and a
+  provider's register may not name a consumer's items, so the ID is replaced
+  by the file — `org-node/docs/problems/2026-09-09-org-node-problems.md`.)
 
 The staleness bound is the other half, and it is weaker than an earlier draft
 claimed. `protocol.qnt` models a `MAX_AGE` policy in which a device may accept
@@ -351,6 +379,14 @@ outside `test_paths`, carries no `verifies:` annotation, has an empty seed
 corpus, and is run by no lane — evidence that exists and counts for nothing,
 which is a worse position to be in than a known absence, because a known
 absence is visible. Annotating and running it is a not-minted control below.
+(Corrected 2026-09-09: three of those four clauses no longer hold. The target
+now sits inside org-node's `test_paths`, carries a `verifies:` annotation and
+runs at every merge as a named `--test` target in org-node's `verify_commands`
+and in its CI step — see org-node's risk analysis
+(`org-node/docs/risk/2026-09-09-org-node-hazards.md`) and its requirements
+ledger (`org-node/docs/requirements/2026-09-09-verify-and-commit.md`). The
+clause that remains true is the empty seed corpus, whose directory holds only
+a `.gitkeep`; the libFuzzer lane for long runs is absent too.)
 
 ### The record altered under what was decided against it
 
@@ -402,6 +438,17 @@ control that closes it is the monotonic envelope sequence number, which
 `org-node` enforces as `SeqGuard` before the delta is decoded and advances only
 after the root match, so a replayed envelope is refused whatever the root says.
 Same position as HAZ-y8h835: implemented, tested in-tree, run by no gate.
+(Corrected 2026-09-09: the last clause no longer holds. The sequence guard's
+tests were relocated out of `org-node/src` unit tests into org-node's
+`test_paths` (`org-node/tests/verify_against_chain.rs`), annotated with
+`verifies:` against requirements of org-node's own, and run at every merge
+through org-node's `verify_commands` and its CI step — see org-node's risk
+analysis (`org-node/docs/risk/2026-09-09-org-node-hazards.md`) and its
+requirements ledger
+(`org-node/docs/requirements/2026-09-09-verify-and-commit.md`). What remains
+open is that the mark is per node: the bar against a root returning at the
+Organisation level is the registry contract's, and org-node's register assesses
+that residual as not acceptable in its own right.)
 
 ## Hazards introduced by these controls
 
@@ -500,11 +547,11 @@ Per hazard, after controls:
 | HAZ-jkc6tj | S3/P1 | not acceptable | last step is a person reading a name |
 | HAZ-s39gbh | S3/P2 | not acceptable | control unimplemented in one clause (PR-zz4exm), bypassed on the wire path in the other |
 | HAZ-sc7wse | S3/P1 | not acceptable | bounded by reversibility; no confirmation step exists |
-| HAZ-y8h835 | S3/P2 | not acceptable | decisive control unstated, ungated and unrun; staleness bound modelled only |
+| HAZ-y8h835 | S3/P2 | not acceptable | decisive control unstated, ungated and unrun (corrected 2026-09-09: now stated and gated in org-node — see the correction under this hazard's residual risk); staleness bound modelled only |
 | HAZ-bmv7cy | S3/P2 | not acceptable | re-validation weaker than admission; evidence is five example tests |
-| HAZ-8suua9 | S3/P2 | not acceptable | broadest claim in the register; the target that would support it is unrun |
+| HAZ-8suua9 | S3/P2 | not acceptable | broadest claim in the register; the target that would support it is unrun (corrected 2026-09-09: now annotated and run in org-node — see the corrections under this hazard's evidence and under not-minted control 3; the seed corpus is still empty) |
 | HAZ-m2xfrm | S1/P1 | **acceptable** | S1 acceptable at every probability; control structural |
-| HAZ-h58jn6 | S3/P1 | not acceptable | closing control ungated and unrun |
+| HAZ-h58jn6 | S3/P1 | not acceptable | closing control ungated and unrun (corrected 2026-09-09: now annotated, gated and run in org-node — see the correction under this hazard's residual risk; the returning-root pathway stays open at the contract) |
 
 And the four prose hazards: admin-account compromise **not acceptable**
 (S3/P1, no software control); missed-rotation lock-out **not acceptable**
@@ -574,15 +621,47 @@ test written before the requirement is claimed, not analysis work.
    (HAZ-bmv7cy, HAZ-8suua9). `org-node/tests/fuzz_envelope_decode` exists and
    reaches the validation surface. It needs a `verifies:` annotation, a seed
    corpus, and a lane that runs it — not writing from scratch, which is what an
-   earlier draft wrongly called for.
+   earlier draft wrongly called for. (Corrected 2026-09-09: partly done. The
+   target now carries a `verifies:` annotation and runs at every merge, as a
+   named `--test` target in org-node's `verify_commands` and in its CI step —
+   see org-node's risk analysis
+   (`org-node/docs/risk/2026-09-09-org-node-hazards.md`) and its requirements
+   ledger (`org-node/docs/requirements/2026-09-09-verify-and-commit.md`).
+   Under `cargo test` the target runs bolero's default generative engine for
+   its one-second budget — of the order of two hundred thousand random inputs
+   per run in this tree — so it is fuzzed at every merge, shallowly. What
+   remains absent is the seed corpus, whose directory holds only a
+   `.gitkeep`, and a libFuzzer lane for the long runs, which stays a separate
+   manual invocation.)
 4. **Bring `org-node` under the traceability gate** (HAZ-y8h835, HAZ-h58jn6).
    The controls exist and are tested in-tree; the requirements, the `verifies:`
    annotations and a lane that runs them do not. Tooth 7 covers `strict_paths`;
-   `test_paths` and a CI job have to come with it.
+   `test_paths` and a CI job have to come with it. (Corrected 2026-09-09:
+   substantially done, and by two changes. The multi-unit conversion of
+   2026-09-05 gave org-node `strict_paths`, `test_paths`, a `verify_commands`
+   entry and a CI step; org-node's own risk analysis
+   (`org-node/docs/risk/2026-09-09-org-node-hazards.md`) and requirements
+   ledger (`org-node/docs/requirements/2026-09-09-verify-and-commit.md`) then
+   supplied the requirements — fifteen of them, realising nine controls
+   between them rather than one apiece; one of the fifteen realises three
+   controls on its own — and the `verifies:` annotations that trace the tests
+   to them.
+   What org-node still lacks is coverage measurement — no `coverage_command`,
+   and under class C statement and decision coverage are mandatory — and any
+   architecture or low-level requirements.)
 5. **State the independence of the expected root as a requirement**
    (HAZ-y8h835). `verify_against` compares against whatever the caller passes;
    that the root comes from a path the attacker cannot control is the property
-   that matters and the one nothing states.
+   that matters and the one nothing states. (Corrected 2026-09-09: it is now
+   stated, as a requirement of org-node's rather than of this crate's, in
+   org-node's requirements ledger
+   (`org-node/docs/requirements/2026-09-09-verify-and-commit.md`) and assessed
+   in its risk analysis
+   (`org-node/docs/risk/2026-09-09-org-node-hazards.md`), with a test in
+   `org-node/tests` under org-node's gate. `verify_against` itself is
+   unchanged, so the property still holds only for the caller that states it;
+   what remains for this crate is the provenance rule it cannot enforce and
+   the expectation org-node has standing against it in the meantime.)
 6. **A staleness bound with a chosen number** (HAZ-y8h835). `TAU` is a model
    constant. A requirement stating the maximum age of a membership view a
    device may act on, and an implementation that refuses to act on an older

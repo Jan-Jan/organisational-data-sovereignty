@@ -27,6 +27,17 @@ analysis is written, both items are candidates for `(implements: RC-…)`, and
 an unmet expectation that implements a control fails the run outright — which
 is the intended escalation.
 
+(Corrected 2026-09-09: that register now exists —
+`org-node/docs/risk/2026-09-09-org-node-hazards.md`, written as tooth 3 — and
+it names the hazard each item above was written toward: REQ-ysyu9g stands
+against HAZ-tawvm2, a Change set accepted on its sender's word, and REQ-q92yac
+against HAZ-vxabf9, a device removed from the record that keeps acting as a
+member. Neither item was annotated `(implements: RC-…)`, and the withholding
+is deliberate for the reason this paragraph gives: an unmet expectation that
+implements a control fails this unit's gate on every run, and the providers'
+ninety days run to 2026-12-05. The register records the two hazards and the
+due date in place of the annotation.)
+
 A note on citations. This file names org-members' requirements by ID where it
 needs to, because those are exported; it does not name org-members' hazards,
 risk controls or problem reports by ID, because only requirements can be
@@ -55,6 +66,11 @@ reads at the latest finalised block") and nowhere else: on-chain-client has no
 requirements ledger entry stating it, and `org-node/src/chain_read.rs`
 documents the same call as "current best" — the contradiction filed as an open
 problem report in `org-members/docs/problems/2026-09-02-chain-reader-finality-doc.md`.
+(Corrected 2026-09-10, as part of the 2026-09-09 correction above: that report
+moved with this change into org-node's own ledger, under D14, and now lives in
+`org-node/docs/problems/2026-09-09-org-node-problems.md`. The org-members file
+named above is emptied and defines no item; it is kept only so its ledger's
+history reads chronologically.)
 A doc-comment is not a commitment. This item is what makes it one, on the
 provider that performs the read.
 
