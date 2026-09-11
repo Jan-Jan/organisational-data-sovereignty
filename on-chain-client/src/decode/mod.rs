@@ -21,14 +21,17 @@
 //!   `pallet_revive::Event::ContractEmitted { contract, data, topics }`
 //!   variant — i.e. the bytes *after* the outer `RuntimeEvent` variant
 //!   discriminant has been peeled off. `Decoder::parse_revive_event`
-//!   returns `Ok(None)` for events from other contracts (mismatched
-//!   topics[0]); this is normal because the follow subscription delivers
-//!   every contract's events on one stream.
+//!   returns `Ok(None)` for a log whose first topic matches no signature
+//!   this decoder knows; that is normal because the follow subscription
+//!   delivers every contract's events on one stream. Filtering by
+//!   emitting contract is the caller's check, on the address returned in
+//!   `EmittedEvent` — a matching signature hash says nothing about which
+//!   contract emitted the log.
 
 use alloc::string::String;
 use core::fmt;
 
-use crate::state::{Event, OrgState};
+use crate::state::{EmittedEvent, OrgState};
 
 pub mod dispatch;
 pub mod v_paseo_ah;
@@ -46,9 +49,11 @@ pub trait Decoder: Send + Sync {
 
     /// Parse the SCALE-encoded payload of `pallet_revive::Event::
     /// ContractEmitted` (`contract: H160, data: Vec<u8>, topics:
-    /// Vec<H256>`) into a typed `Event`. Returns `Ok(None)` for events
-    /// from other contracts (signature mismatch on `topics[0]`).
-    fn parse_revive_event(&self, event_bytes: &[u8]) -> Result<Option<Event>, DecodeError>;
+    /// Vec<H256>`) into a typed `Event` paired with the H160 that emitted
+    /// it. Returns `Ok(None)` for a log whose first topic matches no
+    /// signature this decoder knows; filtering by emitting contract is the
+    /// caller's check, on the address returned in `EmittedEvent`.
+    fn parse_revive_event(&self, event_bytes: &[u8]) -> Result<Option<EmittedEvent>, DecodeError>;
 }
 
 /// Errors returned by `Decoder` methods. Variants are deliberately narrow:

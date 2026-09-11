@@ -7,8 +7,16 @@
 //!   * `sig_genesis()` / `sig_root_updated()` — the EVM event-signature topic
 //!     hashes, derived from their canonical Solidity signature strings rather
 //!     than copied from the decoder's `pub(super)` constants. Independent
-//!     derivation = a drift guard (matches the lib's internal
-//!     `event_signatures_match_solidity_abi` test).
+//!     derivation = a drift guard. The guard itself is
+//!     `the_recognised_signature_hashes_are_the_keccak_of_the_canonical_solidity_strings`
+//!     in `on-chain-client/tests/decode_revive_event.rs` (verifies REQ-52uc8f
+//!     and REQ-wnjz9j), which pins these two functions against the canonical
+//!     Solidity strings written out as literals and then asks the decoder to
+//!     accept those hashes and reject a drifted neighbour. This line named
+//!     the lib's internal `event_signatures_match_solidity_abi` until review
+//!     round 2's finding 7; that test was deleted from `src` by this change
+//!     and relocated here, re-expressed as behaviour rather than as equality
+//!     against a constant a test outside the crate cannot see.
 //!   * `encode_contract_emitted` — the canonical SCALE encoding of
 //!     `pallet_revive::Event::ContractEmitted { contract, data, topics }`,
 //!     mirroring the contract ABI. Independent of the decoder, so a round trip

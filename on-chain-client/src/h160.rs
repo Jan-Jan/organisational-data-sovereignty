@@ -14,9 +14,11 @@
 //!    style 32-byte accounts (the case our pure proxies live in).
 //!
 //! The exact byte position of the `0xEE` prefix has changed across
-//! pallet-revive versions; (a later integration test pins our implementation
-//! against chopsticks-captured ground truth before the OrgId invariant
-//! relies on it).
+//! pallet-revive versions. Two tests bear on that: `tests/h160_mapping.rs`
+//! pins both paths against an independent recomputation of the reading above
+//! and runs in this unit's gate, while `tests/p_address_is_orgid.rs` pins the
+//! mapping against the runtime's own answer and needs a live chopsticks fork,
+//! so it runs in no gate.
 
 use tiny_keccak::{Hasher, Keccak};
 
@@ -44,63 +46,4 @@ pub fn h160_of(account_id_32: [u8; 32]) -> [u8; 20] {
     let mut h160 = [0u8; 20];
     h160.copy_from_slice(&hash[12..32]);
     h160
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reverse_mapping_strips_ee_suffix() {
-        // EVM-derived account: H160 || [0xEE; 12].
-        let mut id = [0u8; 32];
-        for (i, byte) in id.iter_mut().enumerate().take(20) {
-            *byte = i as u8;
-        }
-        for byte in id.iter_mut().skip(20) {
-            *byte = EVM_FALLBACK_MARK;
-        }
-        let h160 = h160_of(id);
-        let mut expected = [0u8; 20];
-        for (i, byte) in expected.iter_mut().enumerate() {
-            *byte = i as u8;
-        }
-        assert_eq!(h160, expected);
-    }
-
-    #[test]
-    fn forward_mapping_keccaks_then_truncates() {
-        // Substrate-style account (no 0xEE suffix): keccak256, take low 20.
-        let id = [0xAA; 32];
-        let h160 = h160_of(id);
-
-        // Re-derive independently as a sanity check against an
-        // implementation typo: keccak256([0xAA; 32]), low 20 bytes.
-        let mut hasher = Keccak::v256();
-        hasher.update(&id);
-        let mut hash = [0u8; 32];
-        hasher.finalize(&mut hash);
-        let mut expected = [0u8; 20];
-        expected.copy_from_slice(&hash[12..32]);
-        assert_eq!(h160, expected);
-    }
-
-    #[test]
-    fn forward_path_taken_when_only_some_suffix_bytes_are_ee() {
-        // 11 of 12 suffix bytes are 0xEE → still goes through the
-        // keccak path (the all() guard in h160_of).
-        let mut id = [0u8; 32];
-        for byte in id.iter_mut().skip(21) {
-            *byte = EVM_FALLBACK_MARK;
-        }
-        // byte 20 is not 0xEE → forward path
-        let h160 = h160_of(id);
-        let mut hasher = Keccak::v256();
-        hasher.update(&id);
-        let mut hash = [0u8; 32];
-        hasher.finalize(&mut hash);
-        let mut expected = [0u8; 20];
-        expected.copy_from_slice(&hash[12..32]);
-        assert_eq!(h160, expected);
-    }
 }

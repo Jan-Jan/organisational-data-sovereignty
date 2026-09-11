@@ -1,17 +1,79 @@
-//! Fuzz target (structured / inverse property): for any structurally-valid
-//! event, `parse_revive_event(encode(event)) == Some(event)`. bolero's
-//! derived `TypeGenerator` produces only well-formed `EventShape`s, so any
-//! deviation is a real decoder regression (wrong field order, dropped
-//! padding, mis-decoded epoch), not malformed input.
+//! verifies: REQ-n6v896
 //!
-//! `harness = false` binary. Run with
-//! `cargo test --test fuzz_event_round_trip`; deep-fuzz with
-//! `cargo bolero test fuzz_event_round_trip --engine libfuzzer`.
+//! Fuzz target (structured / INVERSE property): for any structurally-valid
+//! event, `parse_revive_event(encode(event)) == Some(EmittedEvent { contract,
+//! event })` — field for field, including the emitting contract's address.
+//! bolero's derived `TypeGenerator` produces only well-formed `EventShape`s,
+//! so any deviation is a real decoder regression (wrong field order, dropped
+//! padding, mis-decoded epoch, a discarded emitting address), not malformed
+//! input.
+//!
+//! **Which requirement this is evidence for, and which it is not** (review
+//! round 1, finding 7b). It was annotated `REQ-sx5b6g` until 2026-09-10, whose
+//! property is that ANY ARBITRARY byte sequence yields `Ok` or a typed `Err`
+//! and never a panic. This target never feeds arbitrary bytes — the paragraph
+//! above says so in its own words — so it could not fail on that property and
+//! the annotation contradicted the file's own header. It now carries
+//! REQ-n6v896, the inversion property it actually asserts, which implements
+//! RC-6gfh8d. `fuzz_parse_revive_event` and `fuzz_decode_org_state` do feed
+//! arbitrary bytes and keep REQ-sx5b6g under RC-8w9wtp. All three already ran
+//! in this unit's `verify_commands` before any of these annotations existed
+//! and carried no `verifies:` reference at all, so `check-trace.sh` credited
+//! them with nothing — evidence that ran at every merge and counted for
+//! nothing.
+//!
+//! **What a green run of this target does and does not say.** It is a
+//! `harness = false` binary, so it reports no pass count and no test names.
+//! bolero prints one line — run time, iterations/s, corpus inputs, rng inputs
+//! and an exit reason — and a panic, which is its failure signal (both the
+//! `assert_eq!` below and the `expect` on the decode are panics), exits
+//! non-zero and fails `cargo test`. "Green" therefore means the process
+//! exhausted its time budget with the property holding on every generated
+//! shape; it never means "N cases passed". Read the iteration total and the
+//! exit reason, not a count.
+//!
+//! **Depth: one second of generated inputs, which is a smoke depth — and the
+//! shallowest of the three targets.** Under the gate's default engine the
+//! budget is wall-clock, not a fixed case count, so the total differs on
+//! every run and no run's number is reproducible. Measured 2026-09-10 with
+//! the gate's own command, twice in a row: 23_404 then 39_337 rng inputs,
+//! both ending `exit reason: max duration (1s - default) exceeded`. That is
+//! roughly an order of magnitude fewer cases per second than the two
+//! raw-byte targets, because each iteration here builds a whole payload and
+//! reconstructs the expected value rather than handing a slice to the parser.
+//! Depth beyond that second is a separate explicit invocation —
+//! `cargo bolero test fuzz_event_round_trip --engine libfuzzer` — which no
+//! lane in this repository runs.
+//!
+//! **Seed corpus: empty, and this is the one live corpus gap of the three.**
+//! `corpus/` holds only `.gitkeep`, which is why the run line above carries
+//! no `corpus inputs:` field at all where the other two report 4 and 6: every
+//! input this target has ever seen came from the rng, so each run starts from
+//! scratch and nothing found interesting is carried forward. It is unseeded
+//! by design rather than by neglect — `tests/regenerate_corpus.rs` seeds "the
+//! two raw-byte targets" only, and a file dropped in this directory would be
+//! consumed as driver bytes for the `EventShape` `TypeGenerator`, not as a
+//! `ContractEmitted` payload, so seeding it is a different job from seeding
+//! the other two and has not been done. `crashes/` holds only `.gitkeep`.
+//! An empty seed corpus is recorded as a live gap for a fuzz target
+//! elsewhere in this repository too — see
+//! `org-members/docs/risk/2026-09-02-membership-hazards.md` — and the
+//! statement here is the current measured fact for this target, not an
+//! inherited claim.
+//!
+//! The address half of the property is newer than the rest of the file: the
+//! expectation became `Some(EmittedEvent { contract, event })` when the
+//! emitting contract's H160 stopped being dropped by the decoder (REQ-5upq6n,
+//! `tests/contract_address_filter.rs`), so the round-trip now pins the
+//! address the caller filters on instead of discarding it.
+//!
+//! Run this target alone with `cargo test --test fuzz_event_round_trip`.
 
 use std::panic::AssertUnwindSafe;
 
 use bolero::{TypeGenerator, check};
 use on_chain_client::decode::dispatch::{PASEO_AH_SPEC_VERSION, for_runtime};
+use on_chain_client::state::EmittedEvent;
 use on_chain_client::{Epoch, Event, OnChainRootHash, OrgAdmin, OrgPubKey};
 
 #[path = "../fuzz_support/mod.rs"]
@@ -39,9 +101,11 @@ enum EventShape {
     },
 }
 
-/// Encode a shape into a canonical `ContractEmitted` payload AND the `Event`
-/// the decoder should reconstruct from it.
-fn encode_and_expect(shape: &EventShape) -> (Vec<u8>, Event) {
+/// Encode a shape into a canonical `ContractEmitted` payload AND the
+/// `EmittedEvent` the decoder should reconstruct from it — the event *and* the
+/// emitting contract's address, so the round-trip property covers the address
+/// the caller filters on (HAZ-werm85) rather than discarding it.
+fn encode_and_expect(shape: &EventShape) -> (Vec<u8>, EmittedEvent) {
     match *shape {
         EventShape::Genesis { contract, admin, root, key } => {
             let mut data = Vec::with_capacity(64);
@@ -49,10 +113,13 @@ fn encode_and_expect(shape: &EventShape) -> (Vec<u8>, Event) {
             data.extend_from_slice(&key);
             let topics = vec![sig_genesis(), padded_address(admin)];
             let bytes = encode_contract_emitted(contract, data, topics);
-            let expected = Event::Genesis {
-                admin: OrgAdmin(admin),
-                root_hash: OnChainRootHash(root),
-                org_pub_key: OrgPubKey(key),
+            let expected = EmittedEvent {
+                contract,
+                event: Event::Genesis {
+                    admin: OrgAdmin(admin),
+                    root_hash: OnChainRootHash(root),
+                    org_pub_key: OrgPubKey(key),
+                },
             };
             (bytes, expected)
         }
@@ -63,12 +130,15 @@ fn encode_and_expect(shape: &EventShape) -> (Vec<u8>, Event) {
             data.extend_from_slice(&prev_root);
             let topics = vec![sig_root_updated(), padded_address(admin), uint256_be(epoch)];
             let bytes = encode_contract_emitted(contract, data, topics);
-            let expected = Event::Update {
-                admin: OrgAdmin(admin),
-                epoch: Epoch(epoch),
-                root_hash: OnChainRootHash(root),
-                org_pub_key: OrgPubKey(key),
-                prev_root_hash: OnChainRootHash(prev_root),
+            let expected = EmittedEvent {
+                contract,
+                event: Event::Update {
+                    admin: OrgAdmin(admin),
+                    epoch: Epoch(epoch),
+                    root_hash: OnChainRootHash(root),
+                    org_pub_key: OrgPubKey(key),
+                    prev_root_hash: OnChainRootHash(prev_root),
+                },
             };
             (bytes, expected)
         }

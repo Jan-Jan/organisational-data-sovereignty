@@ -42,6 +42,17 @@ pub enum Event {
     },
 }
 
+/// A decoded `OrgRegistry` event together with the H160 of the contract that
+/// emitted it. The address is carried out of the decoder rather than dropped
+/// because it is the only thing that distinguishes a genuine OrgRegistry log
+/// from one any other contract can emit with the same signature hash and the
+/// same indexed admin (HAZ-werm85).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EmittedEvent {
+    pub contract: [u8; 20],
+    pub event: Event,
+}
+
 /// A notification yielded by `OrgRegistryClient::subscribe`. Best-block and
 /// finalised emissions are distinct so consumers can act optimistically on
 /// best-block events and only commit local state once finalisation arrives.

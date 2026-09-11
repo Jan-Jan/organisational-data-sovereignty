@@ -3,6 +3,11 @@
 //! to a static decoder impl. Adding support for a new Paseo AH runtime
 //! version means adding a `decode::v_paseo_ah_<N>` module and a match arm
 //! here — nothing else changes.
+//!
+//! Tested from `on-chain-client/tests/runtime_version_dispatch.rs`, not
+//! from a `#[cfg(test)]` module here: this unit's gate reads its evidence
+//! from `test_paths` (`on-chain-client/tests`), so an annotated test
+//! written in `src` would be read by no gate.
 
 use super::{DecodeError, Decoder, v_paseo_ah};
 
@@ -22,26 +27,5 @@ pub fn for_runtime(spec_version: u32) -> Result<&'static dyn Decoder, DecodeErro
     match spec_version {
         PASEO_AH_SPEC_VERSION => Ok(&v_paseo_ah::DECODER),
         _ => Err(DecodeError::UnsupportedRuntime { spec_version }),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn pinned_version_resolves() {
-        let decoder = for_runtime(PASEO_AH_SPEC_VERSION);
-        assert!(decoder.is_ok(), "pinned spec_version did not resolve");
-    }
-
-    #[test]
-    fn unknown_version_errors() {
-        let bogus = PASEO_AH_SPEC_VERSION.wrapping_add(1);
-        let err = for_runtime(bogus).err();
-        assert_eq!(
-            err,
-            Some(DecodeError::UnsupportedRuntime { spec_version: bogus })
-        );
     }
 }

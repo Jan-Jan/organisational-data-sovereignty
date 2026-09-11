@@ -30,6 +30,11 @@ dev-rpc = ["client"]
 # client (per the 2026-06-04 amendment, this replaced the hand-rolled
 # SmoldotRpc).
 smoldot = ["client", "subxt/light-client"]
+# Exposes crate internals to the annotated integration tests in
+# on-chain-client/tests, which is where this unit's gate reads its evidence
+# (test_paths in on-chain-client/.guardrails/config.yaml). Not part of the
+# crate's supported API; off by default, and never enabled by a consumer.
+test-support = []
 
 [dependencies]
 # SCALE decoder for pallet-revive event payloads. no_std + alloc compatible
@@ -107,3 +112,62 @@ harness = false
 name = "fuzz_event_round_trip"
 path = "tests/fuzz_event_round_trip/fuzz_target.rs"
 harness = false
+
+# The nine annotated integration targets this unit's gate reads (test_paths in
+# on-chain-client/.guardrails/config.yaml). Each is declared explicitly with
+# `required-features = ["test-support"]` for one reason: cargo REFUSES an
+# explicit `--test <name>` whose required features are off, and errors rather
+# than skipping. A target named in `verify_commands` therefore cannot silently
+# not run — the org-node lesson from tooth 1.
+#
+# The same declaration is what makes `cargo check --all-targets` succeed under
+# DEFAULT features: `log_ownership`, `storage_slot_layout` and
+# `best_lane_reorg_rule` import the feature-gated `on_chain_client::test_support`,
+# and without a `required-features` entry cargo tries to build them with the
+# feature off and fails to compile. Measured before this entry existed:
+# `cargo check --all-targets` failed with E0432 on that import.
+#
+# Order matches `verify_commands` in on-chain-client/.guardrails/config.yaml and
+# the `coverage-on-chain-client` recipe in the Makefile, so the three lists are
+# diffable against one another.
+[[test]]
+name = "contract_address_filter"
+required-features = ["test-support"]
+
+[[test]]
+name = "log_ownership"
+required-features = ["test-support"]
+
+[[test]]
+name = "decode_revive_event"
+required-features = ["test-support"]
+
+[[test]]
+name = "decode_org_state"
+required-features = ["test-support"]
+
+[[test]]
+name = "runtime_version_dispatch"
+required-features = ["test-support"]
+
+[[test]]
+name = "h160_mapping"
+required-features = ["test-support"]
+
+[[test]]
+name = "storage_slot_layout"
+required-features = ["test-support"]
+
+[[test]]
+name = "best_lane_reorg_rule"
+required-features = ["test-support"]
+
+# Ninth target, added 2026-09-10 by review round 1's finding 1: the last two
+# `#[cfg(test)]` tests in `src` (types.rs) moved here, where `test_paths` can
+# see their annotations. It needs nothing from `test-support`, but it is
+# declared with the same `required-features` entry as its eight neighbours so
+# that naming it in `verify_commands` is a cargo ERROR when the feature is off
+# rather than a silent skip — the property the whole list is declared for.
+[[test]]
+name = "type_widths"
+required-features = ["test-support"]

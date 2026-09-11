@@ -2,6 +2,13 @@
 //! fixed-size byte arrays — chosen over naked primitives so the public API
 //! can't accidentally swap `OrgPubKey` for `OnChainRootHash` (both are 32
 //! bytes). Matches the surface declared in spec §3.
+//!
+//! Tested from `on-chain-client/tests/type_widths.rs`, not from a
+//! `#[cfg(test)]` module here: this unit's gate reads its evidence from
+//! `test_paths` (`on-chain-client/tests`), so an annotated test written in
+//! `src` would be read by no gate. The two cases that lived here until
+//! 2026-09-10 were the last such tests in this crate's `src` (review round 1,
+//! finding 1).
 
 use core::fmt;
 
@@ -32,24 +39,3 @@ impl fmt::Display for Epoch {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn newtypes_have_expected_widths() {
-        // Locks the public byte layout: any accidental change to the
-        // wrapped array size becomes a compile-then-test failure.
-        assert_eq!(core::mem::size_of::<OrgAdmin>(), 20);
-        assert_eq!(core::mem::size_of::<OnChainRootHash>(), 32);
-        assert_eq!(core::mem::size_of::<OrgPubKey>(), 32);
-        assert_eq!(core::mem::size_of::<Epoch>(), 8);
-    }
-
-    #[test]
-    fn epoch_display_is_the_inner_value() {
-        // Smoke test; the Display impl is used in error messages and logs.
-        let e = Epoch(42);
-        assert_eq!(alloc::format!("{e}"), "42");
-    }
-}

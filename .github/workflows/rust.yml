@@ -45,11 +45,27 @@ jobs:
       - run: npm i -g @informalsystems/quint
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test -p org-members
+      # on-chain-client's verify_commands entry. `--features test-support` and
+      # the nine annotated targets after the fuzz ones are where this unit's
+      # risk controls are verified; each is declared with
+      # `required-features = ["test-support"]`, so naming one without the
+      # feature is a cargo error rather than a silent skip. The `clippy` job
+      # below stays on `--lib`, which does not compile `test-support`, so this
+      # exposure cannot regress the panic-freedom gate.
       - run: |
-          cargo test --manifest-path on-chain-client/Cargo.toml --lib \
+          cargo test --manifest-path on-chain-client/Cargo.toml --features test-support --lib \
             --test fuzz_decode_org_state \
             --test fuzz_parse_revive_event \
-            --test fuzz_event_round_trip
+            --test fuzz_event_round_trip \
+            --test contract_address_filter \
+            --test log_ownership \
+            --test decode_revive_event \
+            --test decode_org_state \
+            --test runtime_version_dispatch \
+            --test h160_mapping \
+            --test storage_slot_layout \
+            --test best_lane_reorg_rule \
+            --test type_widths
       # org-node's verify_commands entry. The chopsticks-dependent targets are
       # excluded there too, and the feature flags are required by the targets'
       # `required-features`.

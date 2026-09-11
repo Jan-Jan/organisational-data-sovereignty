@@ -33,3 +33,14 @@ pub use crate::types::{Epoch, OnChainRootHash, OrgAdmin, OrgPubKey};
 
 #[cfg(feature = "client")]
 pub use crate::client::{ClientError, OrgRegistryClient, SubscribedEventStream};
+
+/// Internals exposed only for this unit's annotated integration tests. See
+/// the `test-support` feature's comment in `Cargo.toml`. Compiled only when
+/// that feature is on, so the crate's default build and the `--lib` clippy
+/// gate in CI are unaffected.
+#[cfg(all(feature = "test-support", feature = "client"))]
+pub mod test_support {
+    pub use crate::client::internals::{
+        ScanStep, increment_slot, log_is_ours, scan_step, solidity_mapping_slot,
+    };
+}

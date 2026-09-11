@@ -30,6 +30,16 @@
 //!
 //! Backend policy and the ReviveApi-based state read are per the
 //! 2026-06-04 subxt-commitment amendment.
+//!
+//! This module's chain-free decisions are tested from
+//! `on-chain-client/tests`, not from a `#[cfg(test)]` module here: this
+//! unit's gate reads its evidence from `test_paths`
+//! (`on-chain-client/tests`), so an annotated test written in `src` would be
+//! read by no gate. `internals::{solidity_mapping_slot, increment_slot}` are
+//! covered by `tests/storage_slot_layout.rs`, `internals::scan_step` by
+//! `tests/best_lane_reorg_rule.rs`, and `internals::log_is_ours` by
+//! `tests/log_ownership.rs` and `tests/contract_address_filter.rs`. All four
+//! are reached through the feature-gated `crate::test_support` re-export.
 
 use alloc::boxed::Box;
 use alloc::format;
@@ -42,8 +52,10 @@ use futures_util::StreamExt;
 use subxt::OnlineClient;
 use subxt::config::PolkadotConfig;
 use subxt::dynamic::Value;
-use tiny_keccak::{Hasher, Keccak};
 
+use crate::client::internals::{
+    ScanStep, increment_slot, log_is_ours, scan_step, solidity_mapping_slot,
+};
 use crate::decode::{Decoder, DecodeError, dispatch};
 use crate::state::{BlockHash, BlockRef, Event, OrgState, SubscribedEvent};
 use crate::types::OrgAdmin;
@@ -356,33 +368,12 @@ impl OrgRegistryClient {
             .scan(Some(seed), move |last: &mut Option<BlockRef>, block_res| {
                 let step: ScanStep = match block_res {
                     Err(e) => ScanStep::Error(format!("block: {e}")),
-                    Ok(block) => {
-                        let n = block.number();
-                        let h = BlockHash(block.hash().0);
-                        let p = BlockHash(block.header().parent_hash.0);
-                        match *last {
-                            // Dedup: same hash as the last head we
-                            // processed — emit nothing, don't advance.
-                            Some(prev) if prev.hash == h => ScanStep::Skip,
-                            _ => {
-                                let reorged = match *last {
-                                    Some(prev)
-                                        if n <= prev.number
-                                            || (n == prev.number + 1 && p != prev.hash) =>
-                                    {
-                                        Some(prev)
-                                    }
-                                    _ => None,
-                                };
-                                let from = match *last {
-                                    Some(prev) if n > prev.number => prev.number + 1,
-                                    _ => n,
-                                };
-                                *last = Some(BlockRef { hash: h, number: n });
-                                ScanStep::Block { reorged, from, to: n }
-                            }
-                        }
-                    }
+                    Ok(block) => scan_step(
+                        last,
+                        block.number(),
+                        BlockHash(block.hash().0),
+                        BlockHash(block.header().parent_hash.0),
+                    ),
                 };
                 core::future::ready(Some(step))
             })
@@ -487,17 +478,123 @@ impl OrgRegistryClient {
     }
 }
 
-/// Per-step output of the best-lane scan. `Skip` yields nothing (dedup),
-/// `Error` surfaces an upstream block error, `Block` carries an optional
-/// reorg notification plus the inclusive backfill range `from ..= to`.
-enum ScanStep {
-    Skip,
-    Error(String),
-    Block {
-        reorged: Option<BlockRef>,
-        from: u64,
-        to: u64,
-    },
+/// The chain-free helpers this module is built on: the best lane's step
+/// decision and the Solidity slot arithmetic. They live in their own module
+/// so they can be declared `pub` and re-exported by `lib.rs`'s
+/// feature-gated `test_support` module — a `pub(crate)` item cannot be
+/// re-exported (E0364), and a `pub` item in a non-public module is not
+/// reachable from outside the crate, so the default build's public API is
+/// unchanged either way.
+pub(crate) mod internals {
+    use alloc::string::String;
+
+    use tiny_keccak::{Hasher, Keccak};
+
+    use super::event_admin;
+    use crate::state::{BlockHash, BlockRef, EmittedEvent};
+    use crate::types::OrgAdmin;
+
+    /// Whether a decoded log belongs to the Organisation this reader watches:
+    /// the contract that emitted it must be the one the reader was constructed
+    /// for, and — when a filter is set — the event's admin must be the one
+    /// filtered on. Extracted from `decode_contract_events` so the decision
+    /// can be tested without a chain: the comparison it replaces was
+    /// unreachable from every gated test, which is HAZ-werm85's residual and
+    /// was measured, not assumed.
+    ///
+    /// The contract check comes first and is decisive: any contract on the
+    /// chain can emit a log carrying our signature hash and a victim's
+    /// indexed admin, so a matching admin must never rescue a foreign log.
+    pub fn log_is_ours(
+        emitted: &EmittedEvent,
+        configured_contract: &[u8; 20],
+        admin_filter: Option<OrgAdmin>,
+    ) -> bool {
+        if emitted.contract != *configured_contract {
+            return false;
+        }
+        match admin_filter {
+            None => true,
+            Some(wanted) => *event_admin(&emitted.event) == wanted,
+        }
+    }
+
+    /// Per-step output of the best-lane scan. `Skip` yields nothing (dedup),
+    /// `Error` surfaces an upstream block error, `Block` carries an optional
+    /// reorg notification plus the inclusive backfill range `from ..= to`.
+    #[derive(Debug, PartialEq, Eq)]
+    pub enum ScanStep {
+        Skip,
+        Error(String),
+        Block {
+            reorged: Option<BlockRef>,
+            from: u64,
+            to: u64,
+        },
+    }
+
+    /// The best lane's per-notification decision, extracted from `best_lane`'s
+    /// `scan` closure so it can be tested without a chain. Given the last best
+    /// head actually processed and the new head's (number, hash, parent),
+    /// returns what to emit and advances `last`. Pure apart from that advance.
+    pub fn scan_step(
+        last: &mut Option<BlockRef>,
+        n: u64,
+        h: BlockHash,
+        p: BlockHash,
+    ) -> ScanStep {
+        match *last {
+            // Dedup: same hash as the last head we processed — emit nothing,
+            // don't advance.
+            Some(prev) if prev.hash == h => ScanStep::Skip,
+            _ => {
+                let reorged = match *last {
+                    Some(prev) if n <= prev.number || (n == prev.number + 1 && p != prev.hash) => {
+                        Some(prev)
+                    }
+                    _ => None,
+                };
+                let from = match *last {
+                    Some(prev) if n > prev.number => prev.number + 1,
+                    _ => n,
+                };
+                *last = Some(BlockRef { hash: h, number: n });
+                ScanStep::Block { reorged, from, to: n }
+            }
+        }
+    }
+
+    /// Compute the Solidity slot key for `orgs[admin]` where `orgs` is the
+    /// `mapping(address => OrgState)` declared at slot 0. Formula:
+    /// `keccak256(abi.encode(uint256(admin_padded), uint256(map_slot)))`.
+    pub fn solidity_mapping_slot(admin: OrgAdmin, map_slot: u64) -> [u8; 32] {
+        let mut buf = [0u8; 64];
+        // address is left-padded into bytes [12..32].
+        buf[12..32].copy_from_slice(&admin.0);
+        // map slot is uint256 big-endian into bytes [32..64]'s low 8.
+        buf[56..64].copy_from_slice(&map_slot.to_be_bytes());
+        let mut hasher = Keccak::v256();
+        hasher.update(&buf);
+        let mut out = [0u8; 32];
+        hasher.finalize(&mut out);
+        out
+    }
+
+    /// Increment a 32-byte big-endian slot id by `offset`. Solidity stores
+    /// struct fields at consecutive slots, so `S+1`, `S+2` etc. are
+    /// computed this way. Wrapping is unreachable in practice (it would
+    /// require a 2^256 mapping).
+    pub fn increment_slot(slot: &mut [u8; 32], offset: u8) {
+        let mut carry = u16::from(offset);
+        for byte in slot.iter_mut().rev() {
+            let sum = u16::from(*byte) + carry;
+            *byte = sum as u8;
+            carry = sum >> 8;
+            if carry == 0 {
+                break;
+            }
+        }
+    }
 }
 
 /// Fetch the events of best block `number`, decode every
@@ -564,7 +661,7 @@ async fn decode_contract_events(
         // same decoder the fixture tests pin, even though subxt could
         // surface fields directly via the dynamic Value API.
         let payload = ev.field_bytes();
-        let parsed = match decoder.parse_revive_event(payload) {
+        let emitted = match decoder.parse_revive_event(payload) {
             Ok(Some(e)) => e,
             Ok(None) => continue,
             Err(e) => {
@@ -572,110 +669,31 @@ async fn decode_contract_events(
                 continue;
             }
         };
-        if !event_matches_contract(&parsed, &contract) {
+        // The decisive check: a log is this organisation's only if the
+        // contract that emitted it is the one this reader was constructed
+        // for. Any contract can emit a log carrying our signature hash and a
+        // victim's indexed admin (HAZ-werm85), so pallet+variant filtering is
+        // not enough. The decision lives in `internals::log_is_ours` so it is
+        // reachable by a test without a chain; behaviour is unchanged — the
+        // contract check already preceded the admin check, and `None` already
+        // meant "no filter".
+        if !log_is_ours(&emitted, &contract, admin_filter) {
             continue;
         }
-        if let Some(filter) = admin_filter {
-            if !event_matches_admin(&parsed, &filter) {
-                continue;
-            }
-        }
-        out.push(Ok(wrap(parsed, block_ref)));
+        out.push(Ok(wrap(emitted.event, block_ref)));
     }
     Ok(out)
-}
-
-/// Compute the Solidity slot key for `orgs[admin]` where `orgs` is the
-/// `mapping(address => OrgState)` declared at slot 0. Formula:
-/// `keccak256(abi.encode(uint256(admin_padded), uint256(map_slot)))`.
-fn solidity_mapping_slot(admin: OrgAdmin, map_slot: u64) -> [u8; 32] {
-    let mut buf = [0u8; 64];
-    // address is left-padded into bytes [12..32].
-    buf[12..32].copy_from_slice(&admin.0);
-    // map slot is uint256 big-endian into bytes [32..64]'s low 8.
-    buf[56..64].copy_from_slice(&map_slot.to_be_bytes());
-    let mut hasher = Keccak::v256();
-    hasher.update(&buf);
-    let mut out = [0u8; 32];
-    hasher.finalize(&mut out);
-    out
-}
-
-/// Increment a 32-byte big-endian slot id by `offset`. Solidity stores
-/// struct fields at consecutive slots, so `S+1`, `S+2` etc. are
-/// computed this way. Wrapping is unreachable in practice (it would
-/// require a 2^256 mapping).
-fn increment_slot(slot: &mut [u8; 32], offset: u8) {
-    let mut carry = u16::from(offset);
-    for byte in slot.iter_mut().rev() {
-        let sum = u16::from(*byte) + carry;
-        *byte = sum as u8;
-        carry = sum >> 8;
-        if carry == 0 {
-            break;
-        }
-    }
 }
 
 fn subxt_block_ref(h: BlockHash) -> subxt::utils::H256 {
     subxt::utils::H256(h.0)
 }
 
-fn event_matches_contract(ev: &Event, contract: &[u8; 20]) -> bool {
-    // Both event variants carry an `admin` field that's the H160 the
-    // contract is keyed on — *not* the contract's own H160, which we
-    // already filtered on by pallet+variant. So this is a no-op for
-    // address filtering; left here as the structural hook for when a
-    // future deployment uses one OrgRegistry instance + many ABIs.
-    let _ = (ev, contract);
-    true
-}
-
-fn event_matches_admin(ev: &Event, admin: &OrgAdmin) -> bool {
-    let event_admin = match ev {
+/// The admin an `OrgRegistry` event carries, borrowed. One match over the two
+/// event shapes, so `log_is_ours` does not have to repeat it.
+fn event_admin(ev: &Event) -> &OrgAdmin {
+    match ev {
         Event::Genesis { admin, .. } => admin,
         Event::Update { admin, .. } => admin,
-    };
-    event_admin == admin
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn solidity_mapping_slot_matches_known_vector() {
-        // Reference vector: a 20-byte admin of all 0x11, mapping slot 0.
-        // Expected = keccak256(0x00*12 || 0x11*20 || 0x00*32).
-        let admin = OrgAdmin([0x11; 20]);
-        let got = solidity_mapping_slot(admin, 0);
-
-        let mut buf = [0u8; 64];
-        buf[12..32].copy_from_slice(&[0x11; 20]);
-        // buf[32..64] is all zero (slot 0).
-        let mut hasher = Keccak::v256();
-        hasher.update(&buf);
-        let mut expected = [0u8; 32];
-        hasher.finalize(&mut expected);
-        assert_eq!(got, expected);
-    }
-
-    #[test]
-    fn increment_slot_adds_offset_big_endian() {
-        let mut slot = [0u8; 32];
-        slot[31] = 0xfe;
-        increment_slot(&mut slot, 3);
-        // 0xfe + 3 = 0x101 → low byte 0x01, carry into byte 30.
-        let mut expected = [0u8; 32];
-        expected[30] = 0x01;
-        expected[31] = 0x01;
-        assert_eq!(slot, expected);
-    }
-
-    #[test]
-    fn increment_slot_offset_zero_is_identity() {
-        let mut slot = [0x42; 32];
-        increment_slot(&mut slot, 0);
-        assert_eq!(slot, [0x42; 32]);
     }
 }
