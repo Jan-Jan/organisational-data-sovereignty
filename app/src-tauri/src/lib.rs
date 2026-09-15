@@ -4,6 +4,9 @@
 //! registers all Tauri commands, and exposes the `run()` entry point.
 
 pub mod commands;
+pub mod events;
+pub mod parsing;
+pub mod policy;
 pub mod state;
 
 use tauri::Manager;
@@ -19,7 +22,7 @@ pub fn run() {
             let tauri_data_dir = app
                 .path()
                 .app_data_dir()
-                .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/ods-poc"));
+                .ok();
 
             let app_state = AppState::init(tauri_data_dir)
                 .unwrap_or_else(|e| panic!("AppState init failed: {e}"));

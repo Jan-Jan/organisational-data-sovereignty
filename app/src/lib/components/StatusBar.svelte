@@ -1,4 +1,15 @@
 <script lang="ts">
+	/**
+	 * REQ-645jq9: the transport mode the backend is actually running is shown
+	 * here, because it changes what the operator must supply elsewhere (the peer
+	 * address in Revoke) and was previously invisible.
+	 *
+	 * REQ-e4ah9h / REQ-bvx4nh: `chain_ws` and `contract_h160` come from the
+	 * configuration the backend built at startup, not from the environment, and
+	 * are null exactly when `chain_configured` is false. The guards below are
+	 * therefore a rendering guard, not a second decision — this component never
+	 * infers "configured" from the presence of an endpoint.
+	 */
 	import { connectionStatus, type ConnectionStatus } from '$lib/api';
 
 	let status = $state<ConnectionStatus | null>(null);
@@ -26,12 +37,12 @@
 		<span class:ok={status.chain_configured} class:warn={!status.chain_configured}>
 			{status.chain_configured ? 'Chain OK' : 'Chain NOT configured'}
 		</span>
-		{#if status.chain_ws}
+		{#if status.chain_configured}
 			<span class="detail">ws: {status.chain_ws}</span>
-		{/if}
-		{#if status.contract_h160}
 			<span class="detail">contract: {status.contract_h160}</span>
 		{/if}
+		<!-- REQ-645jq9 -->
+		<span class="detail">transport: {status.transport_mode}</span>
 		<span class="detail">data: {status.data_dir}</span>
 	{:else}
 		<span class="muted">loading…</span>

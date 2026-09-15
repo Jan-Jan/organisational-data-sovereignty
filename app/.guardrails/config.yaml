@@ -33,35 +33,79 @@ doc_sad: app/docs/architecture
 doc_soup: app/docs/architecture/soup.md
 doc_problems: app/docs/problems
 
-# The Rust side of the Tauri shell. The SvelteKit frontend (app/src) is not
-# under trace discipline yet — widen here when its first item is written.
+# Both sides of the IPC boundary, widened 2026-09-14 with the unit's first
+# requirements. The SvelteKit frontend is in scope because six of this unit's
+# requirements are realised there — REQ-vgr7s2, REQ-he8ejb, REQ-a83vqr,
+# REQ-akt4p7, REQ-rq8g2v, REQ-wu6z9p — and FIVE of them are realised there and
+# NOWHERE else: all but REQ-vgr7s2, which also has a Rust half in ipc.rs.
+#
+# Re-measured 2026-09-15 (it read "five ... three of them" until then, measured
+# on 2026-09-14 and overtaken twice). Two things moved it: REQ-wu6z9p was minted
+# by the first independent review and is gated only by app/tests, and REQ-he8ejb
+# became frontend-only when its two Rust annotations were retracted as
+# unbearable — the handler's check runs AFTER the command is invoked, and the
+# requirement says "before any command is invoked" (see ipc.rs's own note).
+# The verification row's outcome, the listener teardown, the receiver-error
+# routing and the pre-invocation identifier check are frontend decisions with no
+# Rust half at all.
 strict_paths:
   - app/src-tauri/src
+  - app/src
 
-# The crate has NO tests today; the directory holds a .gitkeep so the key
-# matches a file (an empty test_paths with REQ in id_prefixes is exit 2).
-# The first REQ written for this unit will draw MISSING-TEST until a test
-# verifies it — which is the point.
+# Both test trees, added 2026-09-14 with the unit's first tests: six cargo
+# integration targets under app/src-tauri/tests (declared in Cargo.toml with
+# `required-features = ["test-support"]`) and four vitest files under
+# app/tests. The placeholder file that used to hold app/src-tauri/tests open
+# is deleted — the directory now holds real test targets.
 test_paths:
   - app/src-tauri/tests
+  - app/tests
 
-# `cargo test` on a crate with no tests is a compile proof, no more.
-# `npm run check` is svelte-check over the frontend and needs app/node_modules
-# (npm install) on the merging machine.
-# Measured 2026-09-05 at the verification gate: `cargo test` compiles both
-# targets and runs 0 tests (a compile proof); `npm run check` needs
-# app/node_modules, which is gitignored and must be present (npm install) on
-# the merging machine — a fresh worktree does not have it.
+# Measured 2026-09-14 at the end of the app risk analysis change.
+#
+# The cargo entry names all six targets explicitly because each is declared
+# `required-features = ["test-support"]`: naming a target with the feature off
+# is a cargo ERROR rather than a silent skip, which is what makes this entry
+# fail loudly if the feature or a target is ever dropped. Measured:
+#   startup_policy 12 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 27 + receiver_guard 6 + ipc 9 = 78 tests.
+# Four of the six rose during the change, each from a gate or review finding:
+# receiver_events 14 -> 27 (REQ-tw4cb5 was verified on one fixture rather than
+# as a property; six more for REQ-kn5rtx; four more when the terminal-error
+# detection turned out never to have fired), org_id_parsing 11 -> 14 and
+# ipc 8 -> 9 (a doubled `0x` prefix was silently normalised at two boundary
+# parsers), and connection_status 8 -> 10 (REQ-bvx4nh's data-directory clause
+# was gated by no test annotated to it).
+#
+# `npm run check` is `svelte-kit sync && svelte-check`; it type-checks app/src
+# AND app/tests (measured 2026-09-14 — the generated .svelte-kit/tsconfig.json
+# includes ../tests/**). 0 errors, 1 pre-existing @types/node warning.
+#
+# `npm run test` is `svelte-kit sync && vitest run`; the sync is part of the
+# script rather than assumed from the entry above, so the entry does not
+# depend on its neighbour's side effects. 30 tests across four files.
+#
+# Both npm entries need app/node_modules, which is gitignored: the merging
+# machine must run `npm --prefix app ci` first. A fresh worktree does not have
+# it.
 verify_commands:
-  - cargo test --manifest-path app/src-tauri/Cargo.toml
+  - cargo test --manifest-path app/src-tauri/Cargo.toml --features test-support --test startup_policy --test connection_status --test org_id_parsing --test receiver_events --test receiver_guard --test ipc
   - npm --prefix app run check
+  - npm --prefix app run test
 
 problem_age_days: 30
 problem_open_max: 10
 
-# No coverage_command: nothing to measure until the crate has tests. Under
-# class C this is a gap against a mandatory requirement, recorded in
-# docs/plans/2026-09-05-ratchet-setup.md.
+# No coverage_command. The first half of this note used to read "nothing to
+# measure until the crate has tests" and is no longer true: as of 2026-09-14 the
+# unit has 78 cargo tests and 30 vitest tests. What remains true is the second
+# half — under class C the absence is a gap against a mandatory requirement, and
+# it is recorded in docs/plans/2026-09-05-ratchet-setup.md.
+#
+# Not adding one here was the owner's explicit decision on 2026-09-14: tooth 5
+# sets floors for org-node and app together, on one measurement basis, rather
+# than setting one here in isolation. Nothing in this unit's hazard register
+# rests on a coverage figure, because there is none.
 # coverage_command:
 #   - make coverage-app
 
@@ -71,9 +115,17 @@ expectation_open_max: 10
 # Declared 2026-09-06 after the dependency assessment in
 # docs/plans/2026-09-06-dependency-edges.md. Both providers are class C, so
 # the class floor (MISCLASSED-DEPENDENCY) has nothing to convict and no
-# segregated_from: entry is needed. The app has no requirements yet, so it
-# records no expects: items; the gaps the assessment found are listed in the
-# plan for the app's own requirements change.
+# segregated_from: entry is needed.
+#
+# Updated 2026-09-14. This note used to say "the app has no requirements yet, so
+# it records no expects: items". It now has twenty-two, written by the hazard
+# analysis in app/docs/risk/, and one expectation: REQ-x3c8n2 expects org-node
+# to distinguish a permanent transport-endpoint failure from a transient one by
+# the error's TYPE, because the receiver loop currently decides by matching a
+# substring of a message org-node formats and no gate in either unit protects.
+# Until org-node defines an exported requirement carrying
+# `satisfies: REQ-x3c8n2`, this unit's run reports UNMET-EXPECTATION and
+# org-node's reports one open expectation standing against it. Due 2026-12-13.
 depends_on:
   - org-node
   - on-chain-client

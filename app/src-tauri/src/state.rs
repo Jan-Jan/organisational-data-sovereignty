@@ -1,20 +1,36 @@
 //! AppState: the Tauri-managed state for the ODS PoC app.
 //!
-//! On startup, `AppState::init` reads env vars to determine:
+//! `AppState::init` is the ONLY place in this unit that reads the process
+//! environment. It reads, then hands what it read to the total functions in
+//! `crate::policy`, which decide. That split is what makes the decisions
+//! testable: cargo runs integration tests in threads of one process, so a test
+//! that set an environment variable would race every other test in the binary.
 //!
-//! - Data directory: `ODS_DATA_DIR` if set; otherwise Tauri's `app_data_dir`.
-//! - Passphrase: `ODS_PASSPHRASE` if set; otherwise `"ods-dev-default"` (S9).
+//! On startup, `init` resolves:
+//!
+//! - Data directory: `ODS_DATA_DIR`, else Tauri's `app_data_dir`, else — only
+//!   under `ODS_ALLOW_DEV_DEFAULTS` — a temporary directory (REQ-rxc8sp).
+//! - Passphrase: `ODS_PASSPHRASE`, else — only under `ODS_ALLOW_DEV_DEFAULTS` —
+//!   the built-in development passphrase (REQ-7g3k9a). Absent both, startup
+//!   REFUSES rather than silently protecting real key material with a published
+//!   literal.
 //! - Chain mode: if `ODS_CHAIN_WS` + `ODS_CONTRACT_H160` + `ODS_ADMIN_SEED`
-//!   are all set, `build_chain_ops` is called EAGERLY inside `init` via
-//!   `block_on`.  If that succeeds a real `SubxtChainOps` is wired in and
-//!   `chain_ready` is set to `true`.  If it fails (env vars absent or connect
-//!   error) the service falls back to `ChainNotConfigured` and `chain_ready`
-//!   remains `false`.
+//!   are all set, `build_chain_ops` is called EAGERLY here via `block_on`. On
+//!   success it returns the ops AND the `ChainEndpoint` they were built from,
+//!   which is recorded in `chain_endpoint`. On failure the service falls back
+//!   to `ChainNotConfigured` and `chain_endpoint` is `None`.
+//!
+//! `chain_endpoint` replaces the former `chain_ready: bool` + environment
+//! re-read. The verdict and the endpoint are now ONE `Option`, so there is no
+//! state in which the app reports "chain not configured" beside an endpoint it
+//! is not talking to (REQ-e4ah9h, REQ-bvx4nh).
 //!
 //! `OrgService` is held behind a `tokio::sync::Mutex` so Tauri command
 //! handlers can take an async lock without blocking the thread pool.
 
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use org_node::service::{ChainOps, OrgService};
 use org_node::store::PersonaStore;
@@ -22,17 +38,30 @@ use org_node::transport::TransportMode;
 use org_node::OrgNodeError;
 use tokio::sync::Mutex;
 
+use crate::policy;
+
+/// Re-exported from `crate::policy`, where the projection now lives, so that no
+/// caller of `state::ConnectionStatus` had to change when it moved.
+pub use crate::policy::{connection_status_from_state, ConnectionStatus};
+
 /// Shared Tauri-managed state.  Tauri's `.manage()` wraps this in `State<T>`;
 /// command handlers extract it via `State<'_, AppState>`.
 pub struct AppState {
     pub service: Mutex<OrgService>,
-    /// `true` only when `build_chain_ops` succeeded during `init` and a real
-    /// `SubxtChainOps` was wired into the service.  `false` means the service
-    /// is running with `ChainNotConfigured`; chain commands will return errors.
-    pub chain_ready: bool,
-    /// Guard for `start_receiver`: once set to `true`, additional calls to
-    /// `start_receiver` are no-ops so we never spawn duplicate receiver loops.
-    pub receiver_started: std::sync::atomic::AtomicBool,
+    /// The directory the store was actually opened in. Recorded here so that
+    /// `connection_status` reports the directory in use rather than re-deriving
+    /// one from the environment and possibly disagreeing with `init`.
+    pub data_dir: PathBuf,
+    /// REQ-bvx4nh: the endpoint the running configuration was built from.
+    /// `None` is exactly "chain not configured" — the two are one fact, so
+    /// they cannot disagree (REQ-e4ah9h).
+    pub chain_endpoint: Option<policy::ChainEndpoint>,
+    /// REQ-645jq9. This unit's own name for the transport mode, because it is
+    /// serialised across the IPC boundary and org-node's type is not.
+    pub transport_mode: policy::TransportModeName,
+    /// REQ-6hgm8r / REQ-3hfggn. `Arc` so a `StartGuard` can be moved into the
+    /// spawned receiver task and release the slot when that task ends.
+    pub receiver_started: Arc<AtomicBool>,
 }
 
 /// A `ChainOps` implementation that rejects every call with a clear message
@@ -78,93 +107,114 @@ impl ChainOps for ChainNotConfigured {
     }
 }
 
-/// Connection status reported by the `connection_status` command.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ConnectionStatus {
-    /// `true` only when a real `SubxtChainOps` was successfully constructed
-    /// during startup (i.e. env vars were present AND the connection succeeded).
-    /// `false` means the service is using `ChainNotConfigured`; chain commands
-    /// will return errors even if the env vars look correct.
-    pub chain_configured: bool,
-    /// The WS endpoint in use (from `ODS_CHAIN_WS`), if set — displayed for
-    /// information even when `chain_configured` is false.
-    pub chain_ws: Option<String>,
-    /// The contract H160 (from `ODS_CONTRACT_H160`), if set.
-    pub contract_h160: Option<String>,
-    /// The data directory path.
-    pub data_dir: String,
-}
-
-/// Build a `ConnectionStatus` from the actual runtime state.
-///
-/// `chain_ready` comes from `AppState::chain_ready` (set at startup based on
-/// whether `build_chain_ops` succeeded), not from env-var presence, so the
-/// field accurately reflects whether chain ops are actually available.
-pub fn connection_status_from_state(data_dir: &PathBuf, chain_ready: bool) -> ConnectionStatus {
-    let chain_ws = std::env::var("ODS_CHAIN_WS").ok();
-    let contract_h160 = std::env::var("ODS_CONTRACT_H160").ok();
-    ConnectionStatus {
-        chain_configured: chain_ready,
-        chain_ws,
-        contract_h160,
-        data_dir: data_dir.display().to_string(),
+/// `policy::TransportModeName` — this unit's serialisable name for the mode —
+/// as the mode org-node's transport layer takes.
+fn transport_mode_for(name: policy::TransportModeName) -> TransportMode {
+    match name {
+        policy::TransportModeName::Loopback => TransportMode::Loopback,
+        policy::TransportModeName::Networked => TransportMode::Networked,
     }
 }
 
 impl AppState {
-    /// Initialise `AppState` from environment variables.
+    /// Initialise `AppState`.
     ///
-    /// `data_dir` comes from the Tauri `app_data_dir` (the caller passes it in
-    /// after resolving it from `tauri::Manager::path()`), unless `ODS_DATA_DIR`
-    /// overrides it (so two demo instances can coexist).
-    pub fn init(tauri_data_dir: PathBuf) -> Result<Self, String> {
-        // Data directory override.
-        let data_dir = match std::env::var("ODS_DATA_DIR") {
-            Ok(d) => PathBuf::from(d),
-            Err(_) => tauri_data_dir,
-        };
+    /// This is the only environment-reading function in the unit. Every
+    /// decision it makes is delegated to `crate::policy`, which is total,
+    /// parameterised and gated by `tests/startup_policy.rs`.
+    ///
+    /// `tauri_data_dir` is what the platform path resolver returned, or `None`
+    /// if it failed — the failure is NOT swallowed into a hard-coded `/tmp`
+    /// path by the caller any more, because whether that fallback is allowed is
+    /// `resolve_data_dir`'s decision to make (REQ-rxc8sp).
+    pub fn init(tauri_data_dir: Option<PathBuf>) -> Result<Self, String> {
+        // REQ-7g3k9a / REQ-rxc8sp: the built-in development values are
+        // available only behind an explicit opt-in. Absent it, a missing value
+        // is a refusal with a message that names both variables (REQ-bmk2z2).
+        let allow_dev = std::env::var("ODS_ALLOW_DEV_DEFAULTS").is_ok();
+        let data_dir = policy::resolve_data_dir(
+            std::env::var("ODS_DATA_DIR").ok().as_deref(),
+            tauri_data_dir,
+            allow_dev,
+        )
+        .map_err(|e| e.to_string())?;
+        let passphrase = policy::resolve_passphrase(
+            std::env::var("ODS_PASSPHRASE").ok().as_deref(),
+            allow_dev,
+        )
+        .map_err(|e| e.to_string())?;
+
+        // Chain ops: try to build SubxtChainOps from env; fall back to
+        // ChainNotConfigured. The endpoint comes back WITH the ops, so what is
+        // reported is what was built and cannot drift from it (REQ-bvx4nh).
+        let (chain, chain_endpoint): (Box<dyn ChainOps>, Option<policy::ChainEndpoint>) =
+            match build_chain_ops() {
+                Ok((ops, endpoint)) => (ops, Some(endpoint)),
+                Err(e) => {
+                    // Surface WHY chain mode didn't come up (missing/malformed env var
+                    // or a failed connect) instead of silently degrading — otherwise the
+                    // UI just shows "Chain NOT configured" with no diagnosable reason.
+                    eprintln!("[ods] chain config failed; running ChainNotConfigured: {e}");
+                    (Box::new(ChainNotConfigured), None)
+                }
+            };
+
+        // Transport mode: `ODS_TRANSPORT=loopback` → Loopback (relay disabled,
+        // same-machine app run or CI smoke-test); anything else (including
+        // unset) → Networked (n0 relay + discovery) — the right choice for two
+        // laptops over the internet on live Paseo.
+        let transport_mode =
+            policy::transport_mode_from(std::env::var("ODS_TRANSPORT").ok().as_deref());
+
+        Self::assemble(data_dir, &passphrase, chain, chain_endpoint, transport_mode)
+    }
+
+    /// Open the store under `data_dir` and wire the service. Shared by `init`
+    /// and `for_test` so the two cannot drift in how the state is built.
+    fn assemble(
+        data_dir: PathBuf,
+        passphrase: &str,
+        chain: Box<dyn ChainOps>,
+        chain_endpoint: Option<policy::ChainEndpoint>,
+        transport_mode: policy::TransportModeName,
+    ) -> Result<Self, String> {
         std::fs::create_dir_all(&data_dir)
             .map_err(|e| format!("create data_dir {}: {e}", data_dir.display()))?;
-        let store_path = data_dir.join("persona_store.bin");
-
-        // Passphrase (S9: env var or dev default).
-        let passphrase = std::env::var("ODS_PASSPHRASE")
-            .unwrap_or_else(|_| "ods-dev-default".to_string());
-
-        let store = PersonaStore::open(store_path, &passphrase)
+        let store = PersonaStore::open(data_dir.join("persona_store.bin"), passphrase)
             .map_err(|e| format!("open store: {e}"))?;
 
-        // Chain ops: try to build SubxtChainOps from env; fall back to ChainNotConfigured.
-        // `chain_ready` is true only when build_chain_ops returns Ok — i.e. the
-        // env vars were present AND the async connect inside block_on succeeded.
-        let (chain, chain_ready): (Box<dyn ChainOps>, bool) = match build_chain_ops() {
-            Ok(ops) => (ops, true),
-            Err(e) => {
-                // Surface WHY chain mode didn't come up (missing/malformed env var
-                // or a failed connect) instead of silently degrading — otherwise the
-                // UI just shows "Chain NOT configured" with no diagnosable reason.
-                eprintln!("[ods] chain config failed; running ChainNotConfigured: {e}");
-                (Box::new(ChainNotConfigured), false)
-            }
-        };
-
-        // Transport mode: `ODS_TRANSPORT=loopback` → TransportMode::Loopback (relay
-        // disabled, same-machine app run or CI smoke-test); anything else (including
-        // unset) → TransportMode::Networked (n0 relay + discovery) — the right choice
-        // for two laptops over the internet on live Paseo.
-        let transport_mode = match std::env::var("ODS_TRANSPORT").as_deref() {
-            Ok("loopback") => TransportMode::Loopback,
-            _ => TransportMode::Networked,
-        };
-
         let mut service = OrgService::new(store, chain);
-        service.set_transport_mode(transport_mode);
+        service.set_transport_mode(transport_mode_for(transport_mode));
 
         Ok(Self {
             service: Mutex::new(service),
-            chain_ready,
-            receiver_started: std::sync::atomic::AtomicBool::new(false),
+            data_dir,
+            chain_endpoint,
+            transport_mode,
+            receiver_started: Arc::new(AtomicBool::new(false)),
         })
+    }
+
+    /// Build a state directly, for tests. Never reads the environment.
+    ///
+    /// The store it opens is real — the point of `tests/ipc.rs` is to drive the
+    /// real handlers over the real boundary — but every input the environment
+    /// would have supplied is a parameter, so two tests in one binary cannot
+    /// interfere with each other.
+    #[cfg(feature = "test-support")]
+    pub fn for_test(
+        data_dir: PathBuf,
+        passphrase: &str,
+        chain_endpoint: Option<policy::ChainEndpoint>,
+        transport_mode: policy::TransportModeName,
+    ) -> Result<Self, String> {
+        Self::assemble(
+            data_dir,
+            passphrase,
+            Box::new(ChainNotConfigured),
+            chain_endpoint,
+            transport_mode,
+        )
     }
 }
 
@@ -177,7 +227,11 @@ impl AppState {
 /// is driven EAGERLY at startup via a `block_on` call here, inside `AppState::init`.
 /// There is no lazy / deferred connection path; the `SubxtChainOps` (or the
 /// `ChainNotConfigured` fallback) is fully determined before `init` returns.
-fn build_chain_ops() -> Result<Box<dyn ChainOps>, String> {
+///
+/// REQ-bvx4nh: the `ChainEndpoint` comes back ALONGSIDE the ops, from the same
+/// values the ops were built from. Reporting it is then a read of what exists
+/// rather than a second read of the environment that could disagree with it.
+fn build_chain_ops() -> Result<(Box<dyn ChainOps>, policy::ChainEndpoint), String> {
     let ws_url = std::env::var("ODS_CHAIN_WS").map_err(|_| "ODS_CHAIN_WS not set")?;
     let h160_hex =
         std::env::var("ODS_CONTRACT_H160").map_err(|_| "ODS_CONTRACT_H160 not set")?;
@@ -236,13 +290,17 @@ fn build_chain_ops() -> Result<Box<dyn ChainOps>, String> {
     // during the connect succeeded. `tauri::async_runtime` lives for the whole
     // app, so the background task (and the connection) survive until shutdown, and
     // it is the same runtime the command handlers later use.
+    let endpoint = policy::ChainEndpoint {
+        ws_url: ws_url.clone(),
+        contract_h160: h160_hex.clone(),
+    };
     let chain = tauri::async_runtime::block_on(connect_chain(
         ws_url,
         contract_h160,
         admin_seed,
         others,
     ))?;
-    Ok(Box::new(chain))
+    Ok((Box::new(chain), endpoint))
 }
 
 /// Async: connect to the chain and build `SubxtChainOps`.

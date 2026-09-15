@@ -29,3 +29,48 @@ subxt = { version = "0.50", default-features = false, features = ["native", "jso
 subxt-signer = { version = "0.50", default-features = false, features = ["sr25519", "subxt"] }
 on-chain-client = { path = "../../on-chain-client", default-features = false, features = ["dev-rpc"] }
 org-node = { path = "../../org-node", features = ["app"] }
+
+[features]
+# Gates the test-only constructors and the integration test targets below.
+# Every `[[test]]` entry declares it via `required-features`, so naming a
+# target with the feature off is a cargo ERROR rather than a silent skip —
+# the property on-chain-client's nine targets rely on.
+test-support = []
+
+[dev-dependencies]
+# `tauri/test` supplies mock_builder / mock_context / get_ipc_response, used by
+# the IPC suite in T2. Feature unification means the dev build of the lib also
+# sees `test`; that is harmless and is why this is a dev-dependency rather than
+# an optional feature of the main entry.
+tauri = { version = "2", features = ["test"] }
+tempfile = "3"
+# `tests/receiver_events.rs` constructs `OrgNodeError::Trie(_)`, whose payload
+# is an `org_members::OrgMembersError`. org-node does not re-export the type and
+# an integration test crate cannot reach a transitive dependency, so the test
+# needs the path dependency of its own. Same features as org-node's entry, so
+# feature unification changes nothing about the lib build.
+org-members = { path = "../../org-members", default-features = false, features = ["std", "serde"] }
+
+[[test]]
+name = "startup_policy"
+required-features = ["test-support"]
+
+[[test]]
+name = "connection_status"
+required-features = ["test-support"]
+
+[[test]]
+name = "org_id_parsing"
+required-features = ["test-support"]
+
+[[test]]
+name = "receiver_events"
+required-features = ["test-support"]
+
+[[test]]
+name = "receiver_guard"
+required-features = ["test-support"]
+
+[[test]]
+name = "ipc"
+required-features = ["test-support"]

@@ -4,14 +4,17 @@
 # `verify_commands` live in `<unit>/.guardrails/config.yaml`. The `test` job
 # runs the cargo entries of org-members, on-chain-client and org-node
 # verbatim, so that CI and the local merge gate cannot disagree about what
-# "passing" means. The app unit's two verify_commands
-# (`cargo test --manifest-path app/src-tauri/Cargo.toml`,
-# `npm --prefix app run check`) run NOWHERE in CI yet, for two different
-# reasons: the cargo entry needs Tauri's Linux system packages (webkit2gtk,
-# libsoup, …) this workflow does not install; the npm entry needs
-# `npm --prefix app ci` first (app/node_modules is gitignored) — node itself is
-# already set up in the `test` job. So for app the merge gate is the only
-# gate. The gap is recorded in
+# "passing" means. The app unit has THREE verify_commands as of 2026-09-14,
+# and TWO of them run here, in the `app-frontend` job below:
+# `npm --prefix app run check` and `npm --prefix app run test`, each preceded
+# by the `npm --prefix app ci` they need because app/node_modules is
+# gitignored.
+#
+# The THIRD — the cargo entry, `cargo test --manifest-path
+# app/src-tauri/Cargo.toml --features test-support --test …` over six targets —
+# still runs NOWHERE in CI: it needs Tauri's Linux system packages
+# (webkit2gtk, libsoup, …) this workflow does not install, so for that entry
+# the merge gate remains the only gate. That remaining gap is recorded in
 # docs/plans/2026-09-05-ratchet-setup.md. `clippy` and `no-std` are
 # additional contracts that exist only here — see the note on each about why,
 # and about the cost of that.
@@ -75,6 +78,25 @@ jobs:
             --test fuzz_envelope_decode --test fuzz_verify_against_chain \
             --test verify_against_chain --test wire_frame_bound --test store_at_rest \
             --test admission_sender
+
+  # app's npm verify_commands. The cargo entry still runs NOWHERE in CI: it
+  # needs Tauri's Linux system packages (webkit2gtk, libsoup, …) this workflow
+  # does not install, so for that entry the merge gate remains the only gate.
+  # Recorded in docs/plans/2026-09-05-ratchet-setup.md.
+  #
+  # `npm ci` installs from app/package-lock.json and IGNORES app/package.json,
+  # so the lock must carry vitest — measured 2026-09-14: against the lock as
+  # it stood before this change, `npm --prefix app ci` itself failed with
+  # "Missing: vitest@5.0.0 from lock file", before any test could run.
+  app-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - run: npm --prefix app ci
+      - run: npm --prefix app run check
+      - run: npm --prefix app run test
 
   # Lib targets only. Two separate reasons, and only the first is principled:
   #

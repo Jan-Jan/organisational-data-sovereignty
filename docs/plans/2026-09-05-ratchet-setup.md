@@ -50,17 +50,25 @@ about the sandbox, in both directions.
       command fails until `npm install` (or a copy from the primary checkout)
       — the merging machine's responsibility, per worktree-discipline "a fresh
       task worktree holds only tracked files".
-- [ ] **app's verify_commands in CI.** Neither runs in CI, for two different
-      reasons: the cargo entry needs Tauri's Linux system packages (webkit2gtk,
-      libsoup, …) rust.yml does not install; the npm entry needs
-      `npm --prefix app ci` first (app/node_modules is gitignored) — node
-      itself is already set up in the `test` job. Until both are added, the
-      merge gate is app's only gate.
+- [ ] **app's verify_commands in CI.** **Amended 2026-09-14 — partially done.**
+      app now has *three* verify_commands, and **two of them run in CI**: the
+      `app-frontend` job added by the app risk analysis runs
+      `npm --prefix app ci`, `npm --prefix app run check` and
+      `npm --prefix app run test`. What remains is the cargo entry, which needs
+      Tauri's Linux system packages (webkit2gtk, libsoup, …) `rust.yml` does not
+      install — so for that entry alone the merge gate is still app's only gate,
+      and 78 of the unit's 108 tests are behind it. Tracked as its own item in
+      the 2026-09-14 section below; this box stays open until the cargo half
+      lands.
 - [ ] **Coverage for org-node and app.** Neither has a `coverage_command`. Under
       class C statement and decision coverage are mandatory, so these are gaps
       against a requirement, not decisions. Add a `coverage-org-node` Makefile
-      target from a first measurement; the app has nothing to measure until it
-      has tests.
+      target from a first measurement. **Amended 2026-09-14:** the clause "the
+      app has nothing to measure until it has tests" is no longer true — app has
+      108 tests as of the risk analysis. It is the same stale sentence T5
+      corrected in `app/.guardrails/config.yaml`; this copy was missed then and
+      is corrected now. The owner's decision stands: one basis for org-node and
+      app together, at tooth 5.
 - [ ] **Confirm the CI reshaping on the first push.** `rust.yml`'s `guardrails`
       job now runs `check-units.sh` once and the unit gates per unit over
       `check-units.sh --list`. The fix round also added org-node's verify
@@ -426,3 +434,183 @@ forgotten.)
   mapping pinned against our reading of pallet-revive rather than against
   pallet-revive, an unmet consumer expectation, and all four entries its own
   controls introduce unacceptable in their own right.
+
+## Added 2026-09-14 — app risk analysis (`docs/plans/2026-09-14-app-risk-analysis.md`)
+
+The entries below belong to **app's register**
+(`app/docs/risk/…-app-hazards.md`), whose not-minted-control list starts at 1
+and is numbered independently of the other three. The naming rule stated in the
+2026-09-09 section applies here too and without exception: every reference
+below says "app not-minted control N".
+
+This completes tooth 3. All four units now have a per-unit ISO 14971 register,
+and all four conclude **UNACCEPTABLE** overall residual risk against the
+intended use.
+
+**Open problem reports — age limit 2026-10-14** (`problem_age_days: 30`,
+opened 2026-09-14). app now holds five open reports — PR-5mc4d8 opened by the verification gate
+and PR-j9f6kk by the second independent review, both after the register was
+written — taking the repository's total to fifteen across four ledgers.
+
+- [ ] **Resolve PR-w5dae4 (startup failure arrives as a panic in Tauri's
+  `setup` hook).** This one is not ordinary backlog: RC-xt4qr3 and RC-djzms3
+  deliberately convert two silent degradations into startup failures, and a
+  refusal whose reason is invisible trades a silent wrong state for a silent
+  dead app. It is app not-minted control 3, it carries the same date, and until
+  it lands those two controls are only half delivered. The register says so in
+  §5 rather than in a footnote.
+- [ ] **Resolve PR-h6xpnh (`receiverStarted` is component-local, so the badge
+  reports the component's history rather than the receiver's).** Needs a
+  `receiver_status` query command — a new command and a new requirement, not a
+  control on an existing one. app not-minted control 4.
+- [ ] **Resolve PR-j9f6kk (three frontend behaviours gated under requirements
+  that do not describe them; two glossary terms declared in the root glossary
+  and defined nowhere).** Opened by the second independent review and recorded
+  rather than fixed on the owner's decision of 2026-09-14. The asymmetry is the
+  point: this change minted REQ-wu6z9p as the frontend twin of REQ-kn5rtx,
+  arguing a consumer requirement is "separate because it fails separately", and
+  then did not do the same for `receiver-stopped` or `record-unreadable`. Also
+  defines Persona and Epoch in the root glossary — REQ-tw4cb5 and HAZ-8ghmhn
+  turn on them and both glossaries currently point at each other. Age limit
+  2026-10-14.
+- [ ] **Resolve PR-5mc4d8 (five boundary parsers strip a leading `0x`
+  repeatedly, so a doubled prefix is normalised instead of refused).** Opened by
+  the verification gate's round 4 and widened by the task that fixed the two
+  sites a requirement covered. The remaining five have no requirement, which is
+  why they are recorded rather than fixed: a fix would carry a test that could
+  not be annotated. The sharpest is `ODS_CONTRACT_H160`, where the raw
+  unstripped string is what reaches the status display, so the app would talk to
+  `0x…` while showing the operator `0x0x…`. Over-acceptance only — no identifier
+  can be parsed as a different one — so it is a robustness defect, not a route to
+  harm. Closing it wants **one** requirement covering prefix **and whitespace** handling
+  at every operator-supplied identifier in the unit, not six — the report was
+  widened once the two parsers turned out to disagree about whitespace too. Age
+  limit 2026-10-14.
+- [ ] **Resolve PR-eecx3y (the chain verdict is a startup fact reported in the
+  present tense).** Blocked on REQ-x3c8n2 below: the connection lives inside
+  `SubxtChainOps`, which is org-node's. app not-minted control 5.
+
+**Expectation — REQ-x3c8n2, `expects: org-node`, due 2026-12-13**
+(`expectation_age_days: 90`, opened 2026-09-14).
+
+- [ ] **Deliver REQ-x3c8n2 in org-node** before 2026-12-13: an exported
+  requirement carrying `satisfies: REQ-x3c8n2`, letting a consumer distinguish
+  a permanent failure of the transport endpoint from a transient one *from the
+  error's type*. Today app's receiver decides by matching three
+  substrings of messages org-node formats, which no gate in either unit
+  protects. Reword any of them and app loops forever against a dead endpoint
+  while its badge reads "Receiver running" — and that is not hypothetical: until
+  2026-09-15 the app matched a single marker, `"endpoint not bound"`, that
+  org-node and iroh never produce, so the loop had never stopped at all (the
+  register's §3, claim 7).
+
+  Two of app's six hazards do not improve in probability at all because of
+  this, and both say so in their residual: HAZ-cfp4jb (detection is unsound)
+  and HAZ-ny7yvt (liveness is unobservable, the same gap seen from the chain
+  side, PR-eecx3y). If a single health-and-error surface on org-node answers
+  both faces, so much the better — the expectation is worded around the
+  receive path only because that is the one with a live workaround in the code.
+
+  This is the repository's **third** open expectation, alongside REQ-ysyu9g
+  (org-node → on-chain-client, 2026-12-05) and REQ-q92yac (org-node →
+  org-members, 2026-12-05). `expectation_open_max` is 10 in every unit, so the
+  budget is not the constraint; the dates are.
+
+**app's not-minted controls — decide by 2026-12-14**, except where noted.
+Fifteen in total; the ones below are the ones that need a decision rather than
+a tooth.
+
+- [ ] **Render components in tests** (app not-minted control 1). The largest
+  hole in the change and the one a reader should be told about first: *no test
+  in this repository renders a Svelte component.* app's frontend suite tests
+  extracted functions, so nothing asserts that `Revoke.svelte` calls
+  `validateRevokeInput`, that `Membership.svelte` calls `verifyResultFrom`, or
+  that the newly-reachable `✗ MISMATCH` branch is wired to anything. A defect
+  leaving the tested function correct and the component calling something else
+  passes every gate. Needs `@testing-library/svelte` or
+  `vitest-browser-svelte`, a DOM environment, and a decision about how much of
+  SvelteKit to stand up. The residuals of HAZ-n97v5g and HAZ-5ha5vv both rest
+  on this staying open.
+- [ ] **Prompt for the store passphrase at first run** (app not-minted control
+  2), superseding RC-xt4qr3's refusal with the control ISO 14971 prefers: make
+  the safe state reachable rather than the unsafe one fatal. The refusal is
+  what could be implemented and gated now; it is not the end state.
+- [ ] **Surface startup failures in a window** (app not-minted control 3).
+  Same item as PR-w5dae4 above, same date, **2026-10-14** — listed in both
+  places on purpose, because it is simultaneously a defect and the completion
+  of two controls.
+- [ ] **Display full keys, or a human-comparable fingerprint, in the Admit
+  panel** (app not-minted control 6). `Admit.svelte` shows the joiner's member
+  and device keys as their last sixteen hex characters — 64 bits, which nobody
+  would choose deliberately for a comparison an attacker can grind offline. An
+  administrator verifying a join request over a second channel can compare only
+  what is displayed. Recorded in the register's §6 as prose.
+- [ ] **Move the admin signing key out of the process environment** (app
+  not-minted control 8). `ODS_ADMIN_SEED` carries the 32-byte admin secret as
+  hex; environment variables are inherited by child processes and captured by
+  crash reporters and process supervisors. Spans app and org-node, which is
+  why it is a decision rather than a fix.
+- [ ] **A second, independent path to revocation** (app not-minted control
+  15) — a command-line tool or a recovery mode — so a defect in the single user
+  interface cannot remove the safety action outright. HAZ-n97v5g is the
+  existence proof that it can: revocation was unreachable in the default
+  transport, and there was no other way to perform it.
+
+**Coverage, still.** app has no `coverage_command` and this change deliberately
+did not add one (owner's decision, 2026-09-14: keep one measurement basis for
+org-node and app together). Under class C that is a gap against a mandatory
+requirement and it stays recorded here. Tooth 5 now owns: a floor for org-node,
+a floor for app, and decision coverage — unmeasured in all four units.
+
+**CI.** app's three `verify_commands` used to run nowhere in CI. After this
+change two of the three do: a new `app-frontend` job runs `npm --prefix app run
+check` and `npm --prefix app run test`. The cargo entry still runs nowhere,
+because it needs Tauri's Linux system packages (webkit2gtk, libsoup, …) the
+workflow does not install — so for that entry the merge gate remains the only
+gate.
+
+- [ ] **Install Tauri's Linux system packages in CI** so app's cargo entry runs
+  there too. The 108 tests this change adds are the first this unit has ever
+  had, and 78 of them are behind that gap.
+
+**The restriction on use** now has a fourth register behind it. app's overall
+residual risk is UNACCEPTABLE against the intended use: six hazards, every one
+S3, two of which do not improve in probability at all; five open defects; an
+unmet expectation on org-node; no component rendered by any test; and no
+coverage figure of any kind.
+
+**Formatting, now a two-unit question.** `cargo fmt --check` is dirty across
+`app/src-tauri` — `commands.rs`, `state.rs`, `lib.rs`, `events.rs` and four test
+files — and was dirty before the 2026-09-14 change touched any of them. There is
+no `rustfmt.toml`, no fmt entry in any unit's `verify_commands`, and no fmt step
+in CI, so nothing converts this into a failure anywhere.
+
+- [ ] **Decide about `rustfmt`, repository-wide.** on-chain-client's register
+  raised this for its own crate (on-chain-client not-minted control 15, which
+  pairs it with extending clippy past `--lib`); app's risk analysis found the
+  same in a second unit. Two units is enough to make it a repository decision
+  rather than a per-crate one: either adopt a `rustfmt.toml` and add a `cargo
+  fmt --check` step, accepting a one-off reformat across four crates, or record
+  that formatting is deliberately unenforced. What is not worth keeping is the
+  present state, where every task that touches a Rust file has to decide for
+  itself whether to reformat neighbouring lines it does not own — which is a
+  live source of merge noise between parallel task worktrees.
+
+**npm audit, now that this repository ships a JavaScript dependency tree.**
+`npm ci` in `app` reports 4 vulnerabilities (1 low, 1 moderate, 2 high) as of
+2026-09-14. None was introduced by the app risk-analysis change — the tree
+predates it — but that change is the first to make the frontend a gated,
+CI-installed artefact, which is what makes the absence of any audit gate
+visible.
+
+- [ ] **Decide what `npm audit` means for a class C unit.** No
+  `verify_command` in any unit runs it and no CI job will surface it, so today
+  those four advisories are invisible to every gate. The decision is not
+  automatically "add `npm audit` to `verify_commands`" — an advisory feed that
+  can redden a build overnight, on a transitive dependency of a build tool, is
+  a different kind of gate from the rest of this toolkit, and an unpinned one
+  makes the merge gate non-reproducible. The realistic options are a periodic
+  reviewed audit recorded in the SOUP, or an `audit-level` threshold with a
+  documented allowlist. Related: app's SOUP table is still the empty template
+  (app not-minted control 13, tooth 4), and these four advisories are precisely
+  the kind of thing it exists to record.

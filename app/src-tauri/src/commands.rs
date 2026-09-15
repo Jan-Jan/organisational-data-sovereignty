@@ -4,30 +4,29 @@
 //! matching `OrgService` method, and maps `OrgNodeError` → `String` for the
 //! Tauri `Result<T, String>` convention.
 //!
-//! ## Event payloads emitted by `start_receiver`:
+//! ## `start_receiver` and its events
 //!
-//! - `"membership-updated"`: `{ org_id: String, epoch: u64, root: String }`
-//!   emitted after a successful `receive_and_verify` that keeps the caller
-//!   as a member.
-//! - `"incoming-verified"`: same payload as `membership-updated` (alias for
-//!   the first-admission case; the UI can treat them identically).
-//! - `"revoked"`: `{ org_id: String }` emitted when `receive_and_self_delete_if_revoked`
-//!   returns `SelfDeleted`.
-//! - `"epoch-changed"`: `{ org_id: String, epoch: u64 }` emitted on every
-//!   successful verify (superset of the others; useful for epoch-progress bars).
-//! - `"receiver-error"`: `{ message: String }` emitted on recoverable errors
-//!   (endpoint recv failure, verify failure); the task continues running.
+//! The loop no longer decides what to announce. Each iteration produces a
+//! `crate::events::ReceiverOutcome`, and `crate::events::emissions_for` maps
+//! that outcome to the events it produces. The mapping is total, it is gated by
+//! `tests/receiver_events.rs`, and it is the only place the event names and
+//! payload shapes are written down — see that module for the vocabulary.
+//!
+//! The loop's own responsibility is reduced to three things it cannot delegate:
+//! claiming the right to run (`events::StartGuard`), turning one service call
+//! into one outcome (`next_outcomes`), and emitting.
 
 use rand::rngs::OsRng;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use org_node::blobs::JoinRequest;
 use org_node::service::SelfDeleteOutcome;
 use org_node::store::{OrgRecord, PersonaRecord};
-use org_node::OrgId;
 
-use crate::state::{AppState, ConnectionStatus, connection_status_from_state};
+use crate::parsing::parse_org_id;
+use crate::state::{AppState, ConnectionStatus};
+use crate::{events, policy};
 
 // ---------------------------------------------------------------------------
 // Serialisable DTOs
@@ -75,21 +74,6 @@ impl From<&OrgRecord> for OrgDto {
             member_count: o.trie_members.len(),
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// Helper: parse a hex-encoded OrgId string (40 hex chars = 20 bytes).
-// ---------------------------------------------------------------------------
-
-fn parse_org_id(s: &str) -> Result<OrgId, String> {
-    let s = s.trim_start_matches("0x");
-    if s.len() != 40 {
-        return Err(format!("org_id must be 40 hex chars, got {}", s.len()));
-    }
-    let bytes = hex::decode(s).map_err(|e| format!("org_id hex: {e}"))?;
-    let mut arr = [0u8; 20];
-    arr.copy_from_slice(&bytes);
-    Ok(OrgId::new(arr))
 }
 
 // ---------------------------------------------------------------------------
@@ -249,6 +233,12 @@ pub async fn admit_member(
 /// Networked mode, where the revoked member is reached by EndpointId (derived
 /// from its device key in the trie) via iroh discovery. It is only needed for
 /// same-machine Loopback dialing.
+///
+/// REQ-he8ejb. The `0x` prefix on `member_id_hex` is ONE optional prefix, not a
+/// run of them — the same correction `parsing::parse_org_id` carries. A
+/// repeated strip accepted `0x0x` + 64 hex characters as a well-formed member
+/// id and revoked against it; one strip leaves a second `0x` for the hex decode
+/// to refuse. Gated by `tests/ipc.rs`.
 #[tauri::command]
 pub async fn revoke_member(
     state: State<'_, AppState>,
@@ -259,8 +249,8 @@ pub async fn revoke_member(
     use iroh::EndpointAddr;
 
     let oid = parse_org_id(&org_id)?;
-    let member_bytes =
-        hex::decode(member_id_hex.trim_start_matches("0x")).map_err(|e| format!("member_id hex: {e}"))?;
+    let member_bytes = hex::decode(member_id_hex.strip_prefix("0x").unwrap_or(&member_id_hex))
+        .map_err(|e| format!("member_id hex: {e}"))?;
     if member_bytes.len() != 32 {
         return Err("member_id must be 32 bytes (64 hex chars)".into());
     }
@@ -299,148 +289,136 @@ pub async fn list_orgs(state: State<'_, AppState>) -> Result<Vec<OrgDto>, String
     Ok(svc.list_orgs().iter().map(OrgDto::from).collect())
 }
 
-/// Return the current connection status (chain env vars + data dir).
+/// Return the current connection status: what the running configuration was
+/// actually built from, not what the environment currently says.
+///
+/// REQ-e4ah9h / REQ-bvx4nh / REQ-645jq9. Nothing here reads the environment.
+/// The previous handler re-derived the data directory from `ODS_DATA_DIR` /
+/// `app_data_dir()`, duplicating `AppState::init`'s logic, so the directory it
+/// reported could disagree with the one the store was opened in; and it read
+/// `ODS_CHAIN_WS` / `ODS_CONTRACT_H160` directly, so it could report an
+/// endpoint beside `chain_configured: false`.
 #[tauri::command]
-pub async fn connection_status(
+pub async fn connection_status<R: Runtime>(
     state: State<'_, AppState>,
-    app_handle: AppHandle,
+    app_handle: AppHandle<R>,
 ) -> Result<ConnectionStatus, String> {
-    // Resolve the data dir from the Tauri path resolver (same logic as AppState::init).
-    let data_dir = match std::env::var("ODS_DATA_DIR") {
-        Ok(d) => std::path::PathBuf::from(d),
-        Err(_) => app_handle
-            .path()
-            .app_data_dir()
-            .map_err(|e| format!("app_data_dir: {e}"))?,
-    };
-    let chain_ready = state.chain_ready;
-    Ok(connection_status_from_state(&data_dir, chain_ready))
+    // The handle is no longer read for anything. It stays in the signature
+    // because it is what makes this command generic over the runtime, and a
+    // command that is not generic over the runtime cannot be driven by
+    // `MockRuntime` — i.e. cannot be tested across the IPC boundary at all.
+    let _ = &app_handle;
+    Ok(policy::connection_status_from_state(
+        &state.data_dir,
+        state.chain_endpoint.as_ref(),
+        state.transport_mode,
+    ))
 }
 
 // ---------------------------------------------------------------------------
 // start_receiver: spawns a background task looping receive_and_self_delete_if_revoked
 // ---------------------------------------------------------------------------
 
-/// Payload emitted with `membership-updated` / `incoming-verified` events.
-#[derive(Debug, Clone, Serialize)]
-struct MembershipUpdatedPayload {
-    org_id: String,
-    epoch: u64,
-    root: String,
-}
+/// One iteration of the receiver loop, as outcomes.
+///
+/// A `Vec` rather than a single outcome because a terminal error produces two:
+/// the failure itself (REQ-affyf5) and then the loop's exit (REQ-jfxah3). Every
+/// other iteration produces exactly one. The failure case lives in
+/// `events::outcomes_for_receive_error`, where `tests/receiver_events.rs` can
+/// gate it without an AppHandle.
+///
+/// This is where the three defects the register found are fixed, and each is
+/// a return value rather than an emission, so `tests/receiver_events.rs` gates
+/// the announcement and this function stays a straight translation.
+async fn next_outcomes<R: Runtime>(app: &AppHandle<R>) -> Vec<events::ReceiverOutcome> {
+    // Re-lock the service each iteration so other commands can proceed between
+    // messages (the lock is held only for the duration of one receive+verify).
+    let result = {
+        let state: State<'_, AppState> = app.state::<AppState>();
+        let mut svc = state.service.lock().await;
+        svc.receive_and_self_delete_if_revoked(&mut OsRng).await
+    };
 
-/// Payload emitted with `revoked` events.
-#[derive(Debug, Clone, Serialize)]
-struct RevokedPayload {
-    org_id: String,
-}
+    match result {
+        // REQ-tw4cb5: SelfDeleted alone. The previous code also emitted an
+        // `epoch-changed` carrying a literal 0 — and 0 is genesis, a reachable
+        // and meaningful epoch, so the UI could not tell "deleted" from "reset
+        // to genesis" (HAZ-5ha5vv).
+        Ok(SelfDeleteOutcome::SelfDeleted { org_id }) => {
+            vec![events::ReceiverOutcome::SelfDeleted {
+                org_id: hex::encode(org_id.as_bytes()),
+            }]
+        }
 
-/// Payload emitted with `epoch-changed` events.
-#[derive(Debug, Clone, Serialize)]
-struct EpochChangedPayload {
-    org_id: String,
-    epoch: u64,
-}
+        Ok(SelfDeleteOutcome::UpdatedNotRevoked { org_id }) => {
+            // Re-read the org record to get the current epoch + root.
+            let record = {
+                let state: State<'_, AppState> = app.state::<AppState>();
+                let svc = state.service.lock().await;
+                svc.list_orgs()
+                    .iter()
+                    .find(|o| o.org_id == org_id)
+                    .map(|o| (o.epoch, hex::encode(o.root_hash)))
+            };
+            let org_id = hex::encode(org_id.as_bytes());
+            match record {
+                Some((epoch, root)) => {
+                    vec![events::ReceiverOutcome::Updated { org_id, epoch, root }]
+                }
+                // REQ-2k7ys4 / REQ-dp95pv. The previous code was
+                // `.unwrap_or((0, String::new()))`, which announced a verified
+                // update at genesis with an empty root — indistinguishable from
+                // a real one.
+                None => vec![events::ReceiverOutcome::RecordUnreadable { org_id }],
+            }
+        }
 
-/// Payload emitted with `receiver-error` events.
-#[derive(Debug, Clone, Serialize)]
-struct ReceiverErrorPayload {
-    message: String,
+        // RC-3rddh7 / REQ-kn5rtx / REQ-jfxah3: classify by the error's TYPE, and
+        // append the loop's exit when the message is terminal. The previous code
+        // routed every `Err` into `VerifyFailed`, so a transport hiccup or a
+        // chain read failure was displayed as a root mismatch — a fresh instance
+        // of HAZ-9fmhm4.
+        Err(e) => events::outcomes_for_receive_error(&e),
+    }
 }
 
 /// Spawn a background tokio task that loops `receive_and_self_delete_if_revoked`
 /// and emits Tauri events.  The task runs until the app is closed or the
 /// endpoint returns a permanent error (endpoint closed).
 ///
-/// Idempotent: if the receiver task is already running this is a no-op (returns
-/// `Ok(())` immediately without spawning a second loop).
+/// REQ-6hgm8r: only one loop runs at a time. REQ-3hfggn: when the loop ends —
+/// by break, by return, or by panic — the slot is released and a later call may
+/// start a new one. The previous code set the flag before spawning and never
+/// cleared it, so an exited loop kept the slot for the life of the process and
+/// the app could not recover without a restart (HAZ-cfp4jb).
 ///
 /// Returns immediately; the task runs in the background.
 #[tauri::command]
-pub async fn start_receiver(
+pub async fn start_receiver<R: Runtime>(
     state: State<'_, AppState>,
-    app_handle: AppHandle,
+    app_handle: AppHandle<R>,
 ) -> Result<(), String> {
-    use std::sync::atomic::Ordering;
-
-    // Guard: only the first caller spawns the loop; subsequent calls are no-ops.
-    if state
-        .receiver_started
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
-    {
-        // Already started — return silently.
-        return Ok(());
-    }
+    let Some(guard) = events::StartGuard::try_claim(&state.receiver_started) else {
+        return Ok(()); // REQ-6hgm8r: a loop is already running.
+    };
 
     let app_handle_clone = app_handle.clone();
-
-    // Kick off the receiver loop.  Each iteration awaits ONE inbound message.
-    // Errors are emitted as `receiver-error` events so the UI can display them
-    // without crashing the loop.
     tokio::spawn(async move {
+        // REQ-3hfggn: the guard is moved in, so the slot is released when this
+        // task ends — by break, by return, or by panic.
+        let _guard = guard;
         loop {
-            // Re-lock the service each iteration so other commands can proceed
-            // between messages (the lock is held only for the duration of one
-            // receive + verify).
-            let result = {
-                let state: State<'_, AppState> =
-                    app_handle_clone.state::<AppState>();
-                let mut svc = state.service.lock().await;
-                svc.receive_and_self_delete_if_revoked(&mut OsRng).await
-            };
-
-            match result {
-                Ok(SelfDeleteOutcome::SelfDeleted { org_id }) => {
-                    let org_id_hex = hex::encode(org_id.as_bytes());
-                    let _ = app_handle_clone.emit(
-                        "revoked",
-                        RevokedPayload { org_id: org_id_hex.clone() },
-                    );
-                    let _ = app_handle_clone.emit(
-                        "epoch-changed",
-                        EpochChangedPayload { org_id: org_id_hex, epoch: 0 },
-                    );
+            let outcomes = next_outcomes(&app_handle_clone).await;
+            let stopping = outcomes
+                .iter()
+                .any(|o| matches!(o, events::ReceiverOutcome::Stopped { .. }));
+            for outcome in &outcomes {
+                for e in events::emissions_for(outcome) {
+                    let _ = app_handle_clone.emit(e.name, e.payload);
                 }
-                Ok(SelfDeleteOutcome::UpdatedNotRevoked { org_id }) => {
-                    // Re-read the org record to get the current epoch + root.
-                    let (epoch, root) = {
-                        let state: State<'_, AppState> =
-                            app_handle_clone.state::<AppState>();
-                        let svc = state.service.lock().await;
-                        svc.list_orgs()
-                            .iter()
-                            .find(|o| o.org_id == org_id)
-                            .map(|o| (o.epoch, hex::encode(o.root_hash)))
-                            .unwrap_or((0, String::new()))
-                    };
-                    let org_id_hex = hex::encode(org_id.as_bytes());
-                    let payload = MembershipUpdatedPayload {
-                        org_id: org_id_hex.clone(),
-                        epoch,
-                        root: root.clone(),
-                    };
-                    let _ = app_handle_clone.emit("membership-updated", payload.clone());
-                    let _ = app_handle_clone.emit("incoming-verified", payload);
-                    let _ = app_handle_clone.emit(
-                        "epoch-changed",
-                        EpochChangedPayload { org_id: org_id_hex, epoch },
-                    );
-                }
-                Err(e) => {
-                    let msg = e.to_string();
-                    let _ = app_handle_clone.emit(
-                        "receiver-error",
-                        ReceiverErrorPayload { message: msg.clone() },
-                    );
-                    // Stop looping on "endpoint not bound" — this is a
-                    // configuration error, not a transient failure.
-                    if msg.contains("endpoint not bound") {
-                        break;
-                    }
-                    // Other errors (iroh recv, verify failure) are transient;
-                    // keep looping.
-                }
+            }
+            if stopping {
+                break;
             }
         }
     });

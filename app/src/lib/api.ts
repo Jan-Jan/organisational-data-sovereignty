@@ -1,5 +1,5 @@
 /**
- * Typed wrappers around Tauri invoke/listen for all 12 ODS commands + 5 events.
+ * Typed wrappers around Tauri invoke/listen for all 12 ODS commands + 8 events.
  *
  * Command signatures mirror commands.rs exactly (camelCase arg names per Tauri convention).
  * Return shapes mirror the Rust DTOs (PersonaDto, OrgDto, JoinRequestDto, ConnectionStatus).
@@ -39,10 +39,23 @@ export interface JoinRequestDto {
 	node_addr_blob: string; // hex — pass back to admit_member
 }
 
+/**
+ * Which of the two ways this installation reaches other nodes.
+ * Mirrors the Rust `TransportModeName`, which serialises lowercase.
+ */
+export type TransportMode = 'networked' | 'loopback';
+
 export interface ConnectionStatus {
+	/** True only when a real chain client was constructed at startup. */
 	chain_configured: boolean;
+	/**
+	 * REQ-e4ah9h / REQ-bvx4nh: the endpoint the running configuration was built
+	 * from, or null. Never re-read from the environment by the backend.
+	 */
 	chain_ws: string | null;
 	contract_h160: string | null;
+	/** REQ-645jq9. */
+	transport_mode: TransportMode;
 	data_dir: string;
 }
 
@@ -60,6 +73,14 @@ export interface RevokedPayload {
 	org_id: string;
 }
 
+/**
+ * epoch-changed payload.
+ *
+ * REQ-tw4cb5: this is NO LONGER emitted on self-delete. A revoked persona has
+ * deleted its organisation record, so there is no epoch to report; the previous
+ * backend emitted a literal 0, which is genesis and therefore a reachable,
+ * meaningful value (HAZ-5ha5vv).
+ */
 export interface EpochChangedPayload {
 	org_id: string;
 	epoch: number;
@@ -67,6 +88,24 @@ export interface EpochChangedPayload {
 
 export interface ReceiverErrorPayload {
 	message: string;
+}
+
+/** REQ-affyf5: `org_id` is null when the failure happened before an
+ * organisation was identified. */
+export interface VerificationFailedPayload {
+	org_id: string | null;
+	message: string;
+}
+
+/** REQ-2k7ys4 / REQ-dp95pv: an update verified but its record could not be
+ * read back. No membership, epoch or verification event accompanies it. */
+export interface RecordUnreadablePayload {
+	org_id: string;
+}
+
+/** REQ-jfxah3: the receiver loop has exited and is no longer running. */
+export interface ReceiverStoppedPayload {
+	reason: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -128,6 +167,10 @@ export function admitMember(
 /**
  * Revoke a member by member_id_hex (64 hex chars) and peer_addr_blob (hex-encoded
  * postcard bytes of the iroh EndpointAddr from the original join request).
+ *
+ * REQ-vgr7s2: `peerAddrBlob` may be the empty string, which means "no address".
+ * A Networked join request carries no address, so demanding one made revocation
+ * unreachable in the default transport (HAZ-n97v5g). See `validateRevokeInput`.
  */
 export function revokeMember(
 	orgId: string,
@@ -161,7 +204,7 @@ export function startReceiver(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Events — 5 event types
+// Events — 8 event types
 // ---------------------------------------------------------------------------
 
 /** membership-updated: emitted after a successful receive_and_verify (not revoked). */
@@ -191,7 +234,40 @@ export function onEpochChanged(cb: (payload: EpochChangedPayload) => void): Prom
 	return listen<EpochChangedPayload>('epoch-changed', (e) => cb(e.payload));
 }
 
-/** receiver-error: emitted on recoverable errors; task continues running. */
+/**
+ * receiver-error: REQ-kn5rtx / REQ-wu6z9p. Emitted when the receive path fails
+ * for a reason that is NOT a verdict on any update — a chain read or transport
+ * failure (`OrgNodeError::Chain`). Nothing verified and nothing failed to
+ * verify, so this carries a message and no organisation, epoch, root or
+ * verdict, and it must be rendered outside the verification log (REQ-wu6z9p).
+ *
+ * The loop keeps running unless the same failure is also terminal, in which
+ * case `receiver-stopped` follows it (REQ-jfxah3).
+ */
 export function onReceiverError(cb: (payload: ReceiverErrorPayload) => void): Promise<UnlistenFn> {
 	return listen<ReceiverErrorPayload>('receiver-error', (e) => cb(e.payload));
+}
+
+/** verification-failed: REQ-affyf5. An incoming update did not verify. */
+export function onVerificationFailed(
+	cb: (payload: VerificationFailedPayload) => void
+): Promise<UnlistenFn> {
+	return listen<VerificationFailedPayload>('verification-failed', (e) => cb(e.payload));
+}
+
+/**
+ * record-unreadable: REQ-2k7ys4 / REQ-dp95pv. An update verified but the
+ * organisation record could not be read back, so no epoch or root is known.
+ */
+export function onRecordUnreadable(
+	cb: (payload: RecordUnreadablePayload) => void
+): Promise<UnlistenFn> {
+	return listen<RecordUnreadablePayload>('record-unreadable', (e) => cb(e.payload));
+}
+
+/** receiver-stopped: REQ-jfxah3. The receiver loop has exited, with a reason. */
+export function onReceiverStopped(
+	cb: (payload: ReceiverStoppedPayload) => void
+): Promise<UnlistenFn> {
+	return listen<ReceiverStoppedPayload>('receiver-stopped', (e) => cb(e.payload));
 }

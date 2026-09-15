@@ -4,11 +4,24 @@
 	 * A: show member list → enter member_id_hex + peer_addr_blob → "Revoke" → revoke_member.
 	 * B: shows "removed & self-deleted" when the "revoked" event fires (monitored via Membership).
 	 *
-	 * Note: peer_addr_blob must be the hex-encoded postcard bytes of the iroh EndpointAddr
-	 * from the original join request (node_addr_blob from JoinRequestDto).
+	 * REQ-vgr7s2, REQ-he8ejb: the submit preconditions are NOT decided here. They
+	 * live in `validateRevokeInput`, which is gated by tests; this component reads
+	 * the transport mode and renders the verdict. The peer address is required
+	 * only in Loopback — a Networked join request carries no address at all, so
+	 * demanding one unconditionally made revocation unreachable in the shipped
+	 * configuration (HAZ-n97v5g).
 	 */
-	import { listOrgs, listPersonas, revokeMember, onRevoked, type OrgDto } from '$lib/api';
-	import type { UnlistenFn } from '@tauri-apps/api/event';
+	import {
+		listOrgs,
+		revokeMember,
+		onRevoked,
+		connectionStatus,
+		type OrgDto,
+		type TransportMode,
+		type RevokedPayload
+	} from '$lib/api';
+	import { validateRevokeInput } from '$lib/revoke';
+	import { subscribeAll, type Unlisten } from '$lib/receiver';
 
 	interface Props {
 		notifyReload?: () => void;
@@ -20,12 +33,22 @@
 	let memberIdHex = $state('');
 	let peerAddrBlob = $state('');
 
+	/**
+	 * REQ-645jq9. Which transport this installation is running, as reported by
+	 * the backend. The initial value is `'networked'` because that is what the
+	 * backend defaults to for any `ODS_TRANSPORT` other than the literal
+	 * "loopback" — so the form's behaviour before the status arrives matches the
+	 * behaviour after it, in the overwhelmingly common case. Defaulting to
+	 * 'loopback' would demand an address the operator cannot supply, which is
+	 * HAZ-n97v5g with a shorter window.
+	 */
+	let transportMode = $state<TransportMode>('networked');
+
 	let revokeBusy = $state(false);
 	let revokeErr = $state('');
 	let revokeDone = $state(false);
 
 	let revokedEvents = $state<string[]>([]);
-	let unlisten: UnlistenFn | null = null;
 
 	async function loadOrgs() {
 		try {
@@ -36,28 +59,57 @@
 		}
 	}
 
+	async function loadTransportMode() {
+		try {
+			transportMode = (await connectionStatus()).transport_mode;
+		} catch {
+			/* keep the default; the status bar reports the failure */
+		}
+	}
+
 	$effect(() => {
 		loadOrgs();
+		loadTransportMode();
 
-		const setup = async () => {
-			unlisten = await onRevoked((p) => {
-				revokedEvents = [
-					`Org …${p.org_id.slice(-12)} — member self-deleted (received revoke, removed self)`,
-					...revokedEvents
-				];
-			});
-		};
-		setup();
+		// REQ-rq8g2v / PR-u34uqm: the cleanup cancels the subscription even when
+		// the component is destroyed while `listen` is still pending. Assigning
+		// `unlisten` after an un-awaited `await` left the teardown with nothing to
+		// call and the listener attached to a destroyed component.
+		let torndown = false;
+		let cleanup: Unlisten | null = null;
+
+		subscribeAll([
+			[
+				onRevoked,
+				(p: RevokedPayload) => {
+					revokedEvents = [
+						`Org …${p.org_id.slice(-12)} — member self-deleted (received revoke, removed self)`,
+						...revokedEvents
+					];
+				}
+			]
+		]).then((fn) => {
+			if (torndown) fn();
+			else cleanup = fn;
+		});
 
 		return () => {
-			unlisten?.();
+			torndown = true;
+			cleanup?.();
 		};
 	});
 
 	async function doRevoke() {
-		if (!selectedOrgId) { revokeErr = 'Select an org.'; return; }
-		if (memberIdHex.trim().length !== 64) { revokeErr = 'Member ID must be 64 hex chars.'; return; }
-		if (!peerAddrBlob.trim()) { revokeErr = 'Peer addr blob (hex) is required.'; return; }
+		if (!selectedOrgId) {
+			revokeErr = 'Select an org.';
+			return;
+		}
+		// REQ-vgr7s2, REQ-he8ejb. One decision, in one gated place.
+		const check = validateRevokeInput({ transportMode, memberIdHex, peerAddrBlob });
+		if (!check.ok) {
+			revokeErr = check.message;
+			return;
+		}
 		revokeBusy = true;
 		revokeErr = '';
 		try {
@@ -82,9 +134,10 @@
 <section class="panel">
 	<h2>Story 5: Revoke Member</h2>
 	<p class="hint">
-		Enter the member ID (64 hex chars) and peer addr blob (hex-encoded postcard EndpointAddr
-		from the join request). After revocation, the revoked peer self-deletes and you'll see
-		the "revoked" event below.
+		Enter the member ID (64 hex chars). The peer addr blob (hex-encoded postcard EndpointAddr
+		from the join request) is needed only in Loopback transport — in Networked the peer is
+		reached by EndpointId via discovery. After revocation, the revoked peer self-deletes and
+		you'll see the "revoked" event below.
 	</p>
 
 	{#if revokeDone}
@@ -117,11 +170,13 @@
 			/>
 		</label>
 		<label>
-			Peer addr blob (hex — from join request node_addr_blob)
+			Peer addr blob (hex — required in Loopback transport only; transport is {transportMode})
 			<input
 				type="text"
 				bind:value={peerAddrBlob}
-				placeholder="hex-encoded postcard EndpointAddr"
+				placeholder={transportMode === 'loopback'
+					? 'hex-encoded postcard EndpointAddr (required)'
+					: 'hex-encoded postcard EndpointAddr (optional in Networked)'}
 				disabled={revokeBusy}
 				class="mono"
 			/>
