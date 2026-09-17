@@ -425,9 +425,19 @@ impl<H: TrieHasher> OrgTrie<H> {
     ///
     /// Honest deltas produced by `recalculate()`, `calculate_delta()`, and
     /// `pending_changes()` satisfy these by construction via the SMT diff
-    /// walk. Adversarial wire-form variants are rejected here so that the
-    /// postcard byte string accepted by `apply_delta` is the unique encoding
-    /// of the transition.
+    /// walk. Non-canonical wire-form variants are rejected here so that the
+    /// set of `Delta` **values** `apply_delta` will accept between two roots
+    /// is narrowed to one.
+    ///
+    /// **This is a constraint on the decoded value, not on the bytes.**
+    /// Corrected 2026-09-17: this paragraph used to say the check made "the
+    /// postcard byte string accepted by `apply_delta` the unique encoding of
+    /// the transition", which is false. `MemberLeaf`'s `Deserialize` impl
+    /// normalises rather than rejects, so several distinct byte strings decode
+    /// to one `Delta` and all of them pass these rules. Key dedup, replay
+    /// caches and change identity on the decoded `Delta` or on the
+    /// `(base_root, target_root)` pair — never on the encoding. See the
+    /// `Delta` type's own doc comment in `delta.rs` for the counterexample.
     fn validate_canonical_delta(&self, delta: &Delta) -> Result<(), OrgMembersError> {
         use core::cmp::Ordering;
 
@@ -489,10 +499,22 @@ impl<H: TrieHasher> OrgTrie<H> {
     ///   observable change vs. the current trie state at that id.
     /// - `removed` and `upserted` MUST be disjoint.
     ///
-    /// Together these guarantee that the postcard byte string of an accepted
-    /// `Delta` is the unique encoding for the transition from `base_root` to
-    /// the resulting root. See `docs/superpowers/specs/2026-05-28-org-members-
-    /// hyperbridge-review.md` for the threat model.
+    /// Together these narrow the accepted `Delta` **value** for a transition
+    /// from `base_root` to the resulting root to one. They do **not** make the
+    /// postcard encoding of that value unique: corrected 2026-09-17, after an
+    /// independent review measured two distinct byte strings (141 and 142
+    /// bytes, an NFC name and its NFD form) that both decode, both apply here,
+    /// and both verify against the same target root. `MemberLeaf`'s
+    /// `Deserialize` normalises `name`, `surname` and `handle` instead of
+    /// rejecting non-canonical forms, where `P2pDeviceSlots`' `Deserialize`
+    /// rejects. Callers keying dedup, replay caches or change identity on
+    /// bytes must key on the decoded `Delta`, or on the
+    /// `(base_root, target_root)` pair, instead.
+    ///
+    /// See `delta.rs` for the full statement and
+    /// `docs/superpowers/specs/2026-05-28-org-members-hyperbridge-review.md`
+    /// for the threat model — that spec asserts the byte-uniqueness invariant
+    /// and carries a dated note at its head saying it was disproved.
     pub fn apply_delta(&self, delta: &Delta) -> Result<CandidateTrie<H>, OrgMembersError> {
         let current_root = self
             .cached_root_hash

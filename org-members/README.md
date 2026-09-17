@@ -7,11 +7,17 @@ Crate-internal guidance: `AGENTS.md`.
 
 ## What this crate guarantees
 
-The target contract is one invariant, precisely:
+The contract is one invariant, precisely:
 
-> **Canonical-form invariant.** If `OrgTrie::apply_delta(&d)?.verify_against(&R)?` succeeds, then `d` is the unique postcard byte string such that some honest sequence of `OrgTrie` mutations starting from a trie with `root_hash() == d.base_root()` produces a trie with `root_hash() == R`.
+> **Canonical-form invariant.** If `OrgTrie::apply_delta(&d)?.verify_against(&R)?` succeeds, then `d` is the unique `Delta` **value** such that some honest sequence of `OrgTrie` mutations starting from a trie with `root_hash() == d.base_root()` produces a trie with `root_hash() == R`.
 
-**Status:** the invariant holds. Established by the [Hyperbridge fix series](../docs/superpowers/plans/2026-05-28-org-members-hyperbridge-fixes.md), which lands H-1, H-2, H-3, M-1, M-2, M-3, and Info-4 from the [review spec](../docs/superpowers/specs/2026-05-28-org-members-hyperbridge-review.md). Callers can rely on `apply_delta` rejecting any non-canonical wire form; defensive re-canonicalisation upstream is no longer required.
+**Status:** the invariant above holds, as a statement about the decoded `Delta` value. Established by the [Hyperbridge fix series](../docs/superpowers/plans/2026-05-28-org-members-hyperbridge-fixes.md), which lands H-1, H-2, H-3, M-1, M-2, M-3, and Info-4 from the [review spec](../docs/superpowers/specs/2026-05-28-org-members-hyperbridge-review.md). Callers can rely on `apply_delta` rejecting any non-canonical wire form; defensive re-canonicalisation upstream is no longer required.
+
+> **Corrected 2026-09-17 — this section used to claim byte uniqueness, and that claim is false.** It read "`d` is the unique postcard **byte string** …", and the review spec linked above still states it that way (with a dated note at its head). Two independent reviews of the architecture change measured otherwise, most recently with an explicit counterexample: with `name = "é"`, a `Delta` encodes to **141 bytes**; byte-patching the NFC name to its NFD form gives a distinct **142-byte** string; both decode, both are accepted by `apply_delta` on the same base trie, and both `verify_against` the same target root. The cause is that `MemberLeaf`'s `Deserialize` impl **normalises** — `to_nfc` over `name` and `surname`, and the NFC form `validate_handle` returns for the handle — where `P2pDeviceSlots`' `Deserialize` **rejects**. So the postcard encoding is not injective, and canonical form constrains the decoded value only.
+>
+> **What to key on instead.** Dedup, replay caches and any notion of "the same change" must key on the **decoded `Delta`**, or on the `(base_root, target_root)` pair — **never on the blob bytes**. A signature over the encoded bytes still authenticates *those bytes*, which is what a signature is for, but the signed bytes are not a canonical identifier for the transition and must not be used as one. See the `Delta` doc comment in `src/delta.rs` and the LLR-8jttpb assessment in `docs/risk/2026-09-17-design-derived.md`.
+>
+> No code was changed to close this. Making the encoding injective is a behaviour change owed its own red-first test.
 
 Everything else is the caller's responsibility. This README enumerates what "everything else" means in security terms.
 
@@ -67,7 +73,8 @@ The crate has no notion of "who sent this." Callers must:
 
 - Verify a signature over the postcard bytes of the `Delta` against a known admin / quorum public key.
 - Do this **before** calling `apply_delta` (so attacker-controlled bytes never reach the trie).
-- Use the canonical-form invariant: once you've verified one byte string for a given `(base_root, target_root)`, no other byte string with the same effect exists, so signatures, hashes, and replay caches all key cleanly off the blob bytes.
+- **Do not key replay caches, dedup or change identity off the blob bytes.** This bullet used to say the opposite — "once you've verified one byte string for a given `(base_root, target_root)`, no other byte string with the same effect exists, so signatures, hashes, and replay caches all key cleanly off the blob bytes" — and it was **wrong**, corrected 2026-09-17. Several distinct postcard byte strings decode to one `Delta`, apply to the same base and produce the same root (the 141/142-byte NFC/NFD counterexample in "What this crate guarantees" above). A replay cache keyed on bytes, or a hash of the bytes used as a change identifier, will treat a re-encoding of a change already applied as a change it has never seen. Key on the **decoded `Delta`**, or on the `(base_root, target_root)` pair.
+- Signing the blob bytes remains correct and remains required: a signature authenticates the bytes the sender actually sent. What it does not do is identify the transition. Verify the signature over the bytes, then derive identity from the decoded value.
 
 ### 3. Bind the delta to its organisation
 

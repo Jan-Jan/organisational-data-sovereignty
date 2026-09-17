@@ -304,6 +304,15 @@ impl Driver for MembershipDriver {
     }
 }
 
+/// verifies: LLR-fv75ec, LLR-j4d38d, LLR-v3jqau
+///
+/// Not LLR-ch2pkw. The model's `init` sets the trie to the empty map and this
+/// driver's `init` calls `Trie::genesis` with an empty vector -- both of the
+/// `genesis` call sites here pass an empty vector, so its per-member
+/// identifier, handle and skeleton checks never execute. Removing all three of
+/// them leaves this test green (measured, 2026-09-16). The clause is real and
+/// is carried by the `genesis_*` tests in integration_test.rs; it is not
+/// carried here.
 #[quint_run(spec = "../quint/membership_mbt.qnt", max_samples = 50)]
 fn membership_conformance() -> impl Driver {
     MembershipDriver::default()

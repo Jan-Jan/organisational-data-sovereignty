@@ -43,5 +43,36 @@ the high-level REQs), written under the software item they belong to:
 
 ## Overview
 
-<!-- System decomposition, key interfaces, and the segregation rationale
-     between items of different safety classes (if any). -->
+`org-members` is the membership authority: an immutable, hash-addressed record
+of who belongs to an organisation and which keys speak for them. It computes no
+policy and performs no I/O. Six items divide it, along the line between *what a
+member is*, *how the record is hashed*, *how the record is stored and changed*,
+and *how a change crosses a process boundary*.
+
+The six, with the source they own (added 2026-09-17: this section delegated the
+decomposition picture to itself and did not contain it, so a reader sent here
+had to go back to the dated file; the items are defined in
+`2026-09-17-decomposition.md`, which stays the authority for their text):
+
+| Item | Responsibility | Source |
+|---|---|---|
+| SDD-4yr9ge | the validated, canonically serialisable member record — identifier, handle, member-as-a-group key, device key set, personal fields — and the validation and normalisation every construction path applies, the path from deserialised bytes included | `src/types.rs`, `src/normalize.rs` |
+| SDD-d6x85b | the hash interface the record is committed through — four separated domains — and the fixed-shape device sub-trie whose root enters the member leaf hash | `src/hasher.rs`, `src/device_trie.rs` |
+| SDD-d9svdj | the immutable 256-level sparse Merkle store — addressing, path-copying, lazy hashing, the diff walk — holding member records without interpreting them | `src/smt.rs`, `src/node.rs` |
+| SDD-k5wa4n | the organisation trie and its eight membership operations, with the handle and skeleton indexes that make uniqueness and confusability decidable without walking the store | `src/trie.rs` |
+| SDD-55b2zj | the change set that crosses a process boundary — anchored to the record it was computed against, canonical in its encoding, usable only after its result is verified against an independently supplied root | `src/delta.rs`, and `apply_delta` / `calculate_delta` / the canonical-form check in `src/trie.rs` |
+| SDD-m9gs5g | the single typed error by which every rejection leaves the crate, and the lint posture that keeps a rejection from becoming a panic | `src/error.rs`, `src/lib.rs` |
+
+The four conceptual lines map onto them as: *what a member is* (SDD-4yr9ge),
+*how the record is hashed* (SDD-d6x85b), *how it is stored and changed*
+(SDD-d9svdj, SDD-k5wa4n), *how a change crosses a process boundary*
+(SDD-55b2zj) — with SDD-m9gs5g cutting across all four, since every item reports
+its rejections through the one error type.
+
+There is no segregation boundary inside the unit: every item is class C, so
+IEC 62304 §5.3.5 has nothing to argue here. The boundary that matters is the
+one at the crate's edge, and it is stated as a non-responsibility —
+authentication, organisation binding, replay protection across time, authority,
+and supply of an independent trusted root all lie **above** this crate
+(`org-members/src/delta.rs`, "What this crate does NOT do"). SDD-55b2zj carries
+that boundary.

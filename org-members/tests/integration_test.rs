@@ -1,7 +1,7 @@
 use ed25519_dalek::SigningKey;
-use org_members::hasher::Blake3Hasher;
+use org_members::hasher::{Blake3Hasher, TrieHasher};
 use org_members::trie::OrgTrie;
-use org_members::types::{P2pDeviceKey, MemberId, P2pMemberKey, MemberLeaf, RootHash};
+use org_members::types::{P2pDeviceKey, MemberId, NodeHash, P2pMemberKey, MemberLeaf, RootHash, MAX_DEVICES};
 use org_members::OrgMembersError;
 
 type TestTrie = OrgTrie<Blake3Hasher>;
@@ -92,10 +92,15 @@ fn genesis_single_member() {
     assert!(!trie.contains(&member_id("bob-id")));
 }
 
-/// verifies: REQ-m8aexh, REQ-kmvc96
+/// verifies: REQ-m8aexh, REQ-kmvc96, LLR-ch2pkw, LLR-5w2jx8
 ///
 /// The normal case for both: distinct, non-confusable handles are accepted.
 /// Without it those two requirements would be evidenced only by rejections.
+///
+/// It is LLR-5w2jx8's normal case too, added 2026-09-17: five handles that
+/// render differently must receive five different skeletons. The item's other
+/// three carriers are all refusals, so without this one the skeleton function
+/// would be evidenced only by handles it rejects.
 #[test]
 fn genesis_multiple_members() {
     let trie = TestTrie::genesis(vec![alice(), bob(), charlie(), jan_jan(), diana()]).unwrap();
@@ -107,14 +112,14 @@ fn genesis_multiple_members() {
     assert!(trie.contains_handle("diana"));
 }
 
-/// verifies: REQ-crjxk8
+/// verifies: REQ-crjxk8, LLR-ch2pkw
 #[test]
 fn genesis_duplicate_id_fails() {
     let err = TestTrie::genesis(vec![alice(), alice()]);
     assert_eq!(err.unwrap_err(), OrgMembersError::DuplicateId);
 }
 
-/// verifies: REQ-kmvc96
+/// verifies: REQ-kmvc96, LLR-ch2pkw
 #[test]
 fn genesis_duplicate_handle_different_id_fails() {
     let m1 = alice();
@@ -130,6 +135,7 @@ fn genesis_duplicate_handle_different_id_fails() {
     assert_eq!(err.unwrap_err(), OrgMembersError::DuplicateHandle);
 }
 
+/// verifies: LLR-wm5hpc
 #[test]
 fn genesis_empty_is_ok() {
     let trie = TestTrie::genesis(vec![]).unwrap();
@@ -156,7 +162,7 @@ fn insert_adds_member() {
     assert!(delta.removed().is_empty());
 }
 
-/// verifies: REQ-crjxk8
+/// verifies: REQ-crjxk8, LLR-fv75ec
 #[test]
 fn insert_duplicate_id_fails() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -164,7 +170,7 @@ fn insert_duplicate_id_fails() {
     assert_eq!(err.unwrap_err(), OrgMembersError::DuplicateId);
 }
 
-/// verifies: REQ-kmvc96
+/// verifies: REQ-kmvc96, LLR-fv75ec
 #[test]
 fn insert_duplicate_handle_different_id_fails() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -182,6 +188,7 @@ fn insert_duplicate_handle_different_id_fails() {
 
 // --- update_name_surname tests ---
 
+/// verifies: LLR-g6arcs
 #[test]
 fn update_name_surname_changes_pii() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -202,6 +209,7 @@ fn update_name_surname_changes_pii() {
     assert_ne!(trie.root_hash().unwrap(), root_before);
 }
 
+/// verifies: LLR-g6arcs
 #[test]
 fn update_name_surname_nfc_normalizes() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -213,6 +221,7 @@ fn update_name_surname_nfc_normalizes() {
     assert_eq!(member.name(), "\u{00E9}ric"); // NFC composed
 }
 
+/// verifies: LLR-v3jqau
 #[test]
 fn update_name_surname_nonexistent_fails() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -222,7 +231,7 @@ fn update_name_surname_nonexistent_fails() {
 
 // --- update_handle tests ---
 
-/// verifies: REQ-crjxk8, REQ-kmvc96
+/// verifies: REQ-crjxk8, REQ-kmvc96, LLR-mmst86
 ///
 /// The member id is unchanged by a rename, which is what makes a grant made
 /// to the member survive the rename instead of following the handle.
@@ -238,6 +247,7 @@ fn update_handle_renames_member() {
     assert_eq!(trie.get_by_handle("alicia").unwrap().name(), "Alice");
 }
 
+/// verifies: LLR-v3jqau
 #[test]
 fn update_handle_nonexistent_fails() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -245,7 +255,7 @@ fn update_handle_nonexistent_fails() {
     assert_eq!(err.unwrap_err(), OrgMembersError::IdNotFound);
 }
 
-/// verifies: REQ-h5ret5
+/// verifies: REQ-h5ret5, LLR-mmst86
 #[test]
 fn update_handle_rejects_invalid() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -256,7 +266,7 @@ fn update_handle_rejects_invalid() {
     ));
 }
 
-/// verifies: REQ-kmvc96
+/// verifies: REQ-kmvc96, LLR-mmst86
 #[test]
 fn update_handle_rejects_collision() {
     let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
@@ -266,7 +276,7 @@ fn update_handle_rejects_collision() {
 
 // --- rotate_p2p_key tests ---
 
-/// verifies: REQ-crjxk8
+/// verifies: REQ-crjxk8, LLR-k89ahd
 ///
 /// The identifier is unchanged by a key replacement, which is the other half of
 /// REQ-crjxk8's independence claim; `update_handle_renames_member` covers
@@ -291,6 +301,7 @@ fn rotate_p2p_key_changes_only_key() {
     assert_ne!(trie.root_hash().unwrap(), root_before);
 }
 
+/// verifies: LLR-k89ahd, LLR-v3jqau
 #[test]
 fn rotate_p2p_key_nonexistent_fails() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -300,7 +311,7 @@ fn rotate_p2p_key_nonexistent_fails() {
 
 // --- add_p2p_device tests ---
 
-/// verifies: REQ-xdx2c2
+/// verifies: REQ-xdx2c2, LLR-4phmjf
 #[test]
 fn add_p2p_device_adds_a_device() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -319,7 +330,7 @@ fn add_p2p_device_adds_a_device() {
     assert_eq!(member.p2p_key(), &member_key("alice-mk"));
 }
 
-/// verifies: REQ-xdx2c2
+/// verifies: REQ-xdx2c2, LLR-4phmjf
 #[test]
 fn add_p2p_device_rejects_duplicate() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -327,7 +338,7 @@ fn add_p2p_device_rejects_duplicate() {
     assert_eq!(err.unwrap_err(), OrgMembersError::DuplicateDevice);
 }
 
-/// verifies: REQ-xdx2c2
+/// verifies: REQ-xdx2c2, LLR-pys2ek, LLR-4phmjf
 ///
 /// The bound itself (MAX_DEVICES, 4 today) is design data, not part of the
 /// requirement — see the note on REQ-xdx2c2 in the requirements ledger. This
@@ -350,6 +361,7 @@ fn add_p2p_device_rejects_when_full() {
     assert_eq!(err.unwrap_err(), OrgMembersError::DeviceSlotsFull);
 }
 
+/// verifies: LLR-v3jqau
 #[test]
 fn add_p2p_device_nonexistent_member_fails() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -359,7 +371,7 @@ fn add_p2p_device_nonexistent_member_fails() {
 
 // --- delete_p2p_device tests ---
 
-/// verifies: REQ-ewdg2q
+/// verifies: REQ-ewdg2q, LLR-s97ywt
 #[test]
 fn delete_p2p_device_removes_and_rotates_key() {
     let trie = TestTrie::genesis(vec![jan_jan()]).unwrap();
@@ -382,7 +394,7 @@ fn delete_p2p_device_removes_and_rotates_key() {
     assert_eq!(member.p2p_key(), &new_key);
 }
 
-/// verifies: REQ-r784fu, REQ-ewdg2q
+/// verifies: REQ-r784fu, REQ-ewdg2q, LLR-s97ywt
 #[test]
 fn delete_p2p_device_last_device_isolates() {
     // alice has 1 device. Removing it leaves her in isolated state (0 devices).
@@ -403,9 +415,18 @@ fn delete_p2p_device_last_device_isolates() {
     assert_eq!(member.p2p_key(), &new_key);
 }
 
-// No `verifies:` annotation: this exercises the operation's abnormal input,
-// not REQ-ewdg2q's behaviour. Removing the key replacement from
-// delete_p2p_device leaves this test passing.
+// Not annotated to REQ-ewdg2q: removing the key replacement from
+// delete_p2p_device leaves this test passing, so it does not carry that
+// requirement's behaviour.
+/// verifies: LLR-s97ywt
+///
+/// It does carry LLR-s97ywt, annotated 2026-09-17, and specifically the "in
+/// one operation" clause -- the item's abnormal-input side, which its two
+/// other carriers (both successful deletions) do not reach. Swallowing
+/// `remove_device`'s error so the key is rotated anyway reds this test with an
+/// `Ok(OrgTrie { .. })` where `DeviceNotFound` was asserted: the key would
+/// have been replaced without the device being removed, which is the
+/// conjunction the item forbids.
 #[test]
 fn delete_p2p_device_unknown_device_fails() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -417,6 +438,7 @@ fn delete_p2p_device_unknown_device_fails() {
     assert_eq!(err.unwrap_err(), OrgMembersError::DeviceNotFound);
 }
 
+/// verifies: LLR-v3jqau
 #[test]
 fn delete_p2p_device_nonexistent_member_fails() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -430,7 +452,7 @@ fn delete_p2p_device_nonexistent_member_fails() {
 
 // --- emergency_isolate_member tests ---
 
-/// verifies: REQ-r784fu
+/// verifies: REQ-r784fu, LLR-w92psx
 #[test]
 fn emergency_isolate_member_removes_all_devices_and_rotates_key() {
     let trie = TestTrie::genesis(vec![jan_jan()]).unwrap();
@@ -452,7 +474,7 @@ fn emergency_isolate_member_removes_all_devices_and_rotates_key() {
     assert_eq!(member.surname(), "Gödel");
 }
 
-/// verifies: REQ-r784fu
+/// verifies: REQ-r784fu, LLR-w92psx
 #[test]
 fn emergency_isolate_member_keeps_member_in_trie() {
     let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
@@ -466,7 +488,7 @@ fn emergency_isolate_member_keeps_member_in_trie() {
     assert!(trie.contains_handle("alice"));
 }
 
-/// verifies: REQ-r784fu
+/// verifies: REQ-r784fu, LLR-w92psx
 #[test]
 fn emergency_isolate_member_then_readd_device_unisolates() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -484,7 +506,7 @@ fn emergency_isolate_member_then_readd_device_unisolates() {
     assert_eq!(member.p2p_key(), &member_key("recovered"));
 }
 
-/// verifies: REQ-r784fu
+/// verifies: REQ-r784fu, LLR-w92psx, LLR-v3jqau
 #[test]
 fn emergency_isolate_member_nonexistent_fails() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -494,6 +516,15 @@ fn emergency_isolate_member_nonexistent_fails() {
 
 // --- Delete tests ---
 
+/// verifies: LLR-j4d38d
+///
+/// Added 2026-09-17. LLR-j4d38d has two halves and its other carrier,
+/// `delete_member_frees_the_handle_for_reuse`, only reaches one: reuse is
+/// gated by the *skeleton* index, so dropping
+/// `new_handle_index.remove(existing.handle())` from `delete_by_id` leaves
+/// that test green and reds this one at `!trie.contains_handle("alice")`.
+/// Measured on 2026-09-17, both ways round. This is also the item's
+/// abnormal-input side: a lookup of a handle no member holds.
 #[test]
 fn delete_removes_member() {
     let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
@@ -506,6 +537,7 @@ fn delete_removes_member() {
     assert_eq!(delta.removed().len(), 1);
 }
 
+/// verifies: LLR-v3jqau
 #[test]
 fn delete_nonexistent_fails() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -513,9 +545,36 @@ fn delete_nonexistent_fails() {
     assert_eq!(err.unwrap_err(), OrgMembersError::IdNotFound);
 }
 
+/// verifies: LLR-j4d38d
+///
+/// Deleting a member removes their handle and skeleton from the indexes, so a
+/// later member may take the handle. The doc comment on `delete_member` has
+/// claimed this since the operation was written; nothing tested it.
+#[test]
+fn delete_member_frees_the_handle_for_reuse() {
+    let trie = TestTrie::genesis(vec![alice()]).unwrap();
+    let after = trie.delete_member(alice().id()).unwrap();
+
+    // A different member, same handle as the departed one.
+    let successor = MemberLeaf::new(
+        member_id("successor"),
+        "alice",
+        member_key("s"),
+        "Alicia",
+        "Brown",
+        vec![device_key("s-dev")],
+    )
+    .unwrap();
+
+    assert!(
+        after.add_member(successor).is_ok(),
+        "the departed member's handle must be available again"
+    );
+}
+
 // --- Immutability tests ---
 
-/// verifies: REQ-d3prca
+/// verifies: REQ-d3prca, LLR-tk4qxu
 #[test]
 fn insert_does_not_mutate_original() {
     let original = TestTrie::genesis(vec![alice()]).unwrap();
@@ -527,7 +586,7 @@ fn insert_does_not_mutate_original() {
     assert!(!original.contains_handle("bob"));
 }
 
-/// verifies: REQ-d3prca
+/// verifies: REQ-d3prca, LLR-tk4qxu
 #[test]
 fn delete_does_not_mutate_original() {
     let original = TestTrie::genesis(vec![alice(), bob()]).unwrap();
@@ -541,7 +600,31 @@ fn delete_does_not_mutate_original() {
 
 // --- Delta and CandidateTrie tests ---
 
-/// verifies: REQ-4umsuz
+/// verifies: REQ-4umsuz, LLR-y38jfk, LLR-au8het, LLR-7tdqv9, LLR-juxk9q
+///
+/// The whole-pipeline normal case. Three further items were annotated onto it
+/// on 2026-09-17 because each was carried by refusals alone, and each of the
+/// three executes here and reds under its own mutation:
+///
+/// - LLR-au8het -- the change set is anchored to the record it was computed
+///   against. Inverting `apply_delta`'s base-root comparison reds this test
+///   with `DeltaBaseMismatch`.
+/// - LLR-7tdqv9 -- verification accepts a candidate whose root matches.
+///   Inverting `verify_against`'s comparison reds it with
+///   `VerificationFailed`.
+/// - LLR-juxk9q -- the upserted record (charlie) is checked for handle
+///   uniqueness and confusability at apply time. Moving the index insert above
+///   the check reds it with `DuplicateHandle`, the upsert colliding with the
+///   entry the check itself just wrote.
+///
+/// On LLR-y38jfk it carries the second clause only. "A candidate exposes no member query" is a
+/// type-level guarantee -- `CandidateTrie` declares exactly `root_hash()` and
+/// `verify_against()` -- and the plan's named mutation (have `apply_delta`
+/// return the trie directly) is a signature change: T7 measured it as seven
+/// compile errors across this file, not a discriminating red. What this test
+/// does assert is that only `verify_against` yields a usable record, and it
+/// reds when `verify_against` hands back a record built with an empty
+/// handle index.
 #[test]
 fn delta_apply_and_verify() {
     let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
@@ -560,7 +643,7 @@ fn delta_apply_and_verify() {
     assert!(verified.contains_handle("charlie"));
 }
 
-/// verifies: REQ-4umsuz
+/// verifies: REQ-4umsuz, LLR-au8het
 #[test]
 fn delta_base_mismatch_fails() {
     let parity_trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -573,7 +656,18 @@ fn delta_base_mismatch_fails() {
     assert_eq!(err.unwrap_err(), OrgMembersError::DeltaBaseMismatch);
 }
 
-/// verifies: REQ-4umsuz
+/// verifies: REQ-4umsuz, LLR-7tdqv9, LLR-y38jfk
+///
+/// LLR-y38jfk added 2026-09-17: this is that item's abnormal-input side --
+/// only verification against the *expected* root yields a usable record, so a
+/// verification against any other root must yield none. Deleting the guard in
+/// `verify_against` reds it with an `Ok(OrgTrie { .. })` where an error was
+/// asserted.
+///
+/// On LLR-7tdqv9 it carries the refusal clause. "The candidate is consumed either way" is a
+/// type-level guarantee -- `verify_against` takes `self` by value, so a test
+/// that reused the candidate afterwards would not compile, and there is no
+/// mutation of the running code that can observe it.
 #[test]
 fn candidate_verify_wrong_root_fails() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -588,6 +682,12 @@ fn candidate_verify_wrong_root_fails() {
 
 // --- calculate_delta tests (long-offline catch-up) ---
 
+/// verifies: LLR-h7stq2
+///
+/// Clause: the change set transforms `old` into the receiver. Reds when
+/// `calculate_delta` reverses the diff direction -- the delta then removes an
+/// id `old` does not hold and `apply_delta` returns
+/// `MalformedDelta("removed id not present in trie")`.
 #[test]
 fn calculate_delta_then_apply_roundtrips() {
     // Member alice's view (the "old" trie) diverged from the latest org state.
@@ -608,6 +708,7 @@ fn calculate_delta_then_apply_roundtrips() {
     assert_eq!(verified.root_hash().unwrap(), current.root_hash().unwrap());
 }
 
+/// verifies: LLR-8jttpb
 #[test]
 fn calculate_delta_returns_removed_and_upserted_leaves() {
     let old_trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
@@ -624,6 +725,7 @@ fn calculate_delta_returns_removed_and_upserted_leaves() {
     assert_eq!(delta.upserted()[0].id(), &member_id("charlie-id"));
 }
 
+/// verifies: LLR-8jttpb
 #[test]
 fn calculate_delta_empty_when_tries_identical() {
     let trie_a = TestTrie::genesis(vec![alice(), bob()]).unwrap();
@@ -635,11 +737,17 @@ fn calculate_delta_empty_when_tries_identical() {
     assert_eq!(delta.base_root(), &trie_b.root_hash().unwrap());
 }
 
-// Deliberately carries no `verifies:` annotation. It reads like REQ-avmu3j
-// coverage and is not: `calculate_delta` has its own is_calculated() guard, so
-// this test passes unchanged even with the root-reporting behaviour REQ-avmu3j
-// requires removed entirely. `root_hash_errs_until_recalculated` is the test
-// that fails under that mutation.
+/// verifies: LLR-h7stq2
+///
+/// Clause: refused when either record has uncomputed hashes. Reds when the
+/// `is_calculated()` guard is dropped -- `calculate_delta` then returns `Ok`.
+/// It is the only carrier that mutation reds.
+///
+/// Deliberately carries no REQ-avmu3j annotation. It reads like REQ-avmu3j
+/// coverage and is not: `calculate_delta` has its own is_calculated() guard, so
+/// this test passes unchanged even with the root-reporting behaviour REQ-avmu3j
+/// requires removed entirely. `root_hash_errs_until_recalculated` is the test
+/// that fails under that mutation.
 #[test]
 fn calculate_delta_fails_when_hashes_not_calculated() {
     let trie_a = TestTrie::genesis(vec![alice()]).unwrap();
@@ -648,6 +756,11 @@ fn calculate_delta_fails_when_hashes_not_calculated() {
     assert_eq!(err.unwrap_err(), OrgMembersError::HashesNotCalculated);
 }
 
+/// verifies: LLR-h7stq2
+///
+/// Clause: the change set transforms `old` into the receiver. Reds when
+/// `calculate_delta` reverses the diff direction -- `forward.removed().len()`
+/// is then 1 rather than 0.
 #[test]
 fn calculate_delta_reversed_args_produces_inverse_delta() {
     // The convention is `new.calculate_delta(&old)`. If a caller flips the
@@ -684,6 +797,14 @@ fn calculate_delta_reversed_args_produces_inverse_delta() {
     assert_eq!(back.root_hash().unwrap(), v1.root_hash().unwrap());
 }
 
+/// verifies: LLR-h7stq2
+///
+/// Measured negative on the direction mutation: this test stays green when
+/// `calculate_delta` reverses the diff, because it asserts only the
+/// `DeltaBaseMismatch` guard and never inspects the delta's contents. What it
+/// does carry is that `calculate_delta` anchors the delta to `old`: stamping
+/// the receiver's root as `base_root` instead reds it, the wrong-side apply
+/// then getting past the guard and failing with a canonical-form error.
 #[test]
 fn apply_delta_to_wrong_side_after_reversed_calc_fails() {
     // Following on from the reversed-args test: applying the forward delta to
@@ -706,7 +827,13 @@ fn apply_delta_to_wrong_side_after_reversed_calc_fails() {
     assert_eq!(err.unwrap_err(), OrgMembersError::DeltaBaseMismatch);
 }
 
-/// verifies: REQ-4umsuz
+/// verifies: REQ-4umsuz, LLR-au8het
+///
+/// Carries both of LLR-au8het's clauses. The sanity assertion that
+/// `delta.base_root()` is v1's root reds when `recalculate()` stamps the new
+/// root into the delta instead of the base; the `DeltaBaseMismatch` assertion
+/// reds when `apply_delta` drops the base comparison (the stale delta then
+/// falls through to an unrelated canonical-form error).
 #[test]
 fn apply_delta_stale_delta_fails() {
     // Realistic scenario: trie evolves v1 -> v2 -> v3. A delta computed for
@@ -748,33 +875,33 @@ fn leaf_with_handle(handle: &str) -> Result<MemberLeaf, OrgMembersError> {
         vec![device_key("d")])
 }
 
-/// verifies: REQ-h5ret5
+/// verifies: REQ-h5ret5, LLR-xzqs9r
 #[test]
 fn handle_valid_ascii() {
     assert!(leaf_with_handle("alice").is_ok());
     assert!(leaf_with_handle("bob-jones").is_ok());
 }
 
-/// verifies: REQ-h5ret5
+/// verifies: REQ-h5ret5, LLR-xzqs9r
 #[test]
 fn handle_empty_rejected() {
     assert!(leaf_with_handle("").is_err());
 }
 
-/// verifies: REQ-h5ret5
+/// verifies: REQ-h5ret5, LLR-xzqs9r
 #[test]
 fn handle_dot_rejected() {
     assert!(leaf_with_handle("alice.bob").is_err());
 }
 
-/// verifies: REQ-h5ret5
+/// verifies: REQ-h5ret5, LLR-xzqs9r
 #[test]
 fn handle_uppercase_rejected() {
     assert!(leaf_with_handle("Alice").is_err());
     assert!(leaf_with_handle("BOB").is_err());
 }
 
-/// verifies: REQ-h5ret5
+/// verifies: REQ-h5ret5, LLR-xzqs9r
 #[test]
 fn handle_nfc_normalized() {
     let m1 = leaf_with_handle("e\u{0301}ric").unwrap();
@@ -782,31 +909,32 @@ fn handle_nfc_normalized() {
     assert_eq!(m1.handle(), m2.handle());
 }
 
-/// verifies: REQ-h5ret5
+/// verifies: REQ-h5ret5, LLR-xzqs9r
 #[test]
 fn handle_mixed_script_rejected() {
     let mixed = "\u{0430}lice"; // Cyrillic а + Latin lice
     assert!(leaf_with_handle(mixed).is_err());
 }
 
-/// verifies: REQ-h5ret5
+/// verifies: REQ-h5ret5, LLR-xzqs9r
 #[test]
 fn handle_single_script_unicode_ok() {
     assert!(leaf_with_handle("\u{0430}\u{043B}\u{0438}\u{0441}\u{0430}").is_ok());
 }
 
-/// verifies: REQ-h5ret5
+/// verifies: REQ-h5ret5, LLR-xzqs9r
 #[test]
 fn handle_hyphen_allowed() {
     assert!(leaf_with_handle("jan-jan").is_ok());
 }
 
+/// verifies: LLR-xzqs9r
 #[test]
 fn handle_digits_allowed() {
     assert!(leaf_with_handle("alice42").is_ok());
 }
 
-/// verifies: REQ-h5ret5
+/// verifies: REQ-h5ret5, LLR-xzqs9r
 ///
 /// The 128-byte clause. The annotated proptest cannot reach it: its strategy
 /// caps generated handles at 64 characters.
@@ -828,7 +956,7 @@ fn handle_too_long_rejected() {
 
 // --- Confusable detection tests ---
 
-/// verifies: REQ-m8aexh
+/// verifies: REQ-m8aexh, LLR-5w2jx8, LLR-ch2pkw
 #[test]
 fn genesis_rejects_confusables() {
     // Find two handles whose UTS#39 skeletons match by probing candidates at runtime.
@@ -858,7 +986,7 @@ fn genesis_rejects_confusables() {
     assert_eq!(err, OrgMembersError::ConfusableHandle);
 }
 
-/// verifies: REQ-m8aexh
+/// verifies: REQ-m8aexh, LLR-5w2jx8, LLR-fv75ec
 #[test]
 fn insert_rejects_confusable_handle() {
     let (h1, h2) =
@@ -885,7 +1013,7 @@ fn insert_rejects_confusable_handle() {
     assert_eq!(err, OrgMembersError::ConfusableHandle);
 }
 
-/// verifies: REQ-m8aexh
+/// verifies: REQ-m8aexh, LLR-5w2jx8, LLR-mmst86
 #[test]
 fn update_rejects_confusable_handle() {
     let (h1, h2) =
@@ -952,6 +1080,7 @@ fn member_leaf_nfc_normalization() {
     assert_eq!(m1.name(), m2.name());
 }
 
+/// verifies: LLR-pys2ek
 #[test]
 fn member_leaf_too_many_devices() {
     let devices: Vec<_> = (0..5).map(|i| device_key(&format!("d{}", i))).collect();
@@ -965,6 +1094,7 @@ fn member_leaf_too_many_devices() {
     assert_eq!(err.unwrap_err(), OrgMembersError::DeviceSlotsFull);
 }
 
+/// verifies: LLR-paxj7b
 #[test]
 fn member_leaf_empty_devices() {
     let err = MemberLeaf::new(
@@ -977,6 +1107,7 @@ fn member_leaf_empty_devices() {
     assert_eq!(err.unwrap_err(), OrgMembersError::EmptyDeviceList);
 }
 
+/// verifies: LLR-4czn8t
 #[test]
 fn member_leaf_debug_redacts_pii() {
     let debug = format!("{:?}", jan_jan());
@@ -986,6 +1117,14 @@ fn member_leaf_debug_redacts_pii() {
     assert!(!debug.contains("jan-jan"));
 }
 
+/// verifies: LLR-paxj7b
+///
+/// Added 2026-09-17. LLR-paxj7b's two other carriers are both refusals of the
+/// zero-device record; this is the normal case the rejection is a boundary of
+/// -- a record with the minimum device count is constructed and its fields
+/// read back. Widening `MemberLeaf::new`'s guard from `is_empty()` to
+/// `len() <= 1` reds it. Note the red arrives through the `alice()` helper's
+/// `unwrap()` at the top of this file, not at an assertion below.
 #[test]
 fn member_leaf_has_id_handle_and_key() {
     let leaf = alice();
@@ -996,6 +1135,7 @@ fn member_leaf_has_id_handle_and_key() {
 
 // --- Deterministic root hash ---
 
+/// verifies: LLR-4n8zqx
 #[test]
 fn same_members_same_root_hash() {
     let trie1 = TestTrie::genesis(vec![alice(), bob(), charlie()]).unwrap();
@@ -1003,6 +1143,7 @@ fn same_members_same_root_hash() {
     assert_eq!(trie1.root_hash().unwrap(), trie2.root_hash().unwrap());
 }
 
+/// verifies: LLR-4n8zqx
 #[test]
 fn different_insertion_order_same_root() {
     let trie_abc = TestTrie::genesis(vec![alice(), bob(), charlie()]).unwrap();
@@ -1012,6 +1153,7 @@ fn different_insertion_order_same_root() {
 
 // --- Multiple mutations before recalculate ---
 
+/// verifies: LLR-n7nya3
 #[test]
 fn batch_mutations_then_recalculate() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -1059,6 +1201,7 @@ fn member_lookup_by_id() {
 
 // --- Lookup by handle ---
 
+/// verifies: LLR-ub6dw9
 #[test]
 fn get_by_handle() {
     let trie = TestTrie::genesis(vec![alice(), bob(), jan_jan()]).unwrap();
@@ -1072,6 +1215,7 @@ fn get_by_handle() {
     assert!(trie.get_by_handle("eve").is_none());
 }
 
+/// verifies: LLR-ub6dw9
 #[test]
 fn contains_handle() {
     let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
@@ -1175,6 +1319,17 @@ fn member_key_rotation_through_delta() {
 
 // --- Adversarial apply_delta (I-2) ---
 
+/// verifies: LLR-juxk9q
+///
+/// Reds when the skeleton/uniqueness block in `apply_delta` is skipped:
+/// `apply_delta` then returns `Ok` and `unwrap_err()` panics.
+///
+/// Measured negative on the other half of the item. That same block returns
+/// `DuplicateHandle` as well as `ConfusableHandle`, and removing the whole
+/// block reds exactly one test in this file -- this one. Nothing asserts that
+/// an upsert carrying a handle already held by another member is refused at
+/// apply time, so the "handle uniqueness" clause of LLR-juxk9q is carried in
+/// name only. The confusability clause is genuinely carried.
 #[test]
 fn apply_delta_rejects_confusable_in_upsert() {
     let (h1, h2) =
@@ -1227,7 +1382,7 @@ fn orgtrie_is_send_sync() {
 // --- Serde validation (C-1) ---
 
 #[cfg(feature = "serde")]
-/// verifies: REQ-shk82j, REQ-h5ret5
+/// verifies: REQ-shk82j, REQ-h5ret5, LLR-68tka5
 #[test]
 fn deserialize_rejects_invalid_handle() {
     use postcard::{from_bytes, to_allocvec};
@@ -1273,6 +1428,7 @@ fn deserialize_rejects_invalid_handle() {
 }
 
 #[cfg(feature = "serde")]
+/// verifies: LLR-xyv6p9
 #[test]
 fn deserialize_accepts_empty_device_list() {
     // Empty device list IS valid on the wire because emergency_isolate_member
@@ -1290,6 +1446,7 @@ fn deserialize_accepts_empty_device_list() {
 }
 
 #[cfg(feature = "serde")]
+/// verifies: LLR-paxj7b
 #[test]
 fn member_leaf_new_rejects_empty_device_list() {
     let err = MemberLeaf::new(
@@ -1305,12 +1462,14 @@ fn member_leaf_new_rejects_empty_device_list() {
 
 // --- Error variant smoke tests (Task 1 of Hyperbridge fixes) ---
 
+/// verifies: LLR-sa3ugj
 #[test]
 fn malformed_delta_error_displays_reason() {
     let err = OrgMembersError::MalformedDelta("test reason");
     assert_eq!(format!("{}", err), "malformed delta: test reason");
 }
 
+/// verifies: LLR-sa3ugj
 #[test]
 fn field_too_long_error_displays_field_and_max() {
     let err = OrgMembersError::FieldTooLong { field: "name", max: 128 };
@@ -1319,6 +1478,7 @@ fn field_too_long_error_displays_field_and_max() {
 
 // --- H-3: name/surname length caps ---
 
+/// verifies: LLR-w5nkbu
 #[test]
 fn member_leaf_new_rejects_oversized_name() {
     let long_name = "a".repeat(129);
@@ -1336,6 +1496,7 @@ fn member_leaf_new_rejects_oversized_name() {
     );
 }
 
+/// verifies: LLR-w5nkbu
 #[test]
 fn member_leaf_new_rejects_oversized_surname() {
     let long_surname = "b".repeat(129);
@@ -1353,6 +1514,7 @@ fn member_leaf_new_rejects_oversized_surname() {
     );
 }
 
+/// verifies: LLR-w5nkbu
 #[test]
 fn member_leaf_new_accepts_max_length_name_and_surname() {
     let name_128 = "a".repeat(128);
@@ -1369,6 +1531,7 @@ fn member_leaf_new_accepts_max_length_name_and_surname() {
 }
 
 #[cfg(feature = "serde")]
+/// verifies: LLR-w5nkbu
 #[test]
 fn deserialize_rejects_oversized_name() {
     use postcard::{from_bytes, to_allocvec};
@@ -1398,6 +1561,7 @@ fn deserialize_rejects_oversized_name() {
 }
 
 #[cfg(feature = "serde")]
+/// verifies: LLR-w5nkbu
 #[test]
 fn deserialize_rejects_oversized_surname() {
     use postcard::{from_bytes, to_allocvec};
@@ -1426,6 +1590,7 @@ fn deserialize_rejects_oversized_surname() {
     assert!(result.is_err());
 }
 
+/// verifies: LLR-w5nkbu, LLR-g6arcs
 #[test]
 fn update_name_surname_rejects_oversized_name() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -1437,6 +1602,7 @@ fn update_name_surname_rejects_oversized_name() {
     );
 }
 
+/// verifies: LLR-w5nkbu, LLR-g6arcs
 #[test]
 fn update_name_surname_rejects_oversized_surname() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -1451,7 +1617,7 @@ fn update_name_surname_rejects_oversized_surname() {
 // --- H-2: P2pDeviceSlots deserialize rejects non-canonical wire form ---
 
 #[cfg(feature = "serde")]
-/// verifies: REQ-shk82j
+/// verifies: REQ-shk82j, LLR-xyv6p9
 #[test]
 fn deserialize_rejects_unsorted_devices() {
     use postcard::{from_bytes, to_allocvec};
@@ -1465,7 +1631,7 @@ fn deserialize_rejects_unsorted_devices() {
 }
 
 #[cfg(feature = "serde")]
-/// verifies: REQ-shk82j
+/// verifies: REQ-shk82j, LLR-xyv6p9
 #[test]
 fn deserialize_rejects_duplicate_devices() {
     use postcard::{from_bytes, to_allocvec};
@@ -1477,7 +1643,7 @@ fn deserialize_rejects_duplicate_devices() {
 }
 
 #[cfg(feature = "serde")]
-/// verifies: REQ-shk82j, REQ-xdx2c2
+/// verifies: REQ-shk82j, REQ-xdx2c2, LLR-pys2ek, LLR-xyv6p9
 #[test]
 fn deserialize_rejects_too_many_devices() {
     use postcard::{from_bytes, to_allocvec};
@@ -1491,7 +1657,7 @@ fn deserialize_rejects_too_many_devices() {
 }
 
 #[cfg(feature = "serde")]
-/// verifies: REQ-shk82j
+/// verifies: REQ-shk82j, LLR-xyv6p9
 #[test]
 fn deserialize_accepts_sorted_unique_devices() {
     use postcard::{from_bytes, to_allocvec};
@@ -1506,6 +1672,11 @@ fn deserialize_accepts_sorted_unique_devices() {
 
 // --- H-1: apply_delta rejects non-canonical Delta ---
 
+/// verifies: LLR-xmpqn2
+///
+/// Clause: every removal is present in the record. Reds when the presence
+/// check is dropped -- the error degrades to `InvariantViolated` raised inside
+/// the apply loop, so the `MalformedDelta` assertion fails.
 #[test]
 fn apply_delta_rejects_stale_removal() {
     // After H-1: a removal of an id not present in the trie is MalformedDelta.
@@ -1524,6 +1695,19 @@ fn apply_delta_rejects_stale_removal() {
     assert!(matches!(err, OrgMembersError::MalformedDelta(_)));
 }
 
+/// verifies: LLR-8jttpb, LLR-xmpqn2
+///
+/// For LLR-xmpqn2, clause: removals strictly increasing. Reds when the
+/// `removed.windows(2)` check is dropped -- `apply_delta` then returns `Ok`.
+///
+/// For LLR-8jttpb:
+/// T5 measured that neither `calculate_delta` carrier named in the plan reds
+/// when `smt::diff_tries` descends right before left -- both hold a single
+/// removal and a single upsert, so no ordering is observable. This test's
+/// setup probe ("≥2 removals in decreasing order" after reversing) is the only
+/// assertion in this file that the diff walk yields strictly increasing
+/// identifiers, so LLR-8jttpb is annotated here as well. It reds as a setup
+/// panic, not at the `MalformedDelta` assertion.
 #[test]
 fn apply_delta_rejects_unsorted_removed() {
     let trie = TestTrie::genesis(vec![alice(), bob(), charlie()]).unwrap();
@@ -1542,6 +1726,12 @@ fn apply_delta_rejects_unsorted_removed() {
     assert!(matches!(err, OrgMembersError::MalformedDelta(_)));
 }
 
+/// verifies: LLR-xmpqn2
+///
+/// Clause: removals strictly increasing (the duplicate case). Reds when the
+/// `removed.windows(2)` check is dropped -- the second removal then hits an
+/// absent id in the apply loop and the error becomes `InvariantViolated`,
+/// failing the `MalformedDelta` assertion.
 #[test]
 fn apply_delta_rejects_duplicate_in_removed() {
     let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
@@ -1554,6 +1744,10 @@ fn apply_delta_rejects_duplicate_in_removed() {
     assert!(matches!(err, OrgMembersError::MalformedDelta(_)));
 }
 
+/// verifies: LLR-xmpqn2
+///
+/// Clause: upserts strictly increasing (the duplicate case). Reds when the
+/// `upserted.windows(2)` check is dropped -- `apply_delta` then returns `Ok`.
 #[test]
 fn apply_delta_rejects_duplicate_in_upserted() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -1566,6 +1760,10 @@ fn apply_delta_rejects_duplicate_in_upserted() {
     assert!(matches!(err, OrgMembersError::MalformedDelta(_)));
 }
 
+/// verifies: LLR-xmpqn2
+///
+/// Clause: upserts strictly increasing. Reds when the `upserted.windows(2)`
+/// check is dropped -- `apply_delta` then returns `Ok`.
 #[test]
 fn apply_delta_rejects_unsorted_upserted() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -1582,6 +1780,11 @@ fn apply_delta_rejects_unsorted_upserted() {
     assert!(matches!(err, OrgMembersError::MalformedDelta(_)));
 }
 
+/// verifies: LLR-xmpqn2
+///
+/// Clause: `removed` and `upserted` are disjoint. Reds when the two-pointer
+/// merge's `Ordering::Equal` arm advances instead of rejecting -- `apply_delta`
+/// then returns `Ok`. It is the only carrier this mutation reds.
 #[test]
 fn apply_delta_rejects_id_in_both_removed_and_upserted() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
@@ -1595,6 +1798,11 @@ fn apply_delta_rejects_id_in_both_removed_and_upserted() {
     assert!(matches!(err, OrgMembersError::MalformedDelta(_)));
 }
 
+/// verifies: LLR-xmpqn2
+///
+/// Clause: every upsert observably changes the record. Reds when the
+/// "identical to existing trie state" check is dropped -- `apply_delta` then
+/// returns `Ok`. It is the only carrier this mutation reds.
 #[test]
 fn apply_delta_rejects_noop_upsert() {
     let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
@@ -1609,6 +1817,15 @@ fn apply_delta_rejects_noop_upsert() {
     assert!(matches!(err, OrgMembersError::MalformedDelta(_)));
 }
 
+/// verifies: LLR-xmpqn2
+///
+/// The acceptance half: a canonical delta must still be accepted. Measured
+/// negative -- this test stays green under all five relaxing mutations
+/// (drop increasing-removed, drop presence, drop increasing-upserted, drop
+/// disjointness, drop no-op), because relaxing a check cannot break an honest
+/// delta. It reds only under a polarity flip that makes the check
+/// over-strict (`removed` presence test inverted to `is_some()`), and that
+/// mutation is blunt: it reds four tests, of which this is one.
 #[test]
 fn apply_delta_canonical_delta_still_works() {
     // Sanity: the strict checks must not break honest round-trips.
@@ -1622,7 +1839,7 @@ fn apply_delta_canonical_delta_still_works() {
     assert_eq!(verified.root_hash().unwrap(), updated.root_hash().unwrap());
 }
 
-/// verifies: REQ-avmu3j
+/// verifies: REQ-avmu3j, LLR-n7nya3
 ///
 /// The abnormal case: a mutated trie must refuse to report a root at all,
 /// rather than reporting the pre-mutation one. `root_hash()` is called by most
@@ -1651,3 +1868,197 @@ fn root_hash_errs_until_recalculated() {
 // a second one was a mistake made by trusting a doc-comment ("gated so a plain
 // cargo test skips") over the file it describes; the annotation it was written
 // to carry now sits on the existing test instead.
+
+/// verifies: LLR-72p8bz
+///
+/// The four hash domains are separated: the same bytes hashed as a member leaf,
+/// a member node, a device leaf and a device node yield four different values.
+/// Without separation, a device key could be presented as a member leaf.
+#[test]
+fn hasher_domains_are_separated() {
+    let input = [7u8; 32];
+    let node = NodeHash::new(input);
+
+    let member_leaf = Blake3Hasher::hash_member_leaf(&input);
+    let device_leaf = Blake3Hasher::hash_device_leaf(&input);
+    let member_node = Blake3Hasher::hash_member_node(&node, &node);
+    let device_node = Blake3Hasher::hash_device_node(&node, &node);
+
+    let all = [member_leaf, device_leaf, member_node, device_node];
+    for i in 0..all.len() {
+        for j in (i + 1)..all.len() {
+            assert_ne!(all[i], all[j], "domains {i} and {j} collide");
+        }
+    }
+}
+
+/// verifies: LLR-kdhd2v
+///
+/// Device keys are held sorted, so the order they are supplied in does not
+/// change the member record's contribution to the root.
+#[test]
+fn device_slot_order_does_not_change_the_root() {
+    let d1 = device_key("dev-a");
+    let d2 = device_key("dev-b");
+
+    let forward = MemberLeaf::new(
+        member_id("m"),
+        "alice",
+        member_key("k"),
+        "Alice",
+        "Anderson",
+        vec![d1, d2],
+    )
+    .unwrap();
+    let reverse = MemberLeaf::new(
+        member_id("m"),
+        "alice",
+        member_key("k"),
+        "Alice",
+        "Anderson",
+        vec![d2, d1],
+    )
+    .unwrap();
+
+    let a = TestTrie::genesis(vec![forward])
+        .unwrap()
+        .recalculate()
+        .unwrap()
+        .0
+        .root_hash()
+        .unwrap();
+    let b = TestTrie::genesis(vec![reverse])
+        .unwrap()
+        .recalculate()
+        .unwrap()
+        .0
+        .root_hash()
+        .unwrap();
+
+    assert_eq!(a, b);
+}
+
+/// verifies: LLR-kdhd2v, LLR-pys2ek
+///
+/// Every one of the MAX_DEVICES slots reaches the root. `to_fixed_slots` is
+/// sized by MAX_DEVICES while `compute_device_root` is sized by the literal 4;
+/// nothing but this test couples them, and a device that does not reach the
+/// root is invisible to every verifier.
+///
+/// LLR-pys2ek added 2026-09-17: this is the item's normal case, and it is
+/// where its second clause -- MAX_DEVICES is 4 *because* the sub-trie has four
+/// slots -- is actually asserted. Its other three carriers are all refusals of
+/// a fifth device. Raising MAX_DEVICES to 5 reds this test at `device slot 4
+/// does not reach the root`, which is precisely the coupling the clause
+/// states.
+///
+/// Rewritten 2026-09-17 (independent review, finding-3): the first version
+/// substituted one fixed key, `device_key("replacement")`, into each slot, and
+/// the MAX_DEVICES 4 -> 5 red depended on that key's BLAKE3 digest happening to
+/// sort after the fourth key of the base set. Changing that one seed string
+/// left the mutation GREEN. The substitute is now the pool's largest key by
+/// construction, so the red no longer turns on a digest coincidence and is
+/// reproduced under any device-key seeds.
+#[test]
+fn every_device_slot_reaches_the_root() {
+    // `P2pDeviceSlots` stores devices in sorted order, so which slot a key
+    // lands in is decided by its digest, not by the order it is written here.
+    // Sort a pool of MAX_DEVICES + 1 keys and take the first MAX_DEVICES as
+    // the base: `base[i]` is then the key in slot `i`, by construction rather
+    // than by coincidence. The spare is the pool's largest, so substituting it
+    // for any base key leaves it in the LAST slot -- which is the only
+    // substitution that can be invisible to a root that hashes fewer slots
+    // than MAX_DEVICES. Picking an arbitrary replacement key instead makes the
+    // detection depend on where that one digest happens to sort.
+    let mut pool: Vec<P2pDeviceKey> =
+        (0..=MAX_DEVICES).map(|i| device_key(&format!("dev-{i}"))).collect();
+    pool.sort();
+    let base: Vec<P2pDeviceKey> = pool[..MAX_DEVICES].to_vec();
+    let spare = pool[MAX_DEVICES];
+
+    let root_of = |devices: Vec<P2pDeviceKey>| {
+        let leaf = MemberLeaf::new(
+            member_id("m"),
+            "alice",
+            member_key("k"),
+            "Alice",
+            "Anderson",
+            devices,
+        )
+        .unwrap();
+        TestTrie::genesis(vec![leaf])
+            .unwrap()
+            .recalculate()
+            .unwrap()
+            .0
+            .root_hash()
+            .unwrap()
+    };
+
+    let all = root_of(base.clone());
+
+    // Vary each slot in turn; every one must move the root.
+    for i in 0..MAX_DEVICES {
+        let mut varied = base.clone();
+        varied[i] = spare;
+        assert_ne!(all, root_of(varied), "device slot {i} does not reach the root");
+    }
+}
+
+// --- SDD-d9svdj: addressing and the empty-subtree defaults ---
+
+/// verifies: LLR-zbe553
+///
+/// Index 0 is the most significant bit of byte 0, and index 255 the least
+/// significant bit of byte 31. The SMT traverses by this, so the convention is
+/// the addressing scheme, not a detail.
+#[test]
+fn member_id_bit_indexes_msb_first() {
+    let mut bytes = [0u8; 32];
+    bytes[0] = 0b1000_0000;
+    bytes[31] = 0b0000_0001;
+    let id = MemberId::new(bytes);
+
+    assert!(id.bit(0), "index 0 must be the MSB of byte 0");
+    assert!(!id.bit(1));
+    assert!(id.bit(255), "index 255 must be the LSB of byte 31");
+    assert!(!id.bit(254));
+}
+
+/// verifies: LLR-wm5hpc, LLR-4n8zqx
+///
+/// Every level's empty-subtree hash is precomputed, so a trie emptied of its
+/// members is indistinguishable from one that never held any.
+///
+/// LLR-4n8zqx added 2026-09-17: this is that item's boundary case, and the
+/// only one that puts a *history* behind the member set rather than a
+/// different insertion order. Its two other carriers compare two tries built
+/// by insertion alone; here the two tries have the same (empty) member set and
+/// different pasts. Making `smt::remove` leave a residue -- `Node::empty` at
+/// the level-1 default instead of the empty-leaf default -- reds it, the root
+/// of an empty organisation then depending on how it got there.
+#[test]
+fn add_then_delete_returns_to_the_empty_root() {
+    let empty = TestTrie::genesis(vec![])
+        .unwrap()
+        .recalculate()
+        .unwrap()
+        .0
+        .root_hash()
+        .unwrap();
+
+    let populated = TestTrie::genesis(vec![])
+        .unwrap()
+        .add_member(alice())
+        .unwrap();
+    let emptied = populated
+        .delete_member(alice().id())
+        .unwrap()
+        .recalculate()
+        .unwrap()
+        .0
+        .root_hash()
+        .unwrap();
+
+    assert_eq!(empty, emptied);
+}

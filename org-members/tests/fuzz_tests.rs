@@ -46,7 +46,7 @@ fn make_member(handle: &str, variant: u8) -> Option<MemberLeaf> {
 // ============================================================
 
 proptest! {
-    /// verifies: REQ-ds8ryr, REQ-h5ret5
+    /// verifies: REQ-ds8ryr, REQ-h5ret5, LLR-h9gs32
     #[test]
     fn handle_validation_never_panics(s in "\\PC{0,64}") {
         if let Ok(normalized) = validate_handle(&s) {
@@ -85,7 +85,7 @@ fn arb_op() -> impl Strategy<Value = Op> {
 }
 
 proptest! {
-    /// verifies: REQ-ds8ryr
+    /// verifies: REQ-ds8ryr, LLR-h9gs32
     #[test]
     fn trie_ops_never_panic_and_count_consistent(ops in proptest::collection::vec(arb_op(), 0..30)) {
         let mut trie = TestTrie::genesis(vec![]).unwrap();
@@ -224,6 +224,7 @@ proptest! {
 // ============================================================
 
 proptest! {
+    /// verifies: LLR-h9gs32
     #[test]
     fn calculate_delta_roundtrip(
         initial_indices in proptest::collection::vec(arb_handle_idx(), 0..6),
@@ -372,6 +373,7 @@ fn arb_mutator() -> impl Strategy<Value = Mutator> {
 }
 
 proptest! {
+    /// verifies: LLR-8jttpb, LLR-h9gs32
     #[test]
     fn delta_canonicality_fuzz(
         seed_ops in proptest::collection::vec(arb_delta_op(), 1..8),

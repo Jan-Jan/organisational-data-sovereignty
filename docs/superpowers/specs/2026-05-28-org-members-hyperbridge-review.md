@@ -1,5 +1,32 @@
 # org-members security review — Hyperbridge April 13 post-mortem & web3 hack lessons
 
+> **Forward pointer, added 2026-09-17 — the byte-uniqueness invariant this spec
+> asserts was disproved, and the body below is left as written.** This project
+> dates its corrections rather than rewriting the record, and `org-members/src/
+> delta.rs` and `org-members/src/trie.rs` both send readers here for the threat
+> model, so the correction is signposted at the head instead.
+>
+> The claim, stated at §4 ("exactly one valid byte string per `(base_root,
+> target_root)` pair") and as the handed-upstream invariant in §6 ("`d` is the
+> unique byte string `b` (under postcard) …"), is **false**. `MemberLeaf`'s
+> `Deserialize` impl *normalises* `name`, `surname` and `handle` rather than
+> rejecting non-canonical forms, so the postcard encoding is not injective:
+> with `name = "é"` a `Delta` encodes to 141 bytes, byte-patching the NFC name
+> to its NFD form gives a distinct 142-byte string, and both decode, both are
+> accepted by `apply_delta` on the same base, and both verify against the same
+> target root. What actually holds is the same statement about the decoded
+> `Delta` **value**. The consequences the spec draws from byte uniqueness — a
+> replay-cache key over `postcard(Delta)`, and "no semantically-equivalent
+> alternative blob exists" — do **not** follow and must not be built on.
+>
+> The correction lives in `org-members/README.md` ("What this crate
+> guarantees"), in the `Delta` doc comment in `org-members/src/delta.rs`, in
+> `apply_delta` and `validate_canonical_delta` in `org-members/src/trie.rs`, in
+> `org-members/docs/architecture/2026-09-17-decomposition.md` under SDD-55b2zj,
+> and in the LLR-8jttpb assessment in
+> `org-members/docs/risk/2026-09-17-design-derived.md`. Everything else in this
+> spec — H-1, H-2, H-3, M-1, M-2, M-3, Info-4 and the threat model — stands.
+
 **Date:** 2026-05-28
 **Reviewer:** jan-jan + claude-opus-4-7
 **Subject:** `org-members` crate (Phase 1.a SMT library)

@@ -27,9 +27,27 @@ use crate::types::{MemberId, MemberLeaf, RootHash};
 /// Combined with the fact that `recalculate()`, `calculate_delta()`, and
 /// `pending_changes()` all produce canonical deltas by construction (via
 /// `diff_recursive`'s left-then-right SMT traversal), this gives the higher-
-/// level layer a strong guarantee: for any `(base_root, target_root)` pair,
-/// there is exactly one postcard byte string of a `Delta` that `apply_delta`
-/// will accept.
+/// level layer a guarantee about *structure*: for any `(base_root,
+/// target_root)` pair there is exactly one `Delta` **value** `apply_delta`
+/// will accept, and every delta this crate produces is already in that form.
+///
+/// **This is not byte-level uniqueness, and must not be relied on as if it
+/// were.** Corrected 2026-09-17 after an independent review found the earlier
+/// wording ("exactly one postcard byte string") false. `MemberLeaf`'s
+/// `Deserialize` impl *normalises* rather than rejects: it runs `to_nfc` over
+/// `name` and `surname` and stores the NFC form `validate_handle` returns, so
+/// an NFD-encoded leaf and its NFC equivalent are two distinct postcard byte
+/// strings that decode to the same `MemberLeaf` and produce the same root. The
+/// encoding is therefore **not injective** on the deserialisation path.
+/// (Contrast `P2pDeviceSlots`, whose `Deserialize` genuinely rejects
+/// non-canonical forms.)
+///
+/// Anything upstream that needs byte-level identity — dedup by encoded bytes,
+/// a signature over encoded bytes treated as an identifier for the change, a
+/// replay guard keyed on the encoding — must supply that property itself; it
+/// does not come from here. Making the encoding injective would be a
+/// behaviour change needing its own red-first test, and is deliberately not
+/// done in the change that corrected this comment.
 ///
 /// # What this crate does NOT do
 ///

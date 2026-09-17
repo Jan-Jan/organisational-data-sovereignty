@@ -2,8 +2,16 @@
 # Stray compiler probe output (see fuzz work, 2026-06)
 rust_out
 target
-Cargo.lock
 .claude/worktrees
+
+# Cargo.lock files are TRACKED, deliberately. Two reasons:
+#   1. An application-side workspace pins its dependencies. `app/src-tauri` is
+#      a shipped binary, not a library, and a shipped binary must build from
+#      the same resolved versions every time.
+#   2. The SOUP inventory of a class C unit cites its lockfile as the evidence
+#      for every version it records (IEC 62304 §8.1.2). An untracked lockfile
+#      makes that evidence unreproducible.
+# See org-members/docs/architecture/soup.md.
 
 # Guardrails: worktrees and sed backups (managed by /ratchet)
 .worktrees/
@@ -13,3 +21,13 @@ Cargo.lock
 # UNCLAIMED-PATH to check-units.sh, which scans `git ls-files --others`.
 .claire/
 _apalache-out/
+
+# proptest failure seeds are NEVER committed here. This project's verification
+# method deliberately breaks production code to prove a test discriminates
+# (the mutation protocol: apply a mutation, watch it red, revert). A proptest
+# run under a mutation writes the failing input to `*.proptest-regressions`,
+# and that seed is a seed for behaviour the software never had. Committed, it
+# would be replayed on every later run and pin the suite to the broken
+# version. The cost of losing a genuine regression seed is one rediscovery;
+# the cost of committing a mutation seed is a permanently misleading suite.
+*.proptest-regressions
