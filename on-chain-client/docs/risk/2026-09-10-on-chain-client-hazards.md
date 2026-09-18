@@ -37,7 +37,7 @@ library call that decides which block a state read is taken at.
 The hazard analysis and the requirements it mints do not have the same reach,
 and the difference is deliberate. The analysis covers the unit. The twenty-one
 requirements in
-`on-chain-client/docs/requirements/DRAFT-worktree-guardrails-on-chain-client-risk-chain-reading.md`
+`on-chain-client/docs/requirements/2026-09-10-chain-reading.md`
 realise only the nine controls this analysis chose, all of which are
 **chain-free decisions**: the derivations, the decoders, the ownership test and
 the best lane's step rule. The async subxt code that surrounds them —
@@ -380,7 +380,7 @@ Nine controls are minted below. Each is worded from behaviour the crate already
 has — with one exception, RC-5e3bdk, whose behaviour did not exist and was
 written in this change as the fix for PR-p5ngya — and **every clause of every
 one of them is realised by a requirement in**
-`on-chain-client/docs/requirements/DRAFT-worktree-guardrails-on-chain-client-risk-chain-reading.md`
+`on-chain-client/docs/requirements/2026-09-10-chain-reading.md`
 carrying `(implements: RC-…)`, **with two exceptions, named here rather than
 left for a reader to find, and neither of them a gap**.
 
@@ -442,7 +442,7 @@ Four hazards below have the shape of a **defect** rather than only a missing
 control — HAZ-werm85, HAZ-8s5chy, HAZ-xd4urb and the empty-verifier hazard
 recorded in prose — and between them they carry **five** problem reports, all
 filed in this unit's ledger
-(`on-chain-client/docs/problems/DRAFT-worktree-guardrails-on-chain-client-risk-on-chain-client-problems.md`)
+(`on-chain-client/docs/problems/2026-09-10-on-chain-client-problems.md`)
 — HAZ-xd4urb carries two of the five, which is why the hazard count and the
 report count differ and why review round 3 (finding-6) found this paragraph
 subtracting one from the other. One report — events never filtered by their

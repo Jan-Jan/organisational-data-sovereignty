@@ -2,7 +2,7 @@
 
 Five reports, all found by the code survey behind this unit's first hazard
 analysis
-(`on-chain-client/docs/risk/DRAFT-worktree-guardrails-on-chain-client-risk-on-chain-client-hazards.md`)
+(`on-chain-client/docs/risk/2026-09-10-on-chain-client-hazards.md`)
 rather than by a failing test. Each was recorded before anyone investigated a
 fix, as `resolve-problem` requires.
 

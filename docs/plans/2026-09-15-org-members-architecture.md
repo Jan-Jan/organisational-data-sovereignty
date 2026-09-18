@@ -2072,6 +2072,37 @@ It also means **tooth 4's on-chain-client architecture change cannot merge until
 this is cleared**, because its step 4 will convict on files it did not create.
 Worth doing before that tooth starts rather than inside it.
 
+> **Correction, 2026-09-17 — the blocker described in this section is cleared.
+> The text above is left standing because this project dates its corrections
+> rather than rewriting the record.**
+>
+> The one-commit change this section calls for was made the same day:
+> `worktree-guardrails-on-chain-client-finalize`. It renamed the three
+> `DRAFT-…` ledger files to
+> `on-chain-client/docs/requirements/2026-09-10-chain-reading.md`,
+> `on-chain-client/docs/risk/2026-09-10-on-chain-client-hazards.md` and
+> `on-chain-client/docs/problems/2026-09-10-on-chain-client-problems.md`, and
+> rewrote every cross-reference **to those three files** — seven of them, all
+> inside the on-chain-client ledgers. It did **not** repair every stale pointer
+> `fbf17f0` left behind: `Makefile` line 47 and
+> `on-chain-client/.guardrails/config.yaml` line 106 both still cite
+> `docs/verification/2026-09-10-worktree-guardrails-on-chain-client-risk.md`,
+> a path that does not exist — the record is dated 2026-09-11. Those two are
+> left deliberately, because editing a Makefile or a unit config would cost that
+> change its documentation-only property; they are filed as an open item in
+> `docs/plans/2026-09-05-ratchet-setup.md` under "Added 2026-09-17". The date is
+> 2026-09-10, not the 2026-09-11 merge date of `fbf17f0`, on the owner's
+> decision — the reasoning is in
+> `docs/plans/2026-09-10-on-chain-client-risk-analysis.md` under "Filenames,
+> corrected on 2026-09-17".
+>
+> So `GR_CONFIG=on-chain-client/.guardrails/config.yaml check-ids.sh` bare is
+> exit 0 on `master`, and tooth 4's on-chain-client architecture change is no
+> longer blocked by it. The systemic open items this defect raised — how a
+> skipped `finalize-docs.sh` gets caught locally, and whether this repository
+> pushes at all — are filed in `docs/plans/2026-09-05-ratchet-setup.md` under
+> "Added 2026-09-17" and remain open.
+
 ### Gate result — 2026-09-17
 
 Run in the change worktree over the computed impact set (`check-units.sh

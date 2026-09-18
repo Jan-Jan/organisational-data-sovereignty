@@ -614,3 +614,287 @@ visible.
   documented allowlist. Related: app's SOUP table is still the empty template
   (app not-minted control 13, tooth 4), and these four advisories are precisely
   the kind of thing it exists to record.
+
+## Added 2026-09-17 — the skipped finalisation, and the CI that has never run (`docs/plans/2026-09-10-on-chain-client-risk-analysis.md`)
+
+Four open items, all raised by one defect: `fbf17f0` (2026-09-11, tooth 3's
+on-chain-client risk analysis) never ran `merge-change` step 3
+(`finalize-docs.sh`), so three ledger files were squashed onto `master` still
+carrying their `DRAFT-` names. `on-chain-client`'s `check-ids.sh` has been exit 1
+on `master` ever since, and stays that way until the repair
+(`worktree-guardrails-on-chain-client-finalize`) merges — the rename itself is
+done on that branch, so none of the items below is the repair.
+
+They divide in two. Items (a) and (b) are **structural**: they are about why
+nothing convicted, and they are the reason this section exists. The two after
+them are **documentary** — collateral the investigation uncovered rather than
+causes of it, and each is someone's outstanding work rather than a decision to
+take.
+
+No date is given here for when the six-day span ended, deliberately. This
+section was first written saying "until the repair on 2026-09-17" and the repair
+did not merge that day; a span written against a merge that has not happened yet
+is a guess, and guessing a date ahead of a merge is the very mistake this
+section is about.
+
+**(a) A skipped step 3 is invisible to the local merge gate.** This is a
+structural property of the sequence, not an oversight by the operator.
+`verify-before-merge` runs `check-ids.sh` **with** `--allow-draft-files`, which
+is correct there: a change's own `DRAFT-<branch>-<slug>.md` files are legitimate
+for the whole life of that change. The only local run **without** the flag is
+`merge-change` step 4 — and step 4 is skipped by exactly the same operator
+omission that skips step 3, because they are adjacent steps of one procedure.
+So the local sequence cannot self-detect a skipped finalisation: the gate that
+would convict is downstream of the omission and inside its blast radius. CI
+*can* detect it — `.github/workflows/rust.yml`'s `guardrails` job runs
+`check-ids.sh` bare per unit on every event that is not a pull request — but
+only on a push, which brings us to (b).
+
+- [ ] **Decide how a skipped `finalize-docs.sh` gets caught locally.** The
+  options are not equivalent and none is obviously right: make step 4's bare run
+  independent of step 3 having been reached (a post-merge hook on the base
+  branch, which catches it after the fact rather than before); have
+  `verify-before-merge` additionally assert that no `DRAFT-*` ledger file is
+  *tracked on the base branch*, which is a different question from the one
+  `--allow-draft-files` forgives and would have caught this one merge later;
+  or accept that CI is the backstop and fix (b) instead. This is the owner's
+  call. Not proposed as decided.
+
+**(b) The principal CI workflow has never run at all, and what CI history does
+exist stops at 2026-06-17.** "Dormant since 2026-06-17" was this section's first
+wording and it was too kind: it reads as gates that used to run and lapsed, and
+for most of them there was never anything to lapse from. Measured 2026-09-17:
+`origin/master` is at `2bb1c21`, dated 2026-06-17, and local `master` is **45
+commits ahead** of it. Nothing has been pushed in three months. Every workflow
+in `.github/workflows/` is triggered by push or pull request, so none of them
+has executed on any of those 45 commits — which includes all four units'
+ratcheting, **all four** of the risk analyses (`630fa0d` org-members,
+`50a5254` org-node, `fbf17f0` on-chain-client, `5c0c710` app; each verified
+present in `origin/master..master` on 2026-09-17), and the org-members
+architecture ledger. But the 45-commit gap is only half the story, and the
+smaller half.
+
+**`.github/workflows/rust.yml` has no execution history whatsoever.** The file
+was added by `4bb5509` (2026-08-27, "ci(guardrails): Rust + guardrails CI and
+the class B coverage gate"), and `4bb5509` is itself one of the 45 unpushed
+commits: `git merge-base --is-ancestor 4bb5509 origin/master` exits **1**, and
+`git cat-file -e origin/master:.github/workflows/rust.yml` fails with "exists on
+disk, but not in `origin/master`". The workflow has therefore never been present
+on the remote and has never been dispatched, not once. So the bare
+`check-ids.sh`, the clippy denial, the `no_std`/wasm32 compile checks and the
+cross-platform coverage re-run are not lapsed gates with a green history behind
+them — they have produced no result, ever. Every sentence anywhere in this
+repository that reads "CI runs X" about `rust.yml` describes an intention, not
+an event.
+
+**`.github/workflows/quint.yml` is the mixed case, and the split is per
+invariant.** That workflow *is* present at `2bb1c21`, so its steps as they stood
+there did run on pushes up to 2026-06-17. `620b459` ("feat(quint): Milestone 3 —
+tau-window, compromised key, convergence", 2026-06-18) is the **only** commit
+touching it since (`git log 2bb1c21..master -- .github/workflows/quint.yml`
+lists it alone), and it too is unpushed: `git merge-base --is-ancestor 620b459
+origin/master` exits **1**. Comparing `git show
+2bb1c21:.github/workflows/quint.yml` against the working tree gives the split
+exactly:
+
+- **Ran, until 2026-06-17.** The `quint` job's simulator runs of `forkSafety`,
+  `revocationSafety` and `revokedExcludedFromOrgSecret` over `protocol.qnt` at
+  5000 samples / 16 steps; the `membership_mbt.qnt` `mbtInv` run at 200 samples
+  / 15 steps; the four typechecks and `quint test quint/membership.qnt`; the
+  `mbt` job; and the `apalache` job's bounded `quint verify` of those same three
+  invariants at depth 5.
+- **Never ran, not once.** The `tauWindow` and `convergence` simulator runs at
+  5000 samples / 16 steps, and the `apalache` job's `quint verify` of
+  `tauWindow` at depth 5 and of `convergence` at depth 3 — all four added by
+  `620b459`. Two of the five randomised invariant runs and two of the five
+  bounded verifies have never executed.
+
+The gates that exist **only** in CI, read with that distinction — "dormant"
+fits only the three older quint invariants; everything in `rust.yml` has never
+run at all:
+
+- the bare `check-ids.sh` per unit (`rust.yml`, `guardrails` job, the
+  `github.event_name != 'pull_request'` branch) — the gate that would have
+  convicted `fbf17f0` on the first push to `master`. A local bare run **does**
+  exist: `merge-change` step 4, as item (a) above says. What CI supplies that
+  step 4 cannot is a bare run **independent of the operator reaching step 4** —
+  and step 4 is inside the blast radius of the very omission it would convict.
+  So CI's is the only bare run that does not depend on the omitted step;
+- `cargo clippy … --lib -- -D warnings` for org-members and on-chain-client
+  (`rust.yml`, `clippy` job) — the panic-freedom denial. Precisely: it is not
+  that clippy has *no local counterpart*, but that it is **prescribed for
+  developers and gated nowhere**. `org-members/AGENTS.md` line 117 gives
+  `cargo build && cargo test && cargo clippy` as the crate's default command.
+  Nothing enforces it: no Makefile target names clippy, no unit's
+  `verify_commands` names it, and no step of `verify-before-merge` or
+  `merge-change` names it. A prescription nobody runs leaves less trace than a
+  CI job nobody ran, because there is not even a build to be red;
+- the `no_std` and `wasm32-unknown-unknown` compile checks for org-members
+  (`rust.yml`, `no-std` job) — org-members' documented build matrix, and the
+  only thing proving its dependency graph stayed no_std-compatible. Same
+  correction as clippy: `org-members/AGENTS.md` lines 24-25 make
+  `cargo check --no-default-features --features serde --target
+  wasm32-unknown-unknown` mandatory "after any dependency change", and lines
+  120-122 list all three configurations under "Build / test commands". Again no
+  gate runs any of them, so the accurate charge is prescribed-but-ungated, not
+  absent locally;
+- **part** of `quint.yml`, not the whole of it. CI-only: `quint typecheck
+  quint/membership_mbt.qnt`, `quint typecheck quint/ods_instances.qnt`,
+  `quint test quint/membership.qnt` and `quint run quint/membership_mbt.qnt
+  --invariant=mbtInv` in the `quint` job; that job's five randomised invariant
+  runs over `protocol.qnt` (`forkSafety`, `revocationSafety`,
+  `revokedExcludedFromOrgSecret`, `tauWindow`, `convergence`, each at 5000
+  samples); and the `apalache` job's five bounded `quint verify` of the same
+  invariants. **Covered locally, and therefore not on this list:** `quint
+  typecheck quint/membership.qnt` and `quint typecheck quint/protocol.qnt`, both
+  verbatim `verify_commands` entries of org-members (and `protocol.qnt` of
+  org-node as well), and the `mbt` job's `cd org-members && cargo test --test
+  mbt_conformance`, which `cargo test -p org-members` already runs —
+  `rust.yml`'s own comment calls that job "now redundant". **And within the
+  CI-only part, the history splits**: `forkSafety`, `revocationSafety` and
+  `revokedExcludedFromOrgSecret` ran until 2026-06-17 and stopped; `tauWindow`
+  and `convergence` — one simulator run and one `quint verify` each — were added
+  by the unpushed `620b459` and have never run. The accurate claim is that every
+  *model-checking* result this repository cites comes from a lane that has
+  either not executed since 2026-06-17 (those three) or never executed at all
+  (`tauWindow`, `convergence`); the typechecks run at every merge.
+
+Two gates that look CI-only and are **not**, recorded here because putting them
+on the list above understates the local sequence:
+
+- **`check-signing.sh` is not dormant.** `.guardrails/scripts/finish-merge.sh`
+  line 130 runs `sh check-signing.sh --strict` unconditionally as guard 1,
+  before any branch or worktree is removed, and `AGENTS.md` (non-negotiable 2)
+  says the squash commit "is verified with `check-signing.sh` before the
+  worktree is cleaned up". The local run is `--strict`; `rust.yml` runs it
+  **non-strict**, and its own comment gives the reason — a runner holds neither
+  the signer's public key nor an `allowed_signers` file. So the local gate is
+  the **stricter** of the two, and what CI would add is an independent backstop
+  against a local sequence that was bypassed, not the only enforcement of
+  non-negotiable 2. Tightening CI to `--strict` is its own open item below.
+- **`make coverage` is not dormant either.** `Makefile` line 139 is
+  `coverage: coverage-org-members coverage-on-chain-client`, and those two
+  targets are exactly the `coverage_command:` entries in
+  `org-members/.guardrails/config.yaml` and
+  `on-chain-client/.guardrails/config.yaml`, consumed locally by
+  `verify-before-merge` check 5 — on-chain-client's most recent local
+  measurement is 41.75% lines / 42.45% regions against floors of 41 and 42
+  (`docs/verification/2026-09-11-worktree-guardrails-on-chain-client-risk.md`).
+  What is dormant is only the **cross-platform re-run**: the floors are
+  calibrated on aarch64-darwin and enforced in CI on x86_64-linux against a
+  floating `stable` toolchain and an untracked root `Cargo.lock`, a difference
+  `rust.yml`'s `coverage` job comment flags itself. With a 0.45-point margin on
+  the region floor, that re-run is the check that has never happened.
+
+`check-review.sh` is a third gate not on the dormant list, for a different
+reason again: it fires only on a pull
+request and this project merges locally, but guardrails 0.5.1 made it runnable
+on macOS and `merge-change` step 6c now runs it on the merging machine. It has
+no independent CI backstop, which is a different gap and already recorded.
+
+- [ ] **Decide whether this repository pushes.** The workflows were written and
+  ratcheted on the assumption that CI is a real backstop; on the evidence it is
+  not one, and — for `rust.yml`, the workflow carrying every unit gate — never
+  was one for a single commit. The realistic options are: push `master`, which
+  is **not** "let three months of accumulated CI catch up" but a **first
+  bring-up** of `rust.yml` on a 45-commit backlog, because no human has ever
+  seen its `guardrails`, `clippy`, `no-std`, `test` or `coverage` jobs succeed
+  or fail on any commit — red on first contact is close to certain rather than a
+  risk to accept, the failures will be the ordinary failures of a workflow's
+  first run (toolchain, missing system packages, path assumptions) mixed
+  indistinguishably with real findings, and triaging that is its own change and
+  probably its own tooth; keep working locally and **delete or disable** the
+  workflows so that no record cites a gate that does not run; or adopt pull
+  requests, which would additionally bring `check-review.sh` back as an
+  independent backstop instead of a local-only step. What is not an option is
+  leaving verification records implying these gates ran. This is the owner's
+  call, recorded here rather than resolved.
+
+  **The "delete or disable the workflows" option moots three items still open
+  in this file**, and a reader choosing it should see what it takes with it:
+
+  - "**Confirm the CI reshaping on the first push**" (under "New with the
+    multi-unit conversion", the sixth of that section's seven items — *not* in
+    the 2026-09-14 section, as this passage first said; there is only one copy
+    of it) — it says `rust.yml`'s `guardrails` job now runs `check-units.sh`
+    once and the unit gates per unit over `check-units.sh --list`, that the fix
+    round added org-node's verify command to the `test` job (the first CI run of
+    `transport_networked` on ubuntu-latest), and that "the first push confirms
+    both". With no push there is never a first push, and that item can never be
+    closed as written — it would have to be withdrawn, not completed.
+  - "**Branch protection on `master`**" (under "Carried over, still open") — "No
+    direct pushes, require signed commits." Branch protection is a
+    forge-side control on a remote that is not being pushed to; deleting the
+    workflows does not by itself moot it, but it removes the required-status-
+    check half of it, leaving only the signature requirement, which
+    `finish-merge.sh` guard 1 already enforces locally and more strictly.
+  - "**CI signing to `--strict`**" (under "Carried over, still open") — "Needs
+    the committers' public keys published to the workflow. Runs non-strict on
+    pushes to master today." Delete the workflows and this item disappears with
+    them; the strict run survives locally in `finish-merge.sh` regardless, which
+    is why this one is a loss of redundancy rather than a loss of enforcement.
+
+- [ ] **Correct two safety registers that cite CI evidence which was never
+  produced.** The rule above — no verification record may imply these gates ran
+  — is not abstract, and it was wrong of the first draft of this section to
+  state it without naming a single affected document. Two are known, both found
+  and read on 2026-09-17:
+
+  - **`org-members/docs/risk/2026-09-02-membership-hazards.md` line 291**, in a
+    **class C** hazard register. Of the `tauWindow` invariant it states: "CI
+    runs that invariant under the simulator (5000 samples, 16 steps) and under
+    Apalache to depth 5, so it is checked rather than merely written down."
+    Every number in that sentence matches `quint.yml` exactly — and every one of
+    those steps was added by the unpushed `620b459` and has never executed. The
+    sentence is **load-bearing**: it is the clause that carries `tauWindow` from
+    *asserted* to *checked*, and the paragraph around it is an argument about how
+    much weight the staleness bound can take. Remove the evidence and the
+    paragraph's own hedges — the check is bounded, the invariant is entailed by
+    the action guard — are all that is left, which is a materially weaker
+    position than the register currently states.
+  - **`org-node/docs/risk/2026-09-09-org-node-hazards.md` line 813-814**, at the
+    end of the reorganisation assessment (S3 / P1, control not minted). Its
+    wording is "Minted when the chopsticks lane runs in CI (setup checklist)" —
+    a **minting condition**, not an assertion that anything ran, and the
+    sentences before it say plainly that the submitter's half "is tested only in
+    the chopsticks lane … which the merge gate does not run". So it is not false
+    and must not be filed as if it were. What it is is a condition that cannot
+    currently be met: `rust.yml` excludes the chopsticks-dependent targets from
+    org-node's `test` step by design (`rust.yml` line 72), and `rust.yml` has
+    never run at all, so the trigger for minting that control is doubly out of
+    reach. A reader of that register should know that.
+
+  **The owner's decision, 2026-09-17: neither register is corrected in this
+  change, and that is deliberate, not an oversight.** Two reasons. First,
+  changing what a hazard's residual-risk argument rests on is a **risk
+  decision** — it belongs to the `analyze-risks` skill, with the acceptability
+  matrix in hand and the option to re-assess or mint, not to a prose-repair
+  change editing a sentence. Second, the change that found this
+  (`worktree-guardrails-on-chain-client-finalize`) is deliberately
+  documentation-only and confined to the on-chain-client finalisation; editing
+  these two files would pull **org-members' and org-node's** risk ledgers into
+  it and oblige it to own both units' gates. So this is filed, open, and carried
+  to whoever runs the next risk analysis on either unit. It is outstanding
+  because it was deferred on purpose, not because it was missed. No sweep for
+  further affected documents was performed; these two are the ones that were
+  found, and the general rule stands over the rest.
+
+- [ ] **Fix two stale verification-record references written by `fbf17f0`.**
+  Both cite `docs/verification/2026-09-10-worktree-guardrails-on-chain-client-risk.md`,
+  a path that does not exist and never did — the record landed as
+  `docs/verification/2026-09-11-worktree-guardrails-on-chain-client-risk.md`:
+
+  - **`Makefile` line 47**, inside the "RESOLVED, 2026-09-10" note that records
+    the owner's recalibration of on-chain-client's coverage floors;
+  - **`on-chain-client/.guardrails/config.yaml` line 106**, in the comment above
+    `coverage_command:` that repeats the same pointer.
+
+  Both were written by `fbf17f0` — the same commit that skipped
+  `finalize-docs.sh` — and they are the same species of damage: a reference
+  written to a file name that the merge was expected to produce and did not.
+  They are **not** fixed by the repair change. Editing `Makefile` or a unit's
+  `config.yaml` would cost that change its documentation-only property and pull
+  gate configuration into a prose repair, which is exactly the trade this
+  project declines. Recorded here so they are left knowingly. Neither breaks a
+  gate — no script resolves these paths — so the cost is a reader following a
+  pointer to nothing.

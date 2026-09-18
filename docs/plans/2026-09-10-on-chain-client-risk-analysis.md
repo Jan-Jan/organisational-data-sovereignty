@@ -28,6 +28,205 @@ The org-node half merged as the signed squash carrying
 `docs/plans/2026-09-09-org-node-risk-analysis.md`. The `app` unit's analysis is
 the next change, not this one.
 
+**Filenames, corrected on 2026-09-17 — and this change never ran
+`finalize-docs.sh` at all.** Every ledger file this plan names below is named by
+its draft name, and those files kept those names on `master` from this change's
+merge (`fbf17f0`, 2026-09-11) until the repair merged. `merge-change` step 3 was
+skipped, so the three drafts were squashed onto the base branch as drafts. The
+text below is left as written — this project dates its corrections rather than
+rewriting the record — so read them as:
+
+| written below | actual file |
+|---|---|
+| `…/requirements/DRAFT-worktree-guardrails-on-chain-client-risk-chain-reading.md` | `on-chain-client/docs/requirements/2026-09-10-chain-reading.md` |
+| `…/risk/DRAFT-worktree-guardrails-on-chain-client-risk-on-chain-client-hazards.md` | `on-chain-client/docs/risk/2026-09-10-on-chain-client-hazards.md` |
+| `…/problems/DRAFT-worktree-guardrails-on-chain-client-risk-on-chain-client-problems.md` | `on-chain-client/docs/problems/2026-09-10-on-chain-client-problems.md` |
+
+**Why 2026-09-10 and not 2026-09-11, the merge date.** The owner decided this on
+2026-09-17. Two reasons, each checkable:
+
+1. `docs/verification/2026-09-11-worktree-guardrails-on-chain-client-risk.md`
+   already asserts it, under Gaps: "The date on this record is 2026-09-11; the
+   ledger files carry 2026-09-10 names. The change was finalized on the 10th and
+   merged on the 11th." That was written as a statement of fact and it was never
+   true, because step 3 never ran and the files carried draft names instead.
+   Naming them 2026-09-10 makes the existing assertion true rather than leaving
+   a certified record contradicted by the tree.
+2. It is what both sibling units of this same tooth actually did. `org-node`'s
+   half merged as `50a5254` on **2026-09-10** and its ledger files are
+   `org-node/docs/risk/2026-09-09-org-node-hazards.md`,
+   `org-node/docs/requirements/2026-09-09-verify-and-commit.md` and
+   `org-node/docs/problems/2026-09-09-org-node-problems.md` — the day before the
+   merge. `app`'s merged as `5c0c710` on **2026-09-15** and its files are
+   `app/docs/risk/2026-09-14-app-hazards.md`,
+   `app/docs/requirements/2026-09-14-tauri-shell.md` and
+   `app/docs/problems/2026-09-14-app-problems.md` — again the day before. Both
+   siblings are finalisation-dated, not merge-dated. 2026-09-10 puts this unit
+   in the same convention as the other two thirds of the tooth.
+
+**The three names were assigned by hand, and `finalize-docs.sh` was
+deliberately bypassed for them.** That script takes no date argument — its
+usage is `finalize-docs.sh [--dry-run]`, it stamps `today=$(date +%Y-%m-%d)`,
+and it strips only the **current** branch's name prefix from the slug. Run here
+on 2026-09-17, from the branch `worktree-guardrails-on-chain-client-finalize`,
+against files still named `DRAFT-worktree-guardrails-on-chain-client-risk-…`, it
+would have produced
+`2026-09-17-worktree-guardrails-on-chain-client-risk-<slug>.md` — wrong in both
+halves: the wrong date, and a stale branch prefix left inside the slug because
+the prefix it strips is this change's branch, not the one that wrote the drafts.
+Running the prescribed remedy six days late does not reproduce what the
+prescribed remedy would have produced on the day. So the renames were done by
+hand to the names the tool would have produced had it run when due, adjusted to
+2026-09-10 for the two reasons above. `finalize-docs.sh --dry-run` was still run
+at `merge-change` step 3 of the repair, with this unit's `GR_CONFIG`, and
+correctly reported nothing left to rename (exit 0, no output) — the step was
+performed, not skipped a second time.
+
+**Honestly, this diverges from what the ledger READMEs say.** All three of
+`on-chain-client/docs/{requirements,risk,problems}/README.md` define the dated
+name as "merge date, assigned by `merge-change`", so a 2026-09-10 name is not
+what those READMEs describe. The divergence is **pre-existing and already
+recorded**: review of the org-node half raised exactly this as **finding-69** in
+`docs/verification/2026-09-10-worktree-guardrails-org-node-risk.md` — "the ledger
+files were finalised to merge-dated names on 2026-09-09 while fix rounds ran to
+2026-09-10, so the dated names are not the merge date the ledger README defines
+them as" — dispositioned "accepted, not fixed". So the convention in practice is
+the finalisation date and the READMEs' wording has been wrong since tooth 2.
+Reconciling the two is the owner's open item, filed in
+`docs/plans/2026-09-05-ratchet-setup.md`, and is not done here.
+
+**What the omission cost, which is more than three filenames.** A draft-named
+ledger file is `DRAFT-FILE` under `check-ids.sh`, so this unit's id gate has been
+exit 1 on `master` from 2026-09-11 until the repair merged — at least six days,
+and no terminal date is written here because the repair had not merged when this
+was written, and a span measured against a merge that has not happened is a
+guess.
+
+The **local** sequence could not have caught it. `verify-before-merge` runs
+`check-ids.sh` **with** `--allow-draft-files`, which is exactly the flag that
+forgives a draft-named file, and the only local run without the flag is
+`merge-change` step 4 — the step the same omission also skipped. Skipping step 3
+and skipping the gate that would have convicted the skip are the same omission,
+so the change that caused it could not detect it locally.
+
+**CI could have, and this is where the larger finding is.** `.github/workflows/rust.yml`
+does not run `check-ids.sh` bare only at merge: its `guardrails` job is
+`on: [push, pull_request]` and runs the per-unit loop **twice, conditionally** —
+`check-ids.sh --allow-draft-files` when `github.event_name == 'pull_request'`,
+and `check-ids.sh` **bare** when `github.event_name != 'pull_request'`. There are
+therefore **two** bare runners, not one, and the second is CI on any push. Had
+`fbf17f0` ever been pushed, that job would have convicted it on the first push to
+`master`, the same day.
+
+It was never pushed. **`origin/master` is still at `2bb1c21`, dated 2026-06-17,
+and local `master` is 45 commits ahead of it.** Nothing has reached the remote in
+three months, so no workflow has run on any of those 45 commits.
+
+**And `rust.yml` is worse than dormant: it has never run once.** The workflow
+was added by `4bb5509` (2026-08-27), which is itself one of the 45 unpushed
+commits — `git merge-base --is-ancestor 4bb5509 origin/master` exits 1, and
+`origin/master` has no `.github/workflows/rust.yml` at all. So the bare
+`check-ids.sh` described in the paragraph above has never executed on any
+commit in this repository's history. "Would have convicted `fbf17f0` on the
+first push" remains true — the workflow would have gone up with the commits —
+but it is a statement about a workflow with no execution record whatsoever, not
+about a gate that used to fire and went quiet.
+
+`quint.yml` is the one workflow with real history, and it splits per invariant.
+It is present at `2bb1c21`, so its steps as they stood there ran on pushes up to
+2026-06-17: `forkSafety`, `revocationSafety` and `revokedExcludedFromOrgSecret`
+under the simulator at 5000 samples / 16 steps, the `mbtInv` run, the typechecks
+and `quint test`, and the `apalache` job's bounded verify of those same three at
+depth 5. `620b459` (2026-06-18) is the only commit touching the file since and is
+also unpushed, so everything it added — the `tauWindow` and `convergence`
+simulator runs, and their verifies at depths 5 and 3 — has **never** run. Two of
+five randomised invariants and two of five bounded verifies have no execution
+history at all.
+
+What that actually costs is narrower than "all of CI", and the distinction
+matters because overstating it makes the local gates look weaker than they are.
+CI-only, with no gate running them anywhere in the merge sequence:
+
+- the bare `check-ids.sh` per unit — with the caveat that a local bare run *does*
+  exist, at `merge-change` step 4; what CI adds is a bare run **independent of
+  the operator reaching that step**, which is exactly the independence this
+  defect needed and did not have;
+- `cargo clippy … --lib -- -D warnings` for org-members and on-chain-client, the
+  panic-freedom denial — **prescribed locally but gated nowhere**, which is the
+  precise charge: `org-members/AGENTS.md` line 117 gives
+  `cargo build && cargo test && cargo clippy` as the crate's default command,
+  and no Makefile target, no unit `verify_commands` entry and no step of
+  `verify-before-merge` or `merge-change` names clippy at all;
+- the `no_std` and `wasm32-unknown-unknown` compile checks for org-members —
+  same shape again. `org-members/AGENTS.md` lines 24-25 make
+  `cargo check --no-default-features --features serde --target
+  wasm32-unknown-unknown` mandatory "after any dependency change" and lines
+  120-122 list all three build configurations, so a developer is told to run
+  them; nothing at merge does;
+- in `quint.yml`: `quint typecheck quint/membership_mbt.qnt`,
+  `quint typecheck quint/ods_instances.qnt`, `quint test quint/membership.qnt`,
+  `quint run quint/membership_mbt.qnt --invariant=mbtInv`, the five randomised
+  5000-sample invariant runs over `protocol.qnt`, and the `apalache` job's five
+  bounded `quint verify`. **Not** the whole workflow: `quint typecheck
+  quint/membership.qnt` and `quint typecheck quint/protocol.qnt` are verbatim
+  `verify_commands` entries of org-members (and `protocol.qnt` of org-node too),
+  and the `mbt` job's `cargo test --test mbt_conformance` is already inside
+  org-members' `cargo test -p org-members` — `rust.yml`'s own comment calls that
+  job "now redundant". And of those five randomised runs and five verifies, only
+  three of each ever executed; `tauWindow` and `convergence` were added by the
+  unpushed `620b459` and never have.
+
+Two gates commonly put on this list do **not** belong on it.
+**`check-signing.sh` runs locally at every merge**: `finish-merge.sh` line 130
+runs it `--strict`, unconditionally, as guard 1 before any branch or worktree is
+removed, and `rust.yml` runs it **non-strict** because a runner holds no public
+key — so the local gate is the stricter of the two and CI would add an
+independent backstop, not the only enforcement. **`make coverage` runs locally
+too**: `Makefile` line 139 is `coverage: coverage-org-members
+coverage-on-chain-client`, and those two targets are exactly the
+`coverage_command:` entries the units declare, consumed by `verify-before-merge`
+check 5. What is dormant there is only the **cross-platform re-run** — floors
+calibrated on aarch64-darwin, enforced in CI on x86_64-linux against a floating
+`stable` toolchain, a difference `rust.yml`'s `coverage` job comment flags itself.
+
+That is the real reason nothing convicted this defect, and it is much larger than
+this defect. It is filed as an owner decision in
+`docs/plans/2026-09-05-ratchet-setup.md`.
+
+**How it was actually found, which was luck and not mechanism.** It was found on
+2026-09-17 during the org-members architecture change
+(`docs/plans/2026-09-15-org-members-architecture.md`), but **not** by that
+change's gates. That change's verification record states it plainly: its impact
+set, computed with `check-units.sh --impact "master..HEAD"`, was "`org-members`
+touched, `org-node` dependent, `app` touched", and "`on-chain-client` is outside
+the set and its gates were not run for this change"
+(`docs/verification/2026-09-17-worktree-guardrails-org-members-arch.md`). The red
+result came from a **deliberate out-of-scope probe** — a hand-run
+`GR_CONFIG=on-chain-client/.guardrails/config.yaml check-ids.sh` from that
+change's worktree, recorded in its plan under "A defect on master, found by this
+change's gate but not caused by it", and explicitly left unfixed there because
+touching this unit would have pulled it into that change's impact set.
+
+The structural point matters more than the attribution. **The dependency graph
+alone could never have pulled `on-chain-client` into an org-members change's
+impact set**: the four declared edges (`.guardrails/units.yaml`) are org-node →
+org-members, org-node → on-chain-client, app → org-node, app → on-chain-client,
+so org-members is a leaf and on-chain-client neither depends on it nor is
+depended on by it. No amount of propagation over those edges reaches this unit
+from that one.
+
+That is a claim about the edges, and it must not be inflated into "never, by any
+route". `check-units.sh --impact` has a second rule, stated in the script's own
+header: "A change under the root `.guardrails/` maps to EVERY unit." So an
+org-members change that also touched the root `.guardrails/` — a script upgrade,
+a manifest edit — would have run on-chain-client's gates and convicted this
+defect, and so would one that happened to touch both units' files, since impact
+starts from *touched* units. The change that found this touched neither, which
+is why its own record reads "`on-chain-client` is outside the set". The honest
+statement is that the mechanism **as exercised by this change** could not have
+caught it, and crediting it would make the process look sounder than it is. What
+caught it was one engineer choosing to run a gate outside their scope.
+
 ## The interview
 
 Asked one question at a time with a recommendation, 2026-09-10. Answers:

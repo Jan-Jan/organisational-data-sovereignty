@@ -2,12 +2,12 @@
 
 on-chain-client's first requirements of its own behaviour. Each realises a risk
 control from
-`on-chain-client/docs/risk/DRAFT-worktree-guardrails-on-chain-client-risk-on-chain-client-hazards.md`
+`on-chain-client/docs/risk/2026-09-10-on-chain-client-hazards.md`
 and is worded from behaviour the crate has; the exceptions are REQ-9vwcwc and
 REQ-5upq6n, whose behaviour did not exist before this change — the emitting
 address was decoded and dropped, and nothing compared it — and which were
 written here as the fix for the problem report in
-`on-chain-client/docs/problems/DRAFT-worktree-guardrails-on-chain-client-risk-on-chain-client-problems.md`
+`on-chain-client/docs/problems/2026-09-10-on-chain-client-problems.md`
 that records why. Every requirement is `satisfies: derived` — it exists because
 of how this reader was built and what it was partitioned to do, not because a
 system-needs document asked for it — and each is assessed in that risk file.
@@ -232,7 +232,7 @@ They do not state anything about re-checking the Runtime spec version after
 construction, about the depth of reorganisation the best lane can detect, or
 about the length of its first backfill span. All three are defects under open
 problem reports in
-`on-chain-client/docs/problems/DRAFT-worktree-guardrails-on-chain-client-risk-on-chain-client-problems.md`,
+`on-chain-client/docs/problems/2026-09-10-on-chain-client-problems.md`,
 and a requirement would be written against the fix, not against the defect.
 REQ-hd6m9d and REQ-ntn4ss are worded to the decision each function actually
 makes for exactly that reason.

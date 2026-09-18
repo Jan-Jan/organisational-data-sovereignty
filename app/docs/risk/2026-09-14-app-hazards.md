@@ -10,7 +10,7 @@ is in `app/docs/risk/README.md`; the harm pathway is
 Fourth and last of the per-unit registers begun on 2026-09-05
 (`docs/plans/2026-09-05-ratchet-gap-analysis.md`, tooth 3), after
 `org-members` (2026-09-02), `org-node` (2026-09-09) and `on-chain-client`
-(2026-09-11).
+(2026-09-10).
 
 ---
 

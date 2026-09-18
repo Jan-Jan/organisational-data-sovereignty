@@ -345,6 +345,37 @@ difference. `on-chain-client` is outside this change's impact set, so fixing it
 here would have pulled the unit in and obliged this change to own its gates.
 **Tooth 4's on-chain-client change cannot merge until it is cleared.**
 
+> **Correction, 2026-09-17 — that blocker is now cleared. The paragraph above
+> is left standing, because this project dates its corrections rather than
+> rewriting the record.**
+>
+> The one-commit change it asks for was made the same day, as
+> `worktree-guardrails-on-chain-client-finalize`. The three draft-named ledger
+> files became
+> `on-chain-client/docs/requirements/2026-09-10-chain-reading.md`,
+> `on-chain-client/docs/risk/2026-09-10-on-chain-client-hazards.md` and
+> `on-chain-client/docs/problems/2026-09-10-on-chain-client-problems.md`, with
+> all seven cross-references **to those three files** rewritten to match. Not
+> every stale pointer `fbf17f0` left was repaired, and the claim is deliberately
+> limited: `Makefile` line 47 and `on-chain-client/.guardrails/config.yaml`
+> line 106 both still cite
+> `docs/verification/2026-09-10-worktree-guardrails-on-chain-client-risk.md`,
+> which does not exist — that record is dated 2026-09-11. Fixing a Makefile or a
+> unit config would have cost that change its documentation-only property, so
+> both are recorded as an open item in
+> `docs/plans/2026-09-05-ratchet-setup.md` under "Added 2026-09-17" instead of
+> being silently left. The 2026-09-10 date, rather than `fbf17f0`'s
+> 2026-09-11 merge date, was the owner's decision; the reasoning is in
+> `docs/plans/2026-09-10-on-chain-client-risk-analysis.md` under "Filenames,
+> corrected on 2026-09-17".
+>
+> `GR_CONFIG=on-chain-client/.guardrails/config.yaml check-ids.sh` bare is
+> therefore exit 0, and tooth 4's on-chain-client change is not blocked by this.
+> What remains open is systemic rather than about these three files: how a
+> skipped `finalize-docs.sh` is caught locally, and whether this repository
+> pushes at all — both filed in `docs/plans/2026-09-05-ratchet-setup.md` under
+> "Added 2026-09-17".
+
 **A process defect this change hit twice.** A ledger cross-reference left
 pointing at a draft name after `finalize-docs.sh` consumed it was review round
 2's finding 19 — and recurred immediately, because a fix round cannot fix a

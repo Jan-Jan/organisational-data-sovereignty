@@ -228,4 +228,72 @@ What this change did **not** establish. A gap stated here is a gap; a gap left o
 
 **The date on this record is 2026-09-11; the ledger files carry 2026-09-10 names.** The change was finalized on the 10th and merged on the 11th. The names are kept, as the same judgement was made for the `org-node` half of this tooth.
 
+> **Correction, 2026-09-17 — the paragraph immediately above was untrue when
+> this record was written, and the original text is left standing because this
+> project dates its corrections rather than rewriting the record.**
+>
+> What was untrue: the ledger files did **not** carry 2026-09-10 names. They
+> carried no dated names at all. `merge-change` step 3 (`finalize-docs.sh`) was
+> never run for this change, so `fbf17f0` squashed all three onto `master` still
+> wearing their draft names —
+> `on-chain-client/docs/requirements/DRAFT-worktree-guardrails-on-chain-client-risk-chain-reading.md`,
+> `on-chain-client/docs/risk/DRAFT-worktree-guardrails-on-chain-client-risk-on-chain-client-hazards.md`
+> and
+> `on-chain-client/docs/problems/DRAFT-worktree-guardrails-on-chain-client-risk-on-chain-client-problems.md`.
+> They stayed that way on `master` from 2026-09-11 until the repair named below
+> merged. No terminal date is given: this note first carried 2026-09-17 and the
+> repair did not merge that day, which is the same forward-dating the final
+> paragraph of this note describes.
+>
+> What is true now: the three files are
+> `on-chain-client/docs/requirements/2026-09-10-chain-reading.md`,
+> `on-chain-client/docs/risk/2026-09-10-on-chain-client-hazards.md` and
+> `on-chain-client/docs/problems/2026-09-10-on-chain-client-problems.md`. The
+> 2026-09-10 names were the owner's decision of 2026-09-17, chosen so that the
+> paragraph above becomes true and so that this unit matches what both sibling
+> units of the same tooth did — `org-node` merged 2026-09-10 with 2026-09-09
+> names, `app` merged 2026-09-15 with 2026-09-14 names.
+>
+> Two steps were skipped, not one, and this record is the evidence of both. The
+> gate table above has a row for `check-ids.sh --allow-draft-files` across three
+> units and **no row for `finalize-docs.sh`** and **no row for a bare
+> `check-ids.sh`** — that is `merge-change` step 3 and step 4, neither run. The
+> two omissions are one omission: step 4 is the only local run without
+> `--allow-draft-files`, so it is the only local gate that would have convicted
+> the skipped step 3. A draft-named ledger file is `DRAFT-FILE` under
+> `check-ids.sh`, so this unit's id gate was exit 1 on `master` for that whole
+> span — at least six days.
+>
+> CI would have convicted it, had anything been pushed. `.github/workflows/rust.yml`
+> runs `check-ids.sh` bare per unit whenever `github.event_name != 'pull_request'`.
+> But `origin/master` is still at `2bb1c21` of 2026-06-17 and local `master` is 45
+> commits ahead, so no workflow has run on any of them. Stronger still, and
+> stated so this record does not imply a gate with a history: `rust.yml` was
+> itself added by the unpushed `4bb5509` (2026-08-27) and is absent from
+> `origin/master` entirely, so it has never executed on any commit. "CI would
+> have convicted it" describes a workflow that has never once run, not one that
+> lapsed. The full account, per workflow and per quint invariant, is in
+> `docs/plans/2026-09-05-ratchet-setup.md` under "Added 2026-09-17".
+>
+> The repair is the change `worktree-guardrails-on-chain-client-finalize`, whose
+> verification record is written at `merge-change` step 6b — after the
+> independent review — and lands in `docs/verification/` declaring
+> `branch: worktree-guardrails-on-chain-client-finalize`. That record and this
+> note land in the same signed squash, so the two are consistent in the merged
+> commit.
+>
+> That record is named here by its branch and not by its path, deliberately.
+> A verification record is named for the date it merges, which is not knowable
+> while it is being written — this note first named a 2026-09-17 path and the
+> merge did not happen that day, which would have left a certified record
+> pointing at a file that never existed. The branch is the durable handle:
+> `check-review.sh` selects a record by its `branch:` field, matched whole, and
+> never by its filename. Guessing a merge date ahead of the merge is the precise
+> mistake this whole repair exists to correct, and it was about to be repeated
+> one paragraph away from the account of it. The corrected account, with the full
+> reasoning for the dates, is in
+> `docs/plans/2026-09-10-on-chain-client-risk-analysis.md` under
+> "Filenames, corrected on 2026-09-17". The systemic open items are filed in
+> `docs/plans/2026-09-05-ratchet-setup.md` under "Added 2026-09-17".
+
 **This unit still has no architecture or SOUP.** `on-chain-client/docs/architecture/` holds a README and an empty `soup.md` template, so the `parity-scale-codec` and `subxt` dependencies this analysis leans on are recorded in the register's prose and nowhere structural. That is tooth 4's work, and this change does not begin it.
