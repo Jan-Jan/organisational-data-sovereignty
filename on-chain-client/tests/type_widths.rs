@@ -27,8 +27,9 @@
 //!     Eight is therefore the width the DECODER gives the field, not the
 //!     width Solidity declares; the narrowing is deliberate (the counter
 //!     increments by one per `update` and cannot reach `u64::MAX`) and the
-//!     refusal of a wider value is gated in `tests/decode_org_state.rs` —
-//!     there and, as the paragraph below records, nowhere else.
+//!     refusal of a wider value is gated in `tests/decode_org_state.rs` and, as
+//!     of this change, in `tests/decode_revive_event.rs` too — see the paragraph
+//!     below.
 //!
 //! So each assertion below states a width as `ABI word minus the offset the
 //! decoder reads from`, and then proves the newtype's inner array accepts
@@ -56,38 +57,37 @@
 //! analysis that found this, and proposed there instead (see
 //! `on-chain-client/docs/risk/`, RC-sxjnx9 and not-minted control 17).
 //!
-//! **Where the over-wide-epoch refusal is gated, and where it is not.** Until
-//! review round 4's finding 3 the epoch bullet above cited two targets; only
-//! one of them gates the refusal. Measured: `DecodeError::EpochOverflow` is
-//! asserted in exactly one place in this repository —
-//! `tests/decode_org_state.rs`, in
-//! `a_non_zero_byte_anywhere_in_the_epoch_slots_leading_twenty_four_bytes_is_refused`.
-//! `tests/decode_revive_event.rs` has no over-wide-epoch case at all: every
-//! epoch it builds comes from the `uint256_be(u64)` helper in
-//! `tests/fuzz_support/mod.rs`, which writes eight big-endian bytes into
-//! `out[24..32]` and leaves the high 24 zero, so it cannot construct the word
-//! that would trip the guard.
+//! **Where the over-wide-epoch refusal is gated.** An earlier round found that
+//! the epoch bullet above cited two targets where only one gated the refusal.
+//! That was true when it was written and is no longer true: this change added a
+//! gated case on the event path, and this paragraph is re-measured rather than
+//! left standing.
 //!
-//! The fact the correction exposes is worth more than the citation. The EVENT
-//! path's epoch runs through the same `decode_uint256_to_u64` — `parse_root_updated`
-//! in `src/decode/v_paseo_ah.rs`, over `topics[2]` — and REQ-9wwenn is worded
-//! generally, over "an Epoch whose on-chain value does not fit the range this
-//! reader represents". So the requirement is stated over both paths, and only
-//! the STORAGE path has a gated case of its own.
+//! **Re-measured 2026-09-29 by review round 4.** `DecodeError::EpochOverflow` is
+//! asserted in **two** places, not one: `tests/decode_org_state.rs:237`, in
+//! `a_non_zero_byte_anywhere_in_the_epoch_slots_leading_twenty_four_bytes_is_refused`,
+//! and `tests/decode_revive_event.rs:777`, in
+//! `root_updated_epoch_above_u64_is_refused_not_truncated`. The second is the
+//! one test this change wrote. It starts from the `uint256_be(u64)` helper in
+//! `tests/fuzz_support/mod.rs` — which writes eight big-endian bytes into
+//! `out[24..32]` and leaves the high twenty-four zero, so the helper alone can
+//! never construct the word that trips the guard — and then overwrites one of
+//! those high bytes, looping over all twenty-four positions. So the EVENT path
+//! now has an over-wide case of its own, and both paths are gated.
 //!
-//! That is a citation defect, not a coverage hole, and the reason is measured
-//! rather than argued: both paths call the one helper, so a real weakening of
-//! the guard reds `decode_org_state`. On 2026-09-11, with `bytes[..24]`
-//! narrowed to `bytes[..0]` in `decode_uint256_to_u64` — the guard switched
-//! off while every other line stands — `--test decode_org_state` reported 8
-//! passed, 1 failed, the failure being the named case above. An over-wide case
-//! added on the event path would be a second copy of that evidence rather than
-//! a second piece of it. The one thing it would add is narrow: that the
-//! REFUSAL, and not only the narrowing, is reachable from the event path.
-//! That `parse_root_updated` reads `topics[2]` through the helper at all is
-//! already gated, by `root_updated_round_trips_every_field` in
-//! `tests/decode_revive_event.rs`: a `uint256_be(42)` topic must come out as
-//! `Epoch(42)`.
+//! **The argument this replaces, and why it does not survive.** The earlier
+//! paragraph held that a case on the event path "would be a second copy of that
+//! evidence rather than a second piece of it", because both paths call the one
+//! `decode_uint256_to_u64` — which is still true of the code, and this rewrite
+//! does not dispute it. What undercuts the argument is the narrow thing the
+//! paragraph itself conceded: that the REFUSAL, and not only the narrowing, is
+//! reachable from the event path. Nothing established that before; the new test
+//! does, and that is a second piece of evidence rather than a second copy.
+//!
+//! The 2026-09-11 measurement it cited stands as history and is worth keeping:
+//! with `bytes[..24]` narrowed to `bytes[..0]` in `decode_uint256_to_u64` — the
+//! guard switched off while every other line stands — `--test decode_org_state`
+//! reported 8 passed, 1 failed, the failure being the storage case above.
 //!
 //! `epoch_display_is_the_inner_value` relocates WITHOUT a `verifies:`
 //! annotation, deliberately. `Display` for `Epoch` is used in error messages
@@ -121,7 +121,7 @@ fn word() -> [u8; ABI_WORD] {
     core::array::from_fn(|i| 0x40u8.wrapping_add(i as u8))
 }
 
-/// verifies: REQ-2qa5r5
+/// verifies: REQ-2qa5r5, LLR-xv7auy
 ///
 /// Normal case, and the whole of the requirement: each public newtype is
 /// exactly as wide as the ABI field it wraps. Stated twice over for each —

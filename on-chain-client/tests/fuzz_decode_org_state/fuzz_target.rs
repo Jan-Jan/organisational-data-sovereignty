@@ -1,4 +1,4 @@
-//! verifies: REQ-sx5b6g
+//! verifies: REQ-sx5b6g, LLR-yhw34z
 //!
 //! Fuzz target: `Decoder::decode_org_state` must never panic on arbitrary
 //! bytes. Reaches the decoder through the public `for_runtime` path — the

@@ -113,7 +113,7 @@ fn decode(bytes: &[u8]) -> Option<EmittedEvent> {
         .expect("a canonical ContractEmitted payload must decode without error")
 }
 
-/// verifies: REQ-5upq6n
+/// verifies: REQ-5upq6n, LLR-z8rrkr, LLR-u2e389
 /// Normal case: a log from the configured contract decodes, and the address it
 /// reports is the configured one, so the caller's comparison accepts it.
 #[test]
@@ -134,7 +134,7 @@ fn log_from_the_configured_contract_reports_that_address() {
     );
 }
 
-/// verifies: REQ-5upq6n
+/// verifies: REQ-5upq6n, LLR-z8rrkr
 /// Abnormal input — the spoofing attempt this control exists for. A different
 /// contract emits a log with a *valid* OrgRegistry signature hash and the
 /// victim organisation's *valid* indexed admin, carrying a root of the
@@ -163,7 +163,7 @@ fn log_from_another_contract_with_a_valid_signature_is_rejected() {
     );
 }
 
-/// verifies: REQ-5upq6n
+/// verifies: REQ-5upq6n, LLR-z8rrkr, LLR-u2e389
 /// The address is reported byte for byte, for `RootUpdated` as well as
 /// `GenesisInitialized`, and for an address with no repeated-byte structure to
 /// hide a truncation or a shifted copy.

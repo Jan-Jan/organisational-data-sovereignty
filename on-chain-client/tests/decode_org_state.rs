@@ -107,7 +107,7 @@ fn assert_error_names(err: &DecodeError, expected: usize, actual: usize) {
 // REQ-4astjb — exactly three slots, and nothing else
 // ---------------------------------------------------------------------------
 
-// verifies: REQ-4astjb, REQ-9wwenn
+// verifies: REQ-4astjb, REQ-9wwenn, LLR-nq7nhg
 //
 // The normal case, and the one that pins every offset: 96 bytes decode, and
 // each of the three fields comes back from the slot it was written to.
@@ -129,7 +129,7 @@ fn exactly_ninety_six_bytes_decodes_every_field() {
     );
 }
 
-// verifies: REQ-4astjb
+// verifies: REQ-4astjb, LLR-sq76u3
 //
 // One byte short. This is the near neighbour below the bound, where a `<`
 // written in place of a `!=` hides, and it is the direction that matters
@@ -150,7 +150,7 @@ fn ninety_five_bytes_is_rejected() {
     assert_error_names(&err, 96, 95);
 }
 
-// verifies: REQ-4astjb
+// verifies: REQ-4astjb, LLR-sq76u3
 //
 // One byte long — the other side of the bound, so it is pinned from both
 // directions rather than only from below. A 97-byte answer is not three slots
@@ -169,7 +169,7 @@ fn ninety_seven_bytes_is_rejected() {
     assert_error_names(&err, 96, 97);
 }
 
-// verifies: REQ-4astjb
+// verifies: REQ-4astjb, LLR-sq76u3
 //
 // The empty blob, which is not a hypothetical: it is the shape a storage read
 // takes when it returns nothing at all. It is also the widest gap between the
@@ -190,7 +190,7 @@ fn an_empty_blob_is_rejected_rather_than_read_out_of_bounds() {
     assert_error_names(&err, 96, 0);
 }
 
-// verifies: REQ-4astjb
+// verifies: REQ-4astjb, LLR-sq76u3
 //
 // Whole-slot miscounts, the realistic wrong lengths: one slot, two slots,
 // four slots and six slots. Two slots (64 bytes) is what a caller that
@@ -217,7 +217,7 @@ fn a_whole_number_of_slots_other_than_three_is_rejected() {
 // REQ-9wwenn — the epoch slot's high 24 bytes
 // ---------------------------------------------------------------------------
 
-// verifies: REQ-9wwenn
+// verifies: REQ-9wwenn, LLR-emp3g9
 //
 // The sweep. A `uint256` that does not fit in a `u64` has a non-zero byte
 // somewhere in the slot's leading 24, and *every* one of those positions must
@@ -241,7 +241,7 @@ fn a_non_zero_byte_anywhere_in_the_epoch_slots_leading_twenty_four_bytes_is_refu
     }
 }
 
-// verifies: REQ-9wwenn
+// verifies: REQ-9wwenn, LLR-emp3g9
 //
 // The largest epoch that does fit, accepted whole. Relocated from `src`'s
 // `decode_org_state_max_u64_epoch_ok`. This is the case that keeps the
@@ -254,7 +254,7 @@ fn the_largest_u64_epoch_is_accepted_whole() {
     assert_eq!(state.epoch, Epoch(u64::MAX));
 }
 
-// verifies: REQ-9wwenn
+// verifies: REQ-9wwenn, LLR-emp3g9
 //
 // Zero. An all-zero epoch slot is inside the range and must decode to
 // `Epoch(0)`, not be mistaken for an absent or invalid value: this decoder's
@@ -266,7 +266,7 @@ fn a_zero_epoch_is_accepted() {
     assert_eq!(state.epoch, Epoch(0));
 }
 
-// verifies: REQ-9wwenn
+// verifies: REQ-9wwenn, LLR-emp3g9
 //
 // The window's lower edge, swept from the other side. For each of the eight
 // bytes the `u64` is made of, a slot holding `0x01` at that position alone

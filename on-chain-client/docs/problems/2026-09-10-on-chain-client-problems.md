@@ -61,9 +61,15 @@ case fail — and it **did not fail**: `--test contract_address_filter` still
 reported 3 passed with the comparison switched off. The three tests verify the
 decoder's half, which is real and necessary; the caller's half sat inside
 `async fn decode_contract_events`, which needs a chain, and every one of the
-nine chopsticks targets deploys exactly one `OrgRegistry` and hands its address
-to `from_client`, so no gated test could reach the comparison and none of the
-ungated ones had a second contract to spoof from either. The fix would have
+five ungated targets that constructs an `OrgRegistryClient` deploys exactly one
+`OrgRegistry` and hands its address to `from_client`, so no gated test could
+reach the comparison and none of the ungated ones had a second contract to
+spoof from either. (**Corrected 2026-09-28 by the review sweep of the change
+`worktree-guardrails-on-chain-client-arch`:** this said "the nine chopsticks
+targets". Nine is the count of ungated targets; five —
+`off_chain_genesis_ceremony`, `p_address_is_orgid`, `reorg_cancels_proposed`,
+`scenario_a_full`, `two_orgs_one_watcher` — is the count that constructs a
+client, and five is the number this argument needs.) The fix would have
 closed the hole and left its decisive line unguarded: anyone could have deleted
 it and every gate would have stayed green.
 
@@ -164,8 +170,10 @@ gives the history — "Lands in Stage 2 Task 5 (after the client surface in
 `client.rs` is in place). At that point `org-members` is added as a dependency;
 for Task 1 this module is a placeholder so the module tree matches the plan."
 Stage 2 landed. `org-members` is not a dependency of this crate. The placeholder
-is still a placeholder, and `.guardrails/units.yaml` records no `depends_on:`
-edge from on-chain-client to anything.
+is still a placeholder, and `on-chain-client/.guardrails/config.yaml` declares no
+`depends_on:` edge from on-chain-client to anything — the key is present only as
+a commented-out example. (An edge lives in the depending unit's own config, not
+in `.guardrails/units.yaml`, whose schema is `units:` and `not_a_unit:` alone.)
 
 Observable symptom: the module exports nothing, so there is nothing to call. It
 is not a wrong answer, it is an absent one, and it is visible only to a reader
@@ -188,7 +196,7 @@ root path by nothing here.
 
 The fix, in outline (not-minted control 6): either implement the module — which
 means taking `org-members` as a dependency, declaring the edge in
-`.guardrails/units.yaml` after the dependency assessment
+`on-chain-client/.guardrails/config.yaml` after the dependency assessment
 `docs/plans/2026-09-06-dependency-edges.md` prescribes, and writing the
 comparison with a gated test — or delete the module and move its promise into
 the design, where a reader will not mistake it for shipped code. Either closes
@@ -219,8 +227,12 @@ want a cap + resync strategy before relying on this lane."
 Observable symptom: on a chain with a finality lag of L blocks, the first
 notification issues L round-trips and delivers L blocks' events, some of them
 for blocks imported before `subscribe()` was called. On the manual-mining forks
-the nine ungated targets use, L is 0 or 1 and the behaviour is invisible, which
-is why no test has ever shown it. Reproduced in this change by reading, not by
+the seven fork-dependent ungated targets use, L is 0 or 1 and the behaviour is
+invisible, which is why no test has ever shown it. (**Corrected 2026-09-28 by
+the review sweep of the change `worktree-guardrails-on-chain-client-arch`:**
+this said "the nine ungated targets". Nine run at no gate, but `smoldot_smoke`
+needs live Paseo rather than a manual-mining fork and `regenerate_corpus` needs
+no chain at all.) Reproduced in this change by reading, not by
 running.
 
 Why it is a hazard and not only a performance note: it is unavailability on the

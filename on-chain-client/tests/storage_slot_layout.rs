@@ -134,7 +134,7 @@ const ADMIN_ONES: [u8; 20] = [0x11; 20];
 // REQ-9m2rnd — the mapping key
 // ---------------------------------------------------------------------------
 
-// verifies: REQ-9m2rnd
+// verifies: REQ-9m2rnd, LLR-vktf8w
 //
 // The relocated reference vector, normal case: a 20-byte admin of all `0x11`
 // at mapping slot 0. The expectation is `keccak256(0x00 * 12 || 0x11 * 20 ||
@@ -163,7 +163,7 @@ fn mapping_slot_matches_the_known_vector() {
     );
 }
 
-// verifies: REQ-9m2rnd
+// verifies: REQ-9m2rnd, LLR-vktf8w
 //
 // A second admin, so the vector above cannot be satisfied by a function that
 // ignores its argument and returns one constant. This admin's twenty bytes are
@@ -194,7 +194,7 @@ fn mapping_slot_for_a_second_admin_is_its_own_key() {
     );
 }
 
-// verifies: REQ-9m2rnd
+// verifies: REQ-9m2rnd, LLR-62tqnv
 //
 // The formula's second operand. `get_org_state` only ever passes 0 — `orgs` is
 // the contract's only state variable — so a function that dropped `map_slot`
@@ -215,7 +215,7 @@ fn a_non_zero_mapping_slot_index_is_part_of_the_key() {
     assert_ne!(at_seven, at_one, "mapping slot 7 must not collide with 1");
 }
 
-// verifies: REQ-9m2rnd
+// verifies: REQ-9m2rnd, LLR-62tqnv
 //
 // Boundary: the widest mapping-slot index the signature can express. Solidity's
 // mapping key is `uint256`, but `solidity_mapping_slot` takes a `u64` and puts
@@ -252,7 +252,7 @@ fn the_mapping_slot_index_is_big_endian_in_the_low_eight_bytes_of_the_second_wor
     );
 }
 
-// verifies: REQ-9m2rnd
+// verifies: REQ-9m2rnd, LLR-vktf8w
 //
 // Abnormal input: the zero address. `OrgAdmin([0; 20])` is not a real
 // organisation — no account maps to it — but the derivation must still be the
@@ -274,7 +274,7 @@ fn the_zero_admin_is_hashed_like_any_other_address() {
 // REQ-xudf25 — the struct-field offset
 // ---------------------------------------------------------------------------
 
-// verifies: REQ-xudf25
+// verifies: REQ-xudf25, LLR-bhwsn6
 //
 // Relocated. Offset 0 is the identity: the first struct field lives at `S`
 // itself, so `get_org_state`'s loop over 0..3 must leave the base key alone on
@@ -290,7 +290,7 @@ fn offset_zero_is_the_identity() {
     assert_eq!(slot, be_add([0x42; 32], 0));
 }
 
-// verifies: REQ-xudf25
+// verifies: REQ-xudf25, LLR-bhwsn6
 //
 // Relocated. The single-byte carry: `0xfe + 3 = 0x101`, so the low byte
 // becomes `0x01` and one carries into byte 30. Expectation written out as a
@@ -308,7 +308,7 @@ fn offset_three_carries_out_of_the_low_byte() {
     assert_eq!(slot, expected);
 }
 
-// verifies: REQ-xudf25
+// verifies: REQ-xudf25, LLR-bhwsn6
 //
 // The carry has to propagate, not merely happen once. Four `0xff` bytes with a
 // zero above them: `+ 1` must clear all four and set the fifth. A keccak output
@@ -332,7 +332,7 @@ fn a_carry_propagates_through_four_bytes() {
     assert_eq!(slot, be_add(before, 1));
 }
 
-// verifies: REQ-xudf25
+// verifies: REQ-xudf25, LLR-bhwsn6
 //
 // Boundary: 255 is the widest offset a `u8` can ask for, tested both where it
 // does not carry and where it does. The second case pins the full-width
@@ -358,7 +358,7 @@ fn offset_255_is_the_widest_a_u8_can_ask_for() {
     assert_eq!(carries, be_add(before, 255));
 }
 
-// verifies: REQ-xudf25
+// verifies: REQ-xudf25, LLR-2y9qdc
 //
 // Abnormal input, and the one case the function's own doc-comment calls
 // unreachable in practice: an all-ones slot key. `+ 1` wraps the whole 256-bit
@@ -380,7 +380,7 @@ fn an_all_ones_slot_wraps_to_zero() {
 // REQ-9m2rnd + REQ-xudf25 — the two composed, as `get_org_state` composes them
 // ---------------------------------------------------------------------------
 
-// verifies: REQ-9m2rnd, REQ-xudf25
+// verifies: REQ-9m2rnd, REQ-xudf25, LLR-v62yjq
 //
 // The three keys `get_org_state` actually reads, derived the way it derives
 // them: one `solidity_mapping_slot(admin, 0)` and then offsets 0, 1, 2. They

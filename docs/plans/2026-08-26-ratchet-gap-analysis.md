@@ -133,8 +133,10 @@ The two `cargo test` entries are what runs at every merge. Precisely:
   this change (`EPERM: mkdir '~/.quint/rust-evaluator-v0.6.0'`). So this entry
   is green on a provisioned machine and red in a sandboxed session, and the
   provisioning item in the setup checklist is what closes that.
-- **`--lib` on `on-chain-client` drops its integration targets**, all of which
-  spawn a chopsticks or anvil fork and need `on-chain/scripts/node_modules`:
+- **`--lib` on `on-chain-client` drops its integration targets**, seven of which
+  spawn a chopsticks fork and need `on-chain/scripts/node_modules` (corrected
+  2026-09-28: this said "all of which". `regenerate_corpus` is an `#[ignore]`d
+  corpus writer needing no chain, and `smoldot_smoke` needs live Paseo):
   `00_chopsticks_sanity`, `01_multisig_sanity`, `off_chain_genesis_ceremony`,
   `p_address_is_orgid`, `regenerate_corpus`, `reorg_cancels_proposed`,
   `scenario_a_full`, `smoldot_smoke`, `two_orgs_one_watcher`. The three fuzz

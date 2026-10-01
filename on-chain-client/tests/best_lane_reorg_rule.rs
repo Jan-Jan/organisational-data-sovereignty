@@ -37,9 +37,13 @@
 //!
 //! verifies: REQ-gr2ver, REQ-ntn4ss, REQ-5zux82
 //!
-//! Deliberately carries no `#![cfg(...)]` guard, unlike the nine
-//! chain-dependent targets beside it: the `test-support` feature this target
-//! needs is declared as a `required-features` entry in `Cargo.toml`, so an
+//! Deliberately carries no `#![cfg(...)]` guard, unlike the chain-dependent
+//! targets beside it (corrected 2026-09-28: this said "the nine
+//! chain-dependent targets". Nine run at no gate; the eight that carry a
+//! crate-level `#![cfg(...)]` guard are exactly the eight that are chain-dependent
+//! — seven need a fork, `smoldot_smoke` live Paseo, `regenerate_corpus` neither): the
+//! `test-support` feature this target needs is declared as a
+//! `required-features` entry in `Cargo.toml`, so an
 //! explicit `--test best_lane_reorg_rule` with the feature off is refused by
 //! cargo rather than compiled down to an empty binary that reports success
 //! having run nothing.
@@ -63,7 +67,7 @@ fn head(number: u64, tag: u8) -> BlockRef {
 
 // ───────────────────────── REQ-gr2ver — dedup ─────────────────────────
 
-/// verifies: REQ-gr2ver
+/// verifies: REQ-gr2ver, LLR-d3ef7s
 ///
 /// A repeated head — same hash as the last one processed — yields nothing and
 /// does not advance `last`. This is the guard that stops a depth-1 reorg
@@ -85,7 +89,7 @@ fn repeated_head_is_skipped_and_last_is_unchanged() {
     );
 }
 
-/// verifies: REQ-gr2ver
+/// verifies: REQ-gr2ver, LLR-d3ef7s
 ///
 /// Abnormal input: the same hash arriving with a *different* claimed number
 /// and a *different* claimed parent. The hash identifies the block, so the
@@ -102,7 +106,7 @@ fn repeated_hash_with_inconsistent_number_is_still_skipped() {
     assert_eq!(last, Some(head(10, 0xAA)));
 }
 
-/// verifies: REQ-gr2ver
+/// verifies: REQ-gr2ver, LLR-d3ef7s
 ///
 /// A head that differs from the last processed one only in hash is not a
 /// repeat: it is the replacement block of a depth-1 reorg, and must be
@@ -123,7 +127,7 @@ fn same_height_different_hash_is_not_a_repeat() {
 
 // ──────────────────── REQ-ntn4ss — reorg detection ────────────────────
 
-/// verifies: REQ-ntn4ss
+/// verifies: REQ-ntn4ss, LLR-56bzcj
 ///
 /// The ordinary case: a head at the next height whose parent *is* the last
 /// processed head. REQ-ntn4ss reports a reorg at the next height only for a
@@ -144,7 +148,7 @@ fn child_of_the_last_head_reports_no_reorg() {
     );
 }
 
-/// verifies: REQ-ntn4ss
+/// verifies: REQ-ntn4ss, LLR-56bzcj
 ///
 /// Same height, different parent: the new head sits one above the last
 /// processed but does not descend from it, so the last processed head was
@@ -167,7 +171,7 @@ fn next_height_with_a_foreign_parent_reports_the_discarded_head() {
     );
 }
 
-/// verifies: REQ-ntn4ss
+/// verifies: REQ-ntn4ss, LLR-56bzcj
 ///
 /// A rewind to the same height — the boundary case, and the one a
 /// strictly-less-than comparison would miss. The head has the last
@@ -189,7 +193,7 @@ fn a_rewind_to_the_same_height_reports_the_discarded_head() {
     );
 }
 
-/// verifies: REQ-ntn4ss
+/// verifies: REQ-ntn4ss, LLR-56bzcj
 ///
 /// A rewind *below* the last processed height reports it too — including the
 /// deep rewind all the way to height 0, the widest a `u64` height can be
@@ -213,7 +217,7 @@ fn a_rewind_below_the_last_height_reports_the_discarded_head() {
     }
 }
 
-/// verifies: REQ-ntn4ss
+/// verifies: REQ-ntn4ss, LLR-56bzcj, LLR-b4p32h
 ///
 /// The discarded reference carries the previous head's hash **and** its
 /// number, not just the hash: a consumer keyed on the hash still needs the
@@ -239,7 +243,7 @@ fn the_discarded_reference_carries_both_hash_and_number() {
     }
 }
 
-/// verifies: REQ-ntn4ss
+/// verifies: REQ-ntn4ss, LLR-56bzcj
 ///
 /// Abnormal input: the very first notification, with no last processed head
 /// at all. There is nothing that could have been discarded, so no reorg is
@@ -265,7 +269,7 @@ fn the_first_notification_reports_no_reorg() {
 
 // ───────────────────── REQ-5zux82 — the backfill span ─────────────────
 
-/// verifies: REQ-5zux82
+/// verifies: REQ-5zux82, LLR-48ygak
 ///
 /// From a seed at height 10, a head at 13 backfills `11 ..= 13` — every
 /// height above the last processed one up to and including the new head, so
@@ -291,7 +295,7 @@ fn a_jump_backfills_every_skipped_height() {
     assert_eq!(last, Some(head(13, 0x0D)));
 }
 
-/// verifies: REQ-5zux82
+/// verifies: REQ-5zux82, LLR-48ygak
 ///
 /// The one-block step is the boundary of the same arithmetic: `11 ..= 11`,
 /// the new head alone and nothing below it. An off-by-one in `from` shows up
@@ -312,7 +316,7 @@ fn a_single_step_backfills_that_height_alone() {
     );
 }
 
-/// verifies: REQ-5zux82
+/// verifies: REQ-5zux82, LLR-48ygak
 ///
 /// A rewind backfills the new head's height alone — never a descending or
 /// empty range. The previous head was higher, so `prev.number + 1` is not a
@@ -333,7 +337,7 @@ fn a_rewind_backfills_the_new_height_alone() {
     );
 }
 
-/// verifies: REQ-5zux82
+/// verifies: REQ-5zux82, LLR-48ygak
 ///
 /// The first head after a seed at the *same* height backfills that height
 /// alone — the seed's hash is a finalised hash, so it never matches a best
@@ -354,7 +358,7 @@ fn the_first_head_at_the_seed_height_backfills_that_height_alone() {
     );
 }
 
-/// verifies: REQ-5zux82
+/// verifies: REQ-5zux82, LLR-48ygak
 ///
 /// `from ..= to` is the contract the caller iterates, so it must never be
 /// descending — a `from > to` range iterates zero times and would silently

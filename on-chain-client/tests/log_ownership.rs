@@ -50,9 +50,13 @@
 //!
 //! verifies: REQ-9vwcwc, REQ-nygs7k
 //!
-//! Deliberately carries no `#![cfg(...)]` guard, unlike the nine
-//! chain-dependent targets beside it: the `test-support` feature this target
-//! needs is declared as a `required-features` entry in `Cargo.toml`, so an
+//! Deliberately carries no `#![cfg(...)]` guard, unlike the chain-dependent
+//! targets beside it (corrected 2026-09-28: this said "the nine
+//! chain-dependent targets". Nine run at no gate; the eight that carry a
+//! crate-level `#![cfg(...)]` guard are exactly the eight that are chain-dependent
+//! — seven need a fork, `smoldot_smoke` live Paseo, `regenerate_corpus` neither): the
+//! `test-support` feature this target needs is declared as a
+//! `required-features` entry in `Cargo.toml`, so an
 //! explicit `--test log_ownership` with the feature off is refused by cargo
 //! rather than compiled down to an empty binary that reports success having
 //! run nothing.
@@ -106,7 +110,7 @@ fn decode(bytes: &[u8]) -> EmittedEvent {
         .expect("a known signature must decode to an event")
 }
 
-/// verifies: REQ-9vwcwc
+/// verifies: REQ-9vwcwc, LLR-2znra8
 /// Normal case: a log from the configured contract, with no admin filter set,
 /// is ours. This is the acceptance path every other case here is measured
 /// against.
@@ -122,7 +126,7 @@ fn a_log_from_the_configured_contract_with_no_filter_is_ours() {
     );
 }
 
-/// verifies: REQ-9vwcwc
+/// verifies: REQ-9vwcwc, LLR-2znra8
 /// Abnormal input — the spoofing attempt this control exists for. A different
 /// contract emits a log with a valid OrgRegistry signature hash and the
 /// victim's valid indexed admin, carrying a root of the attacker's choosing.
@@ -150,7 +154,7 @@ fn the_spoof_a_valid_log_from_another_contract_is_not_ours() {
     );
 }
 
-/// verifies: REQ-9vwcwc
+/// verifies: REQ-9vwcwc, LLR-2znra8
 /// Boundary: the comparison is over all 20 bytes. An address differing in
 /// exactly one byte — at the first position and at the last, the two a
 /// truncated or shifted comparison would miss — is not ours.
@@ -171,7 +175,7 @@ fn an_address_differing_in_one_byte_at_either_end_is_not_ours() {
     );
 }
 
-/// verifies: REQ-9vwcwc
+/// verifies: REQ-9vwcwc, LLR-2znra8
 /// The contract check dominates the admin filter: an impostor whose event
 /// carries exactly the admin the subscriber filtered on is still rejected. A
 /// filter that could rehabilitate a foreign log would defeat the control.
@@ -219,7 +223,7 @@ fn the_contract_check_dominates_a_matching_admin_filter() {
     );
 }
 
-/// verifies: REQ-nygs7k
+/// verifies: REQ-nygs7k, LLR-kfr75c, LLR-9qp3k7
 /// With a filter set, a log for that admin from the configured contract is
 /// ours — for both event shapes, since the two carry the admin in different
 /// positions of different structs.
@@ -237,7 +241,7 @@ fn with_a_filter_set_a_matching_admin_is_ours() {
     );
 }
 
-/// verifies: REQ-nygs7k
+/// verifies: REQ-nygs7k, LLR-kfr75c
 /// Abnormal input for the filter: another Organisation's event, from the same
 /// genuine registry. A subscriber that filtered on one admin and received
 /// this would form a membership belief about the wrong Organisation.
@@ -255,7 +259,7 @@ fn with_a_filter_set_a_non_matching_admin_is_not_ours() {
     );
 }
 
-/// verifies: REQ-9vwcwc
+/// verifies: REQ-9vwcwc, LLR-kfr75c
 /// `None` means no filter, not "match nothing": every admin from the
 /// configured contract is ours. This is what a subscriber watching a whole
 /// registry relies on.

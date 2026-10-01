@@ -187,17 +187,26 @@ three bolero fuzz targets and the nine this change declares
 so that naming one in the gate with the feature off is a cargo error rather than
 a silent skip — the lesson tooth 1 learned in org-node). **Nine run nowhere**:
 `00_chopsticks_sanity`, `01_multisig_sanity`, `off_chain_genesis_ceremony`,
-`p_address_is_orgid`, `regenerate_corpus`, `reorg_cancels_proposed`,
-`scenario_a_full`, `two_orgs_one_watcher` need a chopsticks or anvil fork this
-repository's CI does not start, and `smoldot_smoke` is `#[ignore]`d and needs
-live Paseo. (Twelve plus nine is the whole of it: `on-chain-client/tests/common`
+`p_address_is_orgid`, `reorg_cancels_proposed`, `scenario_a_full` and
+`two_orgs_one_watcher` need a chopsticks or anvil fork this repository's CI does
+not start; `smoldot_smoke` is `#[ignore]`d and needs live Paseo; and
+`regenerate_corpus` is an `#[ignore]`d corpus writer that needs no chain at all
+and is excluded for that reason rather than for want of a fork. (**Corrected
+2026-09-28 by the review sweep of the change
+`worktree-guardrails-on-chain-client-arch`:** `regenerate_corpus` was listed
+among the targets needing a fork. Nine run nowhere either way.)
+
+(Twelve plus nine is the whole of it: `on-chain-client/tests/common`
 and `on-chain-client/tests/fuzz_support` are shared modules the targets pull in
 with `mod`, not cargo targets of their own. An earlier draft
 of this paragraph counted the directory listing and said twenty-two, eleven and
 nine — three figures that do not add up, which is what review round 1's
 finding-10 caught.)
 
-Those nine are where every chain-dependent property of this crate is tested. So
+The eight of those nine that touch a chain at all are where every
+chain-dependent property of this crate is tested (`regenerate_corpus` touches
+none; corrected 2026-09-28 by the review sweep of the change
+`worktree-guardrails-on-chain-client-arch`, which said "those nine"). So
 the shape of this register is: **the chain-free decisions have gated evidence
 and get controls; the chain-dependent properties get prose, residual statements
 and not-minted controls that name the ungated target by file.** That is the
@@ -453,7 +462,9 @@ fixing them would mix a hazard analysis with a change to `client.rs`'s async
 paths, which is the same call org-node's half made and org-members' before it.
 
 This unit is a **provider**. org-node and app depend on it
-(`.guardrails/units.yaml`); it depends on nothing. One requirement of org-node's
+(declared in each consumer's own config — `org-node/.guardrails/config.yaml` and
+`app/.guardrails/config.yaml`, not in `.guardrails/units.yaml`, whose schema
+cannot carry an edge); it depends on nothing. One requirement of org-node's
 is addressed to this unit as an expectation — REQ-ysyu9g, that a state read with
 no block named returns the state at the latest Finalised block — and it has a
 section of its own below, because this change deliberately does not meet it.
@@ -544,9 +555,15 @@ the caller's half: disable the `emitted.contract != contract` comparison and
 watch the spoofing case fail. **It did not fail.** With the comparison switched
 off, `--test contract_address_filter` still reported 3 passed. The reason is
 structural: the comparison sat inside `async fn decode_contract_events`, which
-needs a chain, so no gated test could reach it — and every one of the nine
-chopsticks targets deploys exactly one OrgRegistry and hands its address to
-`from_client`, so not one of them has a second contract to spoof from either.
+needs a chain, so no gated test could reach it — and every one of the five
+ungated targets that constructs an `OrgRegistryClient` at all deploys exactly
+one OrgRegistry and hands its address to `from_client`, so not one of them has a
+second contract to spoof from either. (**Corrected 2026-09-28 by the review
+sweep of the change `worktree-guardrails-on-chain-client-arch`:** this said
+"the nine chopsticks targets". Nine is the count of ungated targets; five is the
+count that construct a client — `off_chain_genesis_ceremony`,
+`p_address_is_orgid`, `reorg_cancels_proposed`, `scenario_a_full`,
+`two_orgs_one_watcher` — and five is the number this argument needs.)
 The change would have fixed the hole and left the fix's decisive line unguarded:
 anyone could have deleted it and every gate would have stayed green.
 
@@ -1129,9 +1146,11 @@ requirement of twenty-one with neither a case nor a reason. What the test does
 gate is the correspondence its own header asserts between those widths and the
 offsets the decoder actually reads from: `ABI_WORD`, `ABI_ADDRESS_OFFSET` and
 `ABI_EPOCH_OFFSET` are `const`s declared inside the test file
-(`on-chain-client/tests/type_widths.rs:73-83`), and nothing in `src` feeds them,
-so drift in the decoder's offsets cannot red this target. That was established
-by negative control rather than inferred from reading: shifting both regions in
+(`on-chain-client/tests/type_widths.rs:106-116`; the citation read `:73-83`
+until review round 5, and had been stale since the file gained its header), and
+nothing in `src` feeds them, so drift in the decoder's offsets cannot red this
+target. That was established by negative control rather than inferred from
+reading: shifting both regions in
 `on-chain-client/src/decode/v_paseo_ah.rs` — `unpack_address_topic` from
 `topic[..12]`/`topic[12..32]` to `topic[..8]`/`topic[8..28]`, and
 `decode_uint256_to_u64` from `bytes[..24]`/`bytes[24..32]` to
@@ -1721,9 +1740,15 @@ control where there is none.
    run `forge test` in CI, or add a chopsticks fixture on this side that
    re-establishes both properties against a deployed contract.
 10. **Run the chain-dependent lane in a gate** (HAZ-xd4urb, HAZ-werm85,
-    HAZ-v2cmtx). Nine targets in `on-chain-client/tests` need a chopsticks or
-    anvil fork and one needs live Paseo, and none of the ten runs anywhere.
-    They are where every chain-dependent property of this crate is tested.
+    HAZ-v2cmtx). Nine targets in `on-chain-client/tests` run at no gate: seven
+    need a chopsticks or anvil fork, `smoldot_smoke` needs live Paseo, and
+    `regenerate_corpus` needs no chain at all. (**Corrected 2026-09-28 by the
+    review sweep of the change `worktree-guardrails-on-chain-client-arch`:**
+    this read "nine … and one needs live Paseo … none of the ten", counting ten
+    ungated targets where there are nine. `smoldot_smoke` **is** one of the
+    nine.)
+    The eight of them that touch a chain are where every chain-dependent
+    property of this crate is tested.
     Note the limit that comes with it: chopsticks finalises every `dev_newBlock`
     immediately, so gating those targets buys reorg and delivery evidence but
     **not** finality evidence, which needs the live-Paseo path.

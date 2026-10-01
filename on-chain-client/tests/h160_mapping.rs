@@ -60,7 +60,7 @@ fn first_20(account_id_32: &[u8; 32]) -> [u8; 20] {
     head
 }
 
-// verifies: REQ-tkhe3u
+// verifies: REQ-tkhe3u, LLR-2yhra8
 //
 // Normal case for the reverse path: an EVM-derived account is `H160 ||
 // [0xEE; 12]`, and the H160 comes back unchanged.
@@ -87,7 +87,7 @@ fn reverse_path_returns_the_first_twenty_bytes() {
     );
 }
 
-// verifies: REQ-tkhe3u
+// verifies: REQ-tkhe3u, LLR-2yhra8, LLR-7pjzjn
 //
 // The boundary where the two paths are hardest to tell apart: every one of the
 // thirty-two bytes is `0xEE`, so the twelve marker bytes are present AND the
@@ -109,7 +109,7 @@ fn reverse_path_taken_when_the_whole_account_is_the_marker_byte() {
     );
 }
 
-// verifies: REQ-rz7fja
+// verifies: REQ-rz7fja, LLR-3bkhuc
 //
 // Normal case for the forward path: a Substrate-style account with no marker
 // suffix is keccaked and truncated to the low twenty bytes. This is the case
@@ -128,7 +128,7 @@ fn forward_path_keccaks_then_truncates() {
     );
 }
 
-// verifies: REQ-rz7fja
+// verifies: REQ-rz7fja, LLR-3bkhuc, LLR-7pjzjn
 //
 // The near-miss: eleven of the twelve marker positions hold `0xEE` and byte 20
 // does not. Eleven is not twelve, so the forward path is taken.
@@ -150,7 +150,7 @@ fn forward_path_taken_when_only_eleven_marker_bytes_are_present() {
     );
 }
 
-// verifies: REQ-rz7fja
+// verifies: REQ-rz7fja, LLR-3bkhuc, LLR-7pjzjn
 //
 // The same near-miss swept across the whole marker window, one position at a
 // time: start from an all-`0xEE` account — the case that DOES take the reverse

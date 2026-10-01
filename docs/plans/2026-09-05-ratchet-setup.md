@@ -111,8 +111,12 @@ about the sandbox, in both directions.
       (PR-zz4exm opened 2026-08-31, PR-hvg2dy opened 2026-09-02); PR-zz4exm
       hits the age limit on 2026-09-30 if still open. Re-check at tooth 8.
 - [ ] **Dev-environment provisioning.** (a) `npm install` in
-      `on-chain/scripts` for the nine on-chain-client integration targets and
-      the three org-node chopsticks targets; (b) a writable `~/.quint`;
+      `on-chain/scripts` for the seven fork-dependent on-chain-client
+      integration targets and the three org-node chopsticks targets
+      (**corrected 2026-09-28 by this change's review sweep:** this said
+      "nine". Nine on-chain-client targets run at no gate, but `smoldot_smoke`
+      needs live Paseo and `regenerate_corpus` needs no chain, so neither needs
+      these `node_modules`); (b) a writable `~/.quint`;
       (c) a writable `CARGO_HOME` holding the keyhive git checkout.
 - [x] **Tool qualification (DO-330-lite).** DONE 2026-09-05. Qualification
       basis: the guardrails bats suite at `guardrails_version: 0.5.1`, upstream
@@ -334,11 +338,16 @@ forgotten.)
   and mentions `forge` in neither. Either run `forge test` in CI or
   re-establish both properties from this side against a deployed contract.
 - [ ] **Run on-chain-client's chain-dependent lane in a gate**
-  (on-chain-client not-minted control 10). Nine targets need a chopsticks or
-  anvil fork and one needs live Paseo; none of the ten runs anywhere, and they
-  are where every chain-dependent property of the crate is tested. It buys
-  reorg and delivery
-  evidence but **not** finality evidence, which needs the live-Paseo path.
+  (on-chain-client not-minted control 10). Nine targets run at no gate: seven
+  need a chopsticks fork, `smoldot_smoke` needs live Paseo, and
+  `regenerate_corpus` needs no chain at all. The first eight are where every
+  chain-dependent property of the crate is tested. Gating them buys reorg and
+  delivery evidence but **not** finality evidence, which needs the live-Paseo
+  path. (**Corrected 2026-09-28 by this change's review sweep:** this read
+  "nine … and one needs live Paseo; none of the ten", counting ten ungated
+  targets where there are nine — `smoldot_smoke` **is** one of the nine — and
+  a broken reflow left "It buys / reorg and delivery / evidence" across three
+  lines.)
   Related: the same item for org-node's chopsticks lane, above.
 - [ ] **Gate the best/finalised distinction, or record that it stays ungated**
   (on-chain-client not-minted control 18, added in fix round 8a from review
@@ -898,3 +907,185 @@ no independent CI backstop, which is a different gap and already recorded.
   project declines. Recorded here so they are left knowingly. Neither breaks a
   gate — no script resolves these paths — so the cost is a reader following a
   pointer to nothing.
+
+## Added 2026-09-28 — a class C item with no verifiable low-level requirement (`docs/plans/2026-09-28-on-chain-client-architecture.md`)
+
+Tooth 4's second unit gave `on-chain-client` its first architecture ledger:
+nine software items and thirty-two low-level requirements. **Eight of the nine
+items carry LLRs. The ninth carries none, and that is a recorded deviation from
+class C rather than an omission.**
+
+- [ ] **SDD-3b8zef has no low-level requirements, because nothing at this
+      unit's gate can verify one.** The item is the chain-facing transport
+      shell in `on-chain-client/src/client.rs` — decoder pinning at
+      construction, `get_org_state`'s three-slot read, `read_contract_slot`,
+      `subscribe` and both lanes, `decode_contract_events` — the majority of
+      that file, and the majority of the unit's source by volume. llvm-cov
+      analyses 336 lines of `client.rs` out of the 491 it analyses across this
+      crate, at 16.37% line coverage. (The hand-computed "roughly 580 of 699"
+      was dropped 2026-09-28 by this change's review sweep as unreproducible;
+      the decomposition file states why.)
+      IEC 62304 class C requires LLRs per software item, verified at the item's
+      own interface; this one has none. Two ways to close it, both code or
+      infrastructure changes owed their own red-first cycle: continue the
+      extraction that already produced `internals` (which is what made
+      SDD-bw7v5x, SDD-4z3k2u and SDD-m59zrg verifiable items) until the
+      remaining decisions are chain-free, or give this unit's gate a harness
+      that can run the five chopsticks targets that reach it. **The
+      decision this item records is which.**
+
+- [ ] **The coverage shortfall and the LLR gap are the same gap measured
+      twice.** `client.rs` at 16.37% line coverage, and SDD-3b8zef having no
+      verifiable LLR, are one fact seen from two directions — the code no gated
+      test reaches. The register has listed the coverage half since 2026-08-26
+      (recalibrated 2026-09-10, floors at 41/42) without the other half being
+      visible. They are cross-referenced here so that closing one is understood
+      to close the other, and so that a future coverage bump obtained by any
+      means other than reaching that code is recognised as not closing either.
+
+**What was refused, and why it is written down.** LLRs for SDD-3b8zef could
+have been minted and annotated onto any of the nine ungated integration
+targets — or onto any other text file under `test_paths`, committed or not —
+and `check-trace.sh` would have reported a clean tree. It would, because
+MISSING-TEST is satisfied by a `verifies:` reference **in a file under
+`test_paths`**, not by an executed assertion — and `on-chain-client/tests` *is*
+`test_paths`, so those targets count whether or not anything ever runs them.
+That was verified against the script rather than assumed. Taking it would have
+produced a green gate standing over evidence that was never produced, which is
+the defect the 2026-09-17 section above records against this repository's own
+hazard registers. The owner was asked on 2026-09-28 and refused it. The gap is
+therefore visible in three places — the item's own text, the architecture
+README's Overview, and this register — rather than absent from all three.
+
+**Added 2026-09-29, review round 5: the third option, and why it was declined.**
+Rounds 1 through 4 all treated this as a two-way choice — annotate LLRs onto
+ungated targets, or mint none. There is a third: **mint them and leave them
+unannotated**, so `check-trace.sh` reports MISSING-TEST for each and exits 1
+(`check-trace.sh:501-503`). Round 4 raised it and judged it *stronger* than what
+was done, on the ground that it makes the gap machine-visible.
+
+Round 5 showed that judgement is wrong, using the very fact recorded two
+paragraphs above: MISSING-TEST is discharged by a `verifies:` reference in any
+text file under `test_paths`. So the red option three raises is **one line away
+from a green**, and typing that line converts a recorded class C deviation into
+a clean gate that no longer reads as a deviation. It hands the next person a
+one-line erasure that leaves no argument behind, where deleting this section
+would at least require deleting the reasons. That is the objection, and it is
+sufficient on its own.
+
+Two reasons first given for declining option three are **withdrawn**, and are
+recorded as withdrawn rather than quietly dropped. "It reddens the gate on a
+tree where nothing is broken" switches criteria: under the criterion this whole
+section argues from, a class C item missing its required low-level requirements
+*is* a defect and a red gate would be accurate. And "a repository whose gates
+are red for recorded reasons teaches its readers to stop reading red" is an
+assertion about people that nothing here measured.
+
+**The decision is the author of the architecture change, not the owner, and it
+is recorded here so it can be overridden.** The owner was asked on 2026-09-28
+about the two-way choice, not about this one. Nothing is owed to close this item
+except a decision that the erasability objection is wrong — in which case option
+three should be taken and this register entry is where to say so.
+
+**Corrected 2026-09-28, review round 1 finding-4.** Both paragraphs above said
+*nine* ungated integration targets. Only **five** of the nine files in
+`on-chain-client/tests` that run at no gate exercise `OrgRegistryClient` at all
+— `off_chain_genesis_ceremony`, `p_address_is_orgid`, `reorg_cancels_proposed`,
+`scenario_a_full`, `two_orgs_one_watcher`. Of the rest, `00_chopsticks_sanity`
+and `01_multisig_sanity` import nothing from the crate, `smoldot_smoke` touches
+only `decode::dispatch::for_runtime` (SDD-v2rtka, whose version-resolution
+interface is fully gated) and needs live Paseo rather than chopsticks, and
+`regenerate_corpus` is an `#[ignore]`d corpus writer that constructs no client.
+The error was made in this register and in the architecture ledger on the same
+day and caught in both by the same finding; it is corrected in both rather than
+in one, because two files disagreeing about the same set is worse than either
+number alone.
+
+**Both numbers are right, for different questions**, and the first pass at this
+correction blurred them. *Nine* is how many targets run at no gate, and so how
+many places a `verifies:` annotation could hide — the review established the
+hiding place is wider still, since MISSING-TEST is a text scan of `test_paths`
+that consults no cargo target and passes `--untracked`, so a README or an
+uncommitted file serves equally. *Five* is how many of those targets exercise
+`OrgRegistryClient`, and so how much of SDD-3b8zef anything reaches at all.
+Replacing nine with five everywhere would have understated the hazard while
+fixing the overstatement.
+
+The same finding narrowed the deviation's scope. `ClientError` and
+`SubscribedEventStream` were listed under SDD-3b8zef, the item whose whole
+claim is that nothing at this unit's gate reaches it. `ClientError` is
+chain-free — three variants, a hand-written `Display`, a `From<DecodeError>` —
+and is re-exported at the crate root under a feature this unit's gate command
+enables by default, so it is reachable from the gated tests today. It has moved
+to SDD-5wamsz, and **an LLR for its `Display` and its conversion is writable and
+gate-verifiable and is not yet written**: minting it needs a new gated cargo
+target, which the architecture tooth deliberately does not add. That is a third
+open item on this gap, smaller than the other two and the cheapest of the three
+to close.
+
+## Added 2026-09-28 — "anvil" is a phantom tool in this repository's prose
+
+- [ ] **Eighteen occurrences across nine documents, plus two in the `Makefile`,
+      describe on-chain-client's ungated targets as needing "a chopsticks fork or
+      anvil". No target uses anvil.** The count has now been measured three
+      times and stated wrongly twice, which is itself worth recording: "roughly
+      twenty documents" quoted occurrences as documents, and round 4's
+      replacement ("twenty-one across ten") was measured before its own edits
+      landed and named a document that by then contained none. The figures above
+      are as of the end of review round 5. Of the nine documents: **four are
+      verification records**, left immutable by the decision below; **two are
+      this change's own files**, where the phrase survives only as a quotation of
+      the error; and **three are live documents still asserting it** —
+      `docs/plans/2026-09-10-on-chain-client-risk-analysis.md`,
+      `on-chain-client/docs/requirements/2026-09-10-chain-reading.md` and
+      `on-chain-client/docs/risk/2026-09-10-on-chain-client-hazards.md`.
+      `docs/plans/2026-08-26-ratchet-gap-analysis.md` was a fourth until this
+      change corrected its single use in passing.
+
+      Measured on 2026-09-29: `grep -rli anvil` across `*.rs`, `*.toml`, `*.js`,
+      `*.ts`, `*.json`, `*.sh`, `*.yml` and `*.yaml` returns **nothing at all** —
+      not merely nothing outside comments, which is how this bullet first put it.
+      Every fork-dependent target in `on-chain-client/tests` spawns chopsticks
+      through `common::chopsticks_fork::spawn_fork`, including
+      `01_multisig_sanity`, whose name suggests otherwise. The phrase is a term
+      of art that has propagated through the SRS, the RMF, the problem ledger,
+      two plans and several verification records without ever describing
+      anything that exists.
+
+      **This change corrected every use it wrote, and two it did not.** The
+      propagation sweep found six in its own new documents; review round 4 found
+      three more that this change had itself written into this very register —
+      one inside the SDD-3b8zef owner item the deviation argument points readers
+      to — plus a site in the decomposition where the first correction had
+      garbled the sentence it repaired. Review round 5 found two more that round
+      4 had newly written into
+      `docs/plans/2026-09-10-on-chain-client-risk-analysis.md`. A change that
+      declares the phrase a phantom while still adding new uses of it is the
+      defect, not untidiness.
+
+      It also, in the course of fixing an unrelated count, corrected the single
+      pre-existing use in `docs/plans/2026-08-26-ratchet-gap-analysis.md`. So the
+      earlier claim that this change "stopped there, deliberately" is **not
+      true** and is withdrawn: it stopped at every *document* it had no other
+      reason to open. The deferral below still stands for the three live
+      documents it never touched. Replacing the phrase in some files and not
+      others would recreate exactly the inconsistency the sweep existed to
+      remove — the repository would then disagree with itself about which tool
+      its tests need, which is the failure mode three review rounds of this
+      change were spent on. The decision owed is whether "chopsticks or anvil"
+      is retired repository-wide in one sweep, or kept as a deliberate term of
+      art meaning "the ungated chain-dependent lane" and defined once in a
+      glossary. Either is defensible; the present state, where it reads as a
+      statement of fact and is not one, is not.
+
+- [ ] **`docs/verification/` records carry claims this change measured as
+      false** — `2026-09-11-worktree-guardrails-on-chain-client-risk.md:213`
+      and `:219`, and two of the 2026-08-26 records, say the nine
+      chopsticks/anvil targets exercise `client.rs`, where five do. They were
+      **left untouched**: a verification record is the signed evidence of a
+      review that happened, and amending it after the fact falsifies the record
+      rather than correcting it. Every *live* ledger those records fed now
+      carries a dated note pointing the other way. The decision owed is whether
+      this project ever amends a verification record, and if so under what
+      annotation — the alternative, which this change assumes, is that records
+      are immutable and corrections live in the ledgers that are still read.

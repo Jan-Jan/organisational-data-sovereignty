@@ -57,7 +57,7 @@ fn assert_refused(spec_version: u32) {
     );
 }
 
-// verifies: REQ-hd6m9d
+// verifies: REQ-hd6m9d, LLR-b3s7st
 #[test]
 fn pinned_version_resolves_to_a_decoder_that_decodes_the_pinned_layout() {
     let decoder =
@@ -76,25 +76,25 @@ fn pinned_version_resolves_to_a_decoder_that_decodes_the_pinned_layout() {
     );
 }
 
-// verifies: REQ-hd6m9d
+// verifies: REQ-hd6m9d, LLR-u8ajby
 #[test]
 fn version_one_below_the_pinned_one_is_refused() {
     assert_refused(PASEO_AH_SPEC_VERSION - 1);
 }
 
-// verifies: REQ-hd6m9d
+// verifies: REQ-hd6m9d, LLR-u8ajby
 #[test]
 fn version_one_above_the_pinned_one_is_refused() {
     assert_refused(PASEO_AH_SPEC_VERSION + 1);
 }
 
-// verifies: REQ-hd6m9d
+// verifies: REQ-hd6m9d, LLR-u8ajby
 #[test]
 fn zero_version_is_refused() {
     assert_refused(0);
 }
 
-// verifies: REQ-hd6m9d
+// verifies: REQ-hd6m9d, LLR-u8ajby
 #[test]
 fn max_version_is_refused() {
     assert_refused(u32::MAX);

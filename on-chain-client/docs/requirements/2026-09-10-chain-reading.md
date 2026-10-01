@@ -302,12 +302,12 @@ different `wrap` closures into `decode_contract_events`
 difference between the two lanes, and `from_client` resolves the decoder and
 fails before returning a client (`:129-147`). Neither could acquire
 a requirement here, because both live in `async` code that needs a live chain:
-the only targets that reach them are the nine chopsticks/anvil ones and the
-live-Paseo smoke test, none of which any gate runs, so a requirement written for
-either would draw `MISSING-TEST` on the next run. A requirement with no possible
-gated test is the shape this change exists to remove. The controls are narrowed
-to what their requirements carry and each removed clause is recorded as a
-not-minted control in the risk file instead.
+the only targets that reach them are the five ungated ones that construct an
+`OrgRegistryClient` at all, none of which any gate runs, so a requirement
+written for either would draw `MISSING-TEST` on the next run. A requirement with
+no possible gated test is the shape this change exists to remove. The controls
+are narrowed to what their requirements carry and each removed clause is
+recorded as a not-minted control in the risk file instead.
 
 And they do not state anything about verification. `on-chain-client/src/verify.rs`
 is seven lines of doc-comment and no code; the module the design names as the
@@ -320,7 +320,29 @@ the behaviour the nine controls that analysis chose call for — and all nine ar
 chain-free decisions. The async subxt code around them — `get_org_state`'s slot
 loop and runtime-API call, the two subscription lanes' stream plumbing,
 `from_client`'s construction — has no requirement here, because the only tests
-that reach it are the nine chopsticks and anvil targets and the live-Paseo smoke
-test, none of which any gate runs. Stating what that code shall do, and the
-low-level requirements of the whole unit, is tooth 4 of
+that reach it are the five ungated targets that construct an
+`OrgRegistryClient`, none of which any gate runs. Stating what that code shall
+do, and the low-level requirements of the whole unit, is tooth 4 of
 `docs/plans/2026-09-05-ratchet-gap-analysis.md`.
+
+**Corrected 2026-09-28 by the review sweep of the change
+`worktree-guardrails-on-chain-client-arch`.** Two paragraphs above said the
+async code is reached by "the nine chopsticks/anvil targets **and** the
+live-Paseo smoke test". That counts ten ungated targets where there are nine —
+`smoldot_smoke` **is** one of the nine — and it overstates how much of that code
+anything reaches. Measured on this tree, exactly **five** of the nine ungated
+targets under `on-chain-client/tests` construct an `OrgRegistryClient`:
+`off_chain_genesis_ceremony`, `p_address_is_orgid`, `reorg_cancels_proposed`,
+`scenario_a_full` and `two_orgs_one_watcher`. `00_chopsticks_sanity` and
+`01_multisig_sanity` import nothing from `on_chain_client`; `smoldot_smoke` is
+`#[ignore]`d, needs live Paseo, and touches only `decode::dispatch::for_runtime`
+— which is SDD-v2rtka, whose version-resolution interface is fully gated (its
+two other declared responsibilities are refined by no LLR); and
+`regenerate_corpus` is an `#[ignore]`d corpus writer that needs no chain and
+constructs no client. Both paragraphs are corrected to five. The measurement was
+made by the architecture change, not by this ledger's own change, and it is
+applied here rather than left to contradict the architecture ledger, because two
+ledgers disagreeing about one set is worse than either number alone. **Nine
+remains the right count elsewhere for how many places a `verifies:` annotation
+could hide**, since MISSING-TEST is a text scan of `test_paths`; the two
+questions are different and neither number substitutes for the other.

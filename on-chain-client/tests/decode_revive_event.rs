@@ -127,7 +127,7 @@ fn assert_error_names(err: &DecodeError, expected: usize, actual: usize) {
 // REQ-wnjz9j — and what a log carrying any other first topic does
 // ---------------------------------------------------------------------------
 
-// verifies: REQ-52uc8f, REQ-wnjz9j
+// verifies: REQ-52uc8f, REQ-wnjz9j, LLR-e6skvu
 //
 // The ABI-drift guard, relocated from `src`'s
 // `event_signatures_match_solidity_abi` and re-expressed as behaviour rather
@@ -234,7 +234,7 @@ fn the_recognised_signature_hashes_are_the_keccak_of_the_canonical_solidity_stri
     }
 }
 
-// verifies: REQ-88fp2h, REQ-twdu84, REQ-axcxf7
+// verifies: REQ-88fp2h, REQ-twdu84, REQ-axcxf7, LLR-6tjhgk, LLR-u2e389
 //
 // REQ-wnjz9j is deliberately NOT among those IDs (review round 1, finding 9).
 // It states only a refusal — an unknown signature yields no event — so it has
@@ -278,7 +278,7 @@ fn genesis_initialized_round_trips_every_field() {
     );
 }
 
-// verifies: REQ-88fp2h, REQ-twdu84, REQ-axcxf7
+// verifies: REQ-88fp2h, REQ-twdu84, REQ-axcxf7, LLR-6tjhgk, LLR-u2e389
 //
 // The same for `RootUpdated`, which has one more indexed field (the epoch)
 // and one more non-indexed slot (the previous root). Relocated from `src`'s
@@ -314,7 +314,7 @@ fn root_updated_round_trips_every_field() {
     );
 }
 
-// verifies: REQ-wnjz9j
+// verifies: REQ-wnjz9j, LLR-rjcqg3
 //
 // An unknown first topic yields nothing. The follow subscription carries
 // every contract's logs, so this is the ordinary case, not an error: a future
@@ -331,7 +331,7 @@ fn an_unknown_first_topic_yields_nothing() {
     assert_eq!(parse(&bytes), Ok(None));
 }
 
-// verifies: REQ-wnjz9j
+// verifies: REQ-wnjz9j, LLR-rjcqg3
 //
 // No topics at all yields nothing. pallet-revive emits `ContractEmitted` with
 // an empty topic list when a contract calls `log0(data)`; there is no
@@ -347,7 +347,7 @@ fn no_topics_at_all_yields_nothing() {
 // REQ-88fp2h — topic count and data length must match the ABI exactly
 // ---------------------------------------------------------------------------
 
-// verifies: REQ-88fp2h
+// verifies: REQ-88fp2h, LLR-n6gghu
 //
 // One topic short of `GenesisInitialized`'s two: the signature matched but the
 // indexed admin is missing, so there is no admin to attribute the root to.
@@ -368,7 +368,7 @@ fn genesis_with_one_topic_is_rejected() {
     assert_error_names(&err, 2, 1);
 }
 
-// verifies: REQ-88fp2h
+// verifies: REQ-88fp2h, LLR-n6gghu
 //
 // One topic long. The extra topic is not simply ignored: a log with a third
 // indexed field is not the event this decoder was written against, and
@@ -392,7 +392,7 @@ fn genesis_with_three_topics_is_rejected() {
     assert_error_names(&err, 2, 3);
 }
 
-// verifies: REQ-88fp2h
+// verifies: REQ-88fp2h, LLR-n6gghu
 //
 // One topic short of `RootUpdated`'s three: the indexed epoch is missing, and
 // the epoch is what orders one root against another. Accepting this would
@@ -416,7 +416,7 @@ fn root_updated_with_two_topics_is_rejected() {
     assert_error_names(&err, 3, 2);
 }
 
-// verifies: REQ-88fp2h
+// verifies: REQ-88fp2h, LLR-n6gghu
 //
 // One topic long, the other side of `RootUpdated`'s boundary — the pair of the
 // case above, so the check is pinned from both directions rather than only
@@ -445,7 +445,7 @@ fn root_updated_with_four_topics_is_rejected() {
     assert_error_names(&err, 3, 4);
 }
 
-// verifies: REQ-88fp2h
+// verifies: REQ-88fp2h, LLR-n6gghu
 //
 // `GenesisInitialized`'s data is exactly two ABI words. Both neighbours of 64
 // are refused — one byte short and one byte long, which is where an `<`
@@ -474,7 +474,7 @@ fn genesis_data_of_any_length_but_sixty_four_is_rejected() {
     }
 }
 
-// verifies: REQ-88fp2h
+// verifies: REQ-88fp2h, LLR-n6gghu
 //
 // `RootUpdated`'s data is exactly three ABI words. Same both-neighbours
 // treatment: 95 and 97 as well as lengths further out. 64 is included
@@ -513,7 +513,7 @@ const DISTINCT_ADMIN: [u8; 20] = [
     0x30, 0x31, 0x32, 0x33,
 ];
 
-// verifies: REQ-twdu84
+// verifies: REQ-twdu84, LLR-89pdz9
 //
 // Solidity always zero-pads an indexed `address` on the left, so a non-zero
 // byte anywhere in those twelve positions means the log was not written by the
@@ -553,7 +553,7 @@ fn a_non_zero_byte_at_each_padding_position_of_the_address_topic_is_rejected() {
     }
 }
 
-// verifies: REQ-twdu84
+// verifies: REQ-twdu84, LLR-89pdz9
 //
 // The accepted side of the same boundary: all twelve padding bytes zero, and
 // the address that comes back is the topic's low twenty bytes exactly — which
@@ -599,7 +599,7 @@ fn all_twelve_padding_bytes_zero_is_accepted_and_the_address_is_the_low_twenty_b
 // REQ-axcxf7 — the payload must be consumed exactly
 // ---------------------------------------------------------------------------
 
-// verifies: REQ-axcxf7
+// verifies: REQ-axcxf7, LLR-8242kq
 //
 // One trailing byte after a well-formed payload. SCALE decoding of the three
 // fields succeeds and leaves the byte unread, so nothing but an explicit
@@ -633,7 +633,7 @@ fn any_trailing_bytes_after_a_well_formed_payload_are_rejected() {
     }
 }
 
-// verifies: REQ-axcxf7
+// verifies: REQ-axcxf7, LLR-8242kq
 //
 // The other end: a payload that runs out before it has been read. Cut at the
 // byte where `topics`' compact length prefix should begin, and again one byte
@@ -669,7 +669,7 @@ fn a_payload_that_ends_inside_its_topics_is_rejected() {
     }
 }
 
-// verifies: REQ-axcxf7
+// verifies: REQ-axcxf7, LLR-8242kq
 //
 // REQ-axcxf7's second clause, literally: a payload that ends **inside a
 // field's own length prefix**. Neither cut above lands there — 86 stops
@@ -724,5 +724,59 @@ fn a_payload_that_ends_inside_a_length_prefix_is_rejected() {
             "a payload cut at {} — inside `data`'s length prefix — must be refused, got {other:?}",
             PREFIX_START + 1
         ),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// REQ-9wwenn — the indexed epoch topic is bounded, never truncated
+// ---------------------------------------------------------------------------
+
+// verifies: LLR-mzh8df
+//
+// `RootUpdated` carries the epoch as an indexed `uint256` topic, and this
+// reader represents it as a `u64`. The storage path's bound is gated in
+// tests/decode_org_state.rs; nothing gated exercised the same bound through
+// the *event* path, even though `parse_root_updated` reaches the same
+// `uint256`-to-`u64` rule. That gap is what this test closes: a chain that
+// reports an epoch above the range this reader can hold must be refused, not
+// silently read as its low eight bytes — a truncated epoch is a stale
+// membership root accepted as a current one.
+//
+// Every one of the twenty-four high positions is swept, because a reader that
+// checked only some of them would still truncate for the rest. The low eight
+// bytes carry 7 throughout, so the value a truncating reader would return is
+// a specific, plausible-looking epoch rather than zero.
+#[test]
+fn root_updated_epoch_above_u64_is_refused_not_truncated() {
+    let admin = [0x22u8; 20];
+    let data = root_updated_data([0x40; 32], [0x80; 32], [0xc0; 32]);
+
+    // The same log with a representable epoch decodes, or the refusals below
+    // would prove nothing about the high half in particular.
+    let representable = encode_contract_emitted(
+        CONTRACT,
+        data.clone(),
+        vec![sig_root_updated(), padded_address(admin), uint256_be(7)],
+    );
+    assert!(
+        matches!(parse(&representable), Ok(Some(_))),
+        "the fixture with an epoch of 7 must decode, or this test proves nothing"
+    );
+
+    for position in 0..24usize {
+        let mut epoch_topic = uint256_be(7);
+        epoch_topic[position] = 0x01;
+
+        let bytes = encode_contract_emitted(
+            CONTRACT,
+            data.clone(),
+            vec![sig_root_updated(), padded_address(admin), epoch_topic],
+        );
+        assert_eq!(
+            parse(&bytes),
+            Err(DecodeError::EpochOverflow),
+            "a non-zero byte at high position {position} must overflow, \
+             not truncate to the low eight bytes"
+        );
     }
 }

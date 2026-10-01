@@ -1,4 +1,4 @@
-//! verifies: REQ-n6v896
+//! verifies: REQ-n6v896, LLR-6tjhgk
 //!
 //! Fuzz target (structured / INVERSE property): for any structurally-valid
 //! event, `parse_revive_event(encode(event)) == Some(EmittedEvent { contract,

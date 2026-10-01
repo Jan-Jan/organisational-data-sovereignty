@@ -209,11 +209,18 @@ touching this unit would have pulled it into that change's impact set.
 
 The structural point matters more than the attribution. **The dependency graph
 alone could never have pulled `on-chain-client` into an org-members change's
-impact set**: the four declared edges (`.guardrails/units.yaml`) are org-node →
-org-members, org-node → on-chain-client, app → org-node, app → on-chain-client,
+impact set**: the four declared edges are org-node → org-members, org-node →
+on-chain-client, app → org-node, app → on-chain-client,
 so org-members is a leaf and on-chain-client neither depends on it nor is
-depended on by it. No amount of propagation over those edges reaches this unit
-from that one.
+depended on by it. (**Citation corrected 2026-09-28 by the review sweep of the
+change `worktree-guardrails-on-chain-client-arch`:** this sentence cited
+`.guardrails/units.yaml` as the place the edges are declared. It is not — that
+file's schema is `units:` and `not_a_unit:` and it can carry no edge in either
+direction. A `depends_on:` edge is declared in the **consumer's own**
+`.guardrails/config.yaml`, here `org-node`'s and `app`'s; units.yaml's header
+comment only enumerates them in prose. The four edges and the conclusion drawn
+from them are unchanged.) No amount of propagation over those edges reaches
+this unit from that one.
 
 That is a claim about the edges, and it must not be inflated into "never, by any
 route". `check-units.sh --impact` has a second rule, stated in the script's own
@@ -1574,10 +1581,17 @@ applied to the acceptance table.
 | TOTAL | 501 | 42.91% |
 
 Every module this change touched is at or near 100%. The aggregate is dragged
-down by `client.rs` alone — 336 of 501 lines, two thirds of the crate, at
-16.37% — which is the async subxt code exercised only by the nine
-chopsticks/anvil targets that no gate runs. That shortfall is long-standing and
-this change neither caused nor worsened it.
+down by `client.rs` alone — **336 of the 501 lines in the table above**, at
+16.37% — which is the async subxt code exercised only by the five ungated
+targets that construct a client, none of which any gate runs. That shortfall is
+long-standing and this change neither caused nor worsened it.
+
+*Basis note, added 2026-09-29 by review round 5.* The table above is the
+measurement as it stood when this section was written. The denominator later
+fell to **491**, when `types.rs` shed ten fully-covered lines to the relocation;
+`client.rs` is 336 lines at 16.37% on either basis. Round 5 caught prose here
+that had been re-based to 491 while the table it comments on still read 501,
+which handed a reader 336/491 pointing at a 336/501 table.
 
 **What actually happened to the ruler.** The relocation moved 214 lines out of
 `src` (715 → 501), and those lines were `#[cfg(test)]` test bodies which, being
@@ -1852,9 +1866,9 @@ and the gate named two shortfalls as shortfalls. The owner was asked and
 
 1. **`client.rs` statement coverage, 16.37%** — 281 of its 336 lines
    unexercised. It dominates the aggregate and is the async subxt code only the
-   nine ungated chopsticks/anvil targets reach. Unchanged in substance since
-   2026-08-26; recorded in the register as HAZ-werm85's and HAZ-xd4urb's
-   residual, not as a met target.
+   five ungated targets that construct a client reach.
+   Unchanged in substance since 2026-08-26; recorded in the register as
+   HAZ-werm85's and HAZ-xd4urb's residual, not as a met target.
 2. **Decision coverage is UNMEASURED in all four units** — both llvm-cov
    reports show `Branches 0 / Missed 0 / Cover -`, i.e. branch instrumentation
    is off and no decision figure exists at all. Class C mandates it. Also

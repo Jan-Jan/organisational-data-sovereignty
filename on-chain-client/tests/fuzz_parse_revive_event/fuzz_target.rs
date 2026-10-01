@@ -1,4 +1,4 @@
-//! verifies: REQ-sx5b6g
+//! verifies: REQ-sx5b6g, LLR-2v5u4d
 //!
 //! Fuzz target: `Decoder::parse_revive_event` must never panic on arbitrary
 //! bytes. The input models the SCALE payload of
