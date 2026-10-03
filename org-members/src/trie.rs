@@ -559,15 +559,21 @@ impl<H: TrieHasher> OrgTrie<H> {
             count = count.checked_sub(1).ok_or(OrgMembersError::InvariantViolated)?;
         }
 
+        // LLR-n5t6bn: release every outgoing handle before checking any
+        // incoming one, so a handle moving between two present members is
+        // judged against the record after the whole set, in any identifier
+        // order (PR-vf5hdm).
         for member in &delta.upserted {
-            let existing = smt::get_member(&root, member.id());
-
-            if let Some(ref old) = existing {
+            if let Some(old) = smt::get_member(&root, member.id()) {
                 if old.handle() != member.handle() {
                     new_skeleton_index.remove(&handle_skeleton(old.handle()));
                     new_handle_index.remove(old.handle());
                 }
             }
+        }
+
+        for member in &delta.upserted {
+            let existing = smt::get_member(&root, member.id());
 
             let needs_check = match &existing {
                 Some(old) => old.handle() != member.handle(),

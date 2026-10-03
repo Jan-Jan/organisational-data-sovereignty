@@ -849,6 +849,10 @@ worth.
   an existing one **is** rejected by the code, and no test would notice if that
   stopped being true. Recorded as a gap rather than closed — this change adds no
   test beyond the five its plan names.
+  *Forward note, 2026-10-03:* reversed — the uniqueness half is now carried,
+  through `apply_delta`, by `membership_conformance` and three
+  `integration_test.rs` tests. See `2026-10-03-lawful-change-replicates.md`,
+  "Measured carriers".
 - **`_canonical_delta_still_works` stays green under all five relaxing
   canonical-form mutations.** Relaxing a check cannot break an honest delta; it
   reds only under an over-strict polarity flip.
@@ -870,6 +874,10 @@ worth.
   annotated with three of the four candidates — LLR-fv75ec, LLR-j4d38d and
   LLR-v3jqau — and the reason for the fourth's absence is written into the
   annotation block in the file, where a later reader will look.
+  *Forward note, 2026-10-03:* reversed — the model's `init` is now genesis with
+  generated seeds, so `genesis`'s per-member loop runs and
+  `membership_conformance` carries LLR-ch2pkw. See
+  `2026-10-03-lawful-change-replicates.md`, "Measured carriers".
 - **The `unwrap` mutation is two kinds of evidence, kept apart.** `cargo test` does
   not run clippy, so the mutation compiles and three carriers red on the real
   behaviour change — `called Result::unwrap() on an Err value: DuplicateId`, a
@@ -904,6 +912,10 @@ worth.
   candidates, and a fifth unmeasured annotation is the unearned evidence the whole
   method exists to avoid. Nothing is owed; the LLR is carried and proven. This is
   the best measured follow-up available to a later change.
+  *Forward note, 2026-10-03:* used — `membership_conformance` now carries
+  `verifies: LLR-4n8zqx`, measured red 5/5 under an order-dependent leaf hash
+  in `smt::insert`. See `2026-10-03-lawful-change-replicates.md`, "Measured
+  carriers".
 
 ## Obligations from the independent review — opened 2026-09-17
 

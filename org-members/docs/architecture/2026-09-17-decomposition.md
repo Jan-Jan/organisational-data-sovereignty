@@ -326,7 +326,12 @@ the canonical-form check in `org-members/src/trie.rs`
 **SDD-55b2zj**: the change set that crosses a process boundary — anchored
 to the record it was computed against, canonical in its encoding, and
 usable only after its result is verified against a root supplied
-independently of it. traces: REQ-4umsuz, REQ-shk82j, REQ-d3prca
+independently of it. traces: REQ-4umsuz, REQ-shk82j, REQ-d3prca, REQ-wx3wpv
+
+(Amended 2026-10-03: REQ-wx3wpv added to the trace, refined by LLR-n5t6bn in
+`docs/architecture/2026-10-03-lawful-change-replicates.md`. The
+item's purpose is a change set that crosses a process boundary; PR-vf5hdm
+showed a class of lawful transition it could not carry.)
 
 **LLR-au8het**: a change set names the record root it was computed against, and
 applying it to a record with a different root is refused with

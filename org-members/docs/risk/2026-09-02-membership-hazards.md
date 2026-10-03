@@ -230,7 +230,8 @@ the same gap as HAZ-jkc6tj, in the same place: the administrator's surface.
 **HAZ-y8h835**: a device's view of the organisation's membership can lag or
 diverge from the record the organisation has committed — concurrent
 administrators, a delta applied to the wrong base, a root published before it
-was recomputed, or a device that has not read the chain recently; that device
+was recomputed, a device that has not read the chain recently, or an honest
+delta refused at the correct base; that device
 treats a member removed by the organisation as current and shares material
 with them, or treats a current member as removed; the removed member reads
 material published after their removal. Severity: S3. Probability: P2.
@@ -238,6 +239,27 @@ material published after their removal. Severity: S3. Probability: P2.
 P2: divergence needs no adversary, only two administrators acting at once or a
 device that was offline. The chain anchor is what makes it recoverable rather
 than permanent.
+
+(Amended 2026-10-03, cause "an honest delta refused at the correct base":
+PR-vf5hdm — a delta this crate produced, moving a handle between two members
+who are both still present, or handing a handle to a member the same delta
+admits (`scenario_handover_to_new_member`), is refused by `apply_delta` with
+`DuplicateHandle` depending on identifier order. It joins this hazard rather
+than founding its own because the record is immutable (REQ-d3prca): a refused
+delta leaves the proposing administrator, the co-administrators and every
+member holding the old committed root; a candidate is discarded unless it
+both applies and verifies against the chain, so nothing is committed that
+replicas cannot follow. What the defect costs is that a lawful change cannot
+replicate by delta: the proposal is blocked at co-administrator review, or —
+if a root is published without that review — every member refuses
+identically and lags until it obtains a complete trie from an administrator,
+verified against the chain root. That full-trie fallback is what keeps this
+cause recoverable, and it is **org-node's** to implement and **not
+implemented** as of this date (an existing member rebuilds from its stored
+trie and stops on error; the `genesis_snapshot` on the wire serves fresh
+admission only). The rationale above therefore holds for this cause only once
+that fallback exists. REQ-wx3wpv removes the cause by design; see its derived
+assessment in this change's risk file.)
 
 **RC-9z65hw**: a set of membership changes is applied only if its declared base
 matches the record it is applied to, and the result of applying it is usable

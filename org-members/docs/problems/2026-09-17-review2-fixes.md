@@ -7,7 +7,15 @@ member acquiring the handle sorts before the member releasing it — so a lawful
 membership change cannot be replicated and producer and receiver diverge.
 affects: SDD-55b2zj, LLR-juxk9q, LLR-xmpqn2, LLR-8jttpb, LLR-h7stq2.
 opened: 2026-09-17
-status: open
+status: resolved
+
+Resolved 2026-10-03 by the change on `worktree-quint-connect-coupling`
+(REQ-wx3wpv, LLR-n5t6bn): root cause the single-pass upsert loop above; fix a
+first loop in `OrgTrie::apply_delta` that releases every outgoing handle from
+both indexes before the second loop checks any incoming one. Reproducing tests
+in `org-members/tests/mbt_conformance.rs`: `scenario_handover_a_to_b`,
+`scenario_handle_swap`, `scenario_handover_to_new_member` (red before the fix,
+green after) and `scenario_handover_b_to_a` (the safe order, green throughout).
 
 Found by the second independent review of the architecture change
 (`merge-change` step 6a, finding-2 of that round), not by a failing test. No
@@ -162,3 +170,15 @@ a two-member trie, swap the handles through two `update_handle` calls, take
 `calculate_delta` against the original, and `apply_delta` it to the original.
 That is the red. The one-way variant needs the same with identifiers chosen so
 the taker sorts first.
+
+## Resolution note (2026-10-03)
+
+The owner chose not to forbid handle swaps or handovers between members
+(REQ-wx3wpv's draft file): a handle may move between two present members in one
+honest delta, or to a member the same delta admits. The fix is the two-phase
+upsert loop this report anticipated — release every outgoing handle, then check
+every incoming one — so the check runs against the record after the whole set,
+in any identifier order. The hazard is HAZ-y8h835 as amended by this change. The
+handover to an admitted member was not in this report's original two shapes; the
+random conformance run found it (seed 0xa68bbc85: handle c->h3, add b h1), and
+`scenario_handover_to_new_member` now pins it.

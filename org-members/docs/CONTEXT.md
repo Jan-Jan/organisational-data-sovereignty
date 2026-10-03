@@ -15,3 +15,36 @@ _Avoid_: synonym1, synonym2
 Be opinionated: when several words exist for one concept, pick one and list
 the rest under _Avoid_. Only include terms specific to this project's domain.
 -->
+
+**Membership model**:
+The Quint model of the membership operations (`org-members/quint/`), against
+which the crate's behaviour is checked.
+_Avoid_: spec, specification, Quint spec
+
+**Model action**:
+One named alternative of the membership model's `step`; each corresponds to
+one thing a caller does to the trie — a single public trie operation, or, for
+receiving a change set, applying it and verifying the result against the
+expected root.
+_Avoid_: spec action, transition
+
+**Conformance test**:
+The test that replays membership-model traces against the crate and requires,
+after every model action, the same result, the same error and the same
+membership state.
+_Avoid_: MBT test, model-based test (as a name for this test)
+
+**Declared abstraction boundary**:
+The written list of crate behaviour the membership model deliberately does not
+describe, each entry naming the test that carries it instead.
+_Avoid_: out of scope, not modelled (unqualified)
+
+**Named scenario**:
+A fixed, named run in the membership model, replayed against the crate
+deterministically regardless of seed.
+_Avoid_: regression trace, quint test (as a noun)
+
+**Exported model interface**:
+The part of the membership model another unit's model may import; nothing
+outside it is visible across the unit boundary.
+_Avoid_: shared types, public model

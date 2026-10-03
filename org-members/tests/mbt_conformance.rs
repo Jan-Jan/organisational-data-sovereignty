@@ -1,38 +1,101 @@
-//! Model-based conformance test: replays membership traces generated from
-//! `quint/membership_mbt.qnt` against the real `OrgTrie`, asserting that the
-//! crate's Ok/Err results AND its root-hash equality classes match the model.
+//! Conformance test: replays traces of the membership model
+//! (`org-members/quint/membership_mbt.qnt`) against the real `OrgTrie` through
+//! quint-connect, requiring after every model action the same result, the same
+//! error and the same membership state, plus root-hash equality classes that
+//! match the model's.
 //!
-//! Requires the `quint` CLI on PATH. Gated so a plain `cargo test` without
-//! quint installed does not fail to build the binary but skips at runtime.
+//! What "maps 1:1" means here is decided in
+//! `docs/adr/2026-10-03-quint-conformance-gate.md` (decisions 4, 8, 10-12):
+//! every model action has exactly one driver arm, every trie-yielding public
+//! operation has a model action or a declared-abstraction-boundary entry
+//! (`TRIE_OPERATIONS`, checked against the source), every action is taken in
+//! the random run, and every error tag maps to exactly one crate result.
+//!
+//! Requires the `quint` CLI on PATH and a writable `$HOME` (Quint's default
+//! rust backend fetches its evaluator into `~/.quint` on first use). It does
+//! NOT skip when either is missing: `quint_preflight` names the cause and the
+//! test fails (decision 9).
 
+use quint_connect::runner::{self, RunConfig, TestConfig};
 use quint_connect::*;
 use serde::Deserialize;
 
 use anyhow::anyhow;
 use ed25519_dalek::SigningKey;
+use org_members::delta::test_support;
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
 use org_members::types::{MemberId, MemberLeaf, P2pDeviceKey, P2pMemberKey};
 use org_members::OrgMembersError;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::{Arc, Mutex};
 
 type Trie = OrgTrie<Blake3Hasher>;
 
+const SPEC: &str = "quint/membership_mbt.qnt";
 const IDS: [&str; 3] = ["a", "b", "c"];
-const GENS: [i64; 3] = [0, 1, 2];
+/// Key generations the model draws (0..=3) plus 4, which only a refused
+/// five-device genesis record uses, so every key the driver builds inverts.
+const GENS: [i64; 5] = [0, 1, 2, 3, 4];
+/// Random-run bounds (decision 7): explicit, per unit.
+const MAX_SAMPLES: usize = 100;
+const MAX_STEPS: usize = 15;
+
+/// Every model action, by its `lastAction` tag.
+const ACTIONS: [&str; 10] = [
+    "Init",
+    "AddMember",
+    "DeleteMember",
+    "UpdateHandle",
+    "UpdateNameSurname",
+    "RotateKey",
+    "AddDevice",
+    "DeleteDevice",
+    "Isolate",
+    "ApplyDelta",
+];
+
+/// Decision 8(i): every public operation that yields a trie or a candidate,
+/// mapped to the model action that drives it or to its declared abstraction
+/// boundary. `trie_operations_table_matches_source` fails when the source
+/// gains one that is not listed here.
+const TRIE_OPERATIONS: [(&str, &str); 11] = [
+    ("genesis", "Init"),
+    ("add_member", "AddMember"),
+    ("delete_member", "DeleteMember"),
+    ("update_name_surname", "UpdateNameSurname"),
+    ("update_handle", "UpdateHandle"),
+    ("rotate_p2p_key", "RotateKey"),
+    ("add_p2p_device", "AddDevice"),
+    ("delete_p2p_device", "DeleteDevice"),
+    ("emergency_isolate_member", "Isolate"),
+    ("apply_delta", "ApplyDelta"),
+    ("verify_against", "ApplyDelta"),
+];
+
+/// Declared abstraction boundary: what the model deliberately does not
+/// describe, and where it is carried instead.
+const BOUNDARY: [(&str, &str); 1] = [(
+    "recalculate",
+    "hash lifecycle: called by the driver after every change and to produce \
+     honest deltas; pending/recalculated state is carried by integration_test.rs",
+)];
+// Also outside the model, with no public trie-yielding operation of their own:
+// UTS#39 skeletons (model skeleton == handle; carried by the handle tests in
+// integration_test.rs), encoding-level delta non-canonicality — ordering and
+// duplicate list entries (delta_canonicality_fuzz), wire encoding
+// (fuzz_tests.rs), SMT internals and hashing (integration_test.rs).
 
 /// Mirror of the Quint `Key` record.
-//
-// `Ord`/`PartialOrd` added beyond the original skeleton: `Leaf.devices` is a
-// `BTreeSet<Key>`, and `BTreeSet<T>: Deserialize` requires `T: Ord`.
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Deserialize, Debug, serde::Serialize)]
 struct Key {
     owner: String,
     gen: i64,
 }
 
-/// Mirror of the Quint `Leaf` record.
-#[derive(Clone, Eq, PartialEq, Deserialize, Debug, serde::Serialize)]
+/// Mirror of the Quint `Leaf` record. `Ord` because `ApplyDelta` picks a
+/// `Set[Leaf]`.
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Deserialize, Debug, serde::Serialize)]
 struct Leaf {
     id: String,
     handle: String,
@@ -41,13 +104,33 @@ struct Leaf {
     surname: String,
     #[serde(rename = "pKey")]
     p_key: Key,
-    devices: std::collections::BTreeSet<Key>,
+    devices: BTreeSet<Key>,
 }
 
-/// The verifiable model state: the trie (id -> leaf) and the last error tag.
+/// Mirror of the Quint `Seed` record (one requested genesis member).
+#[derive(Clone, Deserialize, Debug)]
+struct Seed {
+    id: String,
+    h: String,
+    devs: i64,
+}
+
+/// Mirror of the Quint `Op` record (one producer-side operation).
+#[derive(Clone, Deserialize, Debug)]
+struct Op {
+    op: String,
+    id: String,
+    h: String,
+    g: i64,
+}
+
+/// The verifiable model state. `prev` and `lastAction` are model bookkeeping
+/// and are not compared.
 #[derive(Eq, PartialEq, Deserialize, Debug)]
 struct MembershipState {
-    trie: std::collections::BTreeMap<String, Leaf>,
+    #[serde(rename = "orgExists")]
+    org_exists: bool,
+    trie: BTreeMap<String, Leaf>,
     #[serde(rename = "lastError")]
     last_error: String,
 }
@@ -63,63 +146,138 @@ fn real_device_key(k: &Key) -> P2pDeviceKey {
     let seed: [u8; 32] = blake3::hash(format!("dk:{}:{}", k.owner, k.gen).as_bytes()).into();
     P2pDeviceKey::new(SigningKey::from_bytes(&seed).verifying_key())
 }
+fn key(owner: &str, gen: i64) -> Key {
+    Key {
+        owner: owner.to_string(),
+        gen,
+    }
+}
+
+/// The record a fresh member is admitted with (model `mkLeaf`).
+fn new_leaf(id: &str, h: &str) -> core::result::Result<MemberLeaf, OrgMembersError> {
+    MemberLeaf::new(
+        real_id(id),
+        h,
+        real_member_key(&key(id, 0)),
+        "n",
+        "s",
+        vec![real_device_key(&key(id, 0))],
+    )
+}
+
+/// A genesis seed's record (model `seedLeaf`).
+fn seed_leaf(s: &Seed) -> core::result::Result<MemberLeaf, OrgMembersError> {
+    MemberLeaf::new(
+        real_id(&s.id),
+        &s.h,
+        real_member_key(&key(&s.id, 0)),
+        "n",
+        "s",
+        (0..s.devs)
+            .map(|g| real_device_key(&key(&s.id, g)))
+            .collect(),
+    )
+}
 
 // --- inverse maps (domains are tiny, so brute force) ---
 fn model_id_of(id: &MemberId) -> Option<String> {
-    IDS.iter().find(|m| real_id(m) == *id).map(|m| m.to_string())
+    IDS.iter()
+        .find(|m| real_id(m) == *id)
+        .map(|m| m.to_string())
 }
-fn gen_of_member_key(owner: &str, key: &P2pMemberKey) -> Option<i64> {
-    GENS.iter().copied().find(|g| {
-        real_member_key(&Key {
-            owner: owner.to_string(),
-            gen: *g,
-        }) == *key
-    })
+fn gen_of_member_key(owner: &str, k: &P2pMemberKey) -> Option<i64> {
+    GENS.iter()
+        .copied()
+        .find(|g| real_member_key(&key(owner, *g)) == *k)
 }
 fn model_device_of(owner: &str, d: &P2pDeviceKey) -> Option<Key> {
     GENS.iter()
         .copied()
-        .find(|g| {
-            real_device_key(&Key {
-                owner: owner.to_string(),
-                gen: *g,
-            }) == *d
-        })
-        .map(|g| Key {
-            owner: owner.to_string(),
-            gen: g,
-        })
+        .find(|g| real_device_key(&key(owner, *g)) == *d)
+        .map(|g| key(owner, g))
 }
 
-/// Map a crate error to the model's error tag (model collapses all handle
-/// collisions to "ConfusableHandle"). Unmapped -> "Other:<debug>" forces a
-/// visible mismatch.
+fn model_leaf_of(m: &MemberLeaf) -> Result<Leaf> {
+    let mid = model_id_of(m.id()).ok_or_else(|| anyhow!("unknown member id"))?;
+    let gen = gen_of_member_key(&mid, m.p2p_key())
+        .ok_or_else(|| anyhow!("unknown member key gen for {mid}"))?;
+    let mut devices = BTreeSet::new();
+    for d in m.p2p_devices() {
+        devices
+            .insert(model_device_of(&mid, d).ok_or_else(|| anyhow!("unknown device for {mid}"))?);
+    }
+    Ok(Leaf {
+        id: mid.clone(),
+        handle: m.handle().to_string(),
+        skeleton: m.handle().to_string(), // model invariant: skeleton == handle
+        name: m.name().to_string(),
+        surname: m.surname().to_string(),
+        p_key: key(&mid, gen),
+        devices,
+    })
+}
+
+/// Map a crate error to the model's error tag — exactly one crate result per
+/// tag (decision 10). The model's handles have distinct skeletons, so a model
+/// "ConfusableHandle" is the crate's `DuplicateHandle`; the crate's own
+/// `ConfusableHandle` (distinct handles, one skeleton) is outside the model
+/// and maps to "Other", forcing a visible mismatch if it is ever reached.
 fn err_tag(e: &OrgMembersError) -> String {
     match e {
         OrgMembersError::IdNotFound => "IdNotFound",
         OrgMembersError::DuplicateId => "DuplicateId",
-        OrgMembersError::ConfusableHandle => "ConfusableHandle",
         OrgMembersError::DuplicateHandle => "ConfusableHandle",
         OrgMembersError::DuplicateDevice => "DuplicateDevice",
         OrgMembersError::DeviceNotFound => "DeviceNotFound",
         OrgMembersError::DeviceSlotsFull => "DeviceSlotsFull",
         OrgMembersError::EmptyDeviceList => "EmptyDeviceList",
         OrgMembersError::DeltaBaseMismatch => "DeltaBaseMismatch",
+        OrgMembersError::VerificationFailed => "VerificationFailed",
+        OrgMembersError::MalformedDelta("removed id not present in trie") => "StaleRemoval",
+        OrgMembersError::MalformedDelta("upserted leaf identical to existing trie state") => {
+            "NoOpUpsert"
+        }
+        OrgMembersError::MalformedDelta("id appears in both removed and upserted") => {
+            "RemoveUpsertOverlap"
+        }
         OrgMembersError::P2pKeyNotReplaced => "P2pKeyNotReplaced",
         other => return format!("Other:{other:?}"),
     }
     .to_string()
 }
 
+/// Apply one producer-side operation (model `applyOp`).
+fn apply_op(t: &Trie, o: &Op) -> core::result::Result<Trie, OrgMembersError> {
+    match o.op.as_str() {
+        "add" => t.add_member(new_leaf(&o.id, &o.h)?),
+        "delete" => t.delete_member(&real_id(&o.id)),
+        "handle" => t.update_handle(&real_id(&o.id), &o.h),
+        "rotate" => t.rotate_p2p_key(&real_id(&o.id), real_member_key(&key(&o.id, o.g))),
+        _ => Err(OrgMembersError::InvariantViolated),
+    }
+}
+
+/// Action and outcome counts across every trace of a run (decision 8(ii)).
+type Coverage = Arc<Mutex<BTreeMap<(String, String), usize>>>;
+
 #[derive(Default)]
 struct MembershipDriver {
     trie: Option<Trie>,
+    prev: Option<Trie>,
     last_error: String,
     // root-hash equality classes: canonical model-state bytes -> root hex
-    root_classes: std::collections::HashMap<Vec<u8>, String>,
+    root_classes: HashMap<Vec<u8>, String>,
+    coverage: Option<Coverage>,
 }
 
 impl MembershipDriver {
+    fn with_coverage(coverage: Coverage) -> Self {
+        Self {
+            coverage: Some(coverage),
+            ..Self::default()
+        }
+    }
+
     fn commit(&mut self, res: core::result::Result<Trie, OrgMembersError>) {
         match res {
             Ok(t) => {
@@ -132,13 +290,7 @@ impl MembershipDriver {
                 };
                 // Delta-path conformance: for the real mutation old -> t, the crate's
                 // calculate_delta + apply_delta + verify_against must reproduce t's
-                // root. This realizes the model's round-trip law
-                // (applyDelta(s, calculateDelta(s, s')) == Ok(s')) against the REAL
-                // crate, cross-checking the canonical-form delta machinery — the
-                // crate's headline invariant — which the mutator action set never
-                // exercises directly. (Adversarial/rejection deltas remain covered by
-                // the crate's own `delta_canonicality_fuzz`, so we only check the
-                // positive direction here and never feed a malformed delta.)
+                // root (the model's round-trip law, against the real crate).
                 if let Some(old) = &self.trie {
                     if let (Ok(old_root), Ok(new_root)) = (old.root_hash(), t.root_hash()) {
                         if old_root != new_root {
@@ -147,7 +299,9 @@ impl MembershipDriver {
                                 .expect("calculate_delta failed on a real mutation");
                             let verified = old
                                 .apply_delta(&delta)
-                                .expect("apply_delta rejected a canonical delta from calculate_delta")
+                                .expect(
+                                    "apply_delta rejected a canonical delta from calculate_delta",
+                                )
                                 .verify_against(&new_root)
                                 .expect("verify_against failed for the calculated delta");
                             assert_eq!(
@@ -158,6 +312,7 @@ impl MembershipDriver {
                         }
                     }
                 }
+                self.prev = self.trie.take();
                 self.trie = Some(t);
                 self.last_error = String::new();
             }
@@ -171,36 +326,81 @@ impl MembershipDriver {
         self.trie.clone().ok_or(OrgMembersError::IdNotFound)
     }
 
+    /// The real counterpart of a model leaf in an `ApplyDelta` upsert: the
+    /// current record itself when the model leaf equals it, else a fresh
+    /// record (model `mkLeaf`, the only other shape the model builds).
+    fn real_leaf(&self, cur: &Trie, l: &Leaf) -> core::result::Result<MemberLeaf, OrgMembersError> {
+        if let Some(existing) = cur.get(&real_id(&l.id)) {
+            if model_leaf_of(&existing).ok().as_ref() == Some(l) {
+                return Ok(existing);
+            }
+        }
+        new_leaf(&l.id, &l.handle)
+    }
+
+    fn apply_delta_step(
+        &self,
+        kind: &str,
+        ops: &[Op],
+        removed: &BTreeSet<String>,
+        upserted: &BTreeSet<Leaf>,
+        target: &str,
+    ) -> core::result::Result<Trie, OrgMembersError> {
+        let cur = self.cur()?;
+        match kind {
+            // The producer performs `ops` and computes the delta itself
+            // (REQ-wx3wpv: a change set the software produced).
+            "honest" => {
+                let mut produced = cur.clone();
+                for o in ops {
+                    produced = apply_op(&produced, o)?;
+                }
+                let (produced, delta) = produced.recalculate()?;
+                let expected = if target == "true" {
+                    produced.root_hash()?
+                } else {
+                    cur.root_hash()?
+                };
+                cur.apply_delta(&delta)?.verify_against(&expected)
+            }
+            // Computed against the previous record, applied to the current.
+            "stale" => {
+                let prev = self.prev.clone().ok_or(OrgMembersError::IdNotFound)?;
+                let delta = cur.calculate_delta(&prev)?;
+                cur.apply_delta(&delta)?.verify_against(&cur.root_hash()?)
+            }
+            // Built from removals and upserts at the current base, in
+            // canonical (strictly increasing) order.
+            "built" => {
+                let mut delta = cur.calculate_delta(&cur)?;
+                let mut ids: Vec<MemberId> = removed.iter().map(|i| real_id(i)).collect();
+                ids.sort();
+                let mut leaves = upserted
+                    .iter()
+                    .map(|l| self.real_leaf(&cur, l))
+                    .collect::<core::result::Result<Vec<_>, _>>()?;
+                leaves.sort_by(|a, b| a.id().cmp(b.id()));
+                test_support::delta_set_removed(&mut delta, ids);
+                test_support::delta_set_upserted(&mut delta, leaves);
+                let candidate = cur.apply_delta(&delta)?;
+                let expected = if target == "true" {
+                    candidate.root_hash()
+                } else {
+                    cur.root_hash()?
+                };
+                candidate.verify_against(&expected)
+            }
+            _ => Err(OrgMembersError::InvariantViolated),
+        }
+    }
+
     /// Reconstruct the model trie from the real OrgTrie via inverse maps.
     fn model_trie(&self) -> Result<BTreeMap<String, Leaf>> {
         let mut out = BTreeMap::new();
         if let Some(t) = &self.trie {
             for m in t.members() {
-                let mid = model_id_of(m.id()).ok_or_else(|| anyhow!("unknown member id"))?;
-                let gen = gen_of_member_key(&mid, m.p2p_key())
-                    .ok_or_else(|| anyhow!("unknown member key gen for {mid}"))?;
-                let mut devices = BTreeSet::new();
-                for d in m.p2p_devices() {
-                    devices.insert(
-                        model_device_of(&mid, d)
-                            .ok_or_else(|| anyhow!("unknown device for {mid}"))?,
-                    );
-                }
-                out.insert(
-                    mid.clone(),
-                    Leaf {
-                        id: mid.clone(),
-                        handle: m.handle().to_string(),
-                        skeleton: m.handle().to_string(), // model invariant: skeleton == handle
-                        name: m.name().to_string(),
-                        surname: m.surname().to_string(),
-                        p_key: Key {
-                            owner: mid.clone(),
-                            gen,
-                        },
-                        devices,
-                    },
-                );
+                let l = model_leaf_of(&m)?;
+                out.insert(l.id.clone(), l);
             }
         }
         Ok(out)
@@ -210,6 +410,7 @@ impl MembershipDriver {
 impl State<MembershipDriver> for MembershipState {
     fn from_driver(driver: &MembershipDriver) -> Result<Self> {
         Ok(MembershipState {
+            org_exists: driver.trie.is_some(),
             trie: driver.model_trie()?,
             last_error: driver.last_error.clone(),
         })
@@ -219,70 +420,100 @@ impl State<MembershipDriver> for MembershipState {
 impl Driver for MembershipDriver {
     type State = MembershipState;
 
+    /// The model records each action in `lastAction` (decision 12): `quint
+    /// test` traces carry no `mbt::actionTaken`, and named scenarios must
+    /// drive this same driver.
+    fn config() -> Config {
+        Config {
+            state: &[],
+            nondet: &["lastAction"],
+        }
+    }
+
     fn step(&mut self, step: &Step) -> Result {
         let switch_result: Result = (|| {
             switch!(step {
-            init => {
-                self.trie = Some(Trie::genesis(Vec::new()).map_err(|e| anyhow!("{e:?}"))?);
-                self.last_error = String::new();
-            },
-            AddMember(id: String, h: String) => {
-                let key = Key { owner: id.clone(), gen: 0 };
-                let leaf = MemberLeaf::new(
-                    real_id(&id), &h, real_member_key(&key), "n", "s",
-                    vec![real_device_key(&key)],
-                );
-                let res = match (leaf, self.trie.clone()) {
-                    (Ok(l), Some(t)) => t.add_member(l),
-                    (Ok(l), None) => Trie::genesis(Vec::new()).and_then(|t| t.add_member(l)),
-                    (Err(e), _) => Err(e),
-                };
-                self.commit(res);
-            },
-            DeleteMember(id: String) => {
-                let res = self.cur().and_then(|t| t.delete_member(&real_id(&id)));
-                self.commit(res);
-            },
-            UpdateHandle(id: String, h: String) => {
-                let res = self.cur().and_then(|t| t.update_handle(&real_id(&id), &h));
-                self.commit(res);
-            },
-            UpdateNameSurname(id: String, nm: String, sn: String) => {
-                let res = self.cur().and_then(|t| t.update_name_surname(&real_id(&id), &nm, &sn));
-                self.commit(res);
-            },
-            RotateKey(id: String, g: i64) => {
-                let nk = real_member_key(&Key { owner: id.clone(), gen: g });
-                let res = self.cur().and_then(|t| t.rotate_p2p_key(&real_id(&id), nk));
-                self.commit(res);
-            },
-            AddDevice(id: String, g: i64) => {
-                let d = real_device_key(&Key { owner: id.clone(), gen: g });
-                let res = self.cur().and_then(|t| t.add_p2p_device(&real_id(&id), d));
-                self.commit(res);
-            },
-            DeleteDevice(id: String, g: i64) => {
-                let d = real_device_key(&Key { owner: id.clone(), gen: 0 });
-                let nk = real_member_key(&Key { owner: id.clone(), gen: g });
-                let res = self.cur().and_then(|t| t.delete_p2p_device(&real_id(&id), &d, nk));
-                self.commit(res);
-            },
-            Isolate(id: String, g: i64) => {
-                let nk = real_member_key(&Key { owner: id.clone(), gen: g });
-                let res = self.cur().and_then(|t| t.emergency_isolate_member(&real_id(&id), nk));
-                self.commit(res);
-            }
-        })
+                Init(seeds: Vec<Seed>) => {
+                    let res = seeds
+                        .iter()
+                        .map(seed_leaf)
+                        .collect::<core::result::Result<Vec<_>, _>>()
+                        .and_then(Trie::genesis);
+                    self.trie = None;
+                    self.prev = None;
+                    match res {
+                        Ok(t) => {
+                            self.prev = Some(t.clone());
+                            self.trie = Some(t);
+                            self.last_error = String::new();
+                        }
+                        Err(e) => self.last_error = err_tag(&e),
+                    }
+                },
+                AddMember(id: String, h: String) => {
+                    let res = self.cur().and_then(|t| t.add_member(new_leaf(&id, &h)?));
+                    self.commit(res);
+                },
+                DeleteMember(id: String) => {
+                    let res = self.cur().and_then(|t| t.delete_member(&real_id(&id)));
+                    self.commit(res);
+                },
+                UpdateHandle(id: String, h: String) => {
+                    let res = self.cur().and_then(|t| t.update_handle(&real_id(&id), &h));
+                    self.commit(res);
+                },
+                UpdateNameSurname(id: String, nm: String, sn: String) => {
+                    let res = self.cur().and_then(|t| t.update_name_surname(&real_id(&id), &nm, &sn));
+                    self.commit(res);
+                },
+                RotateKey(id: String, g: i64) => {
+                    let nk = real_member_key(&key(&id, g));
+                    let res = self.cur().and_then(|t| t.rotate_p2p_key(&real_id(&id), nk));
+                    self.commit(res);
+                },
+                AddDevice(id: String, g: i64) => {
+                    let d = real_device_key(&key(&id, g));
+                    let res = self.cur().and_then(|t| t.add_p2p_device(&real_id(&id), d));
+                    self.commit(res);
+                },
+                DeleteDevice(id: String, g: i64) => {
+                    let d = real_device_key(&key(&id, 0));
+                    let nk = real_member_key(&key(&id, g));
+                    let res = self.cur().and_then(|t| t.delete_p2p_device(&real_id(&id), &d, nk));
+                    self.commit(res);
+                },
+                Isolate(id: String, g: i64) => {
+                    let nk = real_member_key(&key(&id, g));
+                    let res = self.cur().and_then(|t| t.emergency_isolate_member(&real_id(&id), nk));
+                    self.commit(res);
+                },
+                ApplyDelta(kind: String, ops: Vec<Op>, removed: BTreeSet<String>, upserted: BTreeSet<Leaf>, target: String) => {
+                    let res = self.apply_delta_step(&kind, &ops, &removed, &upserted, &target);
+                    self.commit(res);
+                }
+            })
         })();
         switch_result?;
+
+        if let Some(cov) = &self.coverage {
+            let outcome = if self.last_error.is_empty() {
+                "Ok".to_string()
+            } else {
+                self.last_error.clone()
+            };
+            *cov.lock()
+                .expect("coverage lock")
+                .entry((step.action_taken.clone(), outcome))
+                .or_insert(0) += 1;
+        }
 
         // Root-hash equality-class check: equal model state <=> equal real root.
         if self.last_error.is_empty() {
             if let Some(t) = &self.trie {
                 let root = t.root_hash().map_err(|e| anyhow!("root_hash: {e:?}"))?;
                 let root_hex = hex::encode(root.as_bytes());
-                let key = serde_json::to_vec(&self.model_trie()?).unwrap_or_default();
-                match self.root_classes.get(&key) {
+                let model_state = serde_json::to_vec(&self.model_trie()?).unwrap_or_default();
+                match self.root_classes.get(&model_state) {
                     Some(prev) if *prev != root_hex => {
                         return Err(anyhow!(
                             "abstraction violated: equal model state, different roots"
@@ -294,7 +525,7 @@ impl Driver for MembershipDriver {
                                 "abstraction violated: distinct model states share a root"
                             ));
                         }
-                        self.root_classes.insert(key, root_hex);
+                        self.root_classes.insert(model_state, root_hex);
                     }
                     _ => {}
                 }
@@ -305,21 +536,326 @@ impl Driver for MembershipDriver {
     }
 }
 
+/// Decision 9: name the cause when the Quint toolchain is unusable, rather
+/// than letting quint-connect panic with "Failed to execute Quint command".
+fn quint_preflight() -> core::result::Result<(), String> {
+    let out = std::process::Command::new("quint")
+        .arg("--version")
+        .output()
+        .map_err(|e| format!("`quint` is not runnable from PATH ({e}); install it (npm i -g @informalsystems/quint)"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "`quint --version` failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    let home =
+        std::env::var_os("HOME").ok_or("HOME is not set; quint's rust backend needs ~/.quint")?;
+    let dir = std::path::Path::new(&home).join(".quint");
+    std::fs::create_dir_all(&dir)
+        .and_then(|_| probe_writable(&dir))
+        .map_err(|e| {
+            format!(
+                "{} is not writable ({e}); quint's rust backend fetches its evaluator there",
+                dir.display()
+            )
+        })
+}
+
+/// Write and remove a probe file. The name is unique per process and thread:
+/// the scenario tests run in parallel, and a shared name lets one test delete
+/// another's probe mid-check (measured: a spurious preflight failure).
+fn probe_writable(dir: &std::path::Path) -> std::io::Result<()> {
+    let p = dir.join(format!(
+        ".org-members-preflight-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    std::fs::write(&p, b"")?;
+    std::fs::remove_file(&p)
+}
+
+fn require_quint() {
+    if let Err(cause) = quint_preflight() {
+        panic!("conformance test cannot run: {cause}");
+    }
+}
+
+fn run_conformance(driver: MembershipDriver, name: &str) {
+    require_quint();
+    let config = runner::Config {
+        test_name: name.to_string(),
+        gen_config: RunConfig {
+            spec: SPEC.to_string(),
+            main: None,
+            init: None,
+            step: None,
+            max_samples: Some(MAX_SAMPLES),
+            max_steps: Some(MAX_STEPS),
+            seed: runner::gen_random_seed(),
+        },
+    };
+    if let Err(err) = runner::run_test(driver, config) {
+        panic!("{err}");
+    }
+}
+
+fn run_scenario(test: &str) {
+    require_quint();
+    let config = runner::Config {
+        test_name: test.to_string(),
+        gen_config: TestConfig {
+            spec: SPEC.to_string(),
+            main: None,
+            test: test.to_string(),
+            max_samples: Some(1),
+            seed: runner::gen_random_seed(),
+        },
+    };
+    if let Err(err) = runner::run_test(MembershipDriver::default(), config) {
+        panic!("{err}");
+    }
+}
+
 /// verifies: LLR-fv75ec, LLR-j4d38d, LLR-v3jqau, LLR-s97ywt, LLR-w92psx
+/// verifies: LLR-ch2pkw, LLR-4n8zqx, LLR-xmpqn2, LLR-juxk9q
 ///
 /// LLR-s97ywt and LLR-w92psx are carried for their unchanged-replacement-key
 /// refusal (PR-zz4exm): removing the `P2pKeyNotReplaced` guard from either
 /// `delete_p2p_device` or `emergency_isolate_member` turns this test red
-/// (measured, 2026-10-03, three seeds each).
+/// (measured, 2026-10-03, three seeds each). Re-measured against the moved
+/// model and this driver (2026-10-03, base merge): red 5 of 5 random seeds
+/// under each deletion, "Specification and implementation states diverge" —
+/// the random step draws the replacement key's generation from `GENS`
+/// (0..3) and every member starts at generation 0, so the unchanged key is
+/// reached without a named scenario.
 ///
-/// Not LLR-ch2pkw. The model's `init` sets the trie to the empty map and this
-/// driver's `init` calls `Trie::genesis` with an empty vector -- both of the
-/// `genesis` call sites here pass an empty vector, so its per-member
-/// identifier, handle and skeleton checks never execute. Removing all three of
-/// them leaves this test green (measured, 2026-09-16). The clause is real and
-/// is carried by the `genesis_*` tests in integration_test.rs; it is not
-/// carried here.
-#[quint_run(spec = "../quint/membership_mbt.qnt", max_samples = 50)]
-fn membership_conformance() -> impl Driver {
-    MembershipDriver::default()
+/// The random run, with action coverage (decision 8(ii)): every model action
+/// must be taken at least once across the run; per-action outcome counts are
+/// printed, not gated.
+///
+/// The second `verifies:` line is measured (2026-10-03, five random seeds per
+/// mutation, each red 5 of 5 with "Specification and implementation states
+/// diverge"): deleting `genesis`'s `DuplicateId` return, or its handle-collision
+/// returns (LLR-ch2pkw — reached now that genesis is the model's `init`); an
+/// order-dependent leaf hash in `smt::insert` (LLR-4n8zqx; 3 of the 5 reds were
+/// the round-trip `expect` in `commit`, 2 the divergence); deleting the
+/// stale-removal, no-op or overlap check (LLR-xmpqn2); deleting the
+/// `DuplicateHandle` return in `apply_delta` (LLR-juxk9q's uniqueness half).
+/// Not carried here: the skeleton (confusable) clauses of LLR-ch2pkw and
+/// LLR-juxk9q — the model's skeleton is its handle (measured: deleting only
+/// `genesis`'s `ConfusableHandle` return stays green) — and LLR-xmpqn2's two ordering
+/// clauses (declared boundary, `delta_canonicality_fuzz`). Table:
+/// `docs/risk/2026-10-03-lawful-change-replicates.md`.
+#[test]
+fn membership_conformance() {
+    let coverage: Coverage = Arc::default();
+    run_conformance(
+        MembershipDriver::with_coverage(coverage.clone()),
+        "membership_conformance",
+    );
+    let counts = coverage.lock().expect("coverage lock");
+    for ((action, outcome), n) in counts.iter() {
+        println!("coverage {action} -> {outcome}: {n}");
+    }
+    let missing: Vec<&str> = ACTIONS
+        .iter()
+        .copied()
+        .filter(|a| !counts.keys().any(|(taken, _)| taken == a))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "model actions never taken in the random run: {missing:?}"
+    );
+}
+
+/// Decision 8(i): the operation table matches the crate's public API.
+#[test]
+fn trie_operations_table_matches_source() {
+    let mut found = BTreeSet::new();
+    for file in ["src/trie.rs", "src/delta.rs"] {
+        let src = std::fs::read_to_string(file).expect("read crate source");
+        let mut rest = src.as_str();
+        while let Some(i) = rest.find("pub fn ") {
+            rest = &rest[i + "pub fn ".len()..];
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            let sig = &rest[..rest.find('{').unwrap_or(rest.len())];
+            let ret = sig.rsplit("->").next().unwrap_or("");
+            let ret: String = ret.split_whitespace().collect();
+            if sig.contains("->")
+                && [
+                    "Result<Self",
+                    "Result<(Self",
+                    "Result<CandidateTrie",
+                    "Result<OrgTrie",
+                ]
+                .iter()
+                .any(|p| ret.starts_with(p))
+            {
+                found.insert(name);
+            }
+        }
+    }
+    let declared: BTreeSet<String> = TRIE_OPERATIONS
+        .iter()
+        .map(|(op, _)| op.to_string())
+        .chain(BOUNDARY.iter().map(|(op, _)| op.to_string()))
+        .collect();
+    assert_eq!(
+        found, declared,
+        "trie-yielding public operations and the TRIE_OPERATIONS/BOUNDARY table disagree"
+    );
+    for (_, action) in TRIE_OPERATIONS {
+        assert!(ACTIONS.contains(&action), "{action} is not a model action");
+    }
+}
+
+/// Decision 9: the preflight names the cause when quint is missing.
+#[test]
+fn quint_preflight_names_a_missing_binary() {
+    let out = std::process::Command::new(std::env::current_exe().expect("test binary"))
+        .args([
+            "--exact",
+            "preflight_probe",
+            "--nocapture",
+            "--include-ignored",
+        ])
+        .env("PATH", "")
+        .output()
+        .expect("re-run test binary");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("PREFLIGHT: `quint` is not runnable from PATH"),
+        "{text}"
+    );
+}
+
+#[test]
+#[ignore = "invoked by quint_preflight_names_a_missing_binary with PATH emptied"]
+fn preflight_probe() {
+    match quint_preflight() {
+        Ok(()) => println!("PREFLIGHT: ok"),
+        Err(cause) => println!("PREFLIGHT: {cause}"),
+    }
+}
+
+// ---- Named scenarios (decision 12), one per `run scenario*` in the model.
+
+#[test]
+fn scenario_genesis() {
+    run_scenario("scenarioGenesis")
+}
+#[test]
+fn scenario_genesis_device_error_first() {
+    run_scenario("scenarioGenesisDeviceErrorFirst")
+}
+#[test]
+fn scenario_add_member() {
+    run_scenario("scenarioAddMember")
+}
+#[test]
+fn scenario_delete_member() {
+    run_scenario("scenarioDeleteMember")
+}
+#[test]
+fn scenario_update_handle() {
+    run_scenario("scenarioUpdateHandle")
+}
+#[test]
+fn scenario_update_name_surname() {
+    run_scenario("scenarioUpdateNameSurname")
+}
+#[test]
+fn scenario_rotate_key() {
+    run_scenario("scenarioRotateKey")
+}
+#[test]
+fn scenario_add_device() {
+    run_scenario("scenarioAddDevice")
+}
+#[test]
+fn scenario_delete_device() {
+    run_scenario("scenarioDeleteDevice")
+}
+#[test]
+fn scenario_isolate() {
+    run_scenario("scenarioIsolate")
+}
+#[test]
+fn scenario_apply_honest() {
+    run_scenario("scenarioApplyHonest")
+}
+/// verifies: LLR-au8het
+///
+/// Measured: red with the `base_root != current_root` refusal deleted.
+#[test]
+fn scenario_apply_stale() {
+    run_scenario("scenarioApplyStale")
+}
+/// verifies: LLR-7tdqv9
+///
+/// Measured: red with `verify_against`'s root comparison made to pass.
+#[test]
+fn scenario_apply_verify_fail() {
+    run_scenario("scenarioApplyVerifyFail")
+}
+/// verifies: REQ-wx3wpv, LLR-n5t6bn
+///
+/// PR-vf5hdm: a handle moved between two members who are both still present,
+/// in one honest delta produced by `recalculate()`.
+#[test]
+fn scenario_handover_a_to_b() {
+    run_scenario("scenarioHandoverAtoB")
+}
+/// verifies: REQ-wx3wpv, LLR-n5t6bn
+///
+/// PR-vf5hdm: the same handover in the other identifier order.
+#[test]
+fn scenario_handover_b_to_a() {
+    run_scenario("scenarioHandoverBtoA")
+}
+/// verifies: REQ-wx3wpv, LLR-n5t6bn
+///
+/// PR-vf5hdm: two present members swap handles in one honest delta.
+#[test]
+fn scenario_handle_swap() {
+    run_scenario("scenarioHandleSwap")
+}
+/// verifies: REQ-wx3wpv, LLR-n5t6bn
+///
+/// PR-vf5hdm: a handle moved off a present member to a member the same honest
+/// delta admits.
+#[test]
+fn scenario_handover_to_new_member() {
+    run_scenario("scenarioHandoverToNewMember")
+}
+#[test]
+fn scenario_device_slots_full() {
+    run_scenario("scenarioDeviceSlotsFull")
+}
+/// verifies: LLR-xmpqn2
+///
+/// Measured: red with the remove/upsert overlap check deleted (green under
+/// the stale-removal and no-op deletions, which it does not reach).
+#[test]
+fn scenario_remove_upsert_overlap() {
+    run_scenario("scenarioRemoveUpsertOverlap")
+}
+/// verifies: LLR-xmpqn2
+///
+/// Measured: red with the no-op upsert check deleted (green under the overlap
+/// deletion, which the no-op check precedes).
+#[test]
+fn scenario_no_op_before_overlap() {
+    run_scenario("scenarioNoOpBeforeOverlap")
+}
+/// verifies: LLR-7tdqv9
+///
+/// Measured: red with `verify_against`'s root comparison made to pass.
+#[test]
+fn scenario_built_verify_fail() {
+    run_scenario("scenarioBuiltVerifyFail")
 }

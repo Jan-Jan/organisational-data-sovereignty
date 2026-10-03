@@ -49,6 +49,8 @@ reproducing tests asked for above are `delete_p2p_device_rejects_unchanged_key`
 and `emergency_isolate_member_rejects_unchanged_key`
 (`org-members/tests/integration_test.rs`), both watched fail with `Ok(..)`
 before the guard existed; the property test `device_removal_never_keeps_key`
-(`fuzz_tests.rs`) and the Quint model `quint/membership.qnt`, whose conformance
+(`fuzz_tests.rs`) and the Quint model `org-members/quint/membership.qnt`
+(at the top-level `quint/` when this fix landed; moved by the quint
+conformance gate change, 2026-10-03), whose conformance
 run now generates the same refusal, cover it as well. `rotate_p2p_key` was
 deliberately left alone: it removes no device, so REQ-ewdg2q does not reach it.

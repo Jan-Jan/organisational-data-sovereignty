@@ -334,6 +334,98 @@ proptest! {
 }
 
 // ============================================================
+// Handle uniqueness after release: whatever a canonical delta
+// removes and re-handles, apply_delta never admits a post-state
+// in which two members share a handle or a skeleton.
+// ============================================================
+
+proptest! {
+    /// verifies: LLR-n5t6bn, LLR-juxk9q
+    ///
+    /// Reds when only `apply_delta`'s `DuplicateHandle` return is deleted
+    /// (measured 2026-10-03).
+    #[test]
+    fn apply_delta_never_admits_a_handle_collision(
+        removed_mask in 0u8..16,
+        claims in proptest::collection::vec((arb_handle_idx(), arb_handle_idx(), any::<u8>()), 1..6),
+    ) {
+        let initial: Vec<_> = HANDLES
+            .iter()
+            .take(4)
+            .filter_map(|h| make_member(h, 0))
+            .collect();
+        let base = TestTrie::genesis(initial.clone()).unwrap();
+
+        let mut removed: Vec<MemberId> = initial
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| removed_mask & (1 << i) != 0)
+            .map(|(_, m)| *m.id())
+            .collect();
+        removed.sort();
+
+        // Each claim gives the member seeded by `id_idx` the handle at
+        // `handle_idx`, existing or new, keeping the delta canonical.
+        let mut upserted: Vec<MemberLeaf> = Vec::new();
+        for (id_idx, handle_idx, variant) in &claims {
+            let seed = HANDLES[*id_idx];
+            let id = member_id(&format!("{}-id-0", seed));
+            if removed.contains(&id) || upserted.iter().any(|m| *m.id() == id) {
+                continue;
+            }
+            let leaf = MemberLeaf::new(
+                id,
+                HANDLES[*handle_idx],
+                member_key(&format!("{}-mk-{}", seed, variant)),
+                "Test",
+                "User",
+                vec![device_key(&format!("{}-d-0", seed))],
+            )
+            .unwrap();
+            if base.get(&id).as_ref() == Some(&leaf) {
+                continue;
+            }
+            upserted.push(leaf);
+        }
+        upserted.sort_by(|a, b| a.id().cmp(b.id()));
+        if removed.is_empty() && upserted.is_empty() {
+            return Ok(());
+        }
+
+        let (_, mut delta) = base
+            .add_member(make_member("zoe", 0).unwrap())
+            .unwrap()
+            .recalculate()
+            .unwrap();
+        org_members::delta::test_support::delta_set_removed(&mut delta, removed);
+        org_members::delta::test_support::delta_set_upserted(&mut delta, upserted);
+
+        let candidate = match base.apply_delta(&delta) {
+            Ok(c) => c,
+            Err(_) => return Ok(()),
+        };
+        let root = candidate.root_hash();
+        let after = candidate
+            .verify_against(&root)
+            .map_err(|e| TestCaseError::fail(format!("candidate failed its own root: {:?}", e)))?;
+
+        let members = after.members();
+        let mut skeletons: Vec<String> = members
+            .iter()
+            .map(|m| org_members::types::handle_skeleton(m.handle()))
+            .collect();
+        skeletons.sort();
+        skeletons.dedup();
+        prop_assert_eq!(
+            skeletons.len(),
+            members.len(),
+            "apply_delta admitted a handle collision: {:?}",
+            members.iter().map(|m| m.handle().to_owned()).collect::<Vec<_>>(),
+        );
+    }
+}
+
+// ============================================================
 // H-1 / H-2 canonicality fuzz: every non-canonical mutation of
 // an honest delta must be rejected by apply_delta with
 // OrgMembersError::MalformedDelta.

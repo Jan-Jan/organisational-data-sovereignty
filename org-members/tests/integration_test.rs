@@ -1426,12 +1426,14 @@ fn member_key_rotation_through_delta() {
 /// Reds when the skeleton/uniqueness block in `apply_delta` is skipped:
 /// `apply_delta` then returns `Ok` and `unwrap_err()` panics.
 ///
-/// Measured negative on the other half of the item. That same block returns
-/// `DuplicateHandle` as well as `ConfusableHandle`, and removing the whole
-/// block reds exactly one test in this file -- this one. Nothing asserts that
-/// an upsert carrying a handle already held by another member is refused at
-/// apply time, so the "handle uniqueness" clause of LLR-juxk9q is carried in
-/// name only. The confusability clause is genuinely carried.
+/// The same block also returns `DuplicateHandle`. On 2026-09-17 nothing in this
+/// file asserted that half; it is now carried by
+/// `apply_delta_rejects_upsert_taking_handle_of_untouched_member`,
+/// `apply_delta_rejects_two_upserts_claiming_one_handle` and the proptest
+/// `apply_delta_never_admits_a_handle_collision` (tests/fuzz_tests.rs), all
+/// annotated `verifies: LLR-juxk9q` and each measured red with only that
+/// return deleted (2026-10-03), and by `membership_conformance`
+/// (tests/mbt_conformance.rs).
 #[test]
 fn apply_delta_rejects_confusable_in_upsert() {
     let (h1, h2) =
@@ -1917,6 +1919,212 @@ fn apply_delta_rejects_noop_upsert() {
 
     let err = trie.apply_delta(&delta).unwrap_err();
     assert!(matches!(err, OrgMembersError::MalformedDelta(_)));
+}
+
+// --- Collisions that survive the release of outgoing handles (LLR-n5t6bn) ---
+
+/// `leaf` with its handle replaced and every other field unchanged.
+fn with_handle(leaf: &MemberLeaf, handle: &str) -> MemberLeaf {
+    MemberLeaf::new(
+        *leaf.id(),
+        handle,
+        *leaf.p2p_key(),
+        leaf.name(),
+        leaf.surname(),
+        leaf.p2p_devices().to_vec())
+    .unwrap()
+}
+
+/// A delta based on `trie`'s root that removes nothing and upserts exactly
+/// `upserted`, put in identifier order so only the handle check can refuse it.
+fn upsert_only_delta(trie: &TestTrie, mut upserted: Vec<MemberLeaf>) -> org_members::delta::Delta {
+    let base_member = MemberLeaf::new(
+        member_id("delta-base"),
+        "deltabase",
+        member_key("delta-base"),
+        "D",
+        "B",
+        vec![device_key("delta-base-d1")])
+    .unwrap();
+    let (_, mut delta) = trie.add_member(base_member).unwrap().recalculate().unwrap();
+    upserted.sort_by(|a, b| a.id().cmp(b.id()));
+    org_members::delta::test_support::delta_set_removed(&mut delta, Vec::new());
+    org_members::delta::test_support::delta_set_upserted(&mut delta, upserted);
+    delta
+}
+
+/// verifies: LLR-n5t6bn, LLR-juxk9q
+///
+/// Both upserted members give up their own handle and claim the same new one.
+/// Releasing the outgoing handles first must not let the second claim through.
+/// Reds when the post-release handle check in `apply_delta` is skipped, and
+/// when only its `DuplicateHandle` return is deleted (measured 2026-10-03) --
+/// `apply_delta` then returns `Ok` and `unwrap_err()` panics.
+#[test]
+fn apply_delta_rejects_two_upserts_claiming_one_handle() {
+    let trie = TestTrie::genesis(vec![alice(), bob(), charlie()]).unwrap();
+    let delta = upsert_only_delta(
+        &trie,
+        vec![with_handle(&alice(), "dave"), with_handle(&bob(), "dave")],
+    );
+
+    let err = trie.apply_delta(&delta).unwrap_err();
+    assert!(matches!(err, OrgMembersError::DuplicateHandle), "got {err:?}");
+}
+
+/// verifies: LLR-n5t6bn, LLR-juxk9q
+///
+/// Alice takes charlie's handle while bob lawfully takes alice's released one.
+/// Charlie is neither removed nor upserted, so his handle is never released and
+/// alice's claim must still be refused. This is also the only test asserting
+/// that an upsert taking another member's handle is refused at apply time.
+/// Reds when the post-release handle check is skipped, when only its
+/// `DuplicateHandle` return is deleted (measured 2026-10-03), and when the
+/// release loop also releases each upsert's incoming handle.
+#[test]
+fn apply_delta_rejects_upsert_taking_handle_of_untouched_member() {
+    let trie = TestTrie::genesis(vec![alice(), bob(), charlie()]).unwrap();
+    let delta = upsert_only_delta(
+        &trie,
+        vec![with_handle(&alice(), "charlie"), with_handle(&bob(), "alice")],
+    );
+
+    let err = trie.apply_delta(&delta).unwrap_err();
+    assert!(matches!(err, OrgMembersError::DuplicateHandle), "got {err:?}");
+}
+
+/// verifies: LLR-n5t6bn
+///
+/// Same shape as above with a confusable instead of an exact match: alice
+/// takes a handle confusable with one an untouched member holds, while bob
+/// lawfully takes alice's released handle. Reds when the post-release check
+/// is skipped, and when the release loop also releases each upsert's incoming
+/// handle's skeleton.
+#[test]
+fn apply_delta_rejects_confusable_of_untouched_member_after_release() {
+    let (h1, h2) =
+        find_confusable_pair().expect("test setup: no confusable pair found among candidates");
+    let holder = MemberLeaf::new(
+        member_id("k1"),
+        &h1,
+        member_key("k1"),
+        "A",
+        "B",
+        vec![device_key("d1")])
+    .unwrap();
+    let trie = TestTrie::genesis(vec![holder, alice(), bob()]).unwrap();
+    let delta = upsert_only_delta(
+        &trie,
+        vec![with_handle(&alice(), &h2), with_handle(&bob(), "alice")],
+    );
+
+    let err = trie.apply_delta(&delta).unwrap_err();
+    assert!(matches!(err, OrgMembersError::ConfusableHandle), "got {err:?}");
+}
+
+// --- Root hash after an irregular history (LLR-4n8zqx) ---
+
+/// verifies: LLR-4n8zqx
+///
+/// The abnormal-input side of "the root is determined by the member set
+/// alone". `same_members_same_root_hash` and
+/// `different_insertion_order_same_root` build the set by genesis only; this
+/// test reaches the same set {alice, bob, charlie} through a history no
+/// genesis takes, and asserts it reports the root a direct genesis reports:
+///
+/// - rejected operations interleaved (duplicate id, a new member taking a
+///   held handle, a present member taking a held handle, a stale delta);
+/// - a member deleted and re-added across a `recalculate()`;
+/// - a member deleted for good, so its slot was occupied and is empty again;
+/// - a member's handle changed away and back across a `recalculate()`.
+///
+/// It then sends the result to a receiver on a different base (a trie holding
+/// two members the history never had) via `calculate_delta` and
+/// `apply_delta`, and asserts the candidate passes `verify_against` the
+/// direct root. The `matches!` asserts only confirm each rejection really
+/// happened, so the history contains them; they are not root assertions.
+///
+/// Measured red (2026-10-03), with both genesis-only tests staying green:
+/// `smt::remove` writing an empty leaf with a non-default hash (a tombstone
+/// left in the hash) and `smt::insert` mixing a replaced leaf's device root
+/// into its successor's (an update leaving history in the hash) both fail
+/// the sender's root assertion; the diff walk dropping removals fails the
+/// receiver's `verify_against`, with the sender's root still correct.
+#[test]
+fn irregular_history_reaches_same_root_as_direct_build() {
+    let direct = TestTrie::genesis(vec![alice(), bob(), charlie()]).unwrap();
+    let direct_root = direct.root_hash().unwrap();
+
+    // Rejection 1: duplicate id.
+    let start = TestTrie::genesis(vec![charlie(), diana()]).unwrap();
+    let impostor = MemberLeaf::new(
+        member_id("charlie-id"),
+        "mallory",
+        member_key("mallory-mk"),
+        "Mallory",
+        "Impostor",
+        vec![device_key("mallory-d1")])
+    .unwrap();
+    let rejected = start.add_member(impostor);
+    assert!(matches!(rejected, Err(OrgMembersError::DuplicateId)), "got {rejected:?}");
+
+    let (trie, _) = start.add_member(alice()).unwrap().recalculate().unwrap();
+
+    // Rejection 2: a new member taking a held handle.
+    let handle_thief = MemberLeaf::new(
+        member_id("thief-id"),
+        "alice",
+        member_key("thief-mk"),
+        "T",
+        "H",
+        vec![device_key("thief-d1")])
+    .unwrap();
+    let rejected = trie.add_member(handle_thief);
+    assert!(matches!(rejected, Err(OrgMembersError::DuplicateHandle)), "got {rejected:?}");
+
+    // Delete charlie and re-add them across a recalculate.
+    let (trie, _) = trie.delete_member(&member_id("charlie-id")).unwrap().recalculate().unwrap();
+    let (trie, _) = trie.add_member(charlie()).unwrap().recalculate().unwrap();
+
+    // Rejection 3: a present member taking a held handle on update.
+    let rejected = trie.update_handle(&member_id("alice-id"), "charlie");
+    assert!(matches!(rejected, Err(OrgMembersError::DuplicateHandle)), "got {rejected:?}");
+
+    // Change alice's handle away and back across a recalculate.
+    let (trie, _) = trie.update_handle(&member_id("alice-id"), "alicia").unwrap().recalculate().unwrap();
+    assert!(trie.contains_handle("alicia"), "test setup: alice's handle must have moved");
+    let (trie, _) = trie.update_handle(&member_id("alice-id"), "alice").unwrap().recalculate().unwrap();
+
+    // Rejection 4: a delta built on another root is stale against `trie`.
+    let (_, stale) = TestTrie::genesis(vec![charlie()])
+        .unwrap()
+        .add_member(jan_jan())
+        .unwrap()
+        .recalculate()
+        .unwrap();
+    let rejected = trie.apply_delta(&stale);
+    assert!(matches!(rejected, Err(OrgMembersError::DeltaBaseMismatch)), "got {:?}", rejected.err());
+
+    // Add bob and delete diana for good.
+    let trie = trie.add_member(bob()).unwrap();
+    let (sender, _) = trie.delete_member(&member_id("diana-id")).unwrap().recalculate().unwrap();
+
+    let mut sender_members = sender.members();
+    sender_members.sort_by(|a, b| a.id().cmp(b.id()));
+    let mut direct_members = direct.members();
+    direct_members.sort_by(|a, b| a.id().cmp(b.id()));
+    assert_eq!(sender_members, direct_members, "test setup: the history must end at the direct member set");
+    assert_eq!(sender.root_hash().unwrap(), direct_root);
+
+    // Received from a different base.
+    let base = TestTrie::genesis(vec![diana(), jan_jan()]).unwrap();
+    let delta = sender.calculate_delta(&base).unwrap();
+    let received = base
+        .apply_delta(&delta)
+        .unwrap()
+        .verify_against(&direct_root)
+        .expect("the received trie must verify against the direct root");
+    assert_eq!(received.root_hash().unwrap(), direct_root);
 }
 
 /// verifies: LLR-xmpqn2

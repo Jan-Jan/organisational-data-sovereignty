@@ -1,14 +1,16 @@
 // -*- mode: Bluespec; -*-
 /// Distributed ODS Phase 1 protocol state machine (Milestone 2: protocol safety),
 /// abstract-root representation: roots are opaque int tokens with a `rootKeys`
-/// side-table, so Apalache `quint verify` is tractable at depth. The rich
-/// Snapshot/Leaf/applyDelta semantics live in membership.qnt (simulator + MBT).
+/// side-table, so Apalache `quint verify` is tractable at depth. The only
+/// thing taken from org-members' model is its exported interface
+/// (`membership_types`: the `Key` record); the trie semantics live in
+/// org-members/quint/membership.qnt (simulator + conformance test).
 ///
 /// Faithfulness assumption (see spec): fresh monotonic root ids are faithful while
 /// membership only ever SHRINKS (removals), so no two reachable roots share a
 /// member-set. Revisit this if a future milestone adds member re-addition.
 module protocol {
-  import membership.* from "./membership"
+  import membership_types.* from "../org-members/quint/membership_types"
 
   type Principal = str
   type ChainState = { epoch: int, root: int, orgGen: int }

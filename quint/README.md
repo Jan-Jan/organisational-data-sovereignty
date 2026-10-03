@@ -4,61 +4,21 @@ Models the Organisational Data Sovereignty Phase 1 protocol around the
 `org-members` crate. Design spec:
 `docs/superpowers/specs/2026-06-15-quint-protocol-model-design.md`.
 
-## Modules
-
-- `membership.qnt` — pure membership-trie semantics (types, ops, canonical-form
-  `applyDelta`, round-trip law). A `RootHash` is modeled as the canonical member
-  map itself (snapshot-as-root); collision-resistance is assumed.
-- `membership_mbt.qnt` — runnable state machine over `membership`, source for
-  model-based test traces.
-
-## Commands
-
-> In a normal environment the default `rust` backend is used. In a sandbox where
-> `$HOME` is read-only (so the Quint rust evaluator cannot be fetched to
-> `~/.quint`), append `--backend=typescript` to `quint test`/`quint run`.
-
-- Typecheck: `quint typecheck quint/membership.qnt quint/membership_mbt.qnt`
-- Unit tests (round-trip law, op semantics): `quint test quint/membership.qnt`
-- Simulate against sanity invariants:
-  `quint run quint/membership_mbt.qnt --invariant=mbtInv --max-steps=15 --max-samples=200`
-- Conformance vs. the real crate (needs `quint` on PATH):
-  `cd org-members && cargo test --test mbt_conformance`
-
-## Sandbox cargo recipe
-
-This repo's dev sandbox mounts `~/.cargo` and `$HOME` read-only. To run the MBT
-conformance test locally:
-
-```
-cd org-members
-HOME=/tmp/fakehome RUSTUP_HOME=$HOME/.rustup CARGO_HOME=/tmp/cargo-wt \
-  cargo test --test mbt_conformance -- --nocapture
-```
-
-(`HOME=/tmp/fakehome` gives quint-connect a writable home for its evaluator;
-`CARGO_HOME=/tmp/cargo-wt` avoids the read-only cargo cache. CI uses the
-defaults.)
-
-## Caveats (by design)
-
-- SMT / Merkle / hashing mechanics are out of model scope — covered by the
-  crate's own tests and the root-hash equality-class check in the MBT harness.
-- Crypto is assumed sound; keys are `(owner, gen)` pairs, not bytes.
-- Confusables are modeled via an explicit `skeleton` field, not real UTS#39.
-- Protocol-layer properties (revocation/replay/τ-window/convergence) and the
-  full adversary arrive in Milestone 2 (`protocol.qnt`).
+The membership model moved to org-members/quint/ on
+2026-10-03 (docs/adr/2026-10-03-quint-conformance-gate.md).
 
 ## Protocol layer (Milestones 2–3)
 
 > **Scope disclaimer.** Everything below is verified about the Quint protocol
 > *model* only. There is **no Rust implementation of the protocol layer** — the
-> `org-members` crate is the sole code under conformance test (via `membership.qnt`
-> + the MBT harness). So `forkSafety`/`revocationSafety`/`tauWindow`/`convergence`
+> `org-members` crate is the sole code under conformance test (via
+> `org-members/quint/membership.qnt` + the conformance test). So `forkSafety`/`revocationSafety`/`tauWindow`/`convergence`
 > are statements about the model, not about a running system. "verify" here means
 > Apalache checked the *model*, not that an implementation was verified.
 
-`protocol.qnt` is the distributed state machine over `membership`: on-chain anchor
+`protocol.qnt` is the distributed state machine. From org-members it imports only
+the exported model interface, `org-members/quint/membership_types.qnt` (the `Key`
+record), not the membership model itself. Its state is the on-chain anchor
 (`chain`), per-member belief (`local`), an unordered tagged-envelope `network`,
 abstract knowledge sets (`orgKnows`, `tokenKnows`/`objToken`), and revocation /
 accepted-write bookkeeping. `ods_instances.qnt` holds vacuity-witness invariants.
@@ -89,7 +49,7 @@ counterexamples.
 **Apalache `quint verify`** runs in CI (the `apalache` job) and locally with a JVM.
 `protocol.qnt` uses an **abstract-root representation** — roots are opaque `int`
 tokens with a `rootMembers: int -> Set[str]` side-table, not full trie `Snapshot`
-maps (the rich Snapshot/Leaf semantics live in `membership.qnt`, validated by the
+maps (the rich Snapshot/Leaf semantics live in `org-members/quint/membership.qnt`, validated by the
 simulator + MBT). This keeps the protocol state small enough for Apalache to verify
 `forkSafety`/`revocationSafety`/`revokedExcludedFromOrgSecret` to depth ~5-6 (the
 concrete-Snapshot model topped out at depth 2). The simulator (`quint run

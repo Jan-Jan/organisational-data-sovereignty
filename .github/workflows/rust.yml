@@ -31,14 +31,12 @@ jobs:
   #
   # quint is installed because `cargo test -p org-members` includes the
   # `mbt_conformance` target, which shells out to it. That test does NOT skip
-  # when quint is absent, despite what its own header comment says: measured
-  # with quint off PATH, it panics with "Failed to execute Quint command" and
-  # the test binary exits non-zero. So a job that ran this entry without quint
-  # would be red on every push.
+  # when quint is absent: its preflight names the cause and the test fails
+  # (docs/adr/2026-10-03-quint-conformance-gate.md, decision 9). So a job that
+  # ran this entry without quint would be red on every push.
   #
-  # This does duplicate quint.yml's `mbt` job, which installs quint and runs
-  # the same target. That job is now redundant and could be dropped — left
-  # alone here because this change does not own quint.yml.
+  # quint.yml's duplicate `mbt` job was removed on 2026-10-03; this job is
+  # the only CI run of the conformance test.
   test:
     runs-on: ubuntu-latest
     steps:
@@ -78,6 +76,18 @@ jobs:
             --test fuzz_envelope_decode --test fuzz_verify_against_chain \
             --test verify_against_chain --test wire_frame_bound --test store_at_rest \
             --test admission_sender
+
+  # The declared MSRV, measured (docs/adr/2026-10-03-quint-conformance-gate.md,
+  # decision 6): quint-connect is edition 2024, so the test build needs 1.85.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - run: npm i -g @informalsystems/quint
+      - uses: dtolnay/rust-toolchain@1.85
+      - run: cargo test -p org-members
 
   # app's npm verify_commands. The cargo entry still runs NOWHERE in CI: it
   # needs Tauri's Linux system packages (webkit2gtk, libsoup, …) this workflow

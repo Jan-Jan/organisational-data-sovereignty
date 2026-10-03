@@ -3,37 +3,9 @@
 /// Mirrors the `org-members` crate under the snapshot-as-root abstraction:
 /// a RootHash is modeled as the canonical member map itself.
 module membership {
-  /// A peer-to-peer key, modeled as (who minted it, rotation generation).
-  /// No bytes, no crypto: rotation bumps `gen`. This lets later layers
-  /// express "revoked insider still holds an old generation".
-  type Key = { owner: str, gen: int }
-
-  /// A member leaf. `skeleton` is the UTS#39 confusable-skeleton of the
-  /// handle: two handles collide iff their skeletons are equal.
-  type Leaf = {
-    id: str,
-    handle: str,
-    skeleton: str,
-    name: str,
-    surname: str,
-    pKey: Key,
-    devices: Set[Key],
-  }
-
-  /// The trie. Doubles as the RootHash: equal maps == equal root.
-  type Snapshot = str -> Leaf
-
-  /// Result of a mutation. `Err`'s payload is an error tag matching the
-  /// crate's `OrgMembersError` variant names where one applies.
-  type Result =
-    | Ok(Snapshot)
-    | Err(str)
-
-  type Delta = {
-    baseRoot: Snapshot,
-    removed: Set[str],
-    upserted: Set[Leaf],
-  }
+  /// The boundary types live in the exported model interface.
+  import membership_types.* from "./membership_types"
+  export membership_types.*
 
   /// Crate constant: members cap at 4 devices.
   pure val MAX_DEVICES = 4
@@ -55,14 +27,29 @@ module membership {
     else
       Ok(s.put(l.id, l))
 
-  /// Build a trie from a list of leaves (genesis ceremony). Folds addMember;
-  /// any error short-circuits to that Err.
+  /// The device-list error a member record is refused with when it is built,
+  /// or "" when its device list is acceptable. Mirrors `MemberLeaf::new`
+  /// (empty list) and `P2pDeviceSlots::new` (over the cap).
+  pure def leafDeviceError(l: Leaf): str =
+    if (l.devices.size() == 0) "EmptyDeviceList"
+    else if (l.devices.size() > MAX_DEVICES) "DeviceSlotsFull"
+    else ""
+
+  /// Build a trie from a list of leaves (genesis ceremony). Every record is
+  /// built before `OrgTrie::genesis` sees any of them, so the first record in
+  /// list order with a bad device list wins over every identifier or handle
+  /// collision; only then does the fold over addMember run, and its first
+  /// error short-circuits.
   pure def genesis(leaves: List[Leaf]): Result =
-    leaves.foldl(Ok(Map()), (acc, l) =>
-      match acc {
-        | Err(e) => Err(e)
-        | Ok(s)  => addMember(s, l)
-      })
+    val deviceErr = leaves.foldl("", (acc, l) => if (acc != "") acc else leafDeviceError(l))
+    if (deviceErr != "")
+      Err(deviceErr)
+    else
+      leaves.foldl(Ok(Map()), (acc, l) =>
+        match acc {
+          | Err(e) => Err(e)
+          | Ok(s)  => addMember(s, l)
+        })
 
   // ---- helpers for tests ----
   pure def leaf(idArg: str, handleArg: str, skel: str): Leaf = {
@@ -146,10 +133,10 @@ module membership {
   pure def addDevice(s: Snapshot, id: str, d: Key): Result =
     if (not(s.keys().contains(id)))
       Err("IdNotFound")
-    else if (s.get(id).devices.contains(d))
-      Err("DuplicateDevice")
     else if (s.get(id).devices.size() >= MAX_DEVICES)
       Err("DeviceSlotsFull")
+    else if (s.get(id).devices.contains(d))
+      Err("DuplicateDevice")
     else
       Ok(s.put(id, s.get(id).with("devices", s.get(id).devices.union(Set(d)))))
 
@@ -250,19 +237,22 @@ module membership {
     upserted: upsertedLeaves(oldS, newS),
   }
 
-  /// Canonical-form acceptance + application. Mirrors apply_delta:
-  /// base must match; removed subseteq base; upserts observable; removed/upserted
-  /// disjoint; post-state skeletons unique; device caps hold.
+  /// Canonical-form acceptance + application. Mirrors apply_delta, in the
+  /// crate's check order: base must match; removed subseteq base; upserts
+  /// observable; removed/upserted disjoint; post-state skeletons unique (over
+  /// the whole set, independent of identifier order — LLR-n5t6bn); device caps
+  /// hold. The cap branch is unreachable from the crate, whose member records
+  /// cannot hold more than MAX_DEVICES keys by type.
   pure def applyDelta(s: Snapshot, d: Delta): Result =
     val upsertIds = d.upserted.map(l => l.id)
     if (d.baseRoot != s)
       Err("DeltaBaseMismatch")
     else if (not(d.removed.subseteq(s.keys())))
       Err("StaleRemoval")
-    else if (d.removed.intersect(upsertIds) != Set())
-      Err("RemoveUpsertOverlap")
     else if (d.upserted.exists(l => s.keys().contains(l.id) and s.get(l.id) == l))
       Err("NoOpUpsert")
+    else if (d.removed.intersect(upsertIds) != Set())
+      Err("RemoveUpsertOverlap")
     else
       val afterRemove = s.keys().exclude(d.removed).mapBy(k => s.get(k))
       val afterUpsert = d.upserted.fold(afterRemove, (acc, l) => acc.put(l.id, l))
