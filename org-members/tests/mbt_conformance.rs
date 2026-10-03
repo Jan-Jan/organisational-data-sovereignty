@@ -78,8 +78,9 @@ const TRIE_OPERATIONS: [(&str, &str); 11] = [
 /// describe, and where it is carried instead.
 const BOUNDARY: [(&str, &str); 1] = [(
     "recalculate",
-    "hash lifecycle: called by the driver after every change and to produce \
-     honest deltas; pending/recalculated state is carried by integration_test.rs",
+    "hash lifecycle: called by the driver after every change that leaves hashes \
+     pending and to produce honest deltas; pending/recalculated state is carried \
+     by integration_test.rs",
 )];
 // Also outside the model, with no public trie-yielding operation of their own:
 // UTS#39 skeletons (model skeleton == handle; carried by the handle tests in
@@ -307,32 +308,43 @@ impl MembershipDriver {
                 // Mutations leave the trie with uncalculated hashes; recalculate
                 // so `root_hash()` succeeds. This does not change observable
                 // model state (member contents), only fills the hash cache.
-                let t = match t.recalculate() {
-                    Ok((t2, _delta)) => t2,
-                    Err(_) => t,
+                // An ApplyDelta result is already calculated and is kept as is:
+                // recalculating it is to be refused (PR-zqvs7t). On a pending
+                // trie recalculate has no lawful failure, so an Err is a crate
+                // defect (PR-499dzp).
+                let t = if t.has_pending_changes() {
+                    t.recalculate()
+                        .unwrap_or_else(|e| panic!("recalculate after an accepted mutation: {e:?}"))
+                        .0
+                } else {
+                    t
                 };
                 // Delta-path conformance: for the real mutation old -> t, the crate's
                 // calculate_delta + apply_delta + verify_against must reproduce t's
-                // root (the model's round-trip law, against the real crate).
+                // root (the model's round-trip law, against the real crate). Both
+                // tries are calculated here, so a missing root fails the step
+                // rather than skipping the check (PR-499dzp).
                 if let Some(old) = &self.trie {
-                    if let (Ok(old_root), Ok(new_root)) = (old.root_hash(), t.root_hash()) {
-                        if old_root != new_root {
-                            let delta = t
-                                .calculate_delta(old)
-                                .expect("calculate_delta failed on a real mutation");
-                            let verified = old
-                                .apply_delta(&delta)
-                                .expect(
-                                    "apply_delta rejected a canonical delta from calculate_delta",
-                                )
-                                .verify_against(&new_root)
-                                .expect("verify_against failed for the calculated delta");
-                            assert_eq!(
-                                verified.root_hash().expect("root_hash of verified trie"),
-                                new_root,
-                                "delta round-trip produced a different root than the direct mutation"
-                            );
-                        }
+                    let old_root = old
+                        .root_hash()
+                        .unwrap_or_else(|e| panic!("root_hash of the previous trie: {e:?}"));
+                    let new_root = t
+                        .root_hash()
+                        .unwrap_or_else(|e| panic!("root_hash of the accepted trie: {e:?}"));
+                    if old_root != new_root {
+                        let delta = t
+                            .calculate_delta(old)
+                            .expect("calculate_delta failed on a real mutation");
+                        let verified = old
+                            .apply_delta(&delta)
+                            .expect("apply_delta rejected a canonical delta from calculate_delta")
+                            .verify_against(&new_root)
+                            .expect("verify_against failed for the calculated delta");
+                        assert_eq!(
+                            verified.root_hash().expect("root_hash of verified trie"),
+                            new_root,
+                            "delta round-trip produced a different root than the direct mutation"
+                        );
                     }
                 }
                 self.prev = self.trie.take();
