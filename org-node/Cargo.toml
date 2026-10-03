@@ -87,6 +87,13 @@ name = "fuzz_verify_against_chain"
 path = "tests/fuzz_verify_against_chain/fuzz_target.rs"
 harness = false
 
+# `first_admission_base` lives in `service`, which only exists under `app`.
+[[test]]
+name = "fuzz_first_admission_base"
+path = "tests/fuzz_first_admission_base/fuzz_target.rs"
+harness = false
+required-features = ["app"]
+
 [[test]]
 name = "chain_genesis_e2e"
 path = "tests/chain_genesis_e2e.rs"

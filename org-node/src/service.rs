@@ -505,6 +505,26 @@ fn trie_from_snapshots(snapshots: &[MemberSnapshot]) -> Result<Trie, OrgNodeErro
     Trie::genesis(leaves?).map_err(OrgNodeError::Trie)
 }
 
+/// The record a first admission extends: decoded from the snapshot the
+/// admin sent. A first admission without one is refused (REQ-d9g6nt).
+// Public only for the fuzz target `fuzz_first_admission_base`; not API.
+#[doc(hidden)]
+pub fn first_admission_base(genesis_snapshot: Option<&[u8]>) -> Result<Trie, OrgNodeError> {
+    let snap_bytes = genesis_snapshot.ok_or_else(|| {
+        OrgNodeError::Chain("first admission without a record snapshot".into())
+    })?;
+    let snaps: Vec<MemberSnapshot> = postcard::from_bytes(snap_bytes)
+        .map_err(|e| OrgNodeError::Chain(format!("genesis_snapshot decode: {e}")))?;
+    trie_from_snapshots(&snaps)
+}
+
+/// Encode the record a pushed envelope extends, as a `WireMessage`'s
+/// `genesis_snapshot`; `first_admission_base` decodes it.
+fn encode_record_snapshot(snapshots: &[MemberSnapshot]) -> Result<Vec<u8>, OrgNodeError> {
+    postcard::to_allocvec(snapshots)
+        .map_err(|e| OrgNodeError::Chain(format!("genesis_snapshot encode: {e}")))
+}
+
 // ============================================================
 // OrgService — the composition root.
 // ============================================================
@@ -598,7 +618,7 @@ impl OrgService {
         let (member_kp, device_kp, handle, name, surname) = self.persona_keys(persona_id)?;
 
         // Build genesis trie: admin = this persona.
-        let admin_id = MemberId::new(member_id_from_key(member_kp.verifying_key().as_bytes()));
+        let admin_id = fresh_member_id(rng);
         let admin_leaf = MemberLeaf::new(
             admin_id,
             &handle,
@@ -786,8 +806,8 @@ impl OrgService {
             (trie, epoch, pub_key, member_kp, last_seq, snapshots, proxy)
         };
 
-        // Derive a fresh member_id from the joiner's member key bytes.
-        let new_member_id = MemberId::new(member_id_from_key(&join_request.member_key));
+        // Random, so a re-admission with the same keys gets a new id.
+        let new_member_id = fresh_member_id(rng);
         let member_vk = VerifyingKey::from_bytes(&join_request.member_key)
             .map_err(|e| OrgNodeError::Chain(format!("bad member key: {e}")))?;
         let device_vk = VerifyingKey::from_bytes(&join_request.device_key)
@@ -809,6 +829,10 @@ impl OrgService {
         let new_root_hash = new_trie.root_hash().map_err(OrgNodeError::Trie)?;
         let new_root = *new_root_hash.as_bytes();
 
+        // Encode pre-add snapshots so B can reconstruct the genesis trie for verification.
+        // Before the chain write, so an encode failure leaves chain and record unchanged.
+        let genesis_snapshot = Some(encode_record_snapshot(&pre_add_snapshots)?);
+
         // Submit on-chain update (epoch → epoch + 1).
         // Pass proxy_account so SubxtChainOps can find P even after a restart (Gap 2).
         self.chain
@@ -821,11 +845,6 @@ impl OrgService {
         let envelope =
             SignedDeltaEnvelope::build(org_id, parent_seq, &delta, &admin_member_kp)
                 .map_err(|_| OrgNodeError::MalformedDelta)?;
-
-        // Encode pre-add snapshots so B can reconstruct the genesis trie for verification.
-        let genesis_snapshot = postcard::to_allocvec(&pre_add_snapshots)
-            .map(Some)
-            .unwrap_or(None);
 
         // Push the WireMessage to the new member over iroh.
         // Use the lazily bound endpoint; bind from this persona's device seed if not yet bound.
@@ -942,36 +961,10 @@ impl OrgService {
                 let trie = trie_from_snapshots(&existing.trie_members)?;
                 (trie, existing.last_seq, existing.epoch)
             } else {
-                // Fresh admission: reconstruct the genesis trie from the
-                // `genesis_snapshot` included by the admin in the WireMessage.
-                // This contains the pre-add members (the admin only), enabling
-                // `verify_envelope_against_chain` to pass the `base_root` check.
-                let trie = if let Some(ref snap_bytes) = msg.genesis_snapshot {
-                    let snaps: Vec<MemberSnapshot> = postcard::from_bytes(snap_bytes)
-                        .map_err(|e| OrgNodeError::Chain(format!("genesis_snapshot decode: {e}")))?;
-                    trie_from_snapshots(&snaps)?
-                } else {
-                    // Fallback (no snapshot): build a minimal single-admin trie.
-                    // This will fail the base_root check unless the admin used
-                    // the same placeholder values (should not happen in production).
-                    let admin_id =
-                        MemberId::new(member_id_from_key(chain_state.org_pub_key.as_ref()));
-                    let admin_vk = author_vk;
-                    let admin_leaf = MemberLeaf::new(
-                        admin_id,
-                        "admin",
-                        org_members::P2pMemberKey::new(admin_vk),
-                        "Admin",
-                        "User",
-                        vec![org_members::P2pDeviceKey::new(admin_vk)],
-                    )
-                    .map_err(OrgNodeError::Trie)?;
-                    let (t, _) = Trie::genesis(vec![admin_leaf])
-                        .map_err(OrgNodeError::Trie)?
-                        .recalculate()
-                        .map_err(OrgNodeError::Trie)?;
-                    t
-                };
+                // Fresh admission: rebuild the pre-add record from the admin's
+                // `genesis_snapshot`, so `verify_envelope_against_chain` can
+                // check the envelope's `base_root` against it.
+                let trie = first_admission_base(msg.genesis_snapshot.as_deref())?;
                 is_first_admission = true;
                 (trie, 0, 0)
             }
@@ -1168,6 +1161,12 @@ impl OrgService {
         let new_root_hash = new_trie.root_hash().map_err(OrgNodeError::Trie)?;
         let new_root = *new_root_hash.as_bytes();
 
+        // Include the pre-revocation snapshot so B can reconstruct its local trie
+        // and verify the delta (base_root must match B's current trie).
+        // Before the chain write, so an encode failure leaves chain and record unchanged.
+        let genesis_snapshot =
+            Some(encode_record_snapshot(&self.find_org(org_id)?.trie_members)?);
+
         // Submit on-chain update; pass persisted proxy_account (Gap 2 fix).
         self.chain.submit_update(org_id, new_root, org_pub_key, org_epoch, proxy_account).await?;
         let new_epoch = org_epoch + 1;
@@ -1179,13 +1178,10 @@ impl OrgService {
                 .map_err(|_| OrgNodeError::MalformedDelta)?;
 
         // Push to the revoked peer so they can self-delete.
-        // Include the pre-revocation snapshot so B can reconstruct its local trie
-        // and verify the delta (base_root must match B's current trie).
         // Collect all data that borrows from `self` BEFORE calling ensure_endpoint
         // (which takes a &mut self borrow that overlaps with find_org / admin_persona_for_org).
-        let (pre_revoke_snaps, admin_persona_id, networked_peer_id) = {
+        let (admin_persona_id, networked_peer_id) = {
             let org_rec = self.find_org(org_id)?;
-            let snaps = org_rec.trie_members.clone();
             let admin_persona_id = self.admin_persona_for_org(org_id)?.persona_id.clone();
             // Pre-compute the EndpointId for Networked mode from the snapshot (before
             // the snapshot is modified by the org update below).
@@ -1208,9 +1204,8 @@ impl OrgService {
             } else {
                 None
             };
-            (snaps, admin_persona_id, networked_peer_id)
+            (admin_persona_id, networked_peer_id)
         };
-        let genesis_snapshot = postcard::to_allocvec(&pre_revoke_snaps).map(Some).unwrap_or(None);
         let msg = WireMessage { envelope, org_secret: None, genesis_snapshot };
         // Use the lazily bound endpoint; bind from this persona's device seed if not yet bound.
         let mode = self.transport_mode;
@@ -1552,15 +1547,12 @@ fn hex_id(bytes: &[u8; 32]) -> String {
     })
 }
 
-/// Derive a deterministic 32-byte `MemberId` seed from a 32-byte key.
-/// We simply use the key bytes directly — the caller already ensures they are
-/// unique (ed25519 verifying keys are effectively unique per keypair).
-/// PoC choice: production should hash a stable enrollment input (e.g. Blake3(member_vk ‖ org_id)).
-fn member_id_from_key(key: &[u8]) -> [u8; 32] {
+/// A fresh `MemberId`: 32 bytes from the caller's cryptographic random
+/// source, never derived from a key (REQ-d9g6nt).
+fn fresh_member_id<R: RngCore + CryptoRng>(rng: &mut R) -> MemberId {
     let mut id = [0u8; 32];
-    let len = key.len().min(32);
-    id[..len].copy_from_slice(&key[..len]);
-    id
+    rng.fill_bytes(&mut id);
+    MemberId::new(id)
 }
 
 // ============================================================

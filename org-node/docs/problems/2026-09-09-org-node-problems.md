@@ -73,8 +73,8 @@ path to org-members' hazard register was updated when the ledgers moved into
 their units. No statement of the defect was rewritten. Two
 things learned since: the production receive path does not use this reader —
 `receive_and_verify` reads the chain itself in the same operation and hands
-verification a one-shot adapter (`org-node/src/service.rs:922-926`,
-`:1532-1540`); and on the provider's side the same fact is now REQ-ysyu9g, the
+verification a one-shot adapter (`org-node/src/service.rs`, the
+`read_state` call in `receive_and_verify` and `ChainOpsReader`); and on the provider's side the same fact is now REQ-ysyu9g, the
 expectation this unit holds on on-chain-client.
 
 Reach corrected, 2026-09-10. The note above said the cached reader "serves the
@@ -121,10 +121,11 @@ affects: RC-wqgm2p
 opened: 2026-09-09
 status: open
 
-Where: `org-node/src/service.rs` — the chain write at `:814` and the record
-update at `:864-871` in `admit_member`, with the send at `:836-853` between
-them returning early on error; the same shape in `revoke_member` at `:1172`,
-`:1218-1238` and `:1254-1261`. `ensure_endpoint` failing to bind returns early
+Where: `org-node/src/service.rs` — in `admit_member`, the chain write
+(`submit_update`) and the record update at the end of the function, with the
+transport send between them returning early on error; the same shape in
+`revoke_member` (its `submit_update`, its transport send, and its record
+update at the end). `ensure_endpoint` failing to bind returns early
 in the same window.
 
 Observable symptom, as a test would show it: after a successful chain write,
@@ -163,8 +164,9 @@ affects: RC-b6mydy
 opened: 2026-09-09
 status: open
 
-Where: `org-node/src/service.rs:836-842` (loopback branch, dials `peer_addr`
-as given) against `:847-849` (networked branch, derives the peer identity
+Where: `org-node/src/service.rs`, the transport send in `admit_member`: the
+`TransportMode::Loopback` branch dials `peer_addr` as given, against the
+`TransportMode::Networked` branch, which derives the peer identity
 from `join_request.device_key` and so binds delivery to the key). The Join
 request is an unsigned, unauthenticated blob by design
 (`org-node/src/blobs.rs:9-29`), travelling out of band by copy and paste, so
@@ -197,12 +199,14 @@ affects: RC-b6mydy
 opened: 2026-09-09
 status: open
 
-Where: `org-node/src/service.rs:1337` discards the authenticated sender with
-the comment "authenticated but not cross-checked here (revocation path)"; the
-branch that commits is `:1339-1365`, writing the record at `:1355-1364` and
-returning `SelfDeleteOutcome::UpdatedNotRevoked` at `:1365`. The two checks
-this path lacks are in `receive_and_verify` at `:985-1000` (the invite) and
-`:1018-1027` (the membership record the envelope produced).
+Where: `receive_and_self_delete_if_revoked` in `org-node/src/service.rs`
+discards the authenticated sender with the comment "authenticated but not
+cross-checked here (revocation path)"; the branch that commits is its
+`if my_still_present` branch, which writes the record and returns
+`SelfDeleteOutcome::UpdatedNotRevoked`. The two checks this path lacks are in
+`receive_and_verify`: the first-admission invite cross-check against the
+pending invite's `admin_device_key`, and the `sender_known` cross-check
+against the membership record the envelope produced.
 
 Observable symptom, as a test would show it: with B admitted and a third
 member C revoked by the administrator, a rogue device R that relays the
@@ -237,9 +241,10 @@ status: open
 
 Where: `org-node/src/transport/wire.rs:14` ("`None` for non-admission messages
 (e.g. revocations)") and the field's own comment at `:19` ("None for
-non-admission"), against `revoke_member` in `org-node/src/service.rs:1213-1214`,
-which encodes the pre-revoke snapshot and puts it in the `WireMessage` it
-sends. The admission path sets it at `:826-832`; there is no send path in the
+non-admission"), against `revoke_member` in `org-node/src/service.rs`,
+which encodes the pre-revoke snapshot and puts it in the `WireMessage` it sends. The admission
+path, `admit_member`, sets it where it builds the record snapshot for the
+`WireMessage`; there is no send path in the
 crate that leaves it `None`.
 
 Observable symptom: encode a revocation's `WireMessage` and its
@@ -253,8 +258,9 @@ the register argues its introduced trigger for the publish-before-persist
 hazard — S3 / P2, not acceptable — precisely from *both* send paths carrying
 the whole pre-change record, which is what makes the 1 MiB frame a bound on
 the size of the Organisation on the revocation path too
-(`org-node/docs/risk/2026-09-09-org-node-hazards.md:545-550`, the verdict at
-`:565`). Not-minted
+(the RC-gfn6kr bullet among the hazards the controls introduce, and its
+**S3 / P2** verdict, in `org-node/docs/risk/2026-09-09-org-node-hazards.md`).
+Not-minted
 control 15 rests on the same fact, and its cheap half — omit the snapshot on
 the revocation path, where the receiver rebuilds from its own store and never
 reads it — exists only because the field is set there. So the register and the

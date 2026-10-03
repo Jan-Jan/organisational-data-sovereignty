@@ -201,8 +201,12 @@ impl<H: TrieHasher> OrgTrie<H> {
     /// of deleted ids and will accept it). A member re-admitted under a new id
     /// is a new member. The crate refuses only keys held when the operation
     /// runs and keeps no key history: never give a new member a key no longer
-    /// held, in particular one a device of a previous membership held (README,
-    /// "Security checks the caller MUST perform", item 11).
+    /// held, other than the keys the person's previous membership held when it
+    /// was deleted. A re-admitted member may bring those keys (a new member
+    /// under a new id; owner ruling, 2026-10-03);
+    /// where a removed device was compromised, fresh keys are the joiner's
+    /// choice, not a check the crate makes (README, "Security checks the
+    /// caller MUST perform", item 11).
     pub fn add_member(&self, leaf: MemberLeaf) -> Result<Self, OrgMembersError> {
         self.insert_leaf(leaf)
     }
@@ -212,7 +216,10 @@ impl<H: TrieHasher> OrgTrie<H> {
     /// Caller duty: deletion is permanent. The id must never be re-used --
     /// the trie keeps no record of it and will not refuse it (see
     /// `add_member`). The member's keys are no longer held once it is deleted,
-    /// so the crate accepts them again; never supply them again (README,
+    /// so the crate accepts them again. A re-admitted member may bring them (a
+    /// new member under a new id; owner ruling, 2026-10-03), but they must
+    /// never be given to anyone else; where a removed device was compromised,
+    /// fresh keys are the joiner's choice (README,
     /// "Security checks the caller MUST perform", item 11).
     pub fn delete_member(&self, id: &MemberId) -> Result<Self, OrgMembersError> {
         self.delete_by_id(id)

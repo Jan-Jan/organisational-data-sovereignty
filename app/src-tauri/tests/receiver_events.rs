@@ -548,19 +548,19 @@ fn the_two_classes_are_actually_distinguished() {
 /// operator is shown.
 fn terminal_cases() -> Vec<(OrgNodeError, &'static str)> {
     vec![
-        // org-node/src/service.rs:1420 — OrgEndpoint::bind_with_mode failed.
+        // `ensure_endpoint` in org-node/src/service.rs — OrgEndpoint::bind_with_mode failed.
         (
             OrgNodeError::Chain(
                 "endpoint bind: iroh bind error: address already in use".to_string(),
             ),
             "chain read failed: endpoint bind: iroh bind error: address already in use",
         ),
-        // org-node/src/service.rs:1426 — the endpoint is still None afterwards.
+        // `ensure_endpoint` again — the endpoint is still None afterwards.
         (
             OrgNodeError::Chain("endpoint bind failed unexpectedly".to_string()),
             "chain read failed: endpoint bind failed unexpectedly",
         ),
-        // org-node/src/transport/endpoint.rs:241 — accept() returned None.
+        // `recv_one` in org-node/src/transport/endpoint.rs — accept() returned None.
         (
             OrgNodeError::Chain("iroh recv: iroh accept error: endpoint closed".to_string()),
             "chain read failed: iroh recv: iroh accept error: endpoint closed",
@@ -658,9 +658,10 @@ fn the_stop_is_announced_after_the_failure_for_the_same_error() {
 #[test]
 fn locally_reachable_variants_are_classified_as_receiver_errors() {
     // `OrgNotOnChain` and `Trie(_)` sound like verdicts and are not always:
-    // org-node/src/service.rs:1307 returns `OrgNotOnChain` when the LOCAL store
-    // has no record of the organisation, and :1308 returns `Trie(_)` when the
-    // LOCAL members snapshot fails to reconstruct. Neither says anything about
+    // `receive_and_self_delete_if_revoked` in org-node/src/service.rs returns
+    // `OrgNotOnChain` when the LOCAL store has no record of the organisation,
+    // and the same function returns `Trie(_)` when the LOCAL members snapshot
+    // fails to reconstruct. Neither says anything about
     // whether an update verified, so neither may be rendered as a ✗ MISMATCH row
     // under "Verified Updates (chain root match)" — the defect RC-3rddh7 exists
     // to remove.

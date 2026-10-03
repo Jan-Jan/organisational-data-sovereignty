@@ -95,11 +95,17 @@ the same day by the owner: a key no longer held is not refused, and a
 deleted `MemberId` is never legitimately re-added; PR-z463w5 and PR-fzu25w
 are resolved by ruling. That moves the duty, not the risk: the software refuses
 every key still held (`DuplicateKey`, LLR-v6gfc7, LLR-fym7dy, LLR-gjj6bx — the
-removed device's own key included), but not a key no longer held — a member key
-used earlier, the key of a device removed earlier, or a fresh `MemberId` given a
-deleted member's key — and the caller must not supply one
+removed device's own key included), but not a key no longer held — a
+Member-as-a-group key replaced earlier, or the Device key of a device removed
+earlier while the member stayed — and the caller must not supply one
 (`org-members/README.md`, security check 11). Only re-adding a deleted `MemberId` is outside the
-contract. The wire-path bypass also stands.)
+contract. The wire-path bypass also stands. Amended 2026-10-03 by owner
+ruling: a re-admitted person, a new member under a fresh `MemberId`, may bring
+the keys their previous membership held when it was deleted — the one
+exception; nothing granted to the old `MemberId` carries over; a deleted
+member's keys are never given to anyone else. The software keeps no key
+history, so neither duty is enforced by org-members or by org-node; the
+administrator who admits or rotates carries them.)
 
 The requirements keep `satisfies: derived`. Finding the hazard a rule addresses
 does not give the rule a parent in system needs; it gives it a justification.
@@ -221,8 +227,12 @@ is never legitimately re-added, so the same-id route is outside the API's
 contract. The same route with a **fresh** `MemberId` and the old key is inside
 it — a re-admitted person is a new member "whatever its handle or keys" — and
 a removed device holding that key would reach what is later granted to the new
-member. That is caller-borne residual risk (security check 11 in
-`org-members/README.md`), not a closed route.)
+member. That is residual risk accepted by the owner (ruling of 2026-10-03: a
+re-admitted person is a new member under a fresh `MemberId` and may bring the
+keys their previous membership held when it was deleted — the one exception;
+nothing granted to the old id carries over; if a removed device was
+compromised, fresh keys are the joiner's choice, not a software check;
+security check 11 in `org-members/README.md`), not a closed route.)
 
 ### Isolation applied to the wrong member
 
@@ -616,7 +626,7 @@ Per hazard, after controls:
 | Hazard | S/P | Residual | Why |
 |---|---|---|---|
 | HAZ-jkc6tj | S3/P1 | not acceptable | last step is a person reading a name |
-| HAZ-s39gbh | S3/P2 | not acceptable | control unimplemented in one clause (PR-zz4exm), bypassed on the wire path in the other (corrected 2026-10-03: PR-zz4exm resolved, the clause now holds; the wire-path bypass stands and the hazard is not re-scored; the owner's rulings leave reuse of a key no longer held — an earlier member key, a device removed earlier, a re-admitted member's old key — as residual risk the caller carries, a key history in the software being the control declined; key uniqueness (LLR-v6gfc7, LLR-fym7dy, LLR-gjj6bx) now refuses any key still held) |
+| HAZ-s39gbh | S3/P2 | not acceptable | control unimplemented in one clause (PR-zz4exm), bypassed on the wire path in the other (corrected 2026-10-03: PR-zz4exm resolved, the clause now holds; the wire-path bypass stands and the hazard is not re-scored; the owner's rulings leave reuse of a key no longer held — a Member-as-a-group key replaced earlier, the Device key of a device removed earlier while the member stayed, or a deleted member's key given to anyone else — to the administrator who admits or rotates, a key history in the software being the control declined; amended 2026-10-03 by owner ruling: a re-admitted person, a new member under a fresh `MemberId`, may bring the keys their previous membership held when it was deleted, and where a removed device was compromised fresh keys are the joiner's choice, not a software check — residual risk accepted by the owner; key uniqueness (LLR-v6gfc7, LLR-fym7dy, LLR-gjj6bx) now refuses any key still held) |
 | HAZ-sc7wse | S3/P1 | not acceptable | bounded by reversibility; no confirmation step exists |
 | HAZ-y8h835 | S3/P2 | not acceptable | decisive control unstated, ungated and unrun (corrected 2026-09-09: now stated and gated in org-node — see the correction under this hazard's residual risk); staleness bound modelled only |
 | HAZ-bmv7cy | S3/P2 | not acceptable | re-validation weaker than admission; evidence is five example tests |

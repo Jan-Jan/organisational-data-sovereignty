@@ -14,6 +14,9 @@
 //!     in the newly committed trie; A's own device passes, R's does not
 //!     (REQ-ztdza4).
 //!
+//! The same setup carries the MemberId tests: ids are random, not keys, and a
+//! re-admission with the same keys gets a fresh id (REQ-d9g6nt).
+//!
 //! The gate:
 //! `cargo test -p org-node --features app,test-support --test admission_sender`
 
@@ -126,24 +129,28 @@ async fn spawn_b_receive(
     (b_addr, handle)
 }
 
-/// A rogue endpoint R on a third device key. `spawn_rogue_receive` binds it and
-/// spawns `recv_one`; the task yields the endpoint back together with the
-/// authenticated sender and the message it captured, so R can relay it.
-async fn spawn_rogue_receive() -> (
+/// Bind an endpoint from `seed` and spawn `recv_one`. The task yields the
+/// endpoint back with the authenticated sender and the message it received:
+/// a rogue relay R (`ROGUE_SEED`) relays the message; a sink (random seed)
+/// holds the endpoint open until the sender's `send` has returned, since
+/// dropping it on receipt can lose the acknowledgement the sender waits for.
+async fn spawn_recv_one(
+    seed: [u8; 32],
+) -> (
     iroh::EndpointAddr,
     tokio::task::JoinHandle<(OrgEndpoint, org_members::P2pDeviceKey, WireMessage)>,
 ) {
-    let ep_r = OrgEndpoint::bind(&SigningKeypair::from_seed(ROGUE_SEED)).await.unwrap();
-    let r_addr = ep_r.inner().addr();
+    let ep = OrgEndpoint::bind(&SigningKeypair::from_seed(seed)).await.unwrap();
+    let addr = ep.inner().addr();
     let handle = tokio::spawn(async move {
-        let (sender, msg) = tokio::time::timeout(NET, ep_r.recv_one())
+        let (sender, msg) = tokio::time::timeout(NET, ep.recv_one())
             .await
-            .expect("R recv_one timed out")
-            .expect("R recv_one failed");
-        (ep_r, sender, msg)
+            .expect("recv_one timed out")
+            .expect("recv_one failed");
+        (ep, sender, msg)
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
-    (r_addr, handle)
+    (addr, handle)
 }
 
 /// Story 3+4 directly: A admits B, B receives from A's device and commits
@@ -190,7 +197,7 @@ async fn first_admission_from_a_device_other_than_the_invites_admin_is_rejected(
     let mut s = setup("first-rogue").await;
 
     // R waits for A's push; A "admits B" but is handed R's address.
-    let (r_addr, r_task) = spawn_rogue_receive().await;
+    let (r_addr, r_task) = spawn_recv_one(ROGUE_SEED).await;
     tokio::time::timeout(
         NET,
         s.svc_a.admit_member(&mut OsRng, s.org_id, &s.join_request_b, r_addr, ORG_SECRET),
@@ -277,7 +284,7 @@ async fn update_relayed_by_a_non_member_after_admission_is_rejected() {
     let jr_c = join_request_for_c(&mut s.svc_a);
 
     // R captures A's C-admission push.
-    let (r_addr, r_task) = spawn_rogue_receive().await;
+    let (r_addr, r_task) = spawn_recv_one(ROGUE_SEED).await;
     tokio::time::timeout(NET, s.svc_a.admit_member(&mut OsRng, s.org_id, &jr_c, r_addr, ORG_SECRET))
         .await
         .expect("admit_member(C via R) timed out")
@@ -308,4 +315,157 @@ async fn update_relayed_by_a_non_member_after_admission_is_rejected() {
     assert_eq!(svc_b.list_orgs()[0].epoch, 2, "B's record must still be at epoch 2");
     assert_eq!(svc_b.list_orgs()[0].root_hash, root_at_2, "B's root must be unchanged");
     assert_eq!(svc_b.list_orgs()[0].trie_members.len(), 2, "admin + B only");
+}
+
+// Normal case of REQ-d9g6nt: the founding admin's id and an admitted
+// member's id are not their keys, and differ from each other.
+// verifies: REQ-d9g6nt
+#[tokio::test(flavor = "multi_thread")]
+async fn member_ids_are_not_derived_from_keys() {
+    let mut s = setup("ids-not-keys").await;
+
+    let admin_snap = s.svc_a.list_orgs()[0].trie_members[0].clone();
+    assert_eq!(admin_snap.member_key, s.svc_a.list_orgs()[0].admin_member_key);
+    assert_ne!(admin_snap.id, admin_snap.member_key, "the admin's id is its member key");
+    assert_ne!(admin_snap.id, admin_snap.device_keys[0], "the admin's id is its device key");
+
+    // A admits B, delivered to B's own endpoint as in `admit_b_directly`.
+    let (b_addr, b_task) = spawn_b_receive(s.svc_b, &s.b_device_kp).await;
+    let id_b = tokio::time::timeout(
+        NET,
+        s.svc_a.admit_member(&mut OsRng, s.org_id, &s.join_request_b, b_addr, ORG_SECRET),
+    )
+    .await
+    .expect("admit_member(B) timed out")
+    .expect("admit_member(B) failed");
+    let (_svc_b, outcome) = b_task.await.unwrap();
+    outcome.expect("B's admission from A must verify");
+
+    assert_ne!(id_b, s.join_request_b.member_key, "B's id is its member key");
+    assert_ne!(id_b, s.join_request_b.device_key, "B's id is its device key");
+    assert_ne!(id_b, admin_snap.id, "B's id equals the admin's id");
+    assert!(
+        s.svc_a.list_orgs()[0].trie_members.iter().any(|m| m.id == id_b),
+        "A's record holds B under the returned id"
+    );
+}
+
+// Abnormal case of REQ-d9g6nt: admit B, revoke B by MemberId, admit the
+// SAME join request (same member key and device key) again. Re-admission
+// succeeds (owner ruling: same keys allowed), and each new id differs from
+// every deleted id and from every key. Three rounds.
+// verifies: REQ-d9g6nt
+#[tokio::test(flavor = "multi_thread")]
+async fn readmission_with_same_keys_gets_a_fresh_member_id() {
+    let mut s = setup("readmit-same-keys").await;
+    let admin_id = s.svc_a.list_orgs()[0].trie_members[0].id;
+
+    let mut ids: Vec<[u8; 32]> = Vec::new();
+    for round in 0..3 {
+        // Admit the same join request.
+        let (addr, sink) = spawn_recv_one(rand::random()).await;
+        let id = tokio::time::timeout(
+            NET,
+            s.svc_a.admit_member(&mut OsRng, s.org_id, &s.join_request_b, addr, ORG_SECRET),
+        )
+        .await
+        .expect("admit_member(B) timed out")
+        .unwrap_or_else(|e| panic!("admission round {round} with the same keys failed: {e:?}"));
+        sink.await.unwrap();
+
+        assert_ne!(id, s.join_request_b.member_key, "round {round}: id is B's member key");
+        assert_ne!(id, s.join_request_b.device_key, "round {round}: id is B's device key");
+        assert_ne!(id, admin_id, "round {round}: id is the admin's id");
+        assert!(!ids.contains(&id), "round {round}: re-admission reused a deleted id");
+        let members = &s.svc_a.list_orgs()[0].trie_members;
+        assert!(members.iter().any(|m| m.id == id), "round {round}: A's record lacks the new id");
+        for old in &ids {
+            assert!(
+                !members.iter().any(|m| m.id == *old),
+                "round {round}: A's record still holds a deleted id"
+            );
+        }
+        ids.push(id);
+
+        // Revoke B by MemberId.
+        let (addr, sink) = spawn_recv_one(rand::random()).await;
+        tokio::time::timeout(NET, s.svc_a.revoke_member(&mut OsRng, s.org_id, id, Some(addr)))
+            .await
+            .expect("revoke_member(B) timed out")
+            .expect("revoke_member(B) failed");
+        sink.await.unwrap();
+        assert!(
+            !s.svc_a.list_orgs()[0].trie_members.iter().any(|m| m.id == id),
+            "round {round}: revoked id still in A's record"
+        );
+    }
+}
+
+// Normal case of REQ-d9g6nt for the founding administrator: one persona
+// founds two organisations with the same keys. Any id computed from those
+// keys would be the same in both records; drawn at random, the two differ.
+// verifies: REQ-d9g6nt
+#[tokio::test(flavor = "multi_thread")]
+async fn same_persona_founding_two_organisations_gets_two_admin_ids() {
+    let chain = MockChainOps::new();
+    let mut svc = OrgService::new(open_store("two-orgs", "a", "pw_a"), Box::new(chain.clone()));
+    let pid = svc.create_persona(&mut OsRng, "admin", "Admin", "User").unwrap();
+
+    let org_1 = svc.create_organisation(&mut OsRng, &pid).await.unwrap();
+    let org_2 = svc.create_organisation(&mut OsRng, &pid).await.unwrap();
+    assert_ne!(org_1, org_2);
+
+    let admin_of = |org_id: OrgId| {
+        let rec = svc.list_orgs().iter().find(|o| o.org_id == org_id).unwrap();
+        assert_eq!(rec.trie_members.len(), 1, "a new organisation holds its admin only");
+        rec.trie_members[0].clone()
+    };
+    let (admin_1, admin_2) = (admin_of(org_1), admin_of(org_2));
+    assert_eq!(admin_1.member_key, admin_2.member_key, "same persona, same member key");
+    assert_eq!(admin_1.device_keys, admin_2.device_keys, "same persona, same device key");
+    assert_ne!(
+        admin_1.id, admin_2.id,
+        "the same keys founding two organisations produced the same admin id"
+    );
+}
+
+// Abnormal case of REQ-d9g6nt over the service: a fresh node (B, no record
+// of the org) receives a first admission whose `genesis_snapshot` is absent.
+// The envelope is A's genuine, chain-valid admission of B with the snapshot
+// stripped. B must refuse it with the explicit error — not reconstruct a
+// record — and commit nothing. The refusal precedes the sender cross-check,
+// so the relaying device does not matter here.
+// verifies: REQ-d9g6nt
+#[tokio::test(flavor = "multi_thread")]
+async fn first_admission_without_a_record_snapshot_is_refused() {
+    let mut s = setup("no-snapshot").await;
+
+    // Capture A's genuine admission of B.
+    let (r_addr, r_task) = spawn_recv_one(ROGUE_SEED).await;
+    tokio::time::timeout(
+        NET,
+        s.svc_a.admit_member(&mut OsRng, s.org_id, &s.join_request_b, r_addr, ORG_SECRET),
+    )
+    .await
+    .expect("admit_member(B) timed out")
+    .expect("admit_member(B) failed");
+    let (ep_r, _sender, mut msg) = r_task.await.unwrap();
+    assert!(msg.genesis_snapshot.is_some(), "A sent a snapshot to strip");
+    msg.genesis_snapshot = None;
+
+    let (b_addr, b_task) = spawn_b_receive(s.svc_b, &s.b_device_kp).await;
+    tokio::time::timeout(NET, ep_r.send(b_addr, &msg))
+        .await
+        .expect("send timed out")
+        .expect("send failed");
+
+    let (svc_b, result) = b_task.await.unwrap();
+    assert!(
+        matches!(&result, Err(OrgNodeError::Chain(m)) if m == "first admission without a record snapshot"),
+        "B must refuse a snapshot-less first admission explicitly, got {result:?}"
+    );
+    assert!(svc_b.list_orgs().is_empty(), "B must not have committed an OrgRecord");
+    let persona_b = svc_b.list_personas().iter().find(|p| p.persona_id == s.pid_b).unwrap();
+    assert_ne!(persona_b.status, PersonaStatus::Active, "B's persona must not be Active");
+    assert_eq!(persona_b.org_id, None);
 }

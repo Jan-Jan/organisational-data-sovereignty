@@ -47,10 +47,10 @@ pub enum ReceiverOutcome {
 /// like two of the plainest ones. Each is also reachable from a purely LOCAL
 /// condition on the receive path, with no bearing on whether anything verified:
 ///
-/// - `org-node/src/service.rs:1307` returns `OrgNotOnChain` when the local store
-///   holds no record of the organisation;
-/// - `org-node/src/service.rs:1308` returns `Trie(_)` when the local members
-///   snapshot fails to reconstruct (and `verify.rs` returns it again for the
+/// - `receive_and_self_delete_if_revoked` in `org-node/src/service.rs` returns
+///   `OrgNotOnChain` when the local store holds no record of the organisation;
+/// - the same function returns `Trie(_)` when the local members snapshot
+///   fails to reconstruct (and `verify.rs` returns it again for the
 ///   local trie's own `root_hash()`).
 ///
 /// The app cannot tell the two origins apart from the variant alone, and the
@@ -95,11 +95,12 @@ pub fn classify_receive_error(e: &OrgNodeError) -> ReceiverOutcome {
 ///
 /// Each one is a fragment org-node or the transport actually formats:
 ///
-/// - `endpoint bind:` — `org-node/src/service.rs:1420`, the bind itself failed;
-/// - `endpoint bind failed unexpectedly` — `org-node/src/service.rs:1426`, the
+/// - `endpoint bind:` — `ensure_endpoint` in `org-node/src/service.rs`, the
+///   bind itself failed;
+/// - `endpoint bind failed unexpectedly` — `ensure_endpoint` again, the
 ///   endpoint is still absent after a bind that reported success;
-/// - `endpoint closed` — `org-node/src/transport/endpoint.rs:241`, `accept()`
-///   returned `None`; it reaches the app as
+/// - `endpoint closed` — `recv_one` in `org-node/src/transport/endpoint.rs`,
+///   `accept()` returned `None`; it reaches the app as
 ///   `chain read failed: iroh recv: iroh accept error: endpoint closed`.
 ///
 /// The previous value was the single string `"endpoint not bound"`, which

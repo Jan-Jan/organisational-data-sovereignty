@@ -7,7 +7,25 @@ the deleted `MemberId` — which org-members states is outside its contract — 
 the member returns with the key the removed devices held.
 affects: REQ-q92yac
 opened: 2026-10-03
-status: open
+status: resolved
+resolution: by REQ-d9g6nt. org-node now draws each `MemberId` at random before
+the record is built, for the founding administrator in `create_organisation`
+and for each admitted member in `admit_member`; `member_id_from_key` is
+deleted, and a first admission without a record snapshot is refused explicitly
+instead of being attempted against a record rebuilt with a key-derived id
+(an attempt that never succeeded). Verified by
+`member_ids_are_not_derived_from_keys`,
+`readmission_with_same_keys_gets_a_fresh_member_id`,
+`same_persona_founding_two_organisations_gets_two_admin_ids` and
+`first_admission_without_a_record_snapshot_is_refused` in
+`org-node/tests/admission_sender.rs`, and by the fuzz target
+`org-node/tests/fuzz_first_admission_base/fuzz_target.rs`. The second half of
+the report — the member returns with the keys the removed devices held — is
+resolved by owner ruling (2026-10-03): a re-admitted person is a new member
+under a fresh `MemberId` and may bring the keys their previous membership held
+when it was deleted — the one exception; nothing granted to the old id carries
+over. If a removed device was compromised, fresh keys are the joiner's choice,
+not a software check. This is residual risk accepted by the owner.
 
 Found by the independent review of the change that made org-members hold every
 key once (branch `worktree-rotate-same-key`), not by a failing test. Where:
@@ -22,7 +40,8 @@ caller MUST perform", item 11) and in the doc-comments of `add_member` and
 `delete_member`: deleting a member is permanent; a `MemberId` is a fresh random
 value; a deleted identifier must never be re-added; a person re-admitted later is
 a new member under a new identifier and must not be given a key a device of
-their previous membership held. org-members does not enforce the identifier rule
+their previous membership held (the contract as stated before the owner's
+ruling of 2026-10-03, which the resolution above records). org-members does not enforce the identifier rule
 (it keeps no record of deleted identifiers), and its key-uniqueness check does
 not catch the old key either, because once the member is deleted that key is no
 longer held. So org-node is the only place the duty can be met, and its

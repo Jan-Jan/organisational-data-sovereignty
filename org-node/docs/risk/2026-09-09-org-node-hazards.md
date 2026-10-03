@@ -20,7 +20,7 @@ that is every module of `org-node/src`: `verify.rs`, `sequence.rs`,
 `error.rs`, `preflight.rs`. `chain.rs` is not an aside: it declares the
 `ChainReader` trait and the `MockChain` behind it, and is the seam RC-6a2dke's
 independent chain read arrives through, implemented in production by
-`ChainOpsReader` (`org-node/src/service.rs:1536-1540`). The remaining three
+`ChainOpsReader` (in `org-node/src/service.rs`). The remaining three
 files in the tree are not modules of the capability: `lib.rs` is module
 declarations and re-exports, `test_fixtures.rs` is the test-support fixtures
 (discussed under RC-e2uvje), and `bin/preflight.rs` is the CLI wrapper around
@@ -187,16 +187,19 @@ to be strictly newer, and only then requires the recomputed root to equal the
 chain's. The order is deliberate: authenticity is settled before any work is
 done on attacker-chosen bytes. The reader it is handed in production is built
 by `receive_and_verify` from the node's own `read_state` call, made in the same
-operation and before verification (`org-node/src/service.rs:922-926`, the
-reader constructed at `:1011` and handed to verification at `:1013`, and the
-adapter at `:1532-1540`); the author key is the `org_pub_key` of that same
-Organisation state (`:928`), never a key the message carries. The
+operation and before verification (`org-node/src/service.rs`: the
+`read_state` call in `receive_and_verify`, the `ChainOpsReader` it builds from
+that state and hands to `verify_envelope_against_chain`, and the adapter
+`ChainOpsReader` itself); the author key is the `org_pub_key` of that same
+Organisation state (`author_vk` in `receive_and_verify`), never a key the
+message carries. The
 independence org-members' register asks its consumer to supply — its
 "independent trusted root" — is therefore structural here, and
 RC-6a2dke is the requirement it was missing. Two further facts the requirement
 text leans on: `verify_envelope_against_chain` never mutates the local record,
 and `receive_and_verify` reaches its store only after it returns `Ok`
-(`org-node/src/service.rs:1077-1115`), so a rejected envelope leaves nothing
+(the commit block at the end of `receive_and_verify` in
+`org-node/src/service.rs`), so a rejected envelope leaves nothing
 behind but a consumed connection.
 
 The base-root check at step 5 is org-members' rule (REQ-4umsuz, exported) and
@@ -246,8 +249,9 @@ stops being evidence of anything.
 
 And the published signing key is a single ed25519 member key: `org_pub_key`
 is the admin's Member-as-a-group key, derived at genesis
-(`org-node/src/service.rs:616`), submitted to the chain with the genesis root
-(`:622`) and persisted in the record (`:636`), so exactly one author exists per
+(`create_organisation` in `org-node/src/service.rs`), submitted to the chain
+with the genesis root (its `submit_genesis` call) and persisted in the record
+(its `OrgRecord`), so exactly one author exists per
 Organisation and there is no admin role, quorum or rotation for it. Whoever
 holds that seed and the chain account authors membership. That is the
 admin-authority hazard in prose below.
@@ -280,7 +284,8 @@ not greater than the mark (`org-node/src/sequence.rs:27-46`,
 why the placement matters: advancing on `check` rather than on commit would
 move the watermark for an envelope still to be rejected, which is a replay
 bypass. The mark persists as `OrgRecord.last_seq` and is reloaded on the next
-receive (`org-node/src/service.rs:933-945`, `:1002`).
+receive (`receive_and_verify` in `org-node/src/service.rs`, which loads
+`last_seq` from the existing record and builds its `SeqGuard` from it).
 
 Residual risk: reduced, **not acceptable**, because the control closes the
 pathway for one node and not for the Organisation. The sequence number is
@@ -363,9 +368,14 @@ stranger, one the record does not name, obtains a chain read, a record rebuild
 and a signature check per connection. The handshake does authenticate the
 peer's Device key (`org-node/src/transport/endpoint.rs:3-5`, `:288-291`); what
 it does not do is decide whether that key belongs to a member before the work
-is spent (`org-node/src/transport/endpoint.rs:279-306`; the chain read at
-`org-node/src/service.rs:922-926`, the record rebuild at `:933-978`, and the
-signature check inside `verify_envelope_against_chain` at `:1013`). Those are
+is spent (`org-node/src/transport/endpoint.rs:279-306`; in
+`receive_and_verify` in `org-node/src/service.rs`, the chain read, the record
+rebuild — from the node's stored record, or on a first admission the base
+record rebuilt from the administrator's snapshot by `first_admission_base` —
+and the signature check inside `verify_envelope_against_chain`). (Amended
+2026-10-03, REQ-d9g6nt: on a first admission that carries no snapshot,
+`first_admission_base` refuses the message after the chain read and before any
+rebuild or signature check.) Those are
 not-minted controls below.
 And the structural half of the control is unchecked: no gate runs clippy on
 org-node, so the panic-freedom denial the paragraph above cites is a claim
@@ -398,10 +408,11 @@ verified into; a Wire message from any other device is rejected after
 verification and before the record is touched.
 mitigates: HAZ-ep6uzs, HAZ-vxabf9
 
-The first clause is the invite cross-check (`org-node/src/service.rs:985-1000`):
+The first clause is the invite cross-check (the `is_first_admission` block in
+`receive_and_verify`, `org-node/src/service.rs`):
 the invite the joiner imported out of band carries the administrator's Device
 key, and the connection's authenticated key must equal it. The second is the
-post-verification membership check (`:1018-1027`): the sender's Device key
+post-verification membership check (the `sender_known` check): the sender's Device key
 must appear in the record the envelope produced. Both return before the store
 is written.
 
@@ -411,13 +422,15 @@ in three places, each recorded here rather than asserted away.**
 First, the first-admission check runs only when an invite was imported for
 that Organisation; without one the code falls through to the signature and
 chain proof alone, with a comment that this is "log-worthy in production but
-not a hard fail" (`org-node/src/service.rs:993-1000`) in a crate that has no
+not a hard fail" (the invite cross-check in `receive_and_verify`) in a crate
+that has no
 logging. RC-b6mydy is worded to say what the code does; making the invite
 mandatory is a not-minted control.
 
 Second, the revocation receive path (`receive_and_self_delete_if_revoked`)
 performs neither clause: it authenticates the sender and discards the result
-(`org-node/src/service.rs:1337`), relying on the admin signature and the chain
+(`let _ = remote_device_key;` in `org-node/src/service.rs`), relying on the
+admin signature and the chain
 root. A revocation envelope relayed by anyone is acted on, which for a
 revocation is the intended outcome and for the `UpdatedNotRevoked` branch of
 the same function is a message from an unchecked sender committing a record.
@@ -428,9 +441,10 @@ and it is now filed as **PR-u4c2vp**.
 Third — and this is the defect filed as PR-2dmjzj — in loopback transport
 mode `admit_member` sends the envelope and the organisation secret to the
 address the join request carried, without binding that address to the
-joiner's Device key (`org-node/src/service.rs:836-842`); the networked branch
-derives the peer identity from the Device key and so does bind it
-(`:847-849`). A join-request blob whose address was altered in transit hands
+joiner's Device key (the `TransportMode::Loopback` arm of the send in
+`admit_member`, `org-node/src/service.rs`); the networked branch derives the
+peer identity from the Device key and so does bind it (the
+`TransportMode::Networked` arm). A join-request blob whose address was altered in transit hands
 the secret to whoever the altered address names, while the record admits the
 joiner's genuine keys. The blob is unsigned and unauthenticated by design
 (`org-node/src/blobs.rs:9-29`), so nothing upstream catches the alteration.
@@ -468,13 +482,14 @@ unit.
 The other devices' records are updated only when a Change set reaches them,
 and the node pushes a Change set to the affected device alone — the admitted
 member on admission, the revoked member on revocation
-(`org-node/src/service.rs:836-853`, `:1218-1238`). There is no fan-out and no
+(the transport send in `admit_member` and in `revoke_member`,
+`org-node/src/service.rs`). There is no fan-out and no
 periodic re-read of the chain, so every other member's record stays at the
 epoch it last received until something happens to it. That is the stale-view
 hazard in prose below.
 
 The organisation secret is never rotated. The revocation message carries
-`org_secret: None` (`org-node/src/service.rs:1214`), and the secret handed to
+`org_secret: None` (`revoke_member` in `org-node/src/service.rs`), and the secret handed to
 the member at admission stays valid for everyone who has it. Rotating it, and
 distributing the new Member-as-a-group keys the rotation implies, is the CGKA
 layer (Phase 3) — the same boundary org-members' register draws for its
@@ -559,15 +574,18 @@ register's count of distinct hazards is twelve rather than eleven.
 - **RC-gfn6kr (1 MiB frame).** A Change set larger than the frame cannot be
   delivered, which bounds the size of one membership change; and because both
   Wire messages the node sends carry the whole pre-change record as a
-  snapshot — the admission message (`org-node/src/service.rs:826-832`) and the
-  revocation message (`:1213-1214`) — the bound is also a bound on the size of
+  snapshot — the admission message (`admit_member`, where it builds the record
+  snapshot, `org-node/src/service.rs`) and the revocation message
+  (`revoke_member`, likewise) — the bound is also a bound on the size of
   the Organisation either can be delivered for. Where an earlier draft of this
   entry was wrong is *when* that bound bites. It is not a refusal at the start
-  of the act. On both paths the chain write comes first (`:814`, `:1172`); the
+  of the act. On both paths the chain write comes first (the `submit_update`
+  call in each); the
   send frames the message through `encode_frame`, which is where the bound is
   enforced (`org-node/src/transport/endpoint.rs:258`, the check at
   `org-node/src/transport/wire.rs:26-28`); and the local record is updated only
-  after the send has returned (`:864-871`, `:1254-1261`). So for an
+  after the send has returned (the record update at the end of each
+  function). So for an
   Organisation whose snapshot exceeds the frame, the error the administrator
   sees arrives *after* the chain has moved — on the admission path and the
   revocation path alike — with the peer told nothing and the administrator's
@@ -611,7 +629,7 @@ register's count of distinct hazards is twelve rather than eleven.
   which removes the failure mode rather than making it survivable — and which
   on the revocation path costs nothing at all, because
   `receive_and_self_delete_if_revoked` rebuilds its trie from its own store and
-  never reads the snapshot the message carries (`:1299-1310`).
+  never reads the snapshot the message carries.
 - **RC-jjsz97 (passphrase).** A forgotten passphrase is a lost store: the file
   cannot be opened, every persona's keys and every Organisation's record on
   that device are gone, and the member must be re-admitted with new keys.
@@ -646,12 +664,14 @@ register's count of distinct hazards is twelve rather than eleven.
   check is reconsidered when there is more than one author.
 - **RC-wqgm2p (delete the record on one's own removal).** The presence test
   that decides whether the node is still a member filters the store's personas
-  by their recorded Organisation (`org-node/src/service.rs:1330`), so a persona
+  by their recorded Organisation (the `my_still_present` test in
+  `receive_and_self_delete_if_revoked`, `org-node/src/service.rs`), so a persona
   that is not linked to the Organisation yields no candidate, the test
   reads as absent, and the branch deletes the record — a spurious self-delete
   on an inconsistent store. What the branch then does is the whole of the harm:
   it removes this node's record of the Organisation from the store and marks
-  every persona of that Organisation revoked (`:1369-1375`), so the member's
+  every persona of that Organisation revoked (the self-delete branch of the
+  same function), so the member's
   own device no longer holds the record it needs and cannot reach the material
   the Organisation governs. That is unavailability, which the Method section
   above and the class C ADR (`docs/adr/2026-09-01-safety-class-c.md`) put at
@@ -668,25 +688,28 @@ register's count of distinct hazards is twelve rather than eleven.
   **The first** is a commit that writes the record and links no persona: this
   node's own admission does not leave that behind — `receive_and_verify`
   writes the record and sets the persona's `org_id` in one save
-  (`org-node/src/service.rs:1077-1115`) — and the one branch that writes a
-  record while linking nothing is the branch where no persona's device key is
-  in the committed trie at all (`:1048-1060`), which is not this node's own
+  (the commit at the end of `receive_and_verify`, `org-node/src/service.rs`) —
+  and the one branch that writes a record while linking nothing is the branch
+  where no persona's device key is in the committed trie at all (the
+  `my_persona_id` lookup finds none), which is not this node's own
   admission. **The second**, which review round 7 found and this entry missed
   until then, is a link that is taken away again. A persona records a single
   Organisation — `PersonaRecord.org_id` is one `Option<OrgId>`
   (`org-node/src/store.rs:18`) — and the same save overwrites it
-  unconditionally (`:1110`), so admitting a persona already active in one
+  unconditionally (where `receive_and_verify` marks the persona Active), so
+  admitting a persona already active in one
   Organisation to a second one repoints it at the second and leaves the first
   Organisation's record in the store with nothing linked to it. Nothing in the
   code prevents that admission: "one per org" is a comment on the type
   (`org-node/src/store.rs:14`), not a check. A later Change set for the first
   Organisation then reaches `receive_and_self_delete_if_revoked`, finds no
-  candidate at the presence filter (`:1330`), and deletes the record.
+  candidate at the presence filter (`my_still_present`), and deletes the
+  record.
   This second route is the stronger instance of the harm, and the reason the
   entry is worse than it read before: on the first route the node loses a
   record of an Organisation it was never a member of, while on the second it
   deletes the record of an Organisation it genuinely belongs to and revokes
-  every persona it has for it (`:1369-1375`) — the member is put out of an
+  every persona it has for it (the self-delete branch) — the member is put out of an
   Organisation nobody removed them from, which is exactly the harm this hazard
   names.
   With both routes on the table the probability is still **P1**, but on
@@ -722,8 +745,9 @@ is the mechanical trace, and that is reported upstream, not worked around.
 
 **Publish before persist.** `admit_member` and `revoke_member` write the new
 root to the chain first and update the local record only after the envelope
-has been sent to the peer (`org-node/src/service.rs:814` then `:836-871`;
-`:1172` then `:1218-1261`). A failed send — the peer is offline, the address
+has been sent to the peer (`org-node/src/service.rs`: in each function the
+`submit_update` call, then the transport send, then the record update). A
+failed send — the peer is offline, the address
 is stale, the endpoint fails to bind — or a crash between the two returns an
 error with the chain one epoch ahead of the administrator's record. Every
 later publish then carries the stale epoch and is refused by the contract's
@@ -776,7 +800,8 @@ read is the Finalised one — but nothing reads it on a schedule.
 
 **A revoked device keeps the organisation secret.** Stated under HAZ-vxabf9
 and repeated here because it has no control in this unit at all: the secret
-handed over at admission (`org-node/src/service.rs:832`) is never rotated and
+handed over at admission (the `WireMessage` `admit_member` sends,
+`org-node/src/service.rs`) is never rotated and
 never revoked. Assessed **S3 / P2**. The control lies in the CGKA layer, Phase
 3, and until it exists a revocation removes a device from the record without
 removing anything the device can use.
@@ -946,7 +971,8 @@ given an RC identifier until it does.
    not the Device key the request carries, or dial by the key as the
    networked branch does.
 3. **Make the invite mandatory on first admission** (HAZ-ep6uzs). Turn the
-   fall-through at `service.rs:993-1000` into a rejection.
+   fall-through in `receive_and_verify`'s invite cross-check into a
+   rejection.
 4. **Cross-check the sender on the revocation receive path** (HAZ-ep6uzs,
    PR-u4c2vp). The `UpdatedNotRevoked` branch commits a record from a sender
    it did not check.
@@ -987,11 +1013,12 @@ given an RC identifier until it does.
 15. **Bound or omit the membership snapshot on the send path** (the frame
     bound's introduced trigger for the publish-before-persist hazard, and
     PR-vt244s with it). Both Wire messages carry
-    the whole pre-change record (`org-node/src/service.rs:826-832`,
-    `:1213-1214`), which makes the 1 MiB frame a bound on the Organisation, and
-    the bound bites after the chain write. On the revocation path the snapshot
-    is dead weight — `receive_and_self_delete_if_revoked` rebuilds its trie
-    from its own store (`:1299-1310`) — so omitting it there costs nothing. On
+    the whole pre-change record (`admit_member` and `revoke_member`, where
+    each builds the record snapshot, `org-node/src/service.rs`), which makes
+    the 1 MiB frame a bound on the Organisation, and the bound bites after the
+    chain write. On the revocation path the snapshot is dead weight —
+    `receive_and_self_delete_if_revoked` rebuilds its trie from its own store
+    — so omitting it there costs nothing. On
     the admission path the receiver does need a genesis record, so the control
     is to bound it, to page it, or to have the joiner obtain the record by some
     route other than the admission frame.
@@ -1007,12 +1034,15 @@ given an RC identifier until it does.
 17. **Make the presence test independent of a Persona's recorded Organisation**
     (the spurious self-delete RC-wqgm2p introduces). The test that decides
     whether this node is still a member filters the store's personas by their
-    recorded Organisation first (`org-node/src/service.rs:1330`), so a persona
+    recorded Organisation first (the `my_still_present` test in
+    `receive_and_self_delete_if_revoked`, `org-node/src/service.rs`), so a
+    persona
     that is not linked to the Organisation reads as absent and the record is
     deleted — whether it never was linked, or was linked and then repointed by
     a later admission to a second Organisation, `PersonaRecord.org_id` holding
     one Organisation and being overwritten unconditionally
-    (`org-node/src/store.rs:18`, `org-node/src/service.rs:1110`). Decide
+    (`org-node/src/store.rs:18`; `receive_and_verify` in
+    `org-node/src/service.rs`, where it marks the persona Active). Decide
     presence from the Device keys the store holds against the Device keys the
     verified trie holds, without consulting a persona's `org_id`, so that a
     Change set which does not remove one of this node's Device keys can never
@@ -1159,9 +1189,10 @@ overstated it. This register records seven hundred lines above that RC-b6mydy's
 residual risk is **not acceptable** and that the control is "weaker than its
 wording in three places": the first-admission check runs only when an invite
 was imported, falling through to signature and chain proof alone otherwise
-(`org-node/src/service.rs:993-1000`), and the revocation receive path performs
-neither clause, its `UpdatedNotRevoked` branch committing a record from an
-unchecked sender (`:1337`, filed as PR-u4c2vp). **On exactly those paths,
+(the invite cross-check in `receive_and_verify`, `org-node/src/service.rs`),
+and the revocation receive path performs neither clause, its
+`UpdatedNotRevoked` branch committing a record from an unchecked sender
+(`receive_and_self_delete_if_revoked`, filed as PR-u4c2vp). **On exactly those paths,
 distance was the only thing standing between the node and an arbitrary peer**,
 and the wildcard bind removed it. That does not change what is minted, and it
 does sharpen what the fix is worth.
@@ -1200,10 +1231,11 @@ could read one.
 
 It is wrong about the **outbound** direction, and PR-2dmjzj in this same
 register is why. In Loopback mode `admit_member` dials the full `EndpointAddr`
-carried in the join-request blob (`org-node/src/service.rs:838`), which is
+carried in the join-request blob (the `TransportMode::Loopback` arm of the
+send in `admit_member`, `org-node/src/service.rs`), which is
 unsigned and unauthenticated by design, and does **not** bind that address to
 the joiner's Device key — the Networked arm does, deriving the peer from
-`join_request.device_key` (`:847-849`). An altered blob therefore redirects the
+`join_request.device_key` (the `TransportMode::Networked` arm). An altered blob therefore redirects the
 administrator's dial to an attacker-chosen EndpointId, and the TLS this
 assessment relies on then authenticates to *that* key. The ciphertext argument
 protects the secret from an observer; it does nothing against a recipient the

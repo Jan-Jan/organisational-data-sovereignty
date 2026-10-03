@@ -85,8 +85,11 @@ test_paths:
 # the five together. These are checks of the system model only: org-node has
 # no conformance test, so a Rust change to org-node is not checked against
 # the model (decision 13's known gap).
+# 2026-10-03, T2 of docs/plans/2026-10-03-random-member-id.md: a third bolero
+# target, fuzz_first_admission_base (REQ-d9g6nt), asserts a first admission
+# without a record snapshot is refused and fuzzes the snapshot decode.
 verify_commands:
-  - cargo test -p org-node --features app,test-support --lib --test service_stories --test transport_handshake --test transport_networked --test fuzz_envelope_decode --test fuzz_verify_against_chain --test verify_against_chain --test wire_frame_bound --test store_at_rest --test admission_sender
+  - cargo test -p org-node --features app,test-support --lib --test service_stories --test transport_handshake --test transport_networked --test fuzz_envelope_decode --test fuzz_verify_against_chain --test verify_against_chain --test wire_frame_bound --test store_at_rest --test admission_sender --test fuzz_first_admission_base
   - quint --version
   - quint typecheck org-node/quint/protocol.qnt
   - quint typecheck org-node/quint/ods_instances.qnt

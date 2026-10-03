@@ -116,7 +116,18 @@ never supplies a key no longer held that a removed device holds the secret of,
 nor gives a re-admitted member (under a fresh `MemberId`) such a key; that duty
 is security check 11 in `org-members/README.md`. Only re-adding a deleted `MemberId` is outside the
 contract. The wire path is the one gap in the software that stands.) The paragraph
-above is kept as the record of the gap.
+above is kept as the record of the gap. (Narrowed 2026-10-03 by owner ruling: a
+re-admitted member, under a fresh `MemberId`, is a new member and may bring the
+keys their previous membership held when it was deleted; nothing granted to the
+old `MemberId` carries over. Where a device removed from that membership was
+compromised, the device still holds those keys' secrets and reaches what is
+granted to the new member; fresh keys are then the joiner's choice, not a
+check the software makes. This is residual risk accepted by the owner. The duty
+not to supply any other key no longer held stands — a Member-as-a-group key
+replaced earlier, or the Device key of a device removed earlier while the
+member stayed — and a deleted member's keys are never given to anyone else.
+The software keeps no key history: neither duty is enforced by org-members or
+by org-node; the administrator who admits or rotates carries them.)
 
 **REQ-r784fu**: The software shall provide an operation that removes every
 device key from a member and replaces that member's member-as-a-group key in one step,

@@ -137,17 +137,17 @@ The crate validates *what it needs to maintain its own invariants* (handle shape
 
 The most common way to break the security model is to receive `(delta, expected_root)` as a single payload from the same untrusted source, then call `apply_delta(delta).verify_against(expected_root)`. That tautologically passes — the attacker chose both sides. The expected root must come from a separate trust path.
 
-### 11. Choose replacement keys no device ever held, and never re-use a `MemberId`
+### 11. Choose keys no removed device holds — one exception — and never re-use a `MemberId`
 
-The crate holds every key in the organisation in exactly one place: no two members share a member-as-a-group key, no device key is enrolled under two members, and no member key equals an enrolled device key. Every path that builds or changes a record enforces it, `apply_delta` included, refusing with `DuplicateKey`. A key-replacing operation (`rotate_p2p_key`, `delete_p2p_device`, `emergency_isolate_member`) also refuses the member's **current** key (`P2pKeyNotReplaced`) and any key held anywhere in the organisation **before** the operation — another member's key or any enrolled device key, the key of the device it removes included (`DuplicateKey`). Either refusal changes nothing.
+The crate holds every key in the organisation in exactly one place: no two members share a Member-as-a-group key, no Device key is enrolled under two members, and no Member-as-a-group key equals an enrolled Device key. Every path that builds or changes a record enforces it, `apply_delta` included, refusing with `DuplicateKey`. A key-replacing operation (`rotate_p2p_key`, `delete_p2p_device`, `emergency_isolate_member`) also refuses the member's **current** key (`P2pKeyNotReplaced`) and any key held anywhere in the organisation **before** the operation — another member's key or any enrolled Device key, the Device key of the device it removes included (`DuplicateKey`). Either refusal changes nothing.
 
-What the crate cannot see is a key that is **no longer held** — it keeps no key history. The caller must therefore never supply:
+What the crate cannot see is a key that is **no longer held** — it keeps no key history. The caller must therefore never supply, other than the keys the person's previous membership held when it was deleted (the one exception, below):
 
-- a member key used **earlier** and since replaced, by this member or any other (a device removed since may still hold it);
-- the device key of a device removed **earlier** (that device holds its secret, so it would control the new key outright);
+- a Member-as-a-group key used **earlier** and since replaced, by this member or any other (a device removed since may still hold it);
+- the Device key of a device removed **earlier** while the member stayed (that device holds its secret, so it would control the new key outright);
 - a non-canonical encoding of a held key (keys compare by their 32 encoded bytes).
 
-Deleting a member is permanent. A `MemberId` is a fresh random value chosen by the caller, and a deleted id must never be re-added: the trie keeps no record of deleted ids and will accept one, which is outside its contract. A person re-admitted later is a **new** member under a **new** id — delegation is always to a `MemberId`, never to a handle — and must not be given a key a device of their previous membership held.
+Deleting a member is permanent. A `MemberId` is a fresh random value chosen by the caller, and a deleted id must never be re-added: the trie keeps no record of deleted ids and will accept one, which is outside its contract. Delegation is always to a `MemberId`, never to a handle. The one exception to the bullets above (owner ruling, 2026-10-03): a re-admitted person is a new member under a fresh `MemberId` and may bring the keys their previous membership held when it was deleted; nothing granted to the old id carries over. If a removed device was compromised, fresh keys are the joiner's choice, not a software check — an accepted residual risk. The duty not to supply any other key no longer held stands — a Member-as-a-group key used earlier and since replaced, or the Device key of a device removed earlier while the member stayed — and a deleted member's keys must never be given to anyone else.
 
 ## What the crate does on its own
 

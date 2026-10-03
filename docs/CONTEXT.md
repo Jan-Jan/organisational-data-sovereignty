@@ -42,7 +42,9 @@ _Avoid_: username, nickname, alias
 
 **MemberId**:
 The immutable 32-byte identifier of a Member. Independent of the Handle and of
-every key, so that a grant made to a Member survives a rename.
+every key, so that a grant made to a Member survives a rename. Chosen at random
+when the Member is placed in the Membership record; identifiers in Membership
+records made before 2026-10-03 may equal key bytes and are opaque either way.
 _Avoid_: node id, member key
 
 **Member-as-a-group key**:

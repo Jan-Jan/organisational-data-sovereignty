@@ -44,7 +44,7 @@ inferring the binding from a delivery timeout:
 `node_addr_for_dial()` is built directly from `bound_sockets()`, so an
 advertised address is non-loopback only if a bound socket already was. The
 second assertion is still worth making — it is the accessor production hands a
-peer (`org-node/src/service.rs:670`, `:720`) — but it adds no discrimination
+peer (`export_invite` and `export_join_request` in `org-node/src/service.rs`) — but it adds no discrimination
 the first does not already have, and a reader should not count it as two
 independent checks.
 
