@@ -90,7 +90,16 @@ resolved; see the correction under HAZ-s39gbh's residual risk. Its first
 clause's wire-path bypass stands, and a removal may still install a key the
 removed device held *earlier*, which the second clause as worded does not
 reach — PR-z463w5, open; and the first clause is also reachable on the direct
-API by deleting and re-admitting the member — PR-fzu25w, open.)
+API by deleting and re-admitting the member — PR-fzu25w, open. Ruled later
+the same day by the owner: a key no longer held is not refused, and a
+deleted `MemberId` is never legitimately re-added; PR-z463w5 and PR-fzu25w
+are resolved by ruling. That moves the duty, not the risk: the software refuses
+every key still held (`DuplicateKey`, LLR-v6gfc7, LLR-fym7dy, LLR-gjj6bx — the
+removed device's own key included), but not a key no longer held — a member key
+used earlier, the key of a device removed earlier, or a fresh `MemberId` given a
+deleted member's key — and the caller must not supply one
+(`org-members/README.md`, security check 11). Only re-adding a deleted `MemberId` is outside the
+contract. The wire-path bypass also stands.)
 
 The requirements keep `satisfies: derived`. Finding the hazard a rule addresses
 does not give the rule a parent in system needs; it gives it a justification.
@@ -155,8 +164,16 @@ accident (PR-zz4exm names both operations). (Corrected 2026-10-03: that call
 is now refused — PR-zz4exm resolved. P2 is **not** re-scored here: the same
 accident with a key the device held *earlier* is still accepted (PR-z463w5),
 delete-and-re-admit removes a device with no key change at all (PR-fzu25w),
-and the wire path is untouched. Re-evaluating the estimate is `analyze-risks`
-work.)
+and the wire path is untouched. The owner has since ruled that the software
+does not refuse a key no longer held and that a deleted `MemberId` is never
+re-added — PR-z463w5 and PR-fzu25w resolved by ruling; key uniqueness, decided
+the same day, refuses every key still held, the removed device's own included
+(LLR-fym7dy). The ruling transfers the remaining checks to the caller; it does
+not make the accident less likely, so passing a key no longer held — a member
+key used earlier, the key of a device removed earlier — remains the same
+well-typed accident this paragraph describes, now guarded only by security
+check 11 in `org-members/README.md`. That residual, and the wire path, are what
+`analyze-risks` must weigh when it re-evaluates the estimate.)
 
 **RC-mqtks7**: on the direct membership API, removing a device key and
 replacing the member's member-as-a-group key are one operation that cannot be
@@ -199,7 +216,13 @@ Recorded here and listed as a not-minted control rather than asserted away.
 (Corrected 2026-10-03: "an external caller must go through
 `delete_p2p_device`" is too strong. `delete_member` followed by `add_member`
 with the same key and one device fewer reaches the same state on the direct
-API — PR-fzu25w, open.)
+API — PR-fzu25w, resolved by owner ruling the same day: a deleted `MemberId`
+is never legitimately re-added, so the same-id route is outside the API's
+contract. The same route with a **fresh** `MemberId` and the old key is inside
+it — a re-admitted person is a new member "whatever its handle or keys" — and
+a removed device holding that key would reach what is later granted to the new
+member. That is caller-borne residual risk (security check 11 in
+`org-members/README.md`), not a closed route.)
 
 ### Isolation applied to the wrong member
 
@@ -593,7 +616,7 @@ Per hazard, after controls:
 | Hazard | S/P | Residual | Why |
 |---|---|---|---|
 | HAZ-jkc6tj | S3/P1 | not acceptable | last step is a person reading a name |
-| HAZ-s39gbh | S3/P2 | not acceptable | control unimplemented in one clause (PR-zz4exm), bypassed on the wire path in the other (corrected 2026-10-03: PR-zz4exm resolved, the clause now holds; the wire-path bypass stands and the hazard is not re-scored) |
+| HAZ-s39gbh | S3/P2 | not acceptable | control unimplemented in one clause (PR-zz4exm), bypassed on the wire path in the other (corrected 2026-10-03: PR-zz4exm resolved, the clause now holds; the wire-path bypass stands and the hazard is not re-scored; the owner's rulings leave reuse of a key no longer held — an earlier member key, a device removed earlier, a re-admitted member's old key — as residual risk the caller carries, a key history in the software being the control declined; key uniqueness (LLR-v6gfc7, LLR-fym7dy, LLR-gjj6bx) now refuses any key still held) |
 | HAZ-sc7wse | S3/P1 | not acceptable | bounded by reversibility; no confirmation step exists |
 | HAZ-y8h835 | S3/P2 | not acceptable | decisive control unstated, ungated and unrun (corrected 2026-09-09: now stated and gated in org-node — see the correction under this hazard's residual risk); staleness bound modelled only |
 | HAZ-bmv7cy | S3/P2 | not acceptable | re-validation weaker than admission; evidence is five example tests |
@@ -663,7 +686,9 @@ test written before the requirement is claimed, not analysis work.
    already specified. The only item here that closes an unacceptable residual
    risk outright. (Corrected 2026-10-03: done — PR-zz4exm resolved. It did not
    close HAZ-s39gbh's residual outright after all: item 2's wire-path bypass
-   still stands.)
+   still stands, and reuse of a key no longer held is left to the caller by
+   owner ruling, a software key history being declined. Key uniqueness,
+   added the same day, refuses every key still held.)
 2. **Relate a leaf's device set to its member-as-a-group key in delta
    validation** (HAZ-s39gbh). Closes RC-mqtks7's wire-path bypass, and is the
    same kind of rule REQ-shk82j already applies to handles.

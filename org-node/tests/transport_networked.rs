@@ -28,16 +28,20 @@ type Trie = OrgTrie<Blake3Hasher>;
 // Inline genesis_and_admit. Written before `test_fixtures` was reachable from
 // an integration test; since 2026-09-09 it is `pub mod` under `test-support`,
 // which this target already requires, so this helper is kept inline only to
-// leave the test unchanged. Admin keypair doubles as device key, matching the
-// fixture convention. Returns (genesis_trie, new_trie_with_bob, delta).
-fn genesis_and_admit(admin: &SigningKeypair) -> (Trie, Trie, org_members::delta::Delta) {
+// leave the test unchanged. The admin's device is a keypair of its own:
+// org-members refuses a leaf whose member key is also an enrolled device key
+// (`DuplicateKey`). Returns (genesis_trie, new_trie_with_bob, delta).
+fn genesis_and_admit(
+    admin: &SigningKeypair,
+    admin_device: &SigningKeypair,
+) -> (Trie, Trie, org_members::delta::Delta) {
     let admin_leaf = MemberLeaf::new(
         MemberId::new([1u8; 32]),
         "admin",
         admin.member_key(),
         "Admin",
         "User",
-        vec![admin.device_key()],
+        vec![admin_device.device_key()],
     )
     .unwrap();
     let (genesis, _) = Trie::genesis(vec![admin_leaf])
@@ -62,13 +66,14 @@ fn genesis_and_admit(admin: &SigningKeypair) -> (Trie, Trie, org_members::delta:
 
 #[tokio::test]
 async fn delivers_and_verifies_admit_over_relay_by_id() {
-    // Admin MEMBER key signs the envelope (doubles as device key in fixture).
+    // Admin MEMBER key signs the envelope.
     let admin = SigningKeypair::from_seed([1u8; 32]);
-    let a_device = SigningKeypair::from_seed([10u8; 32]); // A's iroh identity
+    // A's iroh identity, enrolled in the trie as the admin's device.
+    let a_device = SigningKeypair::from_seed([10u8; 32]);
     let b_device = SigningKeypair::from_seed([11u8; 32]); // B's iroh identity
     let org = OrgId::new([5u8; 20]);
 
-    let (genesis, new_trie, delta) = genesis_and_admit(&admin);
+    let (genesis, new_trie, delta) = genesis_and_admit(&admin, &a_device);
     let new_root = new_trie.root_hash().unwrap();
     let env = SignedDeltaEnvelope::build(org, 2, &delta, &admin).unwrap();
     let msg = WireMessage {

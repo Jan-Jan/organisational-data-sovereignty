@@ -24,7 +24,10 @@ with the annotation: each control was worded from the behaviour the requirement
 already stated, and where the software falls short of that behaviour it is the
 residual risk that says so (REQ-ewdg2q, PR-zz4exm). (Corrected 2026-10-03:
 PR-zz4exm is resolved; REQ-ewdg2q's remaining shortfalls are the wire path,
-PR-z463w5 and PR-fzu25w — see the note under REQ-ewdg2q.)
+PR-z463w5 and PR-fzu25w — see the note under REQ-ewdg2q; the owner has since
+resolved both by ruling, which moves those checks to the caller (security
+check 11 in `org-members/README.md`) rather than removing them, and leaves the
+wire path as the one gap in the software.)
 
 ## Membership identity
 
@@ -102,8 +105,18 @@ unchanged (the hazard register's not-minted control 2; org-node's REQ-q92yac);
 a removal that installs a key the removed device held *earlier* (PR-z463w5);
 and a device removed by `delete_member` followed by `add_member` with the same
 key, which no device-removal operation sees (PR-fzu25w). "Met" here means met
-by the two device-removal operations, not by every route to the same state. The
-paragraph above is kept as the record of the gap.
+by the two device-removal operations, not by every route to the same state.
+(Ruled 2026-10-03 by the owner: a key no longer held is not refused, and a
+deleted `MemberId` is never legitimately re-added; PR-z463w5 and PR-fzu25w are
+resolved by ruling. Every key still held anywhere in the organisation is
+refused, the removed device's own included — `DuplicateKey`, LLR-fym7dy, a
+later decision the same day. The requirement's purpose — a removed device
+cannot derive access from a key it held — therefore holds only if the caller
+never supplies a key no longer held that a removed device holds the secret of,
+nor gives a re-admitted member (under a fresh `MemberId`) such a key; that duty
+is security check 11 in `org-members/README.md`. Only re-adding a deleted `MemberId` is outside the
+contract. The wire path is the one gap in the software that stands.) The paragraph
+above is kept as the record of the gap.
 
 **REQ-r784fu**: The software shall provide an operation that removes every
 device key from a member and replaces that member's member-as-a-group key in one step,

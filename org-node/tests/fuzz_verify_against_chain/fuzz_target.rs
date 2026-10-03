@@ -24,14 +24,16 @@ use org_node::keys::SigningKeypair;
 use org_node::sequence::SeqGuard;
 use org_node::verify::{verify_envelope_against_chain, VerifyContext};
 
-fn fixed_trie(admin: &SigningKeypair) -> OrgTrie<Blake3Hasher> {
+// The admin's device is a keypair of its own: org-members refuses a leaf whose
+// member key is also an enrolled device key (`DuplicateKey`).
+fn fixed_trie(admin: &SigningKeypair, admin_device: &SigningKeypair) -> OrgTrie<Blake3Hasher> {
     let leaf = MemberLeaf::new(
         MemberId::new([1u8; 32]),
         "admin",
         admin.member_key(),
         "T",
         "U",
-        vec![admin.device_key()],
+        vec![admin_device.device_key()],
     )
     .unwrap();
     let (trie, _) = OrgTrie::<Blake3Hasher>::genesis(vec![leaf]).unwrap().recalculate().unwrap();
@@ -40,7 +42,10 @@ fn fixed_trie(admin: &SigningKeypair) -> OrgTrie<Blake3Hasher> {
 
 fn main() {
     let admin = SigningKeypair::from_seed([1u8; 32]);
-    let local = fixed_trie(&admin);
+    // Same seed as `test_fixtures::ADMIN_DEVICE_SEED`; this target builds
+    // without `test-support`, so it cannot import it.
+    let admin_device = SigningKeypair::from_seed([4u8; 32]);
+    let local = fixed_trie(&admin, &admin_device);
     let org = OrgId::new([5u8; 20]);
     let mut chain = MockChain::new();
     chain.set(org, OrgState { root_hash: local.root_hash().unwrap(), org_pub_key: [0u8; 32], epoch: 9 });

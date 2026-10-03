@@ -590,7 +590,8 @@ proptest! {
 // ============================================================
 // Device-removal key replacement: removing a device or isolating
 // a member must replace the member-as-a-group key, or change
-// nothing (PR-zz4exm).
+// nothing (PR-zz4exm). Routine rotation is held to the same
+// contract (LLR-k89ahd, owner ruling 2026-10-03).
 // ============================================================
 
 /// Members in the device-removal pool. Small, so ops collide often.
@@ -621,7 +622,7 @@ enum DeviceOp {
     DeleteDevice(usize, usize, KeyChoice),
     Isolate(usize, KeyChoice),
     AddDevice(usize, usize),
-    Rotate(usize, u8),
+    Rotate(usize, KeyChoice),
 }
 
 fn arb_device_op() -> impl Strategy<Value = DeviceOp> {
@@ -632,7 +633,7 @@ fn arb_device_op() -> impl Strategy<Value = DeviceOp> {
             .prop_map(|(m, d, k)| DeviceOp::DeleteDevice(m, d, k)),
         2 => (member.clone(), arb_key_choice()).prop_map(|(m, k)| DeviceOp::Isolate(m, k)),
         2 => (member.clone(), device).prop_map(|(m, d)| DeviceOp::AddDevice(m, d)),
-        1 => (member, 0..4u8).prop_map(|(m, v)| DeviceOp::Rotate(m, v)),
+        2 => (member, arb_key_choice()).prop_map(|(m, k)| DeviceOp::Rotate(m, k)),
     ]
 }
 
@@ -681,15 +682,15 @@ fn resolve_key(choice: &KeyChoice, member_idx: usize, current: P2pMemberKey) -> 
 }
 
 proptest! {
-    /// verifies: LLR-s97ywt, LLR-w92psx
+    /// verifies: LLR-s97ywt, LLR-w92psx, LLR-k89ahd
     ///
-    /// Every successful `delete_p2p_device` / `emergency_isolate_member`
-    /// installs the supplied key and that key differs from the one it
-    /// replaces. `P2pKeyNotReplaced` is returned only when the supplied key
-    /// equalled the current key. A refusal is atomic by construction — the
-    /// operations take `&self` and return `Result<Self, _>`, so an `Err`
-    /// carries no trie — so the property checks the error, not a re-read of
-    /// the unchanged input trie.
+    /// Every successful `delete_p2p_device` / `emergency_isolate_member` /
+    /// `rotate_p2p_key` installs the supplied key and that key differs from
+    /// the one it replaces. `P2pKeyNotReplaced` is returned only when the
+    /// supplied key equalled the current key. A refusal is atomic by
+    /// construction — the operations take `&self` and return
+    /// `Result<Self, _>`, so an `Err` carries no trie — so the property checks
+    /// the error, not a re-read of the unchanged input trie.
     #[test]
     fn device_removal_never_keeps_key(
         ops in proptest::collection::vec(arb_device_op(), 1..40),
@@ -714,12 +715,13 @@ proptest! {
                 DeviceOp::AddDevice(_, d) => {
                     (trie.add_p2p_device(&id, pool_device(member_idx, *d)), None)
                 }
-                DeviceOp::Rotate(_, v) => {
-                    (trie.rotate_p2p_key(&id, pool_key(member_idx, *v)), None)
+                DeviceOp::Rotate(_, choice) => {
+                    let key = resolve_key(choice, member_idx, current);
+                    (trie.rotate_p2p_key(&id, key), Some(key))
                 }
             };
 
-            // Only the removal ops carry the key-replacement property.
+            // Only the key-replacing ops carry the key-replacement property.
             let Some(supplied) = supplied else {
                 if let Ok(next) = result {
                     trie = next;
@@ -735,11 +737,15 @@ proptest! {
                         "{:?} succeeded but kept the member's key", op,
                     );
                     prop_assert!(*after.p2p_key() == supplied, "{:?} installed another key", op);
-                    if let DeviceOp::DeleteDevice(_, d, _) = op {
-                        prop_assert!(!after.has_p2p_device(&pool_device(member_idx, *d)));
-                        prop_assert_eq!(after.p2p_device_count(), before.p2p_device_count() - 1);
-                    } else {
-                        prop_assert_eq!(after.p2p_device_count(), 0);
+                    match op {
+                        DeviceOp::DeleteDevice(_, d, _) => {
+                            prop_assert!(!after.has_p2p_device(&pool_device(member_idx, *d)));
+                            prop_assert_eq!(after.p2p_device_count(), before.p2p_device_count() - 1);
+                        }
+                        DeviceOp::Rotate(..) => {
+                            prop_assert_eq!(after.p2p_device_count(), before.p2p_device_count());
+                        }
+                        _ => prop_assert_eq!(after.p2p_device_count(), 0),
                     }
                     trie = next;
                 }
@@ -759,8 +765,10 @@ proptest! {
                 }
                 Err(err) => {
                     // Pool members are never deleted, so no IdNotFound, and
-                    // isolate has no other refusal: the only other error is a
-                    // delete of an absent device, whatever key was supplied.
+                    // pool keys are never held by another member or as a
+                    // device, so no DuplicateKey (keys_stay_unique covers
+                    // that): the only other error is a delete of an absent
+                    // device, whatever key was supplied.
                     let DeviceOp::DeleteDevice(_, d, _) = op else {
                         return Err(TestCaseError::fail(format!("{:?} failed with {:?}", op, err)));
                     };
@@ -768,6 +776,262 @@ proptest! {
                     prop_assert!(!before.has_p2p_device(&pool_device(member_idx, *d)));
                 }
             }
+        }
+    }
+}
+
+// ============================================================
+// Key uniqueness (LLR-v6gfc7, LLR-fym7dy, LLR-gjj6bx): every key in
+// the organisation is held in exactly one place. Member and device
+// keys are drawn from one small shared pool, so ops collide often,
+// in every direction (member/member, device/device, member/device).
+// ============================================================
+
+/// Members in the uniqueness pool.
+const UNIQ_MEMBERS: usize = 4;
+/// Shared key seeds. Small, so a supplied key is often already held.
+const UNIQ_KEYS: usize = 10;
+
+fn uniq_id(m: usize) -> MemberId {
+    member_id(&format!("uniq-{}-id", HANDLES[m]))
+}
+
+fn uniq_bytes(k: usize) -> [u8; 32] {
+    *uniq_mk(k).as_bytes()
+}
+
+fn uniq_mk(k: usize) -> P2pMemberKey {
+    member_key(&format!("uniq-key-{}", k))
+}
+
+fn uniq_dk(k: usize) -> P2pDeviceKey {
+    device_key(&format!("uniq-key-{}", k))
+}
+
+fn uniq_leaf(m: usize, mk: usize, devices: &[usize]) -> Option<MemberLeaf> {
+    MemberLeaf::new(
+        uniq_id(m),
+        HANDLES[m],
+        uniq_mk(mk),
+        "Test",
+        "User",
+        devices.iter().map(|d| uniq_dk(*d)).collect(),
+    )
+    .ok()
+}
+
+/// Every key the trie holds, with repetitions.
+fn held_keys(trie: &TestTrie) -> Vec<[u8; 32]> {
+    let mut keys = Vec::new();
+    for m in trie.members() {
+        keys.extend(leaf_key_bytes(&m));
+    }
+    keys
+}
+
+fn leaf_key_bytes(leaf: &MemberLeaf) -> Vec<[u8; 32]> {
+    let mut keys = vec![*leaf.p2p_key().as_bytes()];
+    keys.extend(leaf.p2p_devices().iter().map(|d| *d.as_bytes()));
+    keys
+}
+
+/// Every key, with repetitions, of the record a change set removing `removed`
+/// and upserting `leaf` produces from `base`.
+fn delta_result_keys(base: &TestTrie, removed: &[MemberId], leaf: &MemberLeaf) -> Vec<[u8; 32]> {
+    let mut keys: Vec<[u8; 32]> = base
+        .members()
+        .iter()
+        .filter(|x| x.id() != leaf.id() && !removed.contains(x.id()))
+        .flat_map(leaf_key_bytes)
+        .collect();
+    keys.extend(leaf_key_bytes(leaf));
+    keys
+}
+
+fn has_repeat(keys: &[[u8; 32]]) -> bool {
+    let mut sorted = keys.to_vec();
+    sorted.sort();
+    sorted.windows(2).any(|w| w[0] == w[1])
+}
+
+#[derive(Debug, Clone)]
+enum UniqOp {
+    AddMember(usize, usize, usize, usize),
+    DeleteMember(usize),
+    AddDevice(usize, usize),
+    Rotate(usize, usize),
+    /// Delete the member's `(d mod count)`-th device, replacing the key with `k`.
+    DeleteDevice(usize, usize, usize),
+    Isolate(usize, usize),
+    /// Upsert member `m` through a forged delta against the recalculated
+    /// record: member key `mk`, and, when it holds no device or is new, the
+    /// single device `dk`. Exercises apply_delta.
+    DeltaUpsert(usize, usize, usize),
+    /// Remove member `m` and give member `n` member `m`'s member key, in one
+    /// delta: the key was held in the base, and the result holds it once.
+    DeltaHandOver(usize, usize),
+}
+
+fn arb_uniq_op() -> impl Strategy<Value = UniqOp> {
+    let m = 0..UNIQ_MEMBERS;
+    let k = 0..UNIQ_KEYS;
+    prop_oneof![
+        2 => (m.clone(), k.clone(), k.clone(), k.clone())
+            .prop_map(|(m, a, b, c)| UniqOp::AddMember(m, a, b, c)),
+        1 => m.clone().prop_map(UniqOp::DeleteMember),
+        2 => (m.clone(), k.clone()).prop_map(|(m, k)| UniqOp::AddDevice(m, k)),
+        2 => (m.clone(), k.clone()).prop_map(|(m, k)| UniqOp::Rotate(m, k)),
+        2 => (m.clone(), 0..4usize, k.clone()).prop_map(|(m, d, k)| UniqOp::DeleteDevice(m, d, k)),
+        1 => (m.clone(), k.clone()).prop_map(|(m, k)| UniqOp::Isolate(m, k)),
+        2 => (m.clone(), k.clone(), k).prop_map(|(m, a, b)| UniqOp::DeltaUpsert(m, a, b)),
+        1 => (m.clone(), m).prop_map(|(a, b)| UniqOp::DeltaHandOver(a, b)),
+    ]
+}
+
+/// A delta against `base` (calculated) with the given removals and upserts.
+fn uniq_delta(
+    base: &TestTrie,
+    removed: Vec<MemberId>,
+    upserted: Vec<MemberLeaf>,
+) -> org_members::delta::Delta {
+    let mut delta = base.calculate_delta(base).unwrap();
+    org_members::delta::test_support::delta_set_removed(&mut delta, removed);
+    org_members::delta::test_support::delta_set_upserted(&mut delta, upserted);
+    delta
+}
+
+proptest! {
+    /// verifies: LLR-v6gfc7, LLR-fym7dy, LLR-gjj6bx
+    ///
+    /// After every successful operation each key is held in exactly one
+    /// place, and a key-replacing direct operation never installed a key
+    /// that was held before it. `DuplicateKey` is returned only when a key
+    /// was genuinely held — for a direct operation, before it or twice in the
+    /// record it would produce; for a change set, twice in the record it
+    /// would produce (LLR-gjj6bx checks the result only). And after every
+    /// step, the change set of everything accepted so far, applied to the
+    /// genesis record, is accepted and reproduces the current root.
+    #[test]
+    fn keys_stay_unique(
+        initial in proptest::collection::vec((0..UNIQ_KEYS, 0..UNIQ_KEYS), 1..=UNIQ_MEMBERS),
+        ops in proptest::collection::vec(arb_uniq_op(), 1..40),
+    ) {
+        // Genesis itself: refused exactly when the members share a key.
+        let leaves: Vec<MemberLeaf> = initial
+            .iter()
+            .enumerate()
+            .filter_map(|(m, (mk, dk))| uniq_leaf(m, *mk, &[*dk]))
+            .collect();
+        let all: Vec<[u8; 32]> = leaves.iter().flat_map(leaf_key_bytes).collect();
+        let mut trie = match TestTrie::genesis(leaves) {
+            Ok(t) => {
+                prop_assert!(!has_repeat(&all), "genesis accepted a shared key");
+                t
+            }
+            Err(e) => {
+                prop_assert_eq!(e, OrgMembersError::DuplicateKey);
+                prop_assert!(has_repeat(&all), "genesis refused distinct keys");
+                return Ok(());
+            }
+        };
+        let start = trie.clone();
+
+        for op in &ops {
+            let held = held_keys(&trie);
+            let is_held = |k: &[u8; 32]| held.contains(k);
+
+            // `genuine`: the key-uniqueness rule really does refuse this op.
+            // `fresh`: the keys a success must not have found held before.
+            let (result, genuine, fresh): (Result<TestTrie, OrgMembersError>, bool, Vec<[u8; 32]>) = match op {
+                UniqOp::AddMember(m, mk, d1, d2) => {
+                    let Some(leaf) = uniq_leaf(*m, *mk, &[*d1, *d2]) else { continue };
+                    let keys = leaf_key_bytes(&leaf);
+                    let genuine = has_repeat(&keys) || keys.iter().any(is_held);
+                    (trie.add_member(leaf), genuine, keys)
+                }
+                UniqOp::DeleteMember(m) => (trie.delete_member(&uniq_id(*m)), false, vec![]),
+                UniqOp::AddDevice(m, k) => {
+                    (trie.add_p2p_device(&uniq_id(*m), uniq_dk(*k)), is_held(&uniq_bytes(*k)), vec![uniq_bytes(*k)])
+                }
+                UniqOp::Rotate(m, k) => {
+                    (trie.rotate_p2p_key(&uniq_id(*m), uniq_mk(*k)), is_held(&uniq_bytes(*k)), vec![uniq_bytes(*k)])
+                }
+                UniqOp::DeleteDevice(m, d, k) => {
+                    let Some(leaf) = trie.get(&uniq_id(*m)) else { continue };
+                    let devices = leaf.p2p_devices();
+                    if devices.is_empty() { continue; }
+                    let device = devices[*d % devices.len()];
+                    (
+                        trie.delete_p2p_device(&uniq_id(*m), &device, uniq_mk(*k)),
+                        is_held(&uniq_bytes(*k)),
+                        vec![uniq_bytes(*k)],
+                    )
+                }
+                UniqOp::Isolate(m, k) => {
+                    (trie.emergency_isolate_member(&uniq_id(*m), uniq_mk(*k)), is_held(&uniq_bytes(*k)), vec![uniq_bytes(*k)])
+                }
+                UniqOp::DeltaUpsert(m, mk, dk) => {
+                    let (base, _) = trie.recalculate().unwrap();
+                    let old = base.get(&uniq_id(*m));
+                    let leaf = match &old {
+                        Some(o) if o.p2p_device_count() > 0 => MemberLeaf::new(
+                            *o.id(), o.handle(), uniq_mk(*mk), o.name(), o.surname(), o.p2p_devices().to_vec(),
+                        ).ok(),
+                        _ => uniq_leaf(*m, *mk, &[*dk]),
+                    };
+                    let Some(leaf) = leaf else { continue };
+                    // A change set is judged on the record it produces only.
+                    let genuine = has_repeat(&delta_result_keys(&base, &[], &leaf));
+                    let delta = uniq_delta(&base, vec![], vec![leaf]);
+                    let result = base
+                        .apply_delta(&delta)
+                        .and_then(|c| { let r = c.root_hash(); c.verify_against(&r) });
+                    (result, genuine, vec![])
+                }
+                UniqOp::DeltaHandOver(from, to) => {
+                    if from == to { continue; }
+                    let (base, _) = trie.recalculate().unwrap();
+                    let (Some(gone), Some(kept)) = (base.get(&uniq_id(*from)), base.get(&uniq_id(*to))) else { continue };
+                    if kept.p2p_device_count() == 0 { continue; }
+                    let Ok(leaf) = MemberLeaf::new(
+                        *kept.id(), kept.handle(), *gone.p2p_key(), kept.name(), kept.surname(), kept.p2p_devices().to_vec(),
+                    ) else { continue };
+                    // The key was held in the base, by `from`; only the
+                    // resulting record counts.
+                    let genuine = has_repeat(&delta_result_keys(&base, &[*gone.id()], &leaf));
+                    let delta = uniq_delta(&base, vec![*gone.id()], vec![leaf]);
+                    let result = base
+                        .apply_delta(&delta)
+                        .and_then(|c| { let r = c.root_hash(); c.verify_against(&r) });
+                    (result, genuine, vec![])
+                }
+            };
+
+            match result {
+                Ok(next) => {
+                    prop_assert!(!has_repeat(&held_keys(&next)), "{:?} left a key held twice", op);
+                    prop_assert!(!genuine, "{:?} succeeded with a key already held", op);
+                    for k in &fresh {
+                        prop_assert!(!is_held(k), "{:?} installed a key held before it", op);
+                    }
+                    trie = next;
+                }
+                Err(OrgMembersError::DuplicateKey) => {
+                    prop_assert!(genuine, "{:?} refused with DuplicateKey but no key was held", op);
+                }
+                Err(_) => {}
+            }
+
+            // Whatever sequence was accepted, its change set against genesis
+            // is accepted and reproduces the root.
+            let (current, _) = trie.recalculate().unwrap();
+            let root = current.root_hash().unwrap();
+            let delta = current.calculate_delta(&start).unwrap();
+            let replayed = start
+                .apply_delta(&delta)
+                .and_then(|c| c.verify_against(&root));
+            prop_assert!(replayed.is_ok(), "change set after {:?} refused: {:?}", op, replayed.err());
+            prop_assert_eq!(replayed.unwrap().root_hash().unwrap(), root);
         }
     }
 }

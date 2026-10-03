@@ -49,11 +49,23 @@ pub fn genesis_trie(admin: &SigningKeypair, admin_device: &SigningKeypair) -> Tr
     trie
 }
 
+/// Seed of the admin's device keypair. Distinct from every other seed the
+/// fixtures use ([1u8;32] admin member, [2u8;32] and [3u8;32] bob), because
+/// org-members refuses an organisation in which one key is held twice
+/// (`OrgMembersError::DuplicateKey`), a member key equal to its own device key
+/// included.
+pub const ADMIN_DEVICE_SEED: [u8; 32] = [4u8; 32];
+
+/// The admin's device keypair: a key of its own, never the admin's member key.
+pub fn admin_device() -> SigningKeypair {
+    SigningKeypair::from_seed(ADMIN_DEVICE_SEED)
+}
+
 /// Build the "admit member B (id=[2u8;32])" delta against a genesis trie
-/// authored by `admin`. Returns (delta, new_trie). `admin` doubles as the
-/// admin device for fixture simplicity.
+/// authored by `admin`, whose device is [`admin_device`]. Returns
+/// (delta, new_trie).
 pub fn admit_member_delta(admin: &SigningKeypair) -> (Delta, Trie) {
-    let base = genesis_trie(admin, admin);
+    let base = genesis_trie(admin, &admin_device());
     let b_member = SigningKeypair::from_seed([2u8; 32]);
     let b_device = SigningKeypair::from_seed([3u8; 32]);
     let b_fix = NodeFixture { keypair: b_member, device: b_device, id: MemberId::new([2u8; 32]) };

@@ -26,6 +26,14 @@ pub enum OrgMembersError {
     #[error("replacement p2p key equals the current key")]
     P2pKeyNotReplaced,
 
+    /// A member key or device key that would be held in two places in this
+    /// organisation: already held by another member, as any enrolled device
+    /// (for a replacement key, the device the operation removes included), or
+    /// by the same leaf as both member key and device. Keys no longer held are
+    /// not refused. LLR-v6gfc7, LLR-fym7dy, LLR-gjj6bx.
+    #[error("key already held in this organisation")]
+    DuplicateKey,
+
     #[error("device slots full (max 4)")]
     DeviceSlotsFull,
 

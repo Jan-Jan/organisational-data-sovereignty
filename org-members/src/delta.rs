@@ -9,7 +9,7 @@ use crate::error::OrgMembersError;
 use crate::hasher::TrieHasher;
 use crate::node::Node;
 use crate::smt::DefaultHashes;
-use crate::trie::OrgTrie;
+use crate::trie::{KeyIndex, OrgTrie};
 use crate::types::{MemberId, MemberLeaf, RootHash};
 
 /// A set of changes anchored to a specific base trie root.
@@ -127,6 +127,7 @@ pub struct CandidateTrie<H: TrieHasher> {
     pub(crate) root_hash: RootHash,
     pub(crate) skeleton_index: HashMap<String, String>,
     pub(crate) handle_index: HashMap<String, MemberId>,
+    pub(crate) key_index: KeyIndex,
     pub(crate) _hasher: core::marker::PhantomData<H>,
 }
 
@@ -147,6 +148,7 @@ impl<H: TrieHasher> CandidateTrie<H> {
             self.root_hash,
             self.skeleton_index,
             self.handle_index,
+            self.key_index,
         ))
     }
 }

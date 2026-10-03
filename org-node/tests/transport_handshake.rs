@@ -20,16 +20,20 @@ use org_members::{MemberId, MemberLeaf};
 type Trie = OrgTrie<Blake3Hasher>;
 
 // Inline genesis_and_admit — test_fixtures is lib-private to the crate.
-// Matches the fixture convention: admin keypair doubles as device key.
+// The admin's device is a keypair of its own: org-members refuses a leaf whose
+// member key is also an enrolled device key (`DuplicateKey`).
 // Returns (genesis_trie, new_trie, delta) where new_trie adds bob.
-fn genesis_and_admit(admin: &SigningKeypair) -> (Trie, Trie, org_members::delta::Delta) {
+fn genesis_and_admit(
+    admin: &SigningKeypair,
+    admin_device: &SigningKeypair,
+) -> (Trie, Trie, org_members::delta::Delta) {
     let admin_leaf = MemberLeaf::new(
         MemberId::new([1u8; 32]),
         "admin",
         admin.member_key(),
         "Admin",
         "User",
-        vec![admin.device_key()],
+        vec![admin_device.device_key()],
     )
     .unwrap();
     let (genesis, _) = Trie::genesis(vec![admin_leaf])
@@ -54,17 +58,17 @@ fn genesis_and_admit(admin: &SigningKeypair) -> (Trie, Trie, org_members::delta:
 
 #[tokio::test]
 async fn delivers_and_verifies_admit_over_iroh() {
-    // Admin keypair: MEMBER key signs the envelope (same keypair doubles as
-    // device key in our fixture, matching test_fixtures convention).
+    // Admin keypair: MEMBER key signs the envelope.
     let admin = SigningKeypair::from_seed([1u8; 32]);
-    // A's iroh identity (device key = iroh EndpointId).
+    // A's iroh identity (device key = iroh EndpointId), enrolled in the trie
+    // as the admin's device.
     let a_device = SigningKeypair::from_seed([10u8; 32]);
     // B's iroh identity.
     let b_device = SigningKeypair::from_seed([11u8; 32]);
     let org = OrgId::new([5u8; 20]);
 
     // Build genesis + admit-bob delta.
-    let (genesis, new_trie, delta) = genesis_and_admit(&admin);
+    let (genesis, new_trie, delta) = genesis_and_admit(&admin, &a_device);
     let new_root = new_trie.root_hash().unwrap();
     let env = SignedDeltaEnvelope::build(org, 2, &delta, &admin).unwrap();
     let msg = WireMessage { envelope: env.clone(), org_secret: Some([0xab; 32]), genesis_snapshot: None };

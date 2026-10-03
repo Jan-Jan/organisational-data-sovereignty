@@ -6,7 +6,7 @@ may still install a key the removed device held earlier, and `rotate_p2p_key`
 accepts any key — including one the removed device held — after a removal.
 affects: REQ-ewdg2q, REQ-r784fu
 opened: 2026-10-03
-status: open
+status: resolved
 
 Found by the independent review of the change that resolved PR-zz4exm
 (`worktree-fix-stale-problems`), not by a failing test. REQ-ewdg2q's purpose is
@@ -56,3 +56,28 @@ Bearing on the register: HAZ-s39gbh's residual is not acceptable and was not
 re-scored by the PR-zz4exm change; this report is a further reason it stands,
 and it should be weighed with RC-mqtks7's wire-path bypass when HAZ-s39gbh is
 next re-evaluated.
+
+Resolved, 2026-10-03, by owner ruling. The ruling: a key **no longer held** — a
+member key used earlier and since replaced, or the key of a device removed
+earlier — and a non-canonical encoding of a held key are not checked and are
+not defects: the requirement's clause — reject "the key being replaced" — is
+the whole of what it asks, and key hygiene beyond it belongs to the caller.
+None of the three sequences above is refused: each installs a key that is no
+longer held anywhere when it is installed. (The ruling as first given said
+"only the *current* key is refused"; two further owner decisions the same day,
+on branch `worktree-rotate-same-key`, plan
+`docs/plans/2026-10-03-rotate-same-key.md`, narrowed it to the wording above.)
+Those two decisions: `rotate_p2p_key` refuses the exact current key
+(`P2pKeyNotReplaced`, LLR-k89ahd), and every key in the organisation is held in
+one place, so a replacement key held anywhere before the operation — another
+member's key or any enrolled device key, the key of the device being removed
+included — is refused with `DuplicateKey` (LLR-v6gfc7, LLR-fym7dy, LLR-gjj6bx).
+The third facet (the removed device's own key) is therefore now refused; the
+earlier-key sequences and the encoding facet are not.
+
+The duty the ruling transfers is written down where integrators read it:
+security check 11 in `org-members/README.md`, and the doc-comments of
+`rotate_p2p_key`, `delete_p2p_device` and `emergency_isolate_member`. The risk
+is not removed — a device holding the secret of a key no longer held, which the
+caller supplies, regains access — it is carried by the caller, and HAZ-s39gbh's
+register entry says so.

@@ -309,6 +309,34 @@ fn rotate_p2p_key_nonexistent_fails() {
     assert_eq!(err.unwrap_err(), OrgMembersError::IdNotFound);
 }
 
+/// verifies: LLR-k89ahd
+///
+/// Owner ruling 2026-10-03: rotating to the exact current key is refused.
+/// The refusal is atomic by construction (`&self` → `Result<Self, _>`);
+/// the evidence is the error itself.
+#[test]
+fn rotate_p2p_key_rejects_unchanged_key() {
+    let trie = TestTrie::genesis(vec![alice()]).unwrap();
+    let current = *trie.get(&member_id("alice-id")).unwrap().p2p_key();
+    let err = trie.rotate_p2p_key(&member_id("alice-id"), current);
+    assert_eq!(err.unwrap_err(), OrgMembersError::P2pKeyNotReplaced);
+}
+
+/// verifies: LLR-k89ahd, LLR-v3jqau
+///
+/// An absent member reports `IdNotFound` before any key comparison.
+#[test]
+fn rotate_p2p_key_nonexistent_with_any_key_reports_id() {
+    let trie = TestTrie::genesis(vec![alice()]).unwrap();
+    // A key that is some member's current key, and one that is nobody's: the
+    // absent id decides the error either way.
+    let held = *trie.get(&member_id("alice-id")).unwrap().p2p_key();
+    for key in [held, member_key("ghost-rotated")] {
+        let err = trie.rotate_p2p_key(&member_id("ghost-id"), key);
+        assert_eq!(err.unwrap_err(), OrgMembersError::IdNotFound);
+    }
+}
+
 // --- add_p2p_device tests ---
 
 /// verifies: REQ-xdx2c2, LLR-4phmjf
@@ -2371,4 +2399,578 @@ fn add_then_delete_returns_to_the_empty_root() {
         .unwrap();
 
     assert_eq!(empty, emptied);
+}
+
+// --- Key uniqueness across the organisation (LLR-v6gfc7, LLR-fym7dy, LLR-gjj6bx) ---
+//
+// `member_key(s)` and `device_key(s)` derive the same 32 bytes from the same
+// seed, so `member_key("alice-d1")` is alice's enrolled device key read as a
+// member key. The refusals below are atomic by construction: every operation
+// takes `&self` and returns `Result<Self, _>`, so an `Err` carries no trie.
+
+/// A leaf with a fixed name, for key-uniqueness fixtures.
+fn keyed_leaf(seed: &str, mk: P2pMemberKey, devices: Vec<P2pDeviceKey>) -> MemberLeaf {
+    MemberLeaf::new(member_id(&format!("{seed}-id")), seed, mk, "Key", "Holder", devices).unwrap()
+}
+
+/// Every key held in `trie`, member and device keys together, as bytes.
+fn held_key_bytes(trie: &TestTrie) -> Vec<[u8; 32]> {
+    let mut keys = Vec::new();
+    for m in trie.members() {
+        keys.push(*m.p2p_key().as_bytes());
+        keys.extend(m.p2p_devices().iter().map(|d| *d.as_bytes()));
+    }
+    keys
+}
+
+fn assert_keys_unique(trie: &TestTrie) {
+    let mut keys = held_key_bytes(trie);
+    let n = keys.len();
+    keys.sort();
+    keys.dedup();
+    assert_eq!(keys.len(), n, "a key is held in two places");
+}
+
+/// verifies: LLR-v6gfc7
+///
+/// Normal case: members whose member and device keys are all distinct are
+/// accepted, and the record holds each key once.
+#[test]
+fn genesis_accepts_distinct_keys() {
+    let trie = TestTrie::genesis(vec![alice(), bob(), jan_jan()]).unwrap();
+    assert_keys_unique(&trie);
+    assert_eq!(held_key_bytes(&trie).len(), 7);
+}
+
+/// verifies: LLR-v6gfc7
+#[test]
+fn genesis_rejects_member_key_held_by_two_members() {
+    let other = keyed_leaf("eve", member_key("alice-mk"), vec![device_key("eve-d1")]);
+    let err = TestTrie::genesis(vec![alice(), other]).unwrap_err();
+    assert_eq!(err, OrgMembersError::DuplicateKey);
+}
+
+/// verifies: LLR-v6gfc7
+#[test]
+fn genesis_rejects_device_key_enrolled_under_two_members() {
+    let other = keyed_leaf("eve", member_key("eve-mk"), vec![device_key("alice-d1")]);
+    let err = TestTrie::genesis(vec![alice(), other]).unwrap_err();
+    assert_eq!(err, OrgMembersError::DuplicateKey);
+}
+
+/// verifies: LLR-v6gfc7
+#[test]
+fn genesis_rejects_member_key_equal_to_another_members_device_key() {
+    let other = keyed_leaf("eve", member_key("alice-d1"), vec![device_key("eve-d1")]);
+    let err = TestTrie::genesis(vec![alice(), other]).unwrap_err();
+    assert_eq!(err, OrgMembersError::DuplicateKey);
+    // And the other way round: a device key equal to an earlier member key.
+    let other = keyed_leaf("eve", member_key("eve-mk"), vec![device_key("alice-mk")]);
+    let err = TestTrie::genesis(vec![alice(), other]).unwrap_err();
+    assert_eq!(err, OrgMembersError::DuplicateKey);
+}
+
+/// verifies: LLR-v6gfc7
+///
+/// Boundary: a single member whose member key is one of its own devices.
+#[test]
+fn genesis_rejects_member_key_equal_to_own_device_key() {
+    let leaf = keyed_leaf("eve", member_key("eve-d2"), vec![device_key("eve-d1"), device_key("eve-d2")]);
+    let err = TestTrie::genesis(vec![leaf]).unwrap_err();
+    assert_eq!(err, OrgMembersError::DuplicateKey);
+}
+
+/// verifies: LLR-v6gfc7
+///
+/// Check order: `DuplicateId` and the handle checks come before `DuplicateKey`.
+#[test]
+fn genesis_reports_id_and_handle_before_shared_key() {
+    // Same id, same keys.
+    let err = TestTrie::genesis(vec![alice(), alice()]).unwrap_err();
+    assert_eq!(err, OrgMembersError::DuplicateId);
+    // Different id, same handle, same member key.
+    let twin = MemberLeaf::new(
+        member_id("alice-twin-id"),
+        "alice",
+        member_key("alice-mk"),
+        "A",
+        "B",
+        vec![device_key("alice-d1")],
+    )
+    .unwrap();
+    let err = TestTrie::genesis(vec![alice(), twin]).unwrap_err();
+    assert_eq!(err, OrgMembersError::DuplicateHandle);
+}
+
+/// verifies: LLR-v6gfc7
+#[test]
+fn add_member_rejects_member_key_held_by_another_member() {
+    let trie = TestTrie::genesis(vec![alice()]).unwrap();
+    let other = keyed_leaf("eve", member_key("alice-mk"), vec![device_key("eve-d1")]);
+    assert_eq!(trie.add_member(other).unwrap_err(), OrgMembersError::DuplicateKey);
+}
+
+/// verifies: LLR-v6gfc7
+#[test]
+fn add_member_rejects_device_key_held_by_another_member() {
+    let trie = TestTrie::genesis(vec![alice()]).unwrap();
+    // Another member's device key.
+    let other = keyed_leaf("eve", member_key("eve-mk"), vec![device_key("alice-d1")]);
+    assert_eq!(trie.add_member(other).unwrap_err(), OrgMembersError::DuplicateKey);
+    // Another member's member key, enrolled as a device.
+    let other = keyed_leaf("eve", member_key("eve-mk"), vec![device_key("alice-mk")]);
+    assert_eq!(trie.add_member(other).unwrap_err(), OrgMembersError::DuplicateKey);
+}
+
+/// verifies: LLR-v6gfc7
+#[test]
+fn add_member_rejects_member_key_equal_to_a_device_key() {
+    let trie = TestTrie::genesis(vec![alice()]).unwrap();
+    // Another member's device.
+    let other = keyed_leaf("eve", member_key("alice-d1"), vec![device_key("eve-d1")]);
+    assert_eq!(trie.add_member(other).unwrap_err(), OrgMembersError::DuplicateKey);
+    // Its own device.
+    let own = keyed_leaf("eve", member_key("eve-d1"), vec![device_key("eve-d1")]);
+    assert_eq!(trie.add_member(own).unwrap_err(), OrgMembersError::DuplicateKey);
+}
+
+/// verifies: LLR-v6gfc7
+///
+/// Check order: `DuplicateId`, then the handle checks, then `DuplicateKey`.
+#[test]
+fn add_member_reports_id_and_handle_before_shared_key() {
+    let trie = TestTrie::genesis(vec![alice()]).unwrap();
+    assert_eq!(trie.add_member(alice()).unwrap_err(), OrgMembersError::DuplicateId);
+    let twin = MemberLeaf::new(
+        member_id("alice-twin-id"),
+        "alice",
+        member_key("alice-mk"),
+        "A",
+        "B",
+        vec![device_key("alice-d1")],
+    )
+    .unwrap();
+    assert_eq!(trie.add_member(twin).unwrap_err(), OrgMembersError::DuplicateHandle);
+}
+
+/// verifies: LLR-v6gfc7
+///
+/// Normal case: only keys held now count. A deleted member's keys are no
+/// longer held, so a new member may be given them (the caller duty in README
+/// item 11 still applies — the crate keeps no history).
+#[test]
+fn add_member_accepts_keys_no_longer_held() {
+    let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
+    let trie = trie.delete_member(&member_id("bob-id")).unwrap();
+    let reuse = keyed_leaf("eve", member_key("bob-mk"), vec![device_key("bob-d1")]);
+    let trie = trie.add_member(reuse).unwrap();
+    assert_keys_unique(&trie);
+}
+
+/// verifies: LLR-v6gfc7
+#[test]
+fn add_p2p_device_rejects_key_held_by_another_member() {
+    let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
+    let id = member_id("alice-id");
+    // Bob's device, bob's member key, and alice's own member key.
+    for seed in ["bob-d1", "bob-mk", "alice-mk"] {
+        let err = trie.add_p2p_device(&id, device_key(seed)).unwrap_err();
+        assert_eq!(err, OrgMembersError::DuplicateKey, "device {seed}");
+    }
+}
+
+/// verifies: LLR-v6gfc7
+///
+/// Check order: `IdNotFound`, `DuplicateDevice` and `DeviceSlotsFull` all come
+/// before `DuplicateKey`.
+#[test]
+fn add_p2p_device_reports_earlier_refusals_before_shared_key() {
+    let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
+    let err = trie.add_p2p_device(&member_id("ghost-id"), device_key("bob-d1")).unwrap_err();
+    assert_eq!(err, OrgMembersError::IdNotFound);
+    // Alice's own device is a DuplicateDevice, not a DuplicateKey.
+    let err = trie.add_p2p_device(&member_id("alice-id"), device_key("alice-d1")).unwrap_err();
+    assert_eq!(err, OrgMembersError::DuplicateDevice);
+    // A full member offered a key another member holds.
+    let mut full = trie.clone();
+    for seed in ["alice-d2", "alice-d3", "alice-d4"] {
+        full = full.add_p2p_device(&member_id("alice-id"), device_key(seed)).unwrap();
+    }
+    let err = full.add_p2p_device(&member_id("alice-id"), device_key("bob-d1")).unwrap_err();
+    assert_eq!(err, OrgMembersError::DeviceSlotsFull);
+}
+
+/// verifies: LLR-v6gfc7
+///
+/// Normal case: a device key freed by `delete_p2p_device` is no longer held.
+#[test]
+fn add_p2p_device_accepts_key_no_longer_held() {
+    let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
+    let trie = trie
+        .delete_p2p_device(&member_id("bob-id"), &device_key("bob-d1"), member_key("bob-mk2"))
+        .unwrap();
+    let trie = trie.add_p2p_device(&member_id("alice-id"), device_key("bob-d1")).unwrap();
+    assert_keys_unique(&trie);
+}
+
+/// verifies: LLR-fym7dy
+#[test]
+fn rotate_p2p_key_rejects_key_held_elsewhere() {
+    let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
+    let id = member_id("alice-id");
+    // Bob's member key, bob's device, alice's own device.
+    for seed in ["bob-mk", "bob-d1", "alice-d1"] {
+        let err = trie.rotate_p2p_key(&id, member_key(seed)).unwrap_err();
+        assert_eq!(err, OrgMembersError::DuplicateKey, "key {seed}");
+    }
+}
+
+/// verifies: LLR-fym7dy
+///
+/// Check order: `IdNotFound` and `P2pKeyNotReplaced` come before
+/// `DuplicateKey`. The current key is held (by the member itself), and still
+/// reports `P2pKeyNotReplaced`.
+#[test]
+fn rotate_p2p_key_reports_earlier_refusals_before_shared_key() {
+    let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
+    let err = trie.rotate_p2p_key(&member_id("ghost-id"), member_key("bob-mk")).unwrap_err();
+    assert_eq!(err, OrgMembersError::IdNotFound);
+    let err = trie.rotate_p2p_key(&member_id("alice-id"), member_key("alice-mk")).unwrap_err();
+    assert_eq!(err, OrgMembersError::P2pKeyNotReplaced);
+}
+
+/// verifies: LLR-fym7dy
+///
+/// Normal case: a key this member held before, and no longer holds, is not
+/// held anywhere and is accepted (history is the caller's, README item 11).
+#[test]
+fn rotate_p2p_key_accepts_key_no_longer_held() {
+    let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
+    let id = member_id("alice-id");
+    let trie = trie.rotate_p2p_key(&id, member_key("alice-mk2")).unwrap();
+    let trie = trie.rotate_p2p_key(&id, member_key("alice-mk")).unwrap();
+    assert_eq!(trie.get(&id).unwrap().p2p_key(), &member_key("alice-mk"));
+    assert_keys_unique(&trie);
+}
+
+/// verifies: LLR-fym7dy
+///
+/// The removed device's own key is held before the operation, so it is refused
+/// as the replacement even though the result would not hold it twice.
+#[test]
+fn delete_p2p_device_rejects_removed_devices_own_key() {
+    let trie = TestTrie::genesis(vec![jan_jan()]).unwrap();
+    let err = trie
+        .delete_p2p_device(&member_id("jan-jan-id"), &device_key("jan-jan-d1"), member_key("jan-jan-d1"))
+        .unwrap_err();
+    assert_eq!(err, OrgMembersError::DuplicateKey);
+    // Last device too: alice's only device.
+    let trie = TestTrie::genesis(vec![alice()]).unwrap();
+    let err = trie
+        .delete_p2p_device(&member_id("alice-id"), &device_key("alice-d1"), member_key("alice-d1"))
+        .unwrap_err();
+    assert_eq!(err, OrgMembersError::DuplicateKey);
+}
+
+/// verifies: LLR-fym7dy
+#[test]
+fn delete_p2p_device_rejects_key_held_elsewhere() {
+    let trie = TestTrie::genesis(vec![jan_jan(), bob()]).unwrap();
+    let id = member_id("jan-jan-id");
+    // Bob's member key, bob's device, jan-jan's remaining device.
+    for seed in ["bob-mk", "bob-d1", "jan-jan-d2"] {
+        let err = trie
+            .delete_p2p_device(&id, &device_key("jan-jan-d1"), member_key(seed))
+            .unwrap_err();
+        assert_eq!(err, OrgMembersError::DuplicateKey, "key {seed}");
+    }
+}
+
+/// verifies: LLR-fym7dy
+///
+/// Check order: `IdNotFound`, `DeviceNotFound`, `P2pKeyNotReplaced`, then
+/// `DuplicateKey`.
+#[test]
+fn delete_p2p_device_reports_earlier_refusals_before_shared_key() {
+    let trie = TestTrie::genesis(vec![jan_jan(), bob()]).unwrap();
+    let err = trie
+        .delete_p2p_device(&member_id("ghost-id"), &device_key("jan-jan-d1"), member_key("bob-mk"))
+        .unwrap_err();
+    assert_eq!(err, OrgMembersError::IdNotFound);
+    let err = trie
+        .delete_p2p_device(&member_id("jan-jan-id"), &device_key("does-not-exist"), member_key("bob-mk"))
+        .unwrap_err();
+    assert_eq!(err, OrgMembersError::DeviceNotFound);
+    let err = trie
+        .delete_p2p_device(&member_id("jan-jan-id"), &device_key("jan-jan-d1"), member_key("jan-jan-mk"))
+        .unwrap_err();
+    assert_eq!(err, OrgMembersError::P2pKeyNotReplaced);
+}
+
+/// verifies: LLR-fym7dy
+#[test]
+fn emergency_isolate_member_rejects_key_held_elsewhere() {
+    let trie = TestTrie::genesis(vec![jan_jan(), bob()]).unwrap();
+    let id = member_id("jan-jan-id");
+    // Bob's member key, bob's device, and both of jan-jan's own (removed) devices.
+    for seed in ["bob-mk", "bob-d1", "jan-jan-d1", "jan-jan-d2"] {
+        let err = trie.emergency_isolate_member(&id, member_key(seed)).unwrap_err();
+        assert_eq!(err, OrgMembersError::DuplicateKey, "key {seed}");
+    }
+}
+
+/// verifies: LLR-fym7dy
+///
+/// Check order: `IdNotFound`, `P2pKeyNotReplaced`, then `DuplicateKey`.
+#[test]
+fn emergency_isolate_member_reports_earlier_refusals_before_shared_key() {
+    let trie = TestTrie::genesis(vec![jan_jan(), bob()]).unwrap();
+    let err = trie.emergency_isolate_member(&member_id("ghost-id"), member_key("bob-mk")).unwrap_err();
+    assert_eq!(err, OrgMembersError::IdNotFound);
+    let err = trie
+        .emergency_isolate_member(&member_id("jan-jan-id"), member_key("jan-jan-mk"))
+        .unwrap_err();
+    assert_eq!(err, OrgMembersError::P2pKeyNotReplaced);
+}
+
+/// A delta anchored at `base` (which must be calculated) carrying `removed`
+/// and `upserted`, sorted into canonical order.
+fn forged_delta(
+    base: &TestTrie,
+    mut removed: Vec<MemberId>,
+    mut upserted: Vec<MemberLeaf>,
+) -> org_members::delta::Delta {
+    let mut delta = base.calculate_delta(base).unwrap();
+    removed.sort();
+    upserted.sort_by(|a, b| a.id().cmp(b.id()));
+    org_members::delta::test_support::delta_set_removed(&mut delta, removed);
+    org_members::delta::test_support::delta_set_upserted(&mut delta, upserted);
+    delta
+}
+
+/// `leaf` with its member key and devices replaced, everything else kept.
+fn rekeyed(leaf: &MemberLeaf, mk: P2pMemberKey, devices: Vec<P2pDeviceKey>) -> MemberLeaf {
+    MemberLeaf::new(*leaf.id(), leaf.handle(), mk, leaf.name(), leaf.surname(), devices).unwrap()
+}
+
+/// verifies: LLR-gjj6bx
+///
+/// Normal cases: a fresh member with fresh keys, and an existing member whose
+/// device set changes while it keeps the member key it already held.
+#[test]
+fn apply_delta_accepts_distinct_keys() {
+    let base = TestTrie::genesis(vec![alice(), jan_jan()]).unwrap();
+    let jan = base.get(&member_id("jan-jan-id")).unwrap();
+    let delta = forged_delta(
+        &base,
+        vec![],
+        vec![
+            bob(),
+            rekeyed(&jan, member_key("jan-jan-mk"), vec![device_key("jan-jan-d2"), device_key("jan-jan-d3")]),
+        ],
+    );
+    let candidate = base.apply_delta(&delta).unwrap();
+    let root = candidate.root_hash();
+    let trie = candidate.verify_against(&root).unwrap();
+    assert_keys_unique(&trie);
+}
+
+/// verifies: LLR-gjj6bx
+#[test]
+fn apply_delta_rejects_upsert_sharing_a_key_with_the_record() {
+    let base = TestTrie::genesis(vec![alice()]).unwrap();
+    for (mk, dk) in [
+        ("alice-mk", "eve-d1"), // member key held by alice
+        ("eve-mk", "alice-d1"), // device enrolled under alice
+        ("alice-d1", "eve-d1"), // member key equal to alice's device
+        ("eve-mk", "alice-mk"), // device equal to alice's member key
+    ] {
+        let eve = keyed_leaf("eve", member_key(mk), vec![device_key(dk)]);
+        let delta = forged_delta(&base, vec![], vec![eve]);
+        let err = base.apply_delta(&delta).unwrap_err();
+        assert_eq!(err, OrgMembersError::DuplicateKey, "member {mk}, device {dk}");
+    }
+}
+
+/// verifies: LLR-gjj6bx
+#[test]
+fn apply_delta_rejects_two_upserts_sharing_a_key() {
+    let base = TestTrie::genesis(vec![alice()]).unwrap();
+    let eve = keyed_leaf("eve", member_key("shared"), vec![device_key("eve-d1")]);
+    let ivy = keyed_leaf("ivy", member_key("ivy-mk"), vec![device_key("shared")]);
+    let delta = forged_delta(&base, vec![], vec![eve, ivy]);
+    assert_eq!(base.apply_delta(&delta).unwrap_err(), OrgMembersError::DuplicateKey);
+}
+
+/// verifies: LLR-gjj6bx
+#[test]
+fn apply_delta_rejects_upsert_whose_member_key_is_its_own_device() {
+    let base = TestTrie::genesis(vec![alice()]).unwrap();
+    let eve = keyed_leaf("eve", member_key("eve-d1"), vec![device_key("eve-d1")]);
+    let delta = forged_delta(&base, vec![], vec![eve]);
+    assert_eq!(base.apply_delta(&delta).unwrap_err(), OrgMembersError::DuplicateKey);
+}
+
+/// `current`'s change set against `base`, applied to `base` and verified
+/// against `current`'s root. Panics if any step refuses.
+fn assert_change_set_reproduces(base: &TestTrie, current: &TestTrie) {
+    let (current, _) = current.recalculate().unwrap();
+    let root = current.root_hash().unwrap();
+    let delta = current.calculate_delta(base).unwrap();
+    let candidate = base.apply_delta(&delta).unwrap();
+    let trie = candidate.verify_against(&root).unwrap();
+    assert_eq!(trie.root_hash().unwrap(), root);
+    assert_keys_unique(&trie);
+}
+
+/// verifies: LLR-gjj6bx
+///
+/// The change set of two accepted direct operations -- delete a device under a
+/// fresh member key, then rotate to the removed device's key, which is no
+/// longer held -- gives the member a key held in the base record. Its result
+/// holds every key once, so `apply_delta` accepts it: the result is checked,
+/// not the base.
+#[test]
+fn apply_delta_accepts_change_set_of_delete_device_then_rotate_to_its_key() {
+    let base = TestTrie::genesis(vec![jan_jan()]).unwrap();
+    let jan = member_id("jan-jan-id");
+    let current = base
+        .delete_p2p_device(&jan, &device_key("jan-jan-d1"), member_key("jan-jan-mk2"))
+        .unwrap()
+        .rotate_p2p_key(&jan, member_key("jan-jan-d1"))
+        .unwrap();
+    assert_change_set_reproduces(&base, &current);
+}
+
+/// verifies: LLR-gjj6bx
+///
+/// The change set of deleting a member and then adding a new member under the
+/// deleted member's member key: accepted step by step, so accepted as a
+/// change set.
+#[test]
+fn apply_delta_accepts_change_set_of_delete_member_then_add_with_its_key() {
+    let base = TestTrie::genesis(vec![alice(), bob()]).unwrap();
+    let eve = keyed_leaf("eve", member_key("bob-mk"), vec![device_key("eve-d1")]);
+    let current = base.delete_member(&member_id("bob-id")).unwrap().add_member(eve).unwrap();
+    assert_change_set_reproduces(&base, &current);
+}
+
+/// verifies: LLR-gjj6bx
+///
+/// An existing member takes the member key of a member removed in the same
+/// change set: the result holds the key once, so the change set is accepted.
+#[test]
+fn apply_delta_accepts_member_key_freed_by_a_removed_member() {
+    let base = TestTrie::genesis(vec![alice(), bob()]).unwrap();
+    let al = base.get(&member_id("alice-id")).unwrap();
+    let up = rekeyed(&al, member_key("bob-mk"), vec![device_key("alice-d1")]);
+    let delta = forged_delta(&base, vec![member_id("bob-id")], vec![up]);
+    let candidate = base.apply_delta(&delta).unwrap();
+    let root = candidate.root_hash();
+    let trie = candidate.verify_against(&root).unwrap();
+    assert_keys_unique(&trie);
+    assert_eq!(trie.get(&member_id("alice-id")).unwrap().p2p_key(), &member_key("bob-mk"));
+}
+
+/// verifies: LLR-gjj6bx
+///
+/// Check order: the existing checks come first. A delta that would also share
+/// a key reports the handle collision or the malformed shape.
+#[test]
+fn apply_delta_reports_earlier_refusals_before_shared_key() {
+    let base = TestTrie::genesis(vec![alice()]).unwrap();
+    // Same handle as alice, alice's member key.
+    let twin = MemberLeaf::new(
+        member_id("alice-twin-id"),
+        "alice",
+        member_key("alice-mk"),
+        "A",
+        "B",
+        vec![device_key("twin-d1")],
+    )
+    .unwrap();
+    let delta = forged_delta(&base, vec![], vec![twin]);
+    assert_eq!(base.apply_delta(&delta).unwrap_err(), OrgMembersError::DuplicateHandle);
+
+    // Unsorted upserts, both sharing alice's member key.
+    let eve = keyed_leaf("eve", member_key("alice-mk"), vec![device_key("eve-d1")]);
+    let ivy = keyed_leaf("ivy", member_key("alice-mk"), vec![device_key("ivy-d1")]);
+    let mut delta = forged_delta(&base, vec![], vec![eve, ivy]);
+    let mut rev = delta.upserted().to_vec();
+    rev.reverse();
+    org_members::delta::test_support::delta_set_upserted(&mut delta, rev);
+    assert!(matches!(base.apply_delta(&delta).unwrap_err(), OrgMembersError::MalformedDelta(_)));
+}
+
+/// verifies: LLR-gjj6bx
+///
+/// Two present members swap member keys: rotate alice to a fresh key, bob to
+/// alice's old key, alice to bob's old key -- each step accepted on the record
+/// it ran on. The change set the software produces moves each key between two
+/// upserted members, so the key check must release every outgoing key before
+/// checking any incoming one (as the handle check does, LLR-n5t6bn), else the
+/// receiver refuses the producer's lawful edit (REQ-wx3wpv). Reds when
+/// `delta_key_index` re-indexes each upsert before releasing the next one's
+/// keys (measured 2026-10-03).
+#[test]
+fn apply_delta_accepts_change_set_of_member_key_swap() {
+    let base = TestTrie::genesis(vec![alice(), bob()]).unwrap();
+    let (a, b) = (member_id("alice-id"), member_id("bob-id"));
+    let current = base
+        .rotate_p2p_key(&a, member_key("swap-k3"))
+        .unwrap()
+        .rotate_p2p_key(&b, member_key("alice-mk"))
+        .unwrap()
+        .rotate_p2p_key(&a, member_key("bob-mk"))
+        .unwrap();
+    assert_eq!(current.get(&a).unwrap().p2p_key(), &member_key("bob-mk"));
+    assert_eq!(current.get(&b).unwrap().p2p_key(), &member_key("alice-mk"));
+    assert_change_set_reproduces(&base, &current);
+}
+
+/// verifies: LLR-gjj6bx
+///
+/// A device key moves between two present members in one change set, in both
+/// directions (so in both identifier orders): the holder drops the device
+/// under a fresh member key, then the other member enrols it. Each step is
+/// accepted on the record it ran on, so the change set is accepted. Reds when
+/// `delta_key_index` re-indexes each upsert before releasing the next one's
+/// keys (measured 2026-10-03).
+#[test]
+fn apply_delta_accepts_change_set_of_device_key_moving_between_members() {
+    for (from, to) in [("alice", "bob"), ("bob", "alice")] {
+        let base = TestTrie::genesis(vec![alice(), bob()]).unwrap();
+        let (f, t) = (member_id(&format!("{from}-id")), member_id(&format!("{to}-id")));
+        let moved = device_key(&format!("{from}-d1"));
+        let current = base
+            .add_p2p_device(&f, device_key(&format!("{from}-d2")))
+            .unwrap()
+            .delete_p2p_device(&f, &moved, member_key(&format!("{from}-mk2")))
+            .unwrap()
+            .add_p2p_device(&t, moved)
+            .unwrap();
+        assert!(current.get(&t).unwrap().p2p_devices().contains(&moved), "{from} -> {to}");
+        assert_change_set_reproduces(&base, &current);
+    }
+}
+
+/// verifies: LLR-gjj6bx, LLR-v6gfc7
+///
+/// The record a verified candidate becomes keeps the key index: a key the
+/// delta introduced is refused afterwards.
+#[test]
+fn apply_delta_result_refuses_keys_the_delta_introduced() {
+    let base = TestTrie::genesis(vec![alice()]).unwrap();
+    let delta = forged_delta(&base, vec![], vec![bob()]);
+    let candidate = base.apply_delta(&delta).unwrap();
+    let root = candidate.root_hash();
+    let trie = candidate.verify_against(&root).unwrap();
+    let err = trie.rotate_p2p_key(&member_id("alice-id"), member_key("bob-d1")).unwrap_err();
+    assert_eq!(err, OrgMembersError::DuplicateKey);
+    // And a key the delta removed is free again.
+    let delta = forged_delta(&trie, vec![member_id("bob-id")], vec![]);
+    let candidate = trie.apply_delta(&delta).unwrap();
+    let root = candidate.root_hash();
+    let trie = candidate.verify_against(&root).unwrap();
+    trie.rotate_p2p_key(&member_id("alice-id"), member_key("bob-d1")).unwrap();
 }

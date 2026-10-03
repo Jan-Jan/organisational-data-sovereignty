@@ -398,8 +398,8 @@ negatives.
 Affects an existing hazardous situation; introduces no new hazard; implements no
 control.
 
-Two distinct points, and the register would be misread if only the first were
-recorded.
+Three distinct points (the third added 2026-10-03), and the register would be
+misread if only the first were recorded.
 
 First, what this operation is **not**. `rotate_p2p_key` replaces the
 member-as-a-group key without touching the device key set
@@ -424,6 +424,14 @@ HAZ-sc7wse's harm reached through an operation that is not the isolation
 operation, and so outside the bounding half of RC-sq3yhp that makes an isolation
 visible and reversible. The clause bounds the blast radius of a routine
 operation, which is why it is worth being an LLR at all.
+
+Third, added 2026-10-03 when the owner ruled that `rotate_p2p_key` refuses the
+member's current key (`P2pKeyNotReplaced`, the error the two device-removal
+operations already return). No new hazard: the refusal changes nothing, so it
+cannot reach HAZ-sc7wse's sudden-loss pathway, and the only behaviour lost is a
+no-op rotation that an integration could mistake for a rotation that happened.
+It removes one mistaken-success path toward HAZ-s39gbh's situation and
+implements no control; it is derived behaviour by owner decision.
 
 ### LLR-g6arcs — `update_name_surname` normalises and applies the field bounds
 
@@ -608,7 +616,10 @@ second clause, and the tests that this section said could not exist are
 `delete_p2p_device_rejects_unchanged_key` and its siblings. The claim above
 that it "closes an unacceptable residual risk outright" did not hold: HAZ-s39gbh
 stays not acceptable, for the wire path, PR-z463w5 and PR-fzu25w — as the
-register's own correction to its not-minted item 1 records.)
+register's own correction to its not-minted item 1 records. The owner later
+resolved PR-z463w5 and PR-fzu25w by ruling, which transfers those checks to the
+caller rather than removing the risk; with the wire path, they remain for
+`analyze-risks` to weigh.)
 
 ### The `MAX_DEVICES` coupling — a latent defect, and one test that now detects it
 

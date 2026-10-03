@@ -12,8 +12,10 @@ module membership_mbt {
   /// many device keys its record is built with (0 and 5 are refused).
   type Seed = { id: str, h: str, devs: int }
 
-  /// One producer-side operation, for honest deltas.
-  type Op = { op: str, id: str, h: str, g: int }
+  /// One producer-side operation, for honest deltas. A rotation's new key is
+  /// `{ owner: ko, gen: g }`: `ko` may name another member, so honest deltas
+  /// can move keys between members (LLR-gjj6bx).
+  type Op = { op: str, id: str, h: str, ko: str, g: int }
 
   type Action =
     | Init({ seeds: List[Seed] })
@@ -21,10 +23,10 @@ module membership_mbt {
     | DeleteMember({ id: str })
     | UpdateHandle({ id: str, h: str })
     | UpdateNameSurname({ id: str, nm: str, sn: str })
-    | RotateKey({ id: str, g: int })
-    | AddDevice({ id: str, g: int })
-    | DeleteDevice({ id: str, g: int })
-    | Isolate({ id: str, g: int })
+    | RotateKey({ id: str, k: Key })
+    | AddDevice({ id: str, k: Key })
+    | DeleteDevice({ id: str, d: Key, k: Key })
+    | Isolate({ id: str, k: Key })
     | ApplyDelta({ kind: str, ops: List[Op], removed: Set[str], upserted: Set[Leaf], target: str })
 
   /// Whether an organisation exists (a failed genesis leaves none).
@@ -46,14 +48,21 @@ module membership_mbt {
   pure val NAMES = Set("n", "n2")
   pure val SURNAMES = Set("s", "s2")
 
-  /// The record a fresh member is admitted with.
+  /// Every key the random run draws. `owner` only names a key: any member may
+  /// be handed a key named after another id, so cross-member and
+  /// member-vs-device collisions (DuplicateKey) occur.
+  pure val KEYS: Set[Key] = tuples(IDS, GENS).map(((o, g)) => { owner: o, gen: g })
+
+  /// The record a fresh member is admitted with: member key generation 0,
+  /// initial device generation 1. A member key and a device key with the same
+  /// (owner, gen) are one key, so they must differ.
   pure def mkLeaf(id: str, h: str): Leaf =
     { id: id, handle: h, skeleton: h, name: "n", surname: "s",
-      pKey: { owner: id, gen: 0 }, devices: Set({ owner: id, gen: 0 }) }
+      pKey: { owner: id, gen: 0 }, devices: Set({ owner: id, gen: 1 }) }
 
-  /// A genesis seed's record: `devs` device keys of generations 0..devs-1.
+  /// A genesis seed's record: `devs` device keys of generations 1..devs.
   pure def seedLeaf(s: Seed): Leaf =
-    mkLeaf(s.id, s.h).with("devices", 0.to(s.devs - 1).map(g => { owner: s.id, gen: g }))
+    mkLeaf(s.id, s.h).with("devices", 1.to(s.devs).map(g => { owner: s.id, gen: g }))
 
   /// The six orders of the three handles.
   pure val HANDLE_ORDERS: Set[List[str]] = Set(
@@ -69,7 +78,7 @@ module membership_mbt {
     if (o.op == "add") addMember(s, mkLeaf(o.id, o.h))
     else if (o.op == "delete") deleteMember(s, o.id)
     else if (o.op == "handle") updateHandle(s, o.id, o.h, o.h)
-    else rotateKey(s, o.id, { owner: o.id, gen: o.g })
+    else rotateKey(s, o.id, { owner: o.ko, gen: o.g })
 
   pure def applyOps(s: Snapshot, ops: List[Op]): Result =
     ops.foldl(Ok(s), (acc, o) => match acc { | Err(e) => Err(e) | Ok(t) => applyOp(t, o) })
@@ -127,14 +136,29 @@ module membership_mbt {
     mutate(updateHandle(trie, id, h, h), UpdateHandle({ id: id, h: h }))
   action doUpdateNameSurname(id: str, nm: str, sn: str): bool =
     mutate(updateNameSurname(trie, id, nm, sn), UpdateNameSurname({ id: id, nm: nm, sn: sn }))
-  action doRotateKey(id: str, g: int): bool =
-    mutate(rotateKey(trie, id, { owner: id, gen: g }), RotateKey({ id: id, g: g }))
-  action doAddDevice(id: str, g: int): bool =
-    mutate(addDevice(trie, id, { owner: id, gen: g }), AddDevice({ id: id, g: g }))
-  action doDeleteDevice(id: str, g: int): bool =
-    mutate(deleteDevice(trie, id, { owner: id, gen: 0 }, { owner: id, gen: g }), DeleteDevice({ id: id, g: g }))
-  action doIsolate(id: str, g: int): bool =
-    mutate(isolate(trie, id, { owner: id, gen: g }), Isolate({ id: id, g: g }))
+  action doRotateKey(id: str, k: Key): bool =
+    mutate(rotateKey(trie, id, k), RotateKey({ id: id, k: k }))
+  action doAddDevice(id: str, k: Key): bool =
+    mutate(addDevice(trie, id, k), AddDevice({ id: id, k: k }))
+  action doDeleteDevice(id: str, d: Key, k: Key): bool =
+    mutate(deleteDevice(trie, id, d, k), DeleteDevice({ id: id, d: d, k: k }))
+  action doIsolate(id: str, k: Key): bool =
+    mutate(isolate(trie, id, k), Isolate({ id: id, k: k }))
+
+  /// DeleteDevice restricted to a device the member holds, so the replacement
+  /// key equals the removed device's key often enough to exercise that
+  /// DuplicateKey case (uniform draws rarely hit it). Records itself as
+  /// DeleteDevice: it is a bias of the generator, not another crate operation.
+  action doDeleteEnrolledDevice = {
+    val enrolled = IDS.filter(i => trie.keys().contains(i) and trie.get(i).devices != Set())
+    all {
+      enrolled != Set(),
+      nondet id = enrolled.oneOf()
+      nondet d = trie.get(id).devices.oneOf()
+      nondet k = KEYS.oneOf()
+      doDeleteDevice(id, d, k),
+    }
+  }
 
   /// Apply a delta and verify the candidate. `target` "true": the expected
   /// root is the producer's (honest) or the candidate's own (malformed);
@@ -181,8 +205,8 @@ module membership_mbt {
   }
 
   pure val OPS: Set[Op] =
-    tuples(Set("add", "delete", "handle", "rotate"), IDS, HANDLES, GENS)
-      .map(((o, i, h, g)) => { op: o, id: i, h: h, g: g })
+    tuples(Set("add", "delete", "handle", "rotate"), IDS, HANDLES, IDS, GENS)
+      .map(((o, i, h, ko, g)) => { op: o, id: i, h: h, ko: ko, g: g })
 
   action ApplyDeltaStep = {
     // Integer draws, because a Set drops duplicates: honest 2/4, stale 1/4,
@@ -219,17 +243,19 @@ module membership_mbt {
     nondet sn = SURNAMES.oneOf()
     doUpdateNameSurname(id, nm, sn),
     nondet id = IDS.oneOf()
-    nondet g = GENS.oneOf()
-    doRotateKey(id, g),
+    nondet k = KEYS.oneOf()
+    doRotateKey(id, k),
     nondet id = IDS.oneOf()
-    nondet g = GENS.oneOf()
-    doAddDevice(id, g),
+    nondet k = KEYS.oneOf()
+    doAddDevice(id, k),
     nondet id = IDS.oneOf()
-    nondet g = GENS.oneOf()
-    doDeleteDevice(id, g),
+    nondet d = KEYS.oneOf()
+    nondet k = KEYS.oneOf()
+    doDeleteDevice(id, d, k),
+    doDeleteEnrolledDevice,
     nondet id = IDS.oneOf()
-    nondet g = GENS.oneOf()
-    doIsolate(id, g),
+    nondet k = KEYS.oneOf()
+    doIsolate(id, k),
     // Listed three times: deltas are the cross-process path and the richest
     // in error branches, so they get three of eleven draws.
     ApplyDeltaStep,
@@ -241,7 +267,10 @@ module membership_mbt {
   // `run_scenario`, one test function each in mbt_conformance.rs.
 
   pure val TWO: List[Seed] = [{ id: "a", h: "h1", devs: 1 }, { id: "b", h: "h2", devs: 1 }]
-  pure def hop(id: str, h: str): Op = { op: "handle", id: id, h: h, g: 0 }
+  pure def hop(id: str, h: str): Op = { op: "handle", id: id, h: h, ko: id, g: 0 }
+  /// A rotation of `id`'s member key to `{ owner: ko, gen: g }`.
+  pure def rop(id: str, ko: str, g: int): Op = { op: "rotate", id: id, h: "h1", ko: ko, g: g }
+  pure def key(o: str, g: int): Key = { owner: o, gen: g }
 
   // One happy path per model action.
   run scenarioGenesis = initWith(TWO)
@@ -253,12 +282,13 @@ module membership_mbt {
   run scenarioDeleteMember = initWith(TWO).then(doDeleteMember("b"))
   run scenarioUpdateHandle = initWith(TWO).then(doUpdateHandle("a", "h3"))
   run scenarioUpdateNameSurname = initWith(TWO).then(doUpdateNameSurname("a", "n2", "s2"))
-  run scenarioRotateKey = initWith(TWO).then(doRotateKey("a", 1))
-  run scenarioAddDevice = initWith(TWO).then(doAddDevice("a", 1))
-  run scenarioDeleteDevice = initWith(TWO).then(doAddDevice("a", 1)).then(doDeleteDevice("a", 1))
-  run scenarioIsolate = initWith(TWO).then(doIsolate("a", 1))
+  run scenarioRotateKey = initWith(TWO).then(doRotateKey("a", key("a", 2)))
+  run scenarioAddDevice = initWith(TWO).then(doAddDevice("a", key("a", 2)))
+  run scenarioDeleteDevice = initWith(TWO).then(doAddDevice("a", key("a", 2)))
+    .then(doDeleteDevice("a", key("a", 1), key("a", 3)))
+  run scenarioIsolate = initWith(TWO).then(doIsolate("a", key("a", 2)))
   run scenarioApplyHonest = initWith(TWO).then(applyHonest([hop("a", "h3")], "true"))
-  run scenarioApplyStale = initWith(TWO).then(doRotateKey("a", 1)).then(applyStale("true"))
+  run scenarioApplyStale = initWith(TWO).then(doRotateKey("a", key("a", 2))).then(applyStale("true"))
   run scenarioApplyVerifyFail = initWith(TWO).then(applyHonest([hop("a", "h3")], "wrong"))
 
   // PR-vf5hdm: a handle moved between two present members in one delta, in
@@ -270,12 +300,39 @@ module membership_mbt {
   // 0xa68bbc85: [handle c->h3, add b h1]).
   run scenarioHandoverToNewMember =
     initWith([{ id: "a", h: "h2", devs: 1 }, { id: "c", h: "h1", devs: 1 }])
-      .then(applyHonest([hop("c", "h3"), { op: "add", id: "b", h: "h1", g: 0 }], "true"))
+      .then(applyHonest([hop("c", "h3"), { op: "add", id: "b", h: "h1", ko: "b", g: 0 }], "true"))
+
+  // Keys move between present members in one delta (LLR-gjj6bx: only the
+  // resulting record is checked, so a lawful sequence's delta is accepted).
+  // Two members swap member keys: rotate a to an unheld key, b to a's old
+  // key, a to b's old key -- each step accepted on its own record.
+  run scenarioMemberKeySwap = initWith(TWO)
+    .then(applyHonest([rop("a", "a", 2), rop("b", "a", 0), rop("a", "b", 0)], "true"))
+  // A device key moves from b to a: the record delete_p2p_device(b, (b,1),
+  // (b,3)) then add_p2p_device(a, (b,1)) reaches, sent as one built delta.
+  run scenarioDeviceKeyMoves = initWith(TWO)
+    .then(doAddDevice("b", key("b", 2)))
+    .then(applyBuilt(Set(), Set(
+      mkLeaf("a", "h1").with("devices", Set(key("a", 1), key("b", 1))),
+      mkLeaf("b", "h2").with("pKey", key("b", 3)).with("devices", Set(key("b", 2)))), "true"))
+
+  // DuplicateKey on each direct path (LLR-v6gfc7, LLR-fym7dy), in the crate's
+  // check order.
+  run scenarioRotateKeyDuplicate = initWith(TWO).then(doRotateKey("a", key("b", 1)))
+  run scenarioAddDeviceDuplicate = initWith(TWO).then(doAddDevice("a", key("b", 0)))
+  run scenarioDeleteDeviceRemovedKey = initWith(TWO).then(doAddDevice("a", key("a", 2)))
+    .then(doDeleteDevice("a", key("a", 2), key("a", 2)))
+  run scenarioIsolateDuplicate = initWith(TWO).then(doIsolate("a", key("a", 1)))
+  run scenarioAddMemberDuplicate = initWith(TWO).then(doRotateKey("a", key("c", 1)))
+    .then(doAddMember("c", "h3"))
+  // A built delta whose resulting record holds one key twice (LLR-gjj6bx).
+  run scenarioApplyDeltaDuplicate = initWith(TWO)
+    .then(applyBuilt(Set(), Set(mkLeaf("a", "h1").with("pKey", key("b", 0))), "true"))
 
   // Error branches random runs reach rarely (measured in the plan, T6).
   run scenarioDeviceSlotsFull = initWith(TWO)
-    .then(doAddDevice("a", 1)).then(doAddDevice("a", 2)).then(doAddDevice("a", 3))
-    .then(doAddDevice("a", 0))
+    .then(doAddDevice("a", key("a", 2))).then(doAddDevice("a", key("a", 3))).then(doAddDevice("a", key("c", 0)))
+    .then(doAddDevice("a", key("a", 0)))
   run scenarioRemoveUpsertOverlap = initWith(TWO)
     .then(applyBuilt(Set("a"), Set(mkLeaf("a", "h3")), "true"))
   // A member both removed and re-upserted unchanged: the crate reports the
@@ -289,6 +346,7 @@ module membership_mbt {
   val mbtInv = and {
     skeletonsUnique(trie),
     deviceCapOk(trie),
+    keysUnique(trie),
     orgExists or trie == Map(),
   }
 }

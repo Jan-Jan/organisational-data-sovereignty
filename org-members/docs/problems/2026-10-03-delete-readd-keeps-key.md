@@ -6,7 +6,7 @@ same identifier, handle and key and one device fewer; the trie accepts both
 calls and the result is a member whose removed device still holds the key.
 affects: REQ-ewdg2q
 opened: 2026-10-03
-status: open
+status: resolved
 
 Found by the fourth independent review round of the change that resolved
 PR-zz4exm (`worktree-fix-stale-problems`), and reproduced there by a probe test
@@ -32,3 +32,23 @@ scope is the replacement key the two device-removal operations accept. Whether
 `add_member` should refuse a key the identifier last held, or whether
 re-admission is legitimately a fresh start, is a requirement question for the
 owner (`grill-requirements`), alongside PR-z463w5 and the wire path.
+
+Resolved, 2026-10-03, by owner ruling; not a defect, and no code change.
+Deleting a member is permanent. A member added later is a new member with a new
+`MemberId`, whatever its handle or keys, and every delegation is made to a
+`MemberId`, never to a handle, because handles change. `MemberId`s are
+caller-generated random values, so a deleted `MemberId` is never legitimately
+re-added: doing so is a caller error outside the API's contract, and the trie
+keeps no record of deleted identifiers and does not enforce it. (Recorded as
+`resolved` because the installed guardrails, 0.5.1, has no `accepted` status.)
+
+Scope of the ruling, stated so it is not read wider: only re-adding a
+*deleted* `MemberId` is outside the contract. Re-admitting the person under a
+fresh `MemberId` with the old key is inside it, and a removed device holding
+that key would reach what is later granted to the new member; not giving a
+re-admitted member such a key is the caller's duty (security check 11
+in `org-members/README.md`; doc-comments of `add_member` and `delete_member`).
+
+The key-uniqueness invariant added later the same day (LLR-v6gfc7) does not
+catch this route: once the member is deleted its keys are no longer held, so a
+fresh `MemberId` given the old key is accepted. It stays the caller's duty.

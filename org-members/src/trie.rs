@@ -28,7 +28,7 @@ use crate::types::{
 ///
 /// # Performance note
 ///
-/// `skeleton_index` and `handle_index` are full `HashMap`s cloned on every
+/// `skeleton_index`, `handle_index` and `key_index` are full `HashMap`s cloned on every
 /// mutation -- O(N) memory per mutation regardless of how few members changed.
 /// At 1000 members that's ~150KB allocation churn per mutation. Fine at the
 /// design's target scale (1000 members, 1% monthly turnover) but undoes the
@@ -53,18 +53,57 @@ pub struct OrgTrie<H: TrieHasher> {
     /// Necessary because handle and id are independent (handle can change rarely
     /// while id stays the same).
     handle_index: HashMap<String, MemberId>,
+    /// Maps every key held in the organisation -- each member key and each
+    /// enrolled device key, by its 32 encoded bytes -- to the member holding
+    /// it. One entry per key is the LLR-v6gfc7 invariant.
+    key_index: KeyIndex,
     _hasher: core::marker::PhantomData<H>,
+}
+
+/// Key bytes → holder. See `OrgTrie::key_index`.
+pub(crate) type KeyIndex = HashMap<[u8; 32], MemberId>;
+
+/// The 32-byte encodings of every key `leaf` holds: its member key, then its
+/// devices. A member key and a device key with the same bytes are the same key.
+fn leaf_keys(leaf: &MemberLeaf) -> impl Iterator<Item = [u8; 32]> + '_ {
+    core::iter::once(*leaf.p2p_key().as_bytes())
+        .chain(leaf.p2p_devices().iter().map(|d| *d.as_bytes()))
+}
+
+/// Records every key `leaf` holds in `index`. Fails with `DuplicateKey` if
+/// any of them is already held -- by another member, or by `leaf` itself
+/// (its member key equal to one of its devices). On error `index` is left
+/// partly updated; callers work on a clone and drop it.
+fn index_leaf_keys(index: &mut KeyIndex, leaf: &MemberLeaf) -> Result<(), OrgMembersError> {
+    for key in leaf_keys(leaf) {
+        if index.insert(key, *leaf.id()).is_some() {
+            return Err(OrgMembersError::DuplicateKey);
+        }
+    }
+    Ok(())
+}
+
+fn unindex_leaf_keys(index: &mut KeyIndex, leaf: &MemberLeaf) {
+    for key in leaf_keys(leaf) {
+        index.remove(&key);
+    }
 }
 
 impl<H: TrieHasher> OrgTrie<H> {
     /// Creates a genesis trie from initial members.
-    /// Checks both id and handle uniqueness (including confusables).
+    /// Checks both id and handle uniqueness (including confusables), then
+    /// key uniqueness: no key may be held in two places -- two members' member
+    /// keys, a device enrolled under two members, or a member key equal to any
+    /// enrolled device key, its own included -- else `DuplicateKey`
+    /// (LLR-v6gfc7). Check order per member: `DuplicateId`, handle checks,
+    /// `DuplicateKey`.
     pub fn genesis(members: Vec<MemberLeaf>) -> Result<Self, OrgMembersError> {
         let defaults = Arc::new(DefaultHashes::compute::<H>());
         let mut root = smt::empty_root(&defaults);
         let mut count = 0;
         let mut skeleton_index = HashMap::new();
         let mut handle_index = HashMap::new();
+        let mut key_index = KeyIndex::new();
 
         for member in members {
             // Check for duplicate key
@@ -82,6 +121,8 @@ impl<H: TrieHasher> OrgTrie<H> {
                 }
             }
 
+            index_leaf_keys(&mut key_index, &member)?;
+
             skeleton_index.insert(skeleton, member.handle().to_owned());
             handle_index.insert(member.handle().to_owned(), *member.id());
             root = smt::insert::<H>(&root, member, &defaults);
@@ -98,6 +139,7 @@ impl<H: TrieHasher> OrgTrie<H> {
             last_calculated_root: root,
             skeleton_index,
             handle_index,
+            key_index,
             _hasher: core::marker::PhantomData,
         })
     }
@@ -147,11 +189,31 @@ impl<H: TrieHasher> OrgTrie<H> {
     /// Adds a new member. Fails if the member id already exists, the handle is
     /// already taken, or the handle confusably collides with an existing handle.
     /// New members must have ≥1 device (enforced by `MemberLeaf::new`).
+    ///
+    /// A leaf holding a key already held in the organisation -- its member key
+    /// or a device key equal to another member's key or any enrolled device
+    /// key -- or whose member key equals one of its own devices is refused with
+    /// `DuplicateKey` (LLR-v6gfc7). Check order: `DuplicateId`, handle checks,
+    /// `DuplicateKey`.
+    ///
+    /// Caller duty: `MemberId`s must be fresh random values. Re-adding a
+    /// deleted member's id is outside the contract (the trie keeps no record
+    /// of deleted ids and will accept it). A member re-admitted under a new id
+    /// is a new member. The crate refuses only keys held when the operation
+    /// runs and keeps no key history: never give a new member a key no longer
+    /// held, in particular one a device of a previous membership held (README,
+    /// "Security checks the caller MUST perform", item 11).
     pub fn add_member(&self, leaf: MemberLeaf) -> Result<Self, OrgMembersError> {
         self.insert_leaf(leaf)
     }
 
     /// Removes a member by id. Their handle becomes available for re-use.
+    ///
+    /// Caller duty: deletion is permanent. The id must never be re-used --
+    /// the trie keeps no record of it and will not refuse it (see
+    /// `add_member`). The member's keys are no longer held once it is deleted,
+    /// so the crate accepts them again; never supply them again (README,
+    /// "Security checks the caller MUST perform", item 11).
     pub fn delete_member(&self, id: &MemberId) -> Result<Self, OrgMembersError> {
         self.delete_by_id(id)
     }
@@ -199,12 +261,31 @@ impl<H: TrieHasher> OrgTrie<H> {
     /// Rotates a member's peer-to-peer key -- the "member-as-a-group" key
     /// the local-first software uses to identify the member when granting
     /// access. All other fields, including device set, are unchanged.
+    ///
+    /// A replacement key equal to the member's current key replaces nothing,
+    /// so it is refused with `P2pKeyNotReplaced` (LLR-k89ahd). A replacement
+    /// key held anywhere in the organisation before the operation -- another
+    /// member's key or any enrolled device key, this member's own devices
+    /// included -- is refused with `DuplicateKey` (LLR-fym7dy). Either refusal
+    /// changes nothing. Check order: `IdNotFound`, `P2pKeyNotReplaced`,
+    /// `DuplicateKey`.
+    ///
+    /// Caller duty: the crate refuses only keys held when the operation runs
+    /// and keeps no key history. Never supply a key no longer held -- a member
+    /// key used earlier and since replaced, by this member or any other, or the
+    /// device key of a device removed earlier: a device holding its secret
+    /// keeps or regains access (README, "Security checks the caller MUST
+    /// perform", item 11).
     pub fn rotate_p2p_key(
         &self,
         id: &MemberId,
         new_p2p_key: P2pMemberKey,
     ) -> Result<Self, OrgMembersError> {
         let existing = smt::get_member(&self.root, id).ok_or(OrgMembersError::IdNotFound)?;
+        if existing.p2p_key() == &new_p2p_key {
+            return Err(OrgMembersError::P2pKeyNotReplaced);
+        }
+        self.refuse_held_key(new_p2p_key.as_bytes())?;
         let new_leaf = existing.with_p2p_key(new_p2p_key);
         self.update_leaf(new_leaf)
     }
@@ -213,6 +294,12 @@ impl<H: TrieHasher> OrgTrie<H> {
     /// already present or the member already has `MAX_DEVICES` (4) devices.
     /// Does NOT rotate the p2p_key -- a new device is trusted with the
     /// current key.
+    ///
+    /// A device key already held in the organisation -- enrolled under
+    /// another member, or equal to any member key, this member's own included
+    /// -- is refused with `DuplicateKey` (LLR-v6gfc7); the refusal changes
+    /// nothing. Check order: `IdNotFound`, `DeviceSlotsFull`,
+    /// `DuplicateDevice`, `DuplicateKey`.
     pub fn add_p2p_device(
         &self,
         id: &MemberId,
@@ -220,6 +307,7 @@ impl<H: TrieHasher> OrgTrie<H> {
     ) -> Result<Self, OrgMembersError> {
         let existing = smt::get_member(&self.root, id).ok_or(OrgMembersError::IdNotFound)?;
         let new_slots = existing.p2p_device_slots().add_device(device)?;
+        self.refuse_held_key(device.as_bytes())?;
         let new_leaf = existing.with_p2p_device_slots(new_slots);
         self.update_leaf(new_leaf)
     }
@@ -233,9 +321,19 @@ impl<H: TrieHasher> OrgTrie<H> {
     ///
     /// A replacement key equal to the member's current key would leave the
     /// removed device holding a live key, so it is refused with
-    /// `P2pKeyNotReplaced` and nothing changes: the device stays enrolled and
-    /// the key is kept. Check order: `IdNotFound`, `DeviceNotFound`,
-    /// `P2pKeyNotReplaced`.
+    /// `P2pKeyNotReplaced`. A replacement key held anywhere in the organisation
+    /// before the operation -- another member's key or any enrolled device
+    /// key, the key of the device being removed included -- is refused with
+    /// `DuplicateKey` (LLR-fym7dy). Either refusal changes nothing: the device
+    /// stays enrolled and the key is kept. Check order: `IdNotFound`,
+    /// `DeviceNotFound`, `P2pKeyNotReplaced`, `DuplicateKey`.
+    ///
+    /// Caller duty: the crate refuses only keys held when the operation runs
+    /// and keeps no key history. Never supply a key no longer held -- a member
+    /// key used earlier and since replaced, by this member or any other, or the
+    /// device key of a device removed earlier: a device holding its secret
+    /// keeps or regains access (README, "Security checks the caller MUST
+    /// perform", item 11).
     pub fn delete_p2p_device(
         &self,
         id: &MemberId,
@@ -247,6 +345,9 @@ impl<H: TrieHasher> OrgTrie<H> {
         if existing.p2p_key() == &new_p2p_key {
             return Err(OrgMembersError::P2pKeyNotReplaced);
         }
+        // Checked against the record before the operation, so the removed
+        // device's own key counts as held.
+        self.refuse_held_key(new_p2p_key.as_bytes())?;
         let new_leaf = existing
             .with_p2p_device_slots(new_slots)
             .with_p2p_key(new_p2p_key);
@@ -261,8 +362,19 @@ impl<H: TrieHasher> OrgTrie<H> {
     ///
     /// A replacement key equal to the member's current key would leave the
     /// removed devices holding a live key, so it is refused with
-    /// `P2pKeyNotReplaced` and nothing changes: every device stays enrolled
-    /// and the key is kept. Check order: `IdNotFound`, `P2pKeyNotReplaced`.
+    /// `P2pKeyNotReplaced`. A replacement key held anywhere in the organisation
+    /// before the operation -- another member's key or any enrolled device
+    /// key, the keys of the devices being removed included -- is refused with
+    /// `DuplicateKey` (LLR-fym7dy). Either refusal changes nothing: every
+    /// device stays enrolled and the key is kept. Check order: `IdNotFound`,
+    /// `P2pKeyNotReplaced`, `DuplicateKey`.
+    ///
+    /// Caller duty: the crate refuses only keys held when the operation runs
+    /// and keeps no key history. Never supply a key no longer held -- a member
+    /// key used earlier and since replaced, by this member or any other, or the
+    /// device key of a device removed earlier: a device holding its secret
+    /// keeps or regains access (README, "Security checks the caller MUST
+    /// perform", item 11).
     pub fn emergency_isolate_member(
         &self,
         id: &MemberId,
@@ -272,6 +384,9 @@ impl<H: TrieHasher> OrgTrie<H> {
         if existing.p2p_key() == &new_p2p_key {
             return Err(OrgMembersError::P2pKeyNotReplaced);
         }
+        // Checked against the record before the operation, so the removed
+        // devices' keys count as held.
+        self.refuse_held_key(new_p2p_key.as_bytes())?;
         let empty_slots = P2pDeviceSlots::new(Vec::new())?;
         let new_leaf = existing
             .with_p2p_device_slots(empty_slots)
@@ -301,6 +416,9 @@ impl<H: TrieHasher> OrgTrie<H> {
         new_skeleton_index.insert(skeleton, leaf.handle().to_owned());
         new_handle_index.insert(leaf.handle().to_owned(), *leaf.id());
 
+        let mut new_key_index = self.key_index.clone();
+        index_leaf_keys(&mut new_key_index, &leaf)?;
+
         let new_root = smt::insert::<H>(&self.root, leaf, &self.defaults);
 
         Ok(Self {
@@ -313,8 +431,17 @@ impl<H: TrieHasher> OrgTrie<H> {
             last_calculated_root: self.last_calculated_root.clone(),
             skeleton_index: new_skeleton_index,
             handle_index: new_handle_index,
+            key_index: new_key_index,
             _hasher: core::marker::PhantomData,
         })
+    }
+
+    /// `DuplicateKey` if `key` is held anywhere in the organisation now.
+    fn refuse_held_key(&self, key: &[u8; 32]) -> Result<(), OrgMembersError> {
+        if self.key_index.contains_key(key) {
+            return Err(OrgMembersError::DuplicateKey);
+        }
+        Ok(())
     }
 
     fn update_leaf(&self, leaf: MemberLeaf) -> Result<Self, OrgMembersError> {
@@ -323,6 +450,13 @@ impl<H: TrieHasher> OrgTrie<H> {
 
         let mut new_skeleton_index = self.skeleton_index.clone();
         let mut new_handle_index = self.handle_index.clone();
+
+        // Re-index the leaf's keys. The operations that change keys refuse a
+        // key held before the operation first; this keeps the index exact and
+        // the invariant enforced on every path through here.
+        let mut new_key_index = self.key_index.clone();
+        unindex_leaf_keys(&mut new_key_index, &existing);
+        index_leaf_keys(&mut new_key_index, &leaf)?;
 
         if existing.handle() != leaf.handle() {
             let old_skeleton = handle_skeleton(existing.handle());
@@ -351,6 +485,7 @@ impl<H: TrieHasher> OrgTrie<H> {
             last_calculated_root: self.last_calculated_root.clone(),
             skeleton_index: new_skeleton_index,
             handle_index: new_handle_index,
+            key_index: new_key_index,
             _hasher: core::marker::PhantomData,
         })
     }
@@ -365,6 +500,8 @@ impl<H: TrieHasher> OrgTrie<H> {
         let skeleton = handle_skeleton(existing.handle());
         new_skeleton_index.remove(&skeleton);
         new_handle_index.remove(existing.handle());
+        let mut new_key_index = self.key_index.clone();
+        unindex_leaf_keys(&mut new_key_index, &existing);
 
         Ok(Self {
             root: new_root,
@@ -376,6 +513,7 @@ impl<H: TrieHasher> OrgTrie<H> {
             last_calculated_root: self.last_calculated_root.clone(),
             skeleton_index: new_skeleton_index,
             handle_index: new_handle_index,
+            key_index: new_key_index,
             _hasher: core::marker::PhantomData,
         })
     }
@@ -425,6 +563,7 @@ impl<H: TrieHasher> OrgTrie<H> {
                 last_calculated_root: self.root.clone(),
                 skeleton_index: self.skeleton_index.clone(),
                 handle_index: self.handle_index.clone(),
+                key_index: self.key_index.clone(),
                 _hasher: core::marker::PhantomData,
             },
             delta,
@@ -516,7 +655,16 @@ impl<H: TrieHasher> OrgTrie<H> {
     ///   observable change vs. the current trie state at that id.
     /// - `removed` and `upserted` MUST be disjoint.
     ///
-    /// Together these narrow the accepted `Delta` **value** for a transition
+    /// After every other check, a delta whose resulting record would hold a
+    /// key in two places is refused with `DuplicateKey` (LLR-gjj6bx). Only the
+    /// resulting record is checked, not keys held in this one: a delta
+    /// collapses a sequence of direct operations, each judged on the record it
+    /// ran on, so `delete_p2p_device(D, K1)` then `rotate_p2p_key(K_D)` is
+    /// accepted step by step and its delta must be accepted too. Never
+    /// supplying a key no longer held is the caller's duty on both paths
+    /// (README, "Security checks the caller MUST perform", item 11).
+    ///
+    /// Together the canonical-form rules narrow the accepted `Delta` **value** for a transition
     /// from `base_root` to the resulting root to one. They do **not** make the
     /// postcard encoding of that value unique: corrected 2026-09-17, after an
     /// independent review measured two distinct byte strings (141 and 142
@@ -599,6 +747,8 @@ impl<H: TrieHasher> OrgTrie<H> {
             }
         }
 
+        let new_key_index = self.delta_key_index(delta)?;
+
         let root_hash = smt::recalculate_hashes::<H>(&root)?;
 
         Ok(CandidateTrie {
@@ -608,8 +758,37 @@ impl<H: TrieHasher> OrgTrie<H> {
             root_hash: root_hash.into(),
             skeleton_index: new_skeleton_index,
             handle_index: new_handle_index,
+            key_index: new_key_index,
             _hasher: core::marker::PhantomData,
         })
+    }
+
+    /// The key index of the record `delta` produces, or `DuplicateKey`
+    /// (LLR-gjj6bx) if that record would hold a key in two places. Keys held
+    /// only in the base record are not checked: see `apply_delta`.
+    ///
+    /// Runs after every other `apply_delta` check, so its refusal comes last.
+    /// `delta` must already have passed `validate_canonical_delta`.
+    fn delta_key_index(&self, delta: &Delta) -> Result<KeyIndex, OrgMembersError> {
+        let mut index = self.key_index.clone();
+
+        for id in &delta.removed {
+            let old = smt::get_member(&self.root, id).ok_or(OrgMembersError::InvariantViolated)?;
+            unindex_leaf_keys(&mut index, &old);
+        }
+        // Drop every replaced leaf's keys before adding any new ones, so a key
+        // moving between two upserted leaves -- a handover or a swap -- is
+        // judged on the final record in any identifier order, as the handle
+        // check is (LLR-n5t6bn).
+        for member in &delta.upserted {
+            if let Some(old) = smt::get_member(&self.root, member.id()) {
+                unindex_leaf_keys(&mut index, &old);
+            }
+        }
+        for member in &delta.upserted {
+            index_leaf_keys(&mut index, member)?;
+        }
+        Ok(index)
     }
 
     /// Computes the delta that transforms `old` into `self`.
@@ -634,6 +813,7 @@ impl<H: TrieHasher> OrgTrie<H> {
         root_hash: RootHash,
         skeleton_index: HashMap<String, String>,
         handle_index: HashMap<String, MemberId>,
+        key_index: KeyIndex,
     ) -> Self {
         Self {
             root: root.clone(),
@@ -643,6 +823,7 @@ impl<H: TrieHasher> OrgTrie<H> {
             last_calculated_root: root,
             skeleton_index,
             handle_index,
+            key_index,
             _hasher: core::marker::PhantomData,
         }
     }
@@ -658,6 +839,7 @@ impl<H: TrieHasher> Clone for OrgTrie<H> {
             last_calculated_root: self.last_calculated_root.clone(),
             skeleton_index: self.skeleton_index.clone(),
             handle_index: self.handle_index.clone(),
+            key_index: self.key_index.clone(),
             _hasher: core::marker::PhantomData,
         }
     }

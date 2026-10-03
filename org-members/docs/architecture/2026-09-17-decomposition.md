@@ -290,7 +290,9 @@ nothing — every device stays enrolled and the key stays as it was.
 satisfies: REQ-r784fu, REQ-ewdg2q
 
 **LLR-k89ahd**: `rotate_p2p_key` replaces the member-as-a-group key and changes
-no other field, the device set included. satisfies: derived
+no other field, the device set included; a replacement key equal to the
+member's current key is refused with `P2pKeyNotReplaced`, checked after the
+member lookup, and the refusal changes nothing. satisfies: derived
 
 **LLR-mmst86**: `update_handle` revalidates the new handle and re-checks it for
 uniqueness and confusability against every other member. satisfies: REQ-h5ret5,
@@ -315,8 +317,18 @@ keys too, so REQ-ewdg2q's second clause governs it as well, and LLR-w92psx now
 says so. LLR-w92psx's refusal also covers a member who already has no device
 keys, where nothing is removed and REQ-ewdg2q does not reach; there it rests on
 REQ-r784fu, read as requiring that the operation *replace* the key — and
-installing the key already held replaces nothing. `rotate_p2p_key` (LLR-k89ahd) is not amended: it removes no device, so
-REQ-ewdg2q does not reach it.
+installing the key already held replaces nothing. `rotate_p2p_key`
+(LLR-k89ahd) is not amended: it removes no device, so REQ-ewdg2q does not reach
+it. (LLR-k89ahd amended after all, 2026-10-03, by owner ruling, in a later
+change: `rotate_p2p_key` refuses the member's current key with the same error.
+It stays `satisfies: derived` — no requirement asks for it — and is assessed in
+`../risk/2026-09-17-design-derived.md` under LLR-k89ahd. The same ruling settled
+that a key no longer held — a member key used earlier, the key of a device
+removed earlier — and a non-canonical encoding of a held key are not checked,
+by any of the three operations; see PR-z463w5. A second owner decision the same
+day, in the same change, refuses with `DuplicateKey` every replacement key still
+held anywhere in the organisation, the key of the device being removed included:
+LLR-fym7dy in `2026-10-03-key-uniqueness.md`.)
 
 ## SDD-55b2zj — Delta exchange and the trust boundary
 

@@ -34,9 +34,10 @@ type Trie = OrgTrie<Blake3Hasher>;
 
 const SPEC: &str = "quint/membership_mbt.qnt";
 const IDS: [&str; 3] = ["a", "b", "c"];
-/// Key generations the model draws (0..=3) plus 4, which only a refused
-/// five-device genesis record uses, so every key the driver builds inverts.
-const GENS: [i64; 5] = [0, 1, 2, 3, 4];
+/// Key generations the model draws (0..=3) plus 4 and 5, which only a refused
+/// five-device genesis record uses (devices 1..=5), so every key the driver
+/// builds inverts.
+const GENS: [i64; 6] = [0, 1, 2, 3, 4, 5];
 /// Random-run bounds (decision 7): explicit, per unit.
 const MAX_SAMPLES: usize = 100;
 const MAX_STEPS: usize = 15;
@@ -115,12 +116,14 @@ struct Seed {
     devs: i64,
 }
 
-/// Mirror of the Quint `Op` record (one producer-side operation).
+/// Mirror of the Quint `Op` record (one producer-side operation). A rotation's
+/// new key is `{ owner: ko, gen: g }`.
 #[derive(Clone, Deserialize, Debug)]
 struct Op {
     op: String,
     id: String,
     h: String,
+    ko: String,
     g: i64,
 }
 
@@ -138,13 +141,18 @@ struct MembershipState {
 fn real_id(model_id: &str) -> MemberId {
     MemberId::new(blake3::hash(format!("id:{model_id}").as_bytes()).into())
 }
+/// One derivation for member and device keys, so model key equality is real
+/// key equality: the model `Key { owner, gen }` used as a member key and as a
+/// device key is the same 32 bytes, exactly as the crate's key index sees it.
+fn real_key_bytes(k: &Key) -> ed25519_dalek::VerifyingKey {
+    let seed: [u8; 32] = blake3::hash(format!("k:{}:{}", k.owner, k.gen).as_bytes()).into();
+    SigningKey::from_bytes(&seed).verifying_key()
+}
 fn real_member_key(k: &Key) -> P2pMemberKey {
-    let seed: [u8; 32] = blake3::hash(format!("mk:{}:{}", k.owner, k.gen).as_bytes()).into();
-    P2pMemberKey::new(SigningKey::from_bytes(&seed).verifying_key())
+    P2pMemberKey::new(real_key_bytes(k))
 }
 fn real_device_key(k: &Key) -> P2pDeviceKey {
-    let seed: [u8; 32] = blake3::hash(format!("dk:{}:{}", k.owner, k.gen).as_bytes()).into();
-    P2pDeviceKey::new(SigningKey::from_bytes(&seed).verifying_key())
+    P2pDeviceKey::new(real_key_bytes(k))
 }
 fn key(owner: &str, gen: i64) -> Key {
     Key {
@@ -153,7 +161,9 @@ fn key(owner: &str, gen: i64) -> Key {
     }
 }
 
-/// The record a fresh member is admitted with (model `mkLeaf`).
+/// The record a fresh member is admitted with (model `mkLeaf`): member key
+/// generation 0, initial device generation 1 -- one derivation serves both,
+/// so they must differ.
 fn new_leaf(id: &str, h: &str) -> core::result::Result<MemberLeaf, OrgMembersError> {
     MemberLeaf::new(
         real_id(id),
@@ -161,11 +171,11 @@ fn new_leaf(id: &str, h: &str) -> core::result::Result<MemberLeaf, OrgMembersErr
         real_member_key(&key(id, 0)),
         "n",
         "s",
-        vec![real_device_key(&key(id, 0))],
+        vec![real_device_key(&key(id, 1))],
     )
 }
 
-/// A genesis seed's record (model `seedLeaf`).
+/// A genesis seed's record (model `seedLeaf`): devices of generations 1..=devs.
 fn seed_leaf(s: &Seed) -> core::result::Result<MemberLeaf, OrgMembersError> {
     MemberLeaf::new(
         real_id(&s.id),
@@ -173,9 +183,22 @@ fn seed_leaf(s: &Seed) -> core::result::Result<MemberLeaf, OrgMembersError> {
         real_member_key(&key(&s.id, 0)),
         "n",
         "s",
-        (0..s.devs)
+        (1..=s.devs)
             .map(|g| real_device_key(&key(&s.id, g)))
             .collect(),
+    )
+}
+
+/// The real record of any model leaf (an `ApplyDelta` upsert built in the
+/// model, keys of any owner included).
+fn leaf_of_model(l: &Leaf) -> core::result::Result<MemberLeaf, OrgMembersError> {
+    MemberLeaf::new(
+        real_id(&l.id),
+        &l.handle,
+        real_member_key(&l.p_key),
+        &l.name,
+        &l.surname,
+        l.devices.iter().map(real_device_key).collect(),
     )
 }
 
@@ -185,26 +208,25 @@ fn model_id_of(id: &MemberId) -> Option<String> {
         .find(|m| real_id(m) == *id)
         .map(|m| m.to_string())
 }
-fn gen_of_member_key(owner: &str, k: &P2pMemberKey) -> Option<i64> {
-    GENS.iter()
-        .copied()
-        .find(|g| real_member_key(&key(owner, *g)) == *k)
+/// Every model key, over all owners: a member may hold a key whose `owner`
+/// is another id.
+fn all_model_keys() -> impl Iterator<Item = Key> {
+    IDS.iter()
+        .flat_map(|o| GENS.iter().map(move |g| key(o, *g)))
 }
-fn model_device_of(owner: &str, d: &P2pDeviceKey) -> Option<Key> {
-    GENS.iter()
-        .copied()
-        .find(|g| real_device_key(&key(owner, *g)) == *d)
-        .map(|g| key(owner, g))
+fn model_key_of(bytes: &[u8; 32]) -> Option<Key> {
+    all_model_keys().find(|k| real_key_bytes(k).as_bytes() == bytes)
 }
 
 fn model_leaf_of(m: &MemberLeaf) -> Result<Leaf> {
     let mid = model_id_of(m.id()).ok_or_else(|| anyhow!("unknown member id"))?;
-    let gen = gen_of_member_key(&mid, m.p2p_key())
-        .ok_or_else(|| anyhow!("unknown member key gen for {mid}"))?;
+    let p_key = model_key_of(m.p2p_key().as_bytes())
+        .ok_or_else(|| anyhow!("unknown member key for {mid}"))?;
     let mut devices = BTreeSet::new();
     for d in m.p2p_devices() {
-        devices
-            .insert(model_device_of(&mid, d).ok_or_else(|| anyhow!("unknown device for {mid}"))?);
+        devices.insert(
+            model_key_of(d.as_bytes()).ok_or_else(|| anyhow!("unknown device for {mid}"))?,
+        );
     }
     Ok(Leaf {
         id: mid.clone(),
@@ -212,7 +234,7 @@ fn model_leaf_of(m: &MemberLeaf) -> Result<Leaf> {
         skeleton: m.handle().to_string(), // model invariant: skeleton == handle
         name: m.name().to_string(),
         surname: m.surname().to_string(),
-        p_key: key(&mid, gen),
+        p_key,
         devices,
     })
 }
@@ -241,6 +263,7 @@ fn err_tag(e: &OrgMembersError) -> String {
             "RemoveUpsertOverlap"
         }
         OrgMembersError::P2pKeyNotReplaced => "P2pKeyNotReplaced",
+        OrgMembersError::DuplicateKey => "DuplicateKey",
         other => return format!("Other:{other:?}"),
     }
     .to_string()
@@ -252,7 +275,7 @@ fn apply_op(t: &Trie, o: &Op) -> core::result::Result<Trie, OrgMembersError> {
         "add" => t.add_member(new_leaf(&o.id, &o.h)?),
         "delete" => t.delete_member(&real_id(&o.id)),
         "handle" => t.update_handle(&real_id(&o.id), &o.h),
-        "rotate" => t.rotate_p2p_key(&real_id(&o.id), real_member_key(&key(&o.id, o.g))),
+        "rotate" => t.rotate_p2p_key(&real_id(&o.id), real_member_key(&key(&o.ko, o.g))),
         _ => Err(OrgMembersError::InvariantViolated),
     }
 }
@@ -327,15 +350,15 @@ impl MembershipDriver {
     }
 
     /// The real counterpart of a model leaf in an `ApplyDelta` upsert: the
-    /// current record itself when the model leaf equals it, else a fresh
-    /// record (model `mkLeaf`, the only other shape the model builds).
+    /// current record itself when the model leaf equals it, else the record
+    /// built from the model leaf's fields.
     fn real_leaf(&self, cur: &Trie, l: &Leaf) -> core::result::Result<MemberLeaf, OrgMembersError> {
         if let Some(existing) = cur.get(&real_id(&l.id)) {
             if model_leaf_of(&existing).ok().as_ref() == Some(l) {
                 return Ok(existing);
             }
         }
-        new_leaf(&l.id, &l.handle)
+        leaf_of_model(l)
     }
 
     fn apply_delta_step(
@@ -466,24 +489,24 @@ impl Driver for MembershipDriver {
                     let res = self.cur().and_then(|t| t.update_name_surname(&real_id(&id), &nm, &sn));
                     self.commit(res);
                 },
-                RotateKey(id: String, g: i64) => {
-                    let nk = real_member_key(&key(&id, g));
+                RotateKey(id: String, k: Key) => {
+                    let nk = real_member_key(&k);
                     let res = self.cur().and_then(|t| t.rotate_p2p_key(&real_id(&id), nk));
                     self.commit(res);
                 },
-                AddDevice(id: String, g: i64) => {
-                    let d = real_device_key(&key(&id, g));
+                AddDevice(id: String, k: Key) => {
+                    let d = real_device_key(&k);
                     let res = self.cur().and_then(|t| t.add_p2p_device(&real_id(&id), d));
                     self.commit(res);
                 },
-                DeleteDevice(id: String, g: i64) => {
-                    let d = real_device_key(&key(&id, 0));
-                    let nk = real_member_key(&key(&id, g));
+                DeleteDevice(id: String, d: Key, k: Key) => {
+                    let d = real_device_key(&d);
+                    let nk = real_member_key(&k);
                     let res = self.cur().and_then(|t| t.delete_p2p_device(&real_id(&id), &d, nk));
                     self.commit(res);
                 },
-                Isolate(id: String, g: i64) => {
-                    let nk = real_member_key(&key(&id, g));
+                Isolate(id: String, k: Key) => {
+                    let nk = real_member_key(&k);
                     let res = self.cur().and_then(|t| t.emergency_isolate_member(&real_id(&id), nk));
                     self.commit(res);
                 },
@@ -549,9 +572,15 @@ fn quint_preflight() -> core::result::Result<(), String> {
             String::from_utf8_lossy(&out.stderr)
         ));
     }
-    let home =
-        std::env::var_os("HOME").ok_or("HOME is not set; quint's rust backend needs ~/.quint")?;
-    let dir = std::path::Path::new(&home).join(".quint");
+    // quint fetches its evaluator into `$QUINT_HOME`, else `~/.quint`
+    // (quint's own `config.js`), so check the directory quint will use.
+    let dir = match std::env::var_os("QUINT_HOME") {
+        Some(q) => std::path::PathBuf::from(q),
+        None => std::path::Path::new(
+            &std::env::var_os("HOME").ok_or("HOME is not set; quint's rust backend needs ~/.quint")?,
+        )
+        .join(".quint"),
+    };
     std::fs::create_dir_all(&dir)
         .and_then(|_| probe_writable(&dir))
         .map_err(|e| {
@@ -619,6 +648,7 @@ fn run_scenario(test: &str) {
 
 /// verifies: LLR-fv75ec, LLR-j4d38d, LLR-v3jqau, LLR-s97ywt, LLR-w92psx
 /// verifies: LLR-ch2pkw, LLR-4n8zqx, LLR-xmpqn2, LLR-juxk9q
+/// verifies: LLR-k89ahd, LLR-v6gfc7, LLR-fym7dy
 ///
 /// LLR-s97ywt and LLR-w92psx are carried for their unchanged-replacement-key
 /// refusal (PR-zz4exm): removing the `P2pKeyNotReplaced` guard from either
@@ -628,7 +658,29 @@ fn run_scenario(test: &str) {
 /// under each deletion, "Specification and implementation states diverge" —
 /// the random step draws the replacement key's generation from `GENS`
 /// (0..3) and every member starts at generation 0, so the unchanged key is
-/// reached without a named scenario.
+/// reached without a named scenario. LLR-k89ahd likewise: removing the guard
+/// from `rotate_p2p_key` turns it red (re-measured against the merged driver,
+/// 2026-10-03: red 3 of 3 random seeds, "Specification and implementation
+/// states diverge" — the rotation is then refused `DuplicateKey`, the
+/// member's own key being held, where the model refuses `P2pKeyNotReplaced`).
+///
+/// LLR-v6gfc7 and LLR-fym7dy are carried for `DuplicateKey`, re-measured
+/// against the merged driver (2026-10-03, three random seeds per mutation):
+/// ignoring the key-index refusal in `add_member` — red 1 of 3 (killed by the
+/// delta round-trip: `apply_delta` refuses the duplicate the direct path let
+/// through; `scenario_add_member_duplicate` is red 3 of 3); in
+/// `add_p2p_device` together with `update_leaf`'s re-index — red 3 of 3 (the
+/// round-trip); in `rotate_p2p_key` together with `update_leaf`'s re-index —
+/// red 3 of 3 (the round-trip; the op-level check alone stays green 3 of 3
+/// across the whole suite, the re-index catching every rotation it does); in
+/// `delete_p2p_device` alone — red 3 of 3 (divergence); in
+/// `emergency_isolate_member` alone — red 2 of 3 (divergence). Not reached:
+/// the `genesis` clause of LLR-v6gfc7 (ignoring its refusal leaves the whole
+/// suite green 3 of 3; seed keys derive from distinct ids). Not LLR-gjj6bx:
+/// ignoring `apply_delta`'s resulting-record refusal leaves this test green
+/// 3 of 3; it is carried by `scenario_apply_delta_duplicate`,
+/// `scenario_member_key_swap` and the crate's `apply_delta_*` tests in
+/// integration_test.rs.
 ///
 /// The random run, with action coverage (decision 8(ii)): every model action
 /// must be taken at least once across the run; per-action outcome counts are
@@ -831,6 +883,75 @@ fn scenario_handle_swap() {
 #[test]
 fn scenario_handover_to_new_member() {
     run_scenario("scenarioHandoverToNewMember")
+}
+/// verifies: LLR-gjj6bx
+///
+/// Two present members swap member keys in one honest delta (rotate a to an
+/// unheld key, b to a's old key, a to b's old key): the change set the
+/// software produced is accepted, the key check judging the resulting record
+/// (LLR-gjj6bx). Measured (2026-10-03): red 3 of 3 with `delta_key_index`
+/// made one-phase (each upsert's old keys released and its new keys indexed
+/// in one pass), "Specification and implementation states diverge".
+#[test]
+fn scenario_member_key_swap() {
+    run_scenario("scenarioMemberKeySwap")
+}
+/// A device key moves from one present member to another in one change set
+/// (LLR-gjj6bx). No `verifies:`: measured green 3 of 3 (2026-10-03) under the
+/// one-phase `delta_key_index` that reddens `scenario_member_key_swap`
+/// (not traced; presumably the giving member is upserted before the receiving
+/// one in identifier order, so a one-pass check has released the key already).
+#[test]
+fn scenario_device_key_moves() {
+    run_scenario("scenarioDeviceKeyMoves")
+}
+/// verifies: LLR-fym7dy
+///
+/// Measured (2026-10-03): red 3 of 3 with `rotate_p2p_key`'s held-key refusal
+/// and `update_leaf`'s re-index refusal both ignored.
+#[test]
+fn scenario_rotate_key_duplicate() {
+    run_scenario("scenarioRotateKeyDuplicate")
+}
+/// verifies: LLR-v6gfc7
+///
+/// Measured (2026-10-03): red 3 of 3 with `add_p2p_device`'s held-key refusal
+/// and `update_leaf`'s re-index refusal both ignored.
+#[test]
+fn scenario_add_device_duplicate() {
+    run_scenario("scenarioAddDeviceDuplicate")
+}
+/// verifies: LLR-fym7dy
+///
+/// Measured (2026-10-03): red 3 of 3 with `delete_p2p_device`'s held-key
+/// refusal deleted.
+#[test]
+fn scenario_delete_device_removed_key() {
+    run_scenario("scenarioDeleteDeviceRemovedKey")
+}
+/// verifies: LLR-fym7dy
+///
+/// Measured (2026-10-03): red 3 of 3 with `emergency_isolate_member`'s
+/// held-key refusal deleted.
+#[test]
+fn scenario_isolate_duplicate() {
+    run_scenario("scenarioIsolateDuplicate")
+}
+/// verifies: LLR-v6gfc7
+///
+/// Measured (2026-10-03): red 3 of 3 with `add_member`'s key-index refusal
+/// ignored.
+#[test]
+fn scenario_add_member_duplicate() {
+    run_scenario("scenarioAddMemberDuplicate")
+}
+/// verifies: LLR-gjj6bx
+///
+/// Measured (2026-10-03): red 3 of 3 with `apply_delta`'s resulting-record
+/// key refusal ignored.
+#[test]
+fn scenario_apply_delta_duplicate() {
+    run_scenario("scenarioApplyDeltaDuplicate")
 }
 #[test]
 fn scenario_device_slots_full() {

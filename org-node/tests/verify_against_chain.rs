@@ -13,15 +13,16 @@ use org_node::chain::{MockChain, OrgState};
 use org_node::ids::OrgId;
 use org_node::keys::SigningKeypair;
 use org_node::sequence::SeqGuard;
-use org_node::test_fixtures::{admit_member_delta, genesis_trie, Trie};
+use org_node::test_fixtures::{admin_device, admit_member_delta, genesis_trie, Trie};
 use org_node::verify::{verify_envelope_against_chain, VerifyContext};
 use org_node::{OrgNodeError, SignedDeltaEnvelope};
 
 fn setup() -> (SigningKeypair, OrgId, Trie, SignedDeltaEnvelope, RootHash) {
     let admin = SigningKeypair::from_seed([1u8; 32]);
-    let local = genesis_trie(&admin, &admin); // receiver's mirror (epoch 1 state)
+    let local = genesis_trie(&admin, &admin_device()); // receiver's mirror (epoch 1 state)
     // NOTE: admit_member_delta builds its own genesis internally from the same
-    // admin; both genesis tries agree by construction (deterministic fixtures).
+    // admin and admin_device(); both genesis tries agree by construction
+    // (deterministic fixtures).
     let (delta, new_trie) = admit_member_delta(&admin);
     let org = OrgId::new([5u8; 20]);
     let env = SignedDeltaEnvelope::build(org, 2, &delta, &admin).unwrap();
