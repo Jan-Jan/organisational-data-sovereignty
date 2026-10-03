@@ -1,18 +1,21 @@
-# ODS Phase 1 — Quint model
+# ODS Phase 1 — Quint protocol model
 
 Models the Organisational Data Sovereignty Phase 1 protocol around the
 `org-members` crate. Design spec:
 `docs/superpowers/specs/2026-06-15-quint-protocol-model-design.md`.
 
-The membership model moved to org-members/quint/ on
-2026-10-03 (docs/adr/2026-10-03-quint-conformance-gate.md).
+These models have lived in org-node since part 2 of
+docs/adr/2026-10-03-quint-conformance-gate.md (2026-10-03): both typechecks and
+the five simulator invariants are unconditional entries in org-node's
+`verify_commands`. The membership model moved to org-members/quint/ in part 1.
 
 ## Protocol layer (Milestones 2–3)
 
 > **Scope disclaimer.** Everything below is verified about the Quint protocol
-> *model* only. There is **no Rust implementation of the protocol layer** — the
-> `org-members` crate is the sole code under conformance test (via
-> `org-members/quint/membership.qnt` + the conformance test). So `forkSafety`/`revocationSafety`/`tauWindow`/`convergence`
+> *model* only. org-node has **no conformance test** yet — no Rust code is
+> replayed against this model (ADR decision 13; the node-level model is a
+> separate change). The `org-members` crate is the sole code under conformance
+> test, against `org-members/quint/membership_mbt.qnt`. So `forkSafety`/`revocationSafety`/`tauWindow`/`convergence`
 > are statements about the model, not about a running system. "verify" here means
 > Apalache checked the *model*, not that an implementation was verified.
 
@@ -35,14 +38,15 @@ Properties (checked with the simulator):
   The epoch-stamped "settled" precondition deliberately excludes the pre-rekey
   transitive-trust window (that is the Milestone-3 τ-window, not a violation).
 
-Commands (append `--backend=typescript` locally; CI uses defaults):
+Commands (the default rust backend, as org-node's `verify_commands` and CI run
+them; the full list is in `org-node/.guardrails/config.yaml`):
 
-- `quint run quint/protocol.qnt --invariant=forkSafety --max-steps=16 --max-samples=5000`
-- `quint run quint/protocol.qnt --invariant=revocationSafety --max-steps=16 --max-samples=5000`
-- vacuity witnesses: `quint run quint/ods_instances.qnt --invariant=settledWithRevocationReachable ...` (finds a counterexample = the target state is reachable).
+- `quint run org-node/quint/protocol.qnt --invariant=forkSafety --max-steps=16 --max-samples=5000`
+- `quint run org-node/quint/protocol.qnt --invariant=revocationSafety --max-steps=16 --max-samples=5000`
+- vacuity witnesses: `quint run org-node/quint/ods_instances.qnt --invariant=settledWithRevocationReachable ...` (finds a counterexample = the target state is reachable).
 
 Negative controls (documented, not committed): dropping the `== chain.root` gate
-in `memberFetchAndApply` breaks `forkSafety`; leaking a CGKA token to revoked
+in `deviceFetchAndApply` breaks `forkSafety` (re-measured 2026-10-03); leaking a CGKA token to revoked
 members in `cgkaRotate` breaks `revocationSafety`. Both produce simulator
 counterexamples.
 
@@ -58,7 +62,7 @@ while membership only shrinks (removals) — revisit if a later milestone adds m
 re-addition. Convergence and the τ-window property arrive in Milestone 3.
 
 Local Apalache run (outside CI) needs a JVM and a writable `$HOME`:
-`HOME=/tmp/fakehome JAVA_HOME=$(/usr/libexec/java_home) PATH=$JAVA_HOME/bin:$PATH quint verify quint/protocol.qnt --invariant=forkSafety --max-steps=5`.
+`HOME=/tmp/fakehome JAVA_HOME=$(/usr/libexec/java_home) PATH=$JAVA_HOME/bin:$PATH quint verify org-node/quint/protocol.qnt --invariant=forkSafety --max-steps=5`.
 
 ## Protocol layer (Milestone 3) — clock, τ-window, compromised key, convergence
 

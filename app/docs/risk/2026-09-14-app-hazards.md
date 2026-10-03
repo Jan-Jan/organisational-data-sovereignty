@@ -42,7 +42,11 @@ widens from `app/src-tauri/src` alone to include `app/src`:
   *does with* their answers and what it *shows* an operator, never about
   whether their answers are right.
 - The contract at `on-chain/` and the formal models at `quint/`, disclaimed in
-  `.guardrails/units.yaml`.
+  `.guardrails/units.yaml`. (Amended 2026-10-03: the formal models moved into
+  `org-members/quint/` and `org-node/quint/`
+  (`docs/adr/2026-10-03-quint-conformance-gate.md`) and are now inside those
+  units, out of scope here like the rest of their behaviour; only `on-chain/`
+  is still disclaimed.)
 - The Tauri framework, `iroh`, `subxt` and the SvelteKit toolchain, which are
   SOUP. This unit's `app/docs/architecture/soup.md` is still the empty
   template; populating it is tooth 4, and this register's reliance on Tauri's

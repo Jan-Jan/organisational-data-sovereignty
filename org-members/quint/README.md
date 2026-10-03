@@ -49,4 +49,4 @@ defaults.)
 - Crypto is assumed sound; keys are `(owner, gen)` pairs, not bytes.
 - Confusables are modeled via an explicit `skeleton` field, not real UTS#39.
 - Protocol-layer properties (revocation/replay/τ-window/convergence) and the
-  full adversary live in the protocol model (`quint/protocol.qnt`).
+  full adversary live in the protocol model (`org-node/quint/protocol.qnt`).

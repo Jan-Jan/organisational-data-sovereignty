@@ -55,9 +55,11 @@ test_paths:
 # ~/.quint is unwritable (decision 9). `quint --version` puts the Quint
 # version into every verification record (decision 7: not pinned).
 # `quint test` uses the typescript backend; the simulator run uses the
-# default rust backend (decision 9, amended). protocol.qnt imports this
-# unit's exported model interface and stays typechecked here until part 2
-# moves it into org-node.
+# default rust backend (decision 9, amended). org-node/quint/protocol.qnt
+# imports this unit's exported model interface (membership_types.qnt);
+# org-node depends on org-members, so check-units.sh --impact runs org-node's
+# gate — which typechecks that importer — on every org-members change
+# (part 2, 2026-10-03).
 verify_commands:
   - cargo test -p org-members
   - quint --version
@@ -66,7 +68,6 @@ verify_commands:
   - quint typecheck org-members/quint/membership_mbt.qnt
   - quint test org-members/quint/membership.qnt --backend=typescript
   - quint run org-members/quint/membership_mbt.qnt --invariant=mbtInv --max-steps=15 --max-samples=1000
-  - quint typecheck quint/protocol.qnt
 
 # Problem-report triage limits: whole numbers, both mean "more than".
 problem_age_days: 30

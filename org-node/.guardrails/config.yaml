@@ -74,9 +74,27 @@ test_paths:
 # transport_handshake 1, transport_networked 1. The two bolero targets report
 # no pass count: each prints its iteration total and exits on its one-second
 # budget.
+# 2026-10-03, part 2 of docs/adr/2026-10-03-quint-conformance-gate.md: the
+# protocol models moved into org-node/quint/, and their checks are
+# unconditional entries here (decision 3) — both typechecks and the five
+# simulator invariants, each with an explicit --max-steps (decision 7). Quint
+# is not pinned; `quint --version` puts the version into every verification
+# record (decision 7). The simulator runs use the default rust backend and
+# need a writable ~/.quint (decision 9). Measured 2026-10-03 (agent sandbox,
+# quint 0.33.0, rust backend): all five pass, about 1 s wall each, 5 s for
+# the five together. These are checks of the system model only: org-node has
+# no conformance test, so a Rust change to org-node is not checked against
+# the model (decision 13's known gap).
 verify_commands:
   - cargo test -p org-node --features app,test-support --lib --test service_stories --test transport_handshake --test transport_networked --test fuzz_envelope_decode --test fuzz_verify_against_chain --test verify_against_chain --test wire_frame_bound --test store_at_rest --test admission_sender
-  - quint typecheck quint/protocol.qnt
+  - quint --version
+  - quint typecheck org-node/quint/protocol.qnt
+  - quint typecheck org-node/quint/ods_instances.qnt
+  - quint run org-node/quint/protocol.qnt --invariant=forkSafety --max-steps=16 --max-samples=5000
+  - quint run org-node/quint/protocol.qnt --invariant=revocationSafety --max-steps=16 --max-samples=5000
+  - quint run org-node/quint/protocol.qnt --invariant=revokedExcludedFromOrgSecret --max-steps=16 --max-samples=5000
+  - quint run org-node/quint/protocol.qnt --invariant=tauWindow --max-steps=16 --max-samples=5000
+  - quint run org-node/quint/protocol.qnt --invariant=convergence --max-steps=16 --max-samples=5000
 
 problem_age_days: 30
 problem_open_max: 10

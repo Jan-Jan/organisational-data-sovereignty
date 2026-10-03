@@ -56,7 +56,6 @@ units:
 
 not_a_unit:
   - on-chain          # Foundry contracts (OrgRegistry.sol); separate toolchain — later tooth
-  - quint             # protocol models (org-node's), moving into org-node in part 2 of docs/adr/2026-10-03-quint-conformance-gate.md; membership model now in org-members/quint
   - spike-common      # Phase 1.d spike, salvage-only (no upstream PRs until value demonstrated)
   - spike-keyhive     # Phase 1.d spike, salvage-only
   - spike-p2panda     # Phase 1.d spike, salvage-only

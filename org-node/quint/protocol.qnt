@@ -10,7 +10,7 @@
 /// membership only ever SHRINKS (removals), so no two reachable roots share a
 /// member-set. Revisit this if a future milestone adds member re-addition.
 module protocol {
-  import membership_types.* from "../org-members/quint/membership_types"
+  import membership_types.* from "../../org-members/quint/membership_types"
 
   type Principal = str
   type ChainState = { epoch: int, root: int, orgGen: int }

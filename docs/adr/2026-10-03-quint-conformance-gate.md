@@ -204,6 +204,14 @@ the abstract-root remodel, used exactly one symbol from it: the `Key` record.
     disclaimed `quint/`, not `org-node/`), and the `rust-version` bumps in
     `org-node/Cargo.toml` and `app/src-tauri/Cargo.toml` land with
     org-members' — so every declared MSRV on `master` is true at every commit.
+    (Note 2026-10-03, part 2 delivered: `protocol.qnt` and `ods_instances.qnt`
+    are in `org-node/quint/`, the import is
+    `../../org-members/quint/membership_types`, `quint` has left
+    `not_a_unit`, and org-node's `verify_commands` run both typechecks and the
+    five simulator invariants at `--max-steps=16`. Measured with quint 0.33.0
+    on the default rust backend: about 1 s each, not the ~60 s decision 3
+    states for the typescript backend. The known gap stands: org-node still
+    has no conformance test.)
 
 ## Why
 
