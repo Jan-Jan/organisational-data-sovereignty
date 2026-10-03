@@ -494,3 +494,188 @@ proptest! {
         );
     }
 }
+
+// ============================================================
+// Device-removal key replacement: removing a device or isolating
+// a member must replace the member-as-a-group key, or change
+// nothing (PR-zz4exm).
+// ============================================================
+
+/// Members in the device-removal pool. Small, so ops collide often.
+const REMOVAL_POOL: usize = 3;
+/// Device seeds per member. Wider than MAX_DEVICES so some ops name a
+/// device the member does not hold, or overflow the slots.
+const DEVICE_POOL: usize = 6;
+
+/// The replacement key an op supplies.
+#[derive(Debug, Clone)]
+enum KeyChoice {
+    /// The member's key at the time the op runs.
+    Current,
+    /// `pool_key(member, v)`. Variant 0 is every member's genesis
+    /// key, so this also lands on the current key at times.
+    Seeded(u8),
+}
+
+fn arb_key_choice() -> impl Strategy<Value = KeyChoice> {
+    prop_oneof![
+        2 => Just(KeyChoice::Current),
+        3 => (0..4u8).prop_map(KeyChoice::Seeded),
+    ]
+}
+
+#[derive(Debug, Clone)]
+enum DeviceOp {
+    DeleteDevice(usize, usize, KeyChoice),
+    Isolate(usize, KeyChoice),
+    AddDevice(usize, usize),
+    Rotate(usize, u8),
+}
+
+fn arb_device_op() -> impl Strategy<Value = DeviceOp> {
+    let member = 0..REMOVAL_POOL;
+    let device = 0..DEVICE_POOL;
+    prop_oneof![
+        3 => (member.clone(), device.clone(), arb_key_choice())
+            .prop_map(|(m, d, k)| DeviceOp::DeleteDevice(m, d, k)),
+        2 => (member.clone(), arb_key_choice()).prop_map(|(m, k)| DeviceOp::Isolate(m, k)),
+        2 => (member.clone(), device).prop_map(|(m, d)| DeviceOp::AddDevice(m, d)),
+        1 => (member, 0..4u8).prop_map(|(m, v)| DeviceOp::Rotate(m, v)),
+    ]
+}
+
+impl DeviceOp {
+    fn member_idx(&self) -> usize {
+        match self {
+            DeviceOp::DeleteDevice(m, _, _)
+            | DeviceOp::Isolate(m, _)
+            | DeviceOp::AddDevice(m, _)
+            | DeviceOp::Rotate(m, _) => *m,
+        }
+    }
+}
+
+fn pool_id(member_idx: usize) -> MemberId {
+    member_id(&format!("{}-id-0", HANDLES[member_idx]))
+}
+
+fn pool_device(member_idx: usize, device_idx: usize) -> P2pDeviceKey {
+    device_key(&format!("{}-d-{}", HANDLES[member_idx], device_idx))
+}
+
+fn pool_key(member_idx: usize, variant: u8) -> P2pMemberKey {
+    member_key(&format!("{}-mk-{}", HANDLES[member_idx], variant))
+}
+
+/// A pool member enrolled with devices 0..3 and genesis key variant 0.
+fn pool_member(member_idx: usize) -> MemberLeaf {
+    let devices = (0..3).map(|d| pool_device(member_idx, d)).collect();
+    MemberLeaf::new(
+        pool_id(member_idx),
+        HANDLES[member_idx],
+        pool_key(member_idx, 0),
+        "Test",
+        "User",
+        devices,
+    )
+    .unwrap()
+}
+
+fn resolve_key(choice: &KeyChoice, member_idx: usize, current: P2pMemberKey) -> P2pMemberKey {
+    match choice {
+        KeyChoice::Current => current,
+        KeyChoice::Seeded(v) => pool_key(member_idx, *v),
+    }
+}
+
+proptest! {
+    /// verifies: LLR-s97ywt, LLR-w92psx
+    ///
+    /// Every successful `delete_p2p_device` / `emergency_isolate_member`
+    /// installs the supplied key and that key differs from the one it
+    /// replaces. `P2pKeyNotReplaced` is returned only when the supplied key
+    /// equalled the current key. A refusal is atomic by construction — the
+    /// operations take `&self` and return `Result<Self, _>`, so an `Err`
+    /// carries no trie — so the property checks the error, not a re-read of
+    /// the unchanged input trie.
+    #[test]
+    fn device_removal_never_keeps_key(
+        ops in proptest::collection::vec(arb_device_op(), 1..40),
+    ) {
+        let mut trie = TestTrie::genesis((0..REMOVAL_POOL).map(pool_member).collect()).unwrap();
+
+        for op in &ops {
+            let member_idx = op.member_idx();
+            let id = pool_id(member_idx);
+            let before = trie.get(&id).unwrap();
+            let current = *before.p2p_key();
+
+            let (result, supplied) = match op {
+                DeviceOp::DeleteDevice(_, d, choice) => {
+                    let key = resolve_key(choice, member_idx, current);
+                    (trie.delete_p2p_device(&id, &pool_device(member_idx, *d), key), Some(key))
+                }
+                DeviceOp::Isolate(_, choice) => {
+                    let key = resolve_key(choice, member_idx, current);
+                    (trie.emergency_isolate_member(&id, key), Some(key))
+                }
+                DeviceOp::AddDevice(_, d) => {
+                    (trie.add_p2p_device(&id, pool_device(member_idx, *d)), None)
+                }
+                DeviceOp::Rotate(_, v) => {
+                    (trie.rotate_p2p_key(&id, pool_key(member_idx, *v)), None)
+                }
+            };
+
+            // Only the removal ops carry the key-replacement property.
+            let Some(supplied) = supplied else {
+                if let Ok(next) = result {
+                    trie = next;
+                }
+                continue;
+            };
+
+            match result {
+                Ok(next) => {
+                    let after = next.get(&id).unwrap();
+                    prop_assert!(
+                        *after.p2p_key() != current,
+                        "{:?} succeeded but kept the member's key", op,
+                    );
+                    prop_assert!(*after.p2p_key() == supplied, "{:?} installed another key", op);
+                    if let DeviceOp::DeleteDevice(_, d, _) = op {
+                        prop_assert!(!after.has_p2p_device(&pool_device(member_idx, *d)));
+                        prop_assert_eq!(after.p2p_device_count(), before.p2p_device_count() - 1);
+                    } else {
+                        prop_assert_eq!(after.p2p_device_count(), 0);
+                    }
+                    trie = next;
+                }
+                Err(OrgMembersError::P2pKeyNotReplaced) => {
+                    prop_assert!(
+                        supplied == current,
+                        "{:?} refused with P2pKeyNotReplaced for a fresh key", op,
+                    );
+                    // Check order: an absent device reports DeviceNotFound
+                    // before any key comparison.
+                    if let DeviceOp::DeleteDevice(_, d, _) = op {
+                        prop_assert!(
+                            before.has_p2p_device(&pool_device(member_idx, *d)),
+                            "{:?} reported P2pKeyNotReplaced for an absent device", op,
+                        );
+                    }
+                }
+                Err(err) => {
+                    // Pool members are never deleted, so no IdNotFound, and
+                    // isolate has no other refusal: the only other error is a
+                    // delete of an absent device, whatever key was supplied.
+                    let DeviceOp::DeleteDevice(_, d, _) = op else {
+                        return Err(TestCaseError::fail(format!("{:?} failed with {:?}", op, err)));
+                    };
+                    prop_assert_eq!(err, OrgMembersError::DeviceNotFound);
+                    prop_assert!(!before.has_p2p_device(&pool_device(member_idx, *d)));
+                }
+            }
+        }
+    }
+}

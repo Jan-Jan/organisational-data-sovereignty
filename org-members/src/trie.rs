@@ -230,6 +230,12 @@ impl<H: TrieHasher> OrgTrie<H> {
     /// which the device derived secrets from), so rotating it invalidates
     /// that access. If the deleted device was the last one, the member
     /// becomes isolated (zero devices).
+    ///
+    /// A replacement key equal to the member's current key would leave the
+    /// removed device holding a live key, so it is refused with
+    /// `P2pKeyNotReplaced` and nothing changes: the device stays enrolled and
+    /// the key is kept. Check order: `IdNotFound`, `DeviceNotFound`,
+    /// `P2pKeyNotReplaced`.
     pub fn delete_p2p_device(
         &self,
         id: &MemberId,
@@ -238,6 +244,9 @@ impl<H: TrieHasher> OrgTrie<H> {
     ) -> Result<Self, OrgMembersError> {
         let existing = smt::get_member(&self.root, id).ok_or(OrgMembersError::IdNotFound)?;
         let new_slots = existing.p2p_device_slots().remove_device(device)?;
+        if existing.p2p_key() == &new_p2p_key {
+            return Err(OrgMembersError::P2pKeyNotReplaced);
+        }
         let new_leaf = existing
             .with_p2p_device_slots(new_slots)
             .with_p2p_key(new_p2p_key);
@@ -249,12 +258,20 @@ impl<H: TrieHasher> OrgTrie<H> {
     /// unclear and you want to cut off all access at once. The member remains
     /// in the trie with zero devices (isolated state). Re-add a device via
     /// `add_p2p_device` to un-isolate.
+    ///
+    /// A replacement key equal to the member's current key would leave the
+    /// removed devices holding a live key, so it is refused with
+    /// `P2pKeyNotReplaced` and nothing changes: every device stays enrolled
+    /// and the key is kept. Check order: `IdNotFound`, `P2pKeyNotReplaced`.
     pub fn emergency_isolate_member(
         &self,
         id: &MemberId,
         new_p2p_key: P2pMemberKey,
     ) -> Result<Self, OrgMembersError> {
         let existing = smt::get_member(&self.root, id).ok_or(OrgMembersError::IdNotFound)?;
+        if existing.p2p_key() == &new_p2p_key {
+            return Err(OrgMembersError::P2pKeyNotReplaced);
+        }
         let empty_slots = P2pDeviceSlots::new(Vec::new())?;
         let new_leaf = existing
             .with_p2p_device_slots(empty_slots)

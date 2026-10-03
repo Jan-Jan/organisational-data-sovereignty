@@ -153,19 +153,33 @@ module membership {
     else
       Ok(s.put(id, s.get(id).with("devices", s.get(id).devices.union(Set(d)))))
 
+  /// Remove one device and rotate the member's key. Mirrors
+  /// OrgTrie::delete_p2p_device: a replacement key equal to the current key
+  /// would leave the removed device holding a live key, so it is refused with
+  /// "P2pKeyNotReplaced" and nothing changes. Check order: IdNotFound,
+  /// DeviceNotFound, P2pKeyNotReplaced.
   pure def deleteDevice(s: Snapshot, id: str, d: Key, newKey: Key): Result =
     if (not(s.keys().contains(id)))
       Err("IdNotFound")
     else if (not(s.get(id).devices.contains(d)))
       Err("DeviceNotFound")
+    else if (s.get(id).pKey == newKey)
+      Err("P2pKeyNotReplaced")
     else
       Ok(s.put(id, s.get(id)
         .with("devices", s.get(id).devices.exclude(Set(d)))
         .with("pKey", newKey)))
 
+  /// Remove every device and rotate the member's key. Mirrors
+  /// OrgTrie::emergency_isolate_member: a replacement key equal to the current
+  /// key would leave the removed devices holding a live key, so it is refused
+  /// with "P2pKeyNotReplaced" and nothing changes. Check order: IdNotFound,
+  /// P2pKeyNotReplaced.
   pure def isolate(s: Snapshot, id: str, newKey: Key): Result =
     if (not(s.keys().contains(id)))
       Err("IdNotFound")
+    else if (s.get(id).pKey == newKey)
+      Err("P2pKeyNotReplaced")
     else
       Ok(s.put(id, s.get(id).with("devices", Set()).with("pKey", newKey)))
 
@@ -200,6 +214,24 @@ module membership {
     val nk = { owner: "a", gen: 1 }
     val exp = base.put("a", base.get("a").with("devices", Set()).with("pKey", nk))
     assert(isolate(base, "a", nk) == Ok(exp))
+  }
+
+  run deleteDeviceSameKeyRejectedTest = {
+    val d2 = { owner: "a-d2", gen: 0 }
+    val base = Map("a" -> leaf("a", "alice", "alice").with("devices", Set({ owner: "a", gen: 0 }, d2)))
+    assert(deleteDevice(base, "a", d2, base.get("a").pKey) == Err("P2pKeyNotReplaced"))
+  }
+
+  run isolateSameKeyRejectedTest = {
+    val base = Map("a" -> leaf("a", "alice", "alice"))
+    assert(isolate(base, "a", base.get("a").pKey) == Err("P2pKeyNotReplaced"))
+  }
+
+  /// Check order: an unknown device is reported before an unchanged key.
+  run deleteDeviceUnknownBeforeSameKeyTest = {
+    val base = Map("a" -> leaf("a", "alice", "alice"))
+    val ghost = { owner: "a-ghost", gen: 0 }
+    assert(deleteDevice(base, "a", ghost, base.get("a").pKey) == Err("DeviceNotFound"))
   }
 
   /// Ids present in `oldS` but absent in `newS`.

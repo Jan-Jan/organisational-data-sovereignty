@@ -450,6 +450,59 @@ fn delete_p2p_device_nonexistent_member_fails() {
     assert_eq!(err.unwrap_err(), OrgMembersError::IdNotFound);
 }
 
+/// verifies: REQ-ewdg2q, LLR-s97ywt
+///
+/// PR-zz4exm's reproducing test. Passing the member's current key back as
+/// the replacement must be refused whole (owner decision 2026-10-03). The
+/// evidence is the `Err(P2pKeyNotReplaced)` itself: the operation takes
+/// `&self` and returns `Result<Self, _>`, so an `Err` carries no trie and
+/// the refusal is atomic by construction — re-reading `trie` afterwards
+/// could not fail and would prove nothing.
+#[test]
+fn delete_p2p_device_rejects_unchanged_key() {
+    let trie = TestTrie::genesis(vec![jan_jan()]).unwrap();
+    let current = *trie.get(&member_id("jan-jan-id")).unwrap().p2p_key();
+    let err = trie.delete_p2p_device(
+        &member_id("jan-jan-id"),
+        &device_key("jan-jan-d1"),
+        current,
+    );
+    assert_eq!(err.unwrap_err(), OrgMembersError::P2pKeyNotReplaced);
+}
+
+/// verifies: REQ-ewdg2q, LLR-s97ywt
+///
+/// The last-device path, which would otherwise isolate the member, must
+/// refuse the same way. As above, the `Err(P2pKeyNotReplaced)` is the
+/// evidence; atomicity holds by construction (`&self` -> `Result<Self, _>`).
+#[test]
+fn delete_p2p_device_last_device_rejects_unchanged_key() {
+    let trie = TestTrie::genesis(vec![alice()]).unwrap();
+    let current = *trie.get(&member_id("alice-id")).unwrap().p2p_key();
+    let err = trie.delete_p2p_device(
+        &member_id("alice-id"),
+        &device_key("alice-d1"),
+        current,
+    );
+    assert_eq!(err.unwrap_err(), OrgMembersError::P2pKeyNotReplaced);
+}
+
+/// verifies: LLR-s97ywt
+///
+/// Check order: an unknown device with the current key reports
+/// DeviceNotFound, not P2pKeyNotReplaced.
+#[test]
+fn delete_p2p_device_unknown_device_with_unchanged_key_reports_device() {
+    let trie = TestTrie::genesis(vec![alice()]).unwrap();
+    let current = *trie.get(&member_id("alice-id")).unwrap().p2p_key();
+    let err = trie.delete_p2p_device(
+        &member_id("alice-id"),
+        &device_key("does-not-exist"),
+        current,
+    );
+    assert_eq!(err.unwrap_err(), OrgMembersError::DeviceNotFound);
+}
+
 // --- emergency_isolate_member tests ---
 
 /// verifies: REQ-r784fu, LLR-w92psx
@@ -512,6 +565,55 @@ fn emergency_isolate_member_nonexistent_fails() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
     let err = trie.emergency_isolate_member(&member_id("ghost-id"), member_key("any"));
     assert_eq!(err.unwrap_err(), OrgMembersError::IdNotFound);
+}
+
+/// verifies: REQ-ewdg2q, LLR-w92psx
+/// The `Err(P2pKeyNotReplaced)` is the evidence; the refusal is atomic by
+/// construction (`&self` -> `Result<Self, _>`, the `Err` carries no trie).
+#[test]
+fn emergency_isolate_member_rejects_unchanged_key() {
+    let trie = TestTrie::genesis(vec![jan_jan()]).unwrap();
+    let current = *trie.get(&member_id("jan-jan-id")).unwrap().p2p_key();
+    let err = trie.emergency_isolate_member(&member_id("jan-jan-id"), current);
+    assert_eq!(err.unwrap_err(), OrgMembersError::P2pKeyNotReplaced);
+}
+
+/// verifies: LLR-w92psx, LLR-v3jqau
+/// An absent member reports IdNotFound before any key comparison.
+#[test]
+fn emergency_isolate_member_nonexistent_with_any_key_reports_id() {
+    let trie = TestTrie::genesis(vec![alice()]).unwrap();
+    // alice's current key, offered for an absent member: there is no current
+    // key to compare against, so the lookup must fail first.
+    let alice_key = *trie.get(&member_id("alice-id")).unwrap().p2p_key();
+    let err = trie.emergency_isolate_member(&member_id("ghost-id"), alice_key);
+    assert_eq!(err.unwrap_err(), OrgMembersError::IdNotFound);
+}
+
+/// verifies: LLR-w92psx
+/// An already-isolated member (zero devices) still refuses its current key,
+/// and accepts a different one.
+#[test]
+fn emergency_isolate_member_already_isolated_rejects_unchanged_key() {
+    let trie = TestTrie::genesis(vec![alice()]).unwrap();
+    let k1 = member_key("isolated-k1");
+    let trie = trie
+        .emergency_isolate_member(&member_id("alice-id"), k1)
+        .unwrap();
+    assert_eq!(trie.get(&member_id("alice-id")).unwrap().p2p_device_count(), 0);
+
+    // The Err is the evidence; `trie` is untouched by construction.
+    let err = trie.emergency_isolate_member(&member_id("alice-id"), k1);
+    assert_eq!(err.unwrap_err(), OrgMembersError::P2pKeyNotReplaced);
+
+    let k2 = member_key("isolated-k2");
+    let trie = trie
+        .emergency_isolate_member(&member_id("alice-id"), k2)
+        .unwrap();
+    let (trie, _) = trie.recalculate().unwrap();
+    let member = trie.get(&member_id("alice-id")).unwrap();
+    assert_eq!(member.p2p_key(), &k2);
+    assert_eq!(member.p2p_device_count(), 0);
 }
 
 // --- Delete tests ---

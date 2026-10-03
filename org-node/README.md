@@ -50,8 +50,9 @@ Enabling `chain` pulls in `subxt` 0.50, `subxt-signer` 0.50, `on-chain-client`
 `chain_read::OnChainReader` implements `ChainReader` over
 `on-chain-client`'s `OrgRegistryClient`:
 
-- **Async half:** `OnChainReader::refresh(&self) -> Result<(), String>` fetches
-  the latest (current best) `OrgState` for the org and caches it in a `Mutex`.
+- **Async half:** `OnChainReader::refresh(&self) -> Result<(), String>` reads
+  the `OrgState` at the latest **finalised** block (`at = None`, REQ-ysyu9g)
+  and caches it in a `Mutex`.
 - **Sync half:** `ChainReader::get_org_state` reads the cached snapshot
   synchronously, so `verify_envelope_against_chain` (which is sync) can call it
   without blocking.

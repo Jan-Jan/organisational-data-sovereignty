@@ -23,6 +23,9 @@ pub enum OrgMembersError {
     #[error("device not found")]
     DeviceNotFound,
 
+    #[error("replacement p2p key equals the current key")]
+    P2pKeyNotReplaced,
+
     #[error("device slots full (max 4)")]
     DeviceSlotsFull,
 

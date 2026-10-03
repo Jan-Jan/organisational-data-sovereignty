@@ -85,6 +85,13 @@ further but have no requirement yet are named in "Controls identified but not
 minted", and are deliberately given no RC identifier — an identifier would
 assert a traced, tested control where there is none.
 
+(Corrected 2026-10-03: RC-mqtks7's second clause is now enforced — PR-zz4exm
+resolved; see the correction under HAZ-s39gbh's residual risk. Its first
+clause's wire-path bypass stands, and a removal may still install a key the
+removed device held *earlier*, which the second clause as worded does not
+reach — PR-z463w5, open; and the first clause is also reachable on the direct
+API by deleting and re-admitting the member — PR-fzu25w, open.)
+
 The requirements keep `satisfies: derived`. Finding the hazard a rule addresses
 does not give the rule a parent in system needs; it gives it a justification.
 The derived assessments in `docs/risk/2026-08-31-membership-derived.md` stand,
@@ -144,7 +151,12 @@ P2, and this is the highest occurrence estimate in the register. It needs no
 attacker: `delete_p2p_device` and `emergency_isolate_member` both take the
 replacement key from the caller and both keys have the same type, so passing
 the outgoing key back is a well-typed call that any integration can make by
-accident (PR-zz4exm names both operations).
+accident (PR-zz4exm names both operations). (Corrected 2026-10-03: that call
+is now refused — PR-zz4exm resolved. P2 is **not** re-scored here: the same
+accident with a key the device held *earlier* is still accepted (PR-z463w5),
+delete-and-re-admit removes a device with no key change at all (PR-fzu25w),
+and the wire path is untouched. Re-evaluating the estimate is `analyze-risks`
+work.)
 
 **RC-mqtks7**: on the direct membership API, removing a device key and
 replacing the member's member-as-a-group key are one operation that cannot be
@@ -165,6 +177,14 @@ contingent on the caller getting it right, which is the one property a risk
 control must not have. Tracked as **PR-zz4exm**, open since 2026-08-31, whose
 stated fix begins with the test that reproduces it.
 
+(Corrected 2026-10-03: the second clause is now implemented. Both operations
+refuse an unchanged replacement key with `P2pKeyNotReplaced` and change
+nothing; PR-zz4exm is resolved, carried by LLR-s97ywt and LLR-w92psx, their
+`*_rejects_unchanged_key` tests, a property test, and the Quint model's
+conformance. The residual is **not re-scored here**: the wire-path bypass of
+the first clause, below, is untouched, and re-evaluating HAZ-s39gbh is
+`analyze-risks` work.)
+
 The first clause holds only where the control says it does, and the scoping is
 new to this revision. `P2pDeviceSlots::remove_device` is crate-private, so an
 external caller must go through `delete_p2p_device`, which always applies the
@@ -176,6 +196,10 @@ key. So a change set may upsert a leaf with one device removed and the key
 unchanged, which is this hazard by another route. That is the same shape of gap
 REQ-shk82j exists to close for handles, and it is unclosed for this pair.
 Recorded here and listed as a not-minted control rather than asserted away.
+(Corrected 2026-10-03: "an external caller must go through
+`delete_p2p_device`" is too strong. `delete_member` followed by `add_member`
+with the same key and one device fewer reaches the same state on the direct
+API — PR-fzu25w, open.)
 
 ### Isolation applied to the wrong member
 
@@ -283,6 +307,8 @@ correct. Two qualifications, both of which an earlier draft got wrong:
   org-node's problems ledger with org-node's own risk analysis, and a
   provider's register may not name a consumer's items, so the ID is replaced
   by the file — `org-node/docs/problems/2026-09-09-org-node-problems.md`.)
+  (Corrected 2026-10-03: that report is resolved; the reader's doc-comment
+  now states the finalised read and the caching.)
 
 The staleness bound is the other half, and it is weaker than an earlier draft
 claimed. `protocol.qnt` models a `MAX_AGE` policy in which a device may accept
@@ -545,7 +571,7 @@ Per hazard, after controls:
 | Hazard | S/P | Residual | Why |
 |---|---|---|---|
 | HAZ-jkc6tj | S3/P1 | not acceptable | last step is a person reading a name |
-| HAZ-s39gbh | S3/P2 | not acceptable | control unimplemented in one clause (PR-zz4exm), bypassed on the wire path in the other |
+| HAZ-s39gbh | S3/P2 | not acceptable | control unimplemented in one clause (PR-zz4exm), bypassed on the wire path in the other (corrected 2026-10-03: PR-zz4exm resolved, the clause now holds; the wire-path bypass stands and the hazard is not re-scored) |
 | HAZ-sc7wse | S3/P1 | not acceptable | bounded by reversibility; no confirmation step exists |
 | HAZ-y8h835 | S3/P2 | not acceptable | decisive control unstated, ungated and unrun (corrected 2026-09-09: now stated and gated in org-node — see the correction under this hazard's residual risk); staleness bound modelled only |
 | HAZ-bmv7cy | S3/P2 | not acceptable | re-validation weaker than admission; evidence is five example tests |
@@ -613,7 +639,9 @@ test written before the requirement is claimed, not analysis work.
 1. **Enforce the replacement-key check** (HAZ-s39gbh). Not a new control: make
    RC-mqtks7's second clause true. PR-zz4exm, open, with the reproducing test
    already specified. The only item here that closes an unacceptable residual
-   risk outright.
+   risk outright. (Corrected 2026-10-03: done — PR-zz4exm resolved. It did not
+   close HAZ-s39gbh's residual outright after all: item 2's wire-path bypass
+   still stands.)
 2. **Relate a leaf's device set to its member-as-a-group key in delta
    validation** (HAZ-s39gbh). Closes RC-mqtks7's wire-path bypass, and is the
    same kind of rule REQ-shk82j already applies to handles.

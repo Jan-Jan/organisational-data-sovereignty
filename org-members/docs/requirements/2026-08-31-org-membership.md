@@ -22,7 +22,9 @@ addresses gives the rule a justification, not a parent in system needs, and the
 derived assessments remain the assessment of record. No requirement text changed
 with the annotation: each control was worded from the behaviour the requirement
 already stated, and where the software falls short of that behaviour it is the
-residual risk that says so (REQ-ewdg2q, PR-zz4exm).
+residual risk that says so (REQ-ewdg2q, PR-zz4exm). (Corrected 2026-10-03:
+PR-zz4exm is resolved; REQ-ewdg2q's remaining shortfalls are the wire path,
+PR-z463w5 and PR-fzu25w — see the note under REQ-ewdg2q.)
 
 ## Membership identity
 
@@ -90,6 +92,18 @@ removes the device and leaves its access intact. Recorded as PR-zz4exm rather
 than softened away, because the intent is not in doubt — the operation exists to
 cut off the removed device. The requirement states the behaviour the software is
 supposed to have; the problem report tracks the distance to it.
+
+Met on the direct API as of 2026-10-03: `delete_p2p_device` and
+`emergency_isolate_member` refuse a replacement key equal to the current key
+with `P2pKeyNotReplaced` and change nothing (LLR-s97ywt, LLR-w92psx; PR-zz4exm
+resolved). Three gaps remain open and are not closed by this: the wire path,
+where `apply_delta` still accepts a leaf with a device removed and the key
+unchanged (the hazard register's not-minted control 2; org-node's REQ-q92yac);
+a removal that installs a key the removed device held *earlier* (PR-z463w5);
+and a device removed by `delete_member` followed by `add_member` with the same
+key, which no device-removal operation sees (PR-fzu25w). "Met" here means met
+by the two device-removal operations, not by every route to the same state. The
+paragraph above is kept as the record of the gap.
 
 **REQ-r784fu**: The software shall provide an operation that removes every
 device key from a member and replaces that member's member-as-a-group key in one step,

@@ -123,7 +123,8 @@ on the owner's decision to defer, not on an unreachability claim.
 The change that filed this is the architecture change's review-fix round: it
 corrects claims and one test's robustness and writes no production code. Fixing
 `bit()` is a behaviour or surface change and gets its own red-first change, the
-same disposition PR-zz4exm has carried since 2026-08-31. Folding a product fix
+same disposition PR-zz4exm carried from 2026-08-31 until its own change
+resolved it on 2026-10-03. Folding a product fix
 into a documentation-correction round would put it where no reviewer is looking
 for one.
 

@@ -154,7 +154,8 @@ a real behaviour change — the plausible shape is a two-phase upsert loop that
 releases every outgoing handle from the indexes before checking any incoming one
 — and under `resolve-problem` it starts with a test that reproduces the refusal,
 which this round is not permitted to add. That is the same disposition PR-zz4exm
-has carried since 2026-08-31 and PR-jq43gx since 2026-09-17.
+carried from 2026-08-31 until its resolution on 2026-10-03, and PR-jq43gx has
+carried since 2026-09-17.
 
 When it is fixed, the reproducing test is cheap and needs no new machinery: build
 a two-member trie, swap the handles through two `update_handle` calls, take

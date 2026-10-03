@@ -97,7 +97,8 @@ performs a removal that mitigates nothing (PR-zz4exm). Until that is fixed, this
 requirement's contribution to the retained-access path is conditional on the
 caller, which is precisely the property a risk control must not have. Tooth 5
 should treat this as a control whose effectiveness is currently unverified
-rather than as one in place.
+rather than as one in place. (Corrected 2026-10-03: fixed — an unchanged
+replacement key is refused with `P2pKeyNotReplaced`; PR-zz4exm resolved.)
 
 REQ-r784fu (isolate a member in one step, retaining membership, reversible by
 adding a device). Hazard impact: mitigates, on both harms at once. It is the

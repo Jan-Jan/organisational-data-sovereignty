@@ -105,6 +105,7 @@ fn err_tag(e: &OrgMembersError) -> String {
         OrgMembersError::DeviceSlotsFull => "DeviceSlotsFull",
         OrgMembersError::EmptyDeviceList => "EmptyDeviceList",
         OrgMembersError::DeltaBaseMismatch => "DeltaBaseMismatch",
+        OrgMembersError::P2pKeyNotReplaced => "P2pKeyNotReplaced",
         other => return format!("Other:{other:?}"),
     }
     .to_string()
@@ -304,7 +305,12 @@ impl Driver for MembershipDriver {
     }
 }
 
-/// verifies: LLR-fv75ec, LLR-j4d38d, LLR-v3jqau
+/// verifies: LLR-fv75ec, LLR-j4d38d, LLR-v3jqau, LLR-s97ywt, LLR-w92psx
+///
+/// LLR-s97ywt and LLR-w92psx are carried for their unchanged-replacement-key
+/// refusal (PR-zz4exm): removing the `P2pKeyNotReplaced` guard from either
+/// `delete_p2p_device` or `emergency_isolate_member` turns this test red
+/// (measured, 2026-10-03, three seeds each).
 ///
 /// Not LLR-ch2pkw. The model's `init` sets the trie to the empty map and this
 /// driver's `init` calls `Trie::genesis` with an empty vector -- both of the

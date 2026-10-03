@@ -216,7 +216,7 @@ REQ-ds8ryr's sense at all — an addressing primitive that adds nothing and
 rejects nothing, or public input the requirement's "for any input" governs. The
 owner's decision on 2026-09-17 was that the code is not touched here: fixing it
 is a behaviour or surface change owed its own red-first change, the same
-disposition PR-zz4exm carries.
+disposition PR-zz4exm carried (it was resolved by such a change on 2026-10-03).
 
 So no abnormal-input test is added for LLR-zbe553 in this change — but the
 reason is now *the deferral recorded in PR-jq43gx*, not a claim that the input
@@ -276,12 +276,18 @@ satisfies: REQ-xdx2c2
 
 **LLR-s97ywt**: `delete_p2p_device` removes the device key and replaces the
 member-as-a-group key in one operation, and isolates the member when the device
-removed was the last. satisfies: REQ-ewdg2q
+removed was the last; a replacement key equal to the member's current key is
+refused with `P2pKeyNotReplaced`, checked after the member and device lookups,
+and the refusal changes nothing — the device stays enrolled and the key stays
+as it was. satisfies: REQ-ewdg2q
 
 **LLR-w92psx**: `emergency_isolate_member` removes every device key and
 replaces the member-as-a-group key in one step, retains the member in the
-organisation, and leaves the member restorable by adding a device key.
-satisfies: REQ-r784fu
+organisation, and leaves the member restorable by adding a device key; a
+replacement key equal to the member's current key is refused with
+`P2pKeyNotReplaced`, checked after the member lookup, and the refusal changes
+nothing — every device stays enrolled and the key stays as it was.
+satisfies: REQ-r784fu, REQ-ewdg2q
 
 **LLR-k89ahd**: `rotate_p2p_key` replaces the member-as-a-group key and changes
 no other field, the device set included. satisfies: derived
@@ -296,13 +302,21 @@ the bounds of LLR-w5nkbu. satisfies: derived
 **LLR-v3jqau**: every operation naming a member that is not in the organisation
 is refused with `IdNotFound`. satisfies: REQ-ds8ryr
 
-LLR-s97ywt states what the software does, which is less than REQ-ewdg2q
-requires. The requirement's second clause — reject a replacement key equal to
-the key being replaced — is not implemented, recorded as PR-zz4exm and open
-since 2026-08-31. The LLR is deliberately worded to the implemented behaviour
-rather than the required behaviour, because an LLR that restated the
-requirement would be satisfied by a test that cannot exist, and the gap would
-vanish into a green gate. The problem report stays open.
+LLR-s97ywt as first written (2026-09-17) stated what the software did, which
+was less than REQ-ewdg2q requires: the requirement's second clause — reject a
+replacement key equal to the key being replaced — was not implemented, recorded
+as PR-zz4exm, open since 2026-08-31. The LLR was deliberately worded to the
+implemented behaviour, because an LLR restating the requirement would have been
+satisfied by a test that could not exist. Amended 2026-10-03, together with
+LLR-w92psx, in the change that fixes PR-zz4exm: the owner decided that an
+unchanged replacement key is an error and the operation is atomic — refused
+whole, never performed by halves. `emergency_isolate_member` removes device
+keys too, so REQ-ewdg2q's second clause governs it as well, and LLR-w92psx now
+says so. LLR-w92psx's refusal also covers a member who already has no device
+keys, where nothing is removed and REQ-ewdg2q does not reach; there it rests on
+REQ-r784fu, read as requiring that the operation *replace* the key — and
+installing the key already held replaces nothing. `rotate_p2p_key` (LLR-k89ahd) is not amended: it removes no device, so
+REQ-ewdg2q does not reach it.
 
 ## SDD-55b2zj — Delta exchange and the trust boundary
 

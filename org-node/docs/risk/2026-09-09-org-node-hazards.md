@@ -228,7 +228,9 @@ the defect's blast radius is small: no shipped behaviour depends on the wrong
 comment today. The report stays open on the grounds it already gives, which
 that does not touch: the doc-comment of a security-relevant control says
 "current best" where the read is finalised, and a second reader written from
-that comment would implement the weaker read.
+that comment would implement the weaker read. (Corrected 2026-10-03: the
+report is resolved — `refresh()`'s doc-comment now states the finalised read and
+the caching, and the line reference above is to the comment as it then stood.)
 
 And the published signing key is a single ed25519 member key: `org_pub_key`
 is the admin's Member-as-a-group key, derived at genesis

@@ -66,6 +66,8 @@ reads at the latest finalised block") and nowhere else: on-chain-client has no
 requirements ledger entry stating it, and `org-node/src/chain_read.rs`
 documents the same call as "current best" — the contradiction filed as an open
 problem report in `org-members/docs/problems/2026-09-02-chain-reader-finality-doc.md`.
+(Corrected 2026-10-03: that report, now in org-node's own ledger, is resolved;
+`chain_read.rs` states the finalised read.)
 (Corrected 2026-09-10, as part of the 2026-09-09 correction above: that report
 moved with this change into org-node's own ledger, under D14, and now lives in
 `org-node/docs/problems/2026-09-09-org-node-problems.md`. The org-members file
@@ -105,7 +107,9 @@ item 2, *relate a leaf's device set to its member-as-a-group key in delta
 validation*. Whether the wire path is inside REQ-ewdg2q or outside it is
 exactly the ambiguity this expectation resolves from the consumer's side. The
 direct-API half is tracked as an open problem report in
-`org-members/docs/problems/2026-08-31-device-removal-key-check.md`. org-node
+`org-members/docs/problems/2026-08-31-device-removal-key-check.md` (corrected
+2026-10-03: resolved — the direct API now refuses an unchanged replacement
+key; the wire path this item is about is unchanged). org-node
 is the unit that takes the wire path, so the gap is org-node's exposure, and
 this item is how a consumer states a need on its provider without filing it
 as the provider's anomaly. org-members may meet REQ-q92yac either by amending

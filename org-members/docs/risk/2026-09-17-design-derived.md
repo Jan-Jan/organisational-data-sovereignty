@@ -602,6 +602,14 @@ is a behaviour change needing its own red-first test. It is not architecture wor
 and it is expected to remain the sole `UNRESOLVED-PR` at this merge, at 16 days
 against the unit's 30-day limit.
 
+(Corrected 2026-10-03: PR-zz4exm resolved in the change that amends LLR-s97ywt
+and LLR-w92psx to state the refusal. The LLRs now carry the requirement's
+second clause, and the tests that this section said could not exist are
+`delete_p2p_device_rejects_unchanged_key` and its siblings. The claim above
+that it "closes an unacceptable residual risk outright" did not hold: HAZ-s39gbh
+stays not acceptable, for the wire path, PR-z463w5 and PR-fzu25w — as the
+register's own correction to its not-minted item 1 records.)
+
 ### The `MAX_DEVICES` coupling — a latent defect, and one test that now detects it
 
 T3 measured that raising `MAX_DEVICES` from 4 to 5 compiles cleanly. Read the two
@@ -1002,7 +1010,8 @@ narrative finding in a risk file are both invisible to `check-trace.sh`: nothing
 prints it at a merge, nothing counts its days, and nothing will fail when it is
 still open in six months. Compare PR-zz4exm, which is the same kind of
 outstanding obligation and *is* surfaced with its age at every merge because it
-is an item with an `opened:` date.
+is an item with an `opened:` date. (Corrected 2026-10-03: PR-zz4exm is now
+resolved; the comparison is with how it was carried while open.)
 
 **Recommendation, not minted here:** give it a tracked item carrying an
 `opened:` date — a problem report is the natural shape, since "the risk

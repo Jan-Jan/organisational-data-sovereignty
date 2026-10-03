@@ -7,7 +7,7 @@ current key back removes the device while leaving its access intact.
 affects: REQ-ewdg2q, REQ-r784fu.
 owner: Jan-Jan
 opened: 2026-08-31
-status: open
+status: resolved
 
 Found while writing REQ-ewdg2q, not by a failing test. The requirement says the
 software shall replace the key "so that a removed device cannot derive access
@@ -34,3 +34,21 @@ which lists that absence as a known gap.
 Not fixed in this change: this is the requirements tooth, and changing library
 behaviour under it would mix a requirements migration with a code fix. It is the
 first item in this ledger and its age is what the merge gate now watches.
+
+Resolved, 2026-10-03. The owner decided that an unchanged replacement key is an
+error and the operation is atomic: `delete_p2p_device` and
+`emergency_isolate_member` now refuse a replacement key equal to the member's
+current key with the new `OrgMembersError::P2pKeyNotReplaced`, after the member
+(and, for `delete_p2p_device`, device) lookup, and change nothing — the device
+stays enrolled and the key stays as it was. Fixed on branch
+`worktree-fix-stale-problems` (plan `docs/plans/2026-10-03-fix-stale-problems.md`,
+verification record `docs/verification/` for that branch); its worktree commits
+are squashed away, so the fixing commit is that change's squash commit on
+master, which also amends LLR-s97ywt and LLR-w92psx to state the refusal. The
+reproducing tests asked for above are `delete_p2p_device_rejects_unchanged_key`
+and `emergency_isolate_member_rejects_unchanged_key`
+(`org-members/tests/integration_test.rs`), both watched fail with `Ok(..)`
+before the guard existed; the property test `device_removal_never_keeps_key`
+(`fuzz_tests.rs`) and the Quint model `quint/membership.qnt`, whose conformance
+run now generates the same refusal, cover it as well. `rotate_p2p_key` was
+deliberately left alone: it removes no device, so REQ-ewdg2q does not reach it.

@@ -25,7 +25,7 @@ client documents as reading at the latest **finalised** block. The two
 statements cannot both be true, and the doc-comment is the one that is wrong.
 affects: RC-6a2dke
 opened: 2026-09-02
-status: open
+status: resolved
 
 Found while writing org-members' hazard analysis
 (`org-members/docs/risk/2026-09-02-membership-hazards.md`), not by a failing
@@ -99,6 +99,15 @@ latest finalised block is at `:40`. The defect is unchanged in substance —
 a doc-comment on a security-relevant control says "current best" where the
 read is finalised — and the fix is the same correction, made on `refresh()`.
 The 2026-09-02 body above is left as it stands.
+
+Resolved, 2026-10-03. The doc-comments in `org-node/src/chain_read.rs` now say
+what the code does: `refresh()` reads at the latest finalised block (`at =
+None`, which org-node holds on-chain-client to as REQ-ysyu9g) and caches the
+result; `get_org_state` reads no block and returns the last `refresh()`'s
+snapshot, so the root's freshness is the caller's refresh discipline; and the
+module states that the production receive path does not use this reader.
+Documentation only — no behaviour changed, so no reproducing test; the "current
+best" wording that a second reader could have been written from is gone.
 
 ## The publish path writes the chain before the record
 

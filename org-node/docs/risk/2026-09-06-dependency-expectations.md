@@ -52,7 +52,9 @@ expectation is violated: a Change set authored elsewhere removes a device and
 keeps the key, org-node applies it because every check it performs passes,
 and the removed device continues to decrypt — the same S3 pathway as the open
 problem report in `org-members/docs/problems/2026-08-31-device-removal-key-check.md`,
-reached without calling either operation that report names. Hazard introduced
+reached without calling either operation that report names. (Corrected
+2026-10-03: that report is resolved on the direct API; this wire-path pathway
+is unchanged by it.) Hazard introduced
 by the control: a legitimate Change set that removes a device without rotating
 is refused, which is an unavailability pathway of the kind the register
 already accepts for the direct-API control (rotation is unconditional by

@@ -1,6 +1,9 @@
 //! Adapts on-chain-client's OrgRegistryClient to org-node's synchronous
 //! ChainReader. Async fetch refreshes a cached snapshot; the sync trait method
 //! returns that snapshot so verify-against-chain stays synchronous.
+//!
+//! The production receive path does not use this reader: `receive_and_verify`
+//! reads the chain itself and hands verification a one-shot adapter.
 #![cfg(feature = "chain")]
 use std::sync::Mutex;
 
@@ -31,8 +34,9 @@ impl OnChainReader {
         Self { client, org_id, cached: Mutex::new(None) }
     }
 
-    /// Fetch the latest (current best) state for `org_id` and cache it. Call
-    /// before invoking verify-against-chain.
+    /// Read the state for `org_id` at the latest **finalised** block and cache
+    /// it. `at = None` selects that block; org-node holds on-chain-client to
+    /// this as REQ-ysyu9g. Call before invoking verify-against-chain.
     pub async fn refresh(&self) -> Result<(), String> {
         let admin = OrgAdmin(*self.org_id.as_bytes());
         let state = self
@@ -48,6 +52,9 @@ impl OnChainReader {
 }
 
 impl ChainReader for OnChainReader {
+    /// Reads no block: returns the snapshot of the last `refresh()`, so the
+    /// root is only as fresh as the caller's refresh discipline.
+    ///
     /// Returns `Ok(None)` both when the org slot is genuinely empty on-chain
     /// AND when `refresh()` has not yet been called (initial state). This fails
     /// closed — callers MUST call `refresh().await` before relying on this.
