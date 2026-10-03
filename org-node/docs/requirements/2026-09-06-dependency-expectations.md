@@ -73,6 +73,13 @@ moved with this change into org-node's own ledger, under D14, and now lives in
 `org-node/docs/problems/2026-09-09-org-node-problems.md`. The org-members file
 named above is emptied and defines no item; it is kept only so its ledger's
 history reads chronologically.)
+(Added 2026-10-03 by the transport change, after the correction above:
+**this item is unaffected by that resolution and stays open.** What was fixed
+is org-node's description of the read; what this item asks for is
+on-chain-client stating the behaviour as an exported requirement, which is
+REQ-ysyu9g and is still owed. The sentence above is left as written because it
+is what made the case for this item, and the case has not changed: a
+doc-comment on the provider is still the only statement of the behaviour.)
 A doc-comment is not a commitment. This item is what makes it one, on the
 provider that performs the read.
 

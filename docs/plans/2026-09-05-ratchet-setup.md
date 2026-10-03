@@ -193,9 +193,30 @@ replaced them stale, and fix round 8c replaced it with this rule.)
   a sender it did not check; reproducing test first (an update relayed to that
   path by a non-member device must be rejected and commit nothing). Age limit
   2026-10-09.
-- [ ] **Resolve PR-hvg2dy** (now in org-node's ledger): correct the
+- [x] **Resolve PR-hvg2dy** (now in org-node's ledger): correct the
   `chain_read.rs` doc-comment and the README's "current best". Age limit
   2026-10-02 — the oldest open item in any unit after PR-zz4exm.
+  **Done 2026-10-03 by `27dab89`** (`worktree-fix-stale-problems`), together
+  with PR-zz4exm. Both sites named above are corrected there, and the ledger
+  paragraphs that described the contradiction as live carry dated notes rather
+  than rewrites — including the one in org-members' hazard register, which a
+  provider's own change could annotate without pulling a consumer into its
+  impact set.
+
+  **The transport change (`worktree-org-node-loopback-timeout`) also fixed this
+  report, independently and in parallel, and lost the race.** It is recorded
+  because the duplication is the lesson, not the tick: two changes were open
+  against the same problem report at once, neither could see the other, and the
+  collision surfaced only at `merge-change` step 1 when the transport change
+  merged the base and hit three conflicts. The project's own rule — one change
+  is taken to its signed squash before the next is opened — is what would have
+  prevented it, and it was not followed. The transport change took this change's
+  text on every conflicting file and dropped PR-hvg2dy from what it claims to
+  resolve.
+
+  It went past its age limit by a day and `check-trace.sh` reported
+  STALE-PROBLEM for org-node before either change landed — recorded because this
+  item's purpose was to prevent exactly that, and it did not.
 - [ ] **Resolve PR-w88sr9** (org-node's ledger, opened 2026-09-10 by review
   round 7): the `WireMessage::genesis_snapshot` doc-comment says the field is
   `None` for non-admission messages while the revocation send path sets it.
@@ -1089,3 +1110,125 @@ to close.
       this project ever amends a verification record, and if so under what
       annotation — the alternative, which this change assumes, is that records
       are immutable and corrections live in the ledgers that are still read.
+
+## Added 2026-10-03 — the transport mode that never was (`worktree-org-node-loopback-timeout`)
+
+PR-d4nye8 is resolved, and the resolution changes what this register should
+believe about two things.
+
+**A green test suite was evidence of the host's network, not of the code.**
+`TransportMode::Loopback` is documented as binding `127.0.0.1`; the builder
+named no bind address, so iroh bound the wildcard — **every interface the host
+has**, not merely the LAN one — and the endpoint advertised a non-loopback
+address, on this machine the Wi-Fi IP. Seven end-to-end tests across three
+targets exercised that path and were green for weeks, dialling that address
+while the host obliged. They went red together when it stopped. `git log -L`
+shows the bind address was never there: the defect is as old as `2bb1c21`, the
+commit `origin/master` still points at.
+
+That is the generalisable lesson and it is not about iroh. **A test that
+asserts an end-to-end outcome cannot distinguish the property it means to test
+from an accident of the environment that produces the same outcome.** The
+repair was a test that reads the bound sockets and fails on the address, by
+name, in hundredths of a second, with no network at all — and REQ-db6s7q, so
+that the contract lives somewhere a gate can see it rather than in a rustdoc
+comment. Worth asking of the other units: which of their green tests would
+still be green if the property under test were false?
+
+- [ ] **REQ-db6s7q and REQ-2wzfzv were assessed by the author, not the owner,
+      and not by a full `analyze-risks` pass.** Both are `satisfies: derived`
+      and realise no control, which `check-trace.sh` reports as
+      UNANALYZED-DERIVED until the RMF mentions them. The assessment is a dated
+      section in `org-node/docs/risk/2026-09-09-org-node-hazards.md`: the
+      wildcard bind widened who could *attempt* three registered hazards from
+      processes on this machine to anything able to route to an address the
+      host answers on, and nothing new is minted because the harms are already
+      registered.
+      **Two rulings are owed, and the second was not in the first draft of this
+      item.** (a) Whether a class C node listening on interfaces its own
+      documentation disclaims is a hazard in its own right; if it is, mint it.
+      (b) Whether RC-b6mydy carries the weight the assessment puts on it — this
+      item first said the control "rejects an unlisted Device key regardless of
+      the peer's distance", which the register's own text contradicts: its
+      residual is **not acceptable** and it runs on neither the invite-less
+      first admission (`org-node/src/service.rs:993-1000`) nor the revocation
+      receive path (`:1337`, PR-u4c2vp). On those paths distance was the only
+      protection. Struck here by review round 3.
+
+- [ ] **REQ-2wzfzv is an unverified requirement in a class C unit, and the
+      gate is green over it.** It states that Loopback mode fails without an
+      IPv4 loopback socket and starts without an IPv6 one. Both clauses are
+      about bind failure and **neither antecedent can be produced from a
+      test**: nothing can remove `127.0.0.1` or `[::1]` from the host, and
+      `bind` names its own addresses with port 0, so there is no occupied-port
+      route. Review round 3 proved the gap by negating the first clause —
+      `set_is_required(false)` on the IPv4 bind — and watching both annotated
+      tests stay green.
+      `check-trace.sh` does not report this, because MISSING-TEST is satisfied
+      by a `verifies:` reference in any file under `test_paths` and the
+      annotation is there. That is the same property recorded against
+      SDD-3b8zef on 2026-09-28, now observed a second time in a second unit,
+      which makes it a property of the gate rather than an accident of that
+      item.
+      **The owner ruled on 2026-10-03 to keep the requirement and book the
+      fix** rather than drop it (which would return the policy to a rustdoc
+      comment, the defect round 2 raised) or build the seam inside a defect fix.
+      What closes it: a `test-support`-gated constructor on `OrgEndpoint` that
+      accepts bind addresses, so a test can occupy a port and make the required
+      IPv4 bind fail. That is new production surface and is owed its own
+      red-first cycle.
+
+- [ ] **Three P2 figures are carried on a premise this defect falsified, and
+      all three are owed a re-derivation — HAZ-ep6uzs, HAZ-tawvm2 and
+      HAZ-5f9jcm.** This item named only HAZ-ep6uzs until review round 3 found
+      that the other two are the ones whose rationales are *expressly* about
+      reachability: HAZ-tawvm2's is "any device that can reach the node can
+      deliver an envelope" and HAZ-5f9jcm's is "the surface is a decoder
+      reachable by anything that can open a QUIC connection to the node". If
+      any figure in this register was derived from a picture of the reachable
+      population, it is those two, and the item that booked the re-derivation
+      left them out.
+      HAZ-ep6uzs's rationale is "relaying is
+      what a network does, and the receiving device on first admission has no
+      record yet to check the sender against" — no mode scoping, and its second
+      clause applies to both modes. All three were assessed while every
+      document in this unit said Loopback meant same-machine, which was false.
+      The figures are left at P2 because moving a rated number is not a side
+      effect a defect fix may have, but they were derived under a mistaken
+      picture of the exposure and nothing has re-derived them.
+      (A first draft of the assessment asserted
+      P2 was "a judgement made about the Networked path" and therefore
+      unaffected; the register never said that, and review round 1 of the
+      fixing change struck it.)
+
+- [ ] **PR-2dmjzj's worst case is narrower than it was, and the register should
+      say so when it is next assessed.** In Loopback mode `admit_member` dials
+      the full `EndpointAddr` from the unsigned join-request blob
+      (`org-node/src/service.rs:838`) without binding it to the joiner's Device
+      key, so an altered blob redirects the administrator's dial — and the TLS
+      that protects the Organisation secret then authenticates to the
+      attacker's key, which is why "it travels under TLS" does not dispose of
+      this one. Under the wildcard bind that dial could reach anything the host
+      could route to; bound to loopback it cannot leave the machine. The defect
+      is **not** resolved — a hostile process on the same machine still
+      receives the secret, and the control that would close it (dial by the
+      Device key the join request carries, as the networked branch does) is
+      still not minted — but its reachable destination set changed, and no
+      S/P figure has been revisited to reflect it.
+
+- [ ] **The 30-day problem limit was not holding, and both breaches were
+      cleared reactively rather than by triage.** PR-hvg2dy went past it and
+      org-node's `check-trace.sh` exited 1 on STALE-PROBLEM; PR-zz4exm reached
+      33 days and org-members' gate was red with it. Both are now resolved by
+      `27dab89` and both units are green again — but each was fixed *because*
+      the gate went red, which is the item above at line 196 failing at the one
+      job it had, twice.
+      **Four more org-node reports reach the limit within a week**: PR-vt244s,
+      PR-2dmjzj and PR-u4c2vp on **2026-10-10**, PR-w88sr9 on **2026-10-11**.
+      The decision owed is not per-item: either the backlog is worked down
+      before those dates, or `problem_age_days` is wrong for a project at this
+      stage and should be changed deliberately with a reason, rather than
+      discovered one red gate at a time. Raising it is loosening a tooth and
+      the ratchet's own rule is that a tooth only tightens, so it needs the
+      exception written down. Two reports opened by `27dab89` (PR-z463w5,
+      PR-fzu25w) start their own clocks from 2026-10-03.

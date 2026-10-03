@@ -5,7 +5,7 @@
 //! The caller is responsible for cross-checking that key against the members trie.
 use iroh::{
     EndpointAddr, EndpointId, RelayMode, TransportAddr,
-    endpoint::{Connection, presets},
+    endpoint::{BindOpts, Connection, presets},
 };
 #[cfg(feature = "test-support")]
 use iroh::{RelayMap, address_lookup::MemoryLookup};
@@ -31,25 +31,42 @@ impl OrgEndpoint {
     ///
     /// Equivalent to `bind_with_mode(device, TransportMode::Loopback)`.
     ///
-    /// Binds to `127.0.0.1:0` (random loopback port) with relay disabled and
-    /// no discovery service configured.  Binding to `localhost` rather than the
-    /// wildcard (`0.0.0.0`) ensures [`node_addr_for_dial`] returns a real,
-    /// dialable socket address immediately after bind — the wildcard address
-    /// is not dialable by a peer.
+    /// Binds loopback only — `127.0.0.1:0` always, and `[::1]:0` where the
+    /// host has IPv6 — with relay disabled and no discovery service
+    /// configured. Both families are named because naming one replaces only
+    /// its own family's default; see [`bind_with_mode`].
     ///
-    /// Existing call sites (tests) are unaffected — they continue to get the
-    /// loopback/offline behaviour.
+    /// Binding loopback rather than the wildcard (`0.0.0.0`, `[::]`) is what
+    /// makes [`node_addr_for_dial`] return an address a peer can actually
+    /// dial: the wildcard is not dialable, and an endpoint bound to it
+    /// advertises whatever non-loopback address the host happens to have.
+    ///
+    /// **This was not true until 2026-10-03.** The builder named no bind
+    /// address at all, so iroh bound the wildcard and the endpoint offered its
+    /// LAN address to peers — the whole of PR-d4nye8. The paragraph above
+    /// described the intended behaviour and was read for months as describing
+    /// the actual behaviour, which is why REQ-db6s7q now states it where a
+    /// gate can see it.
     ///
     /// [`node_addr_for_dial`]: OrgEndpoint::node_addr_for_dial
+    /// [`bind_with_mode`]: OrgEndpoint::bind_with_mode
     pub async fn bind(device: &SigningKeypair) -> Result<Self, TransportError> {
         Self::bind_with_mode(device, TransportMode::Loopback).await
     }
 
     /// Bind an endpoint with an explicit [`TransportMode`].
     ///
-    /// - [`TransportMode::Loopback`]: relay disabled, binds on `127.0.0.1`.
-    ///   Used by offline tests and same-machine demo runs. Identical to the
-    ///   legacy `bind()` behaviour.
+    /// - [`TransportMode::Loopback`]: relay disabled, binds `127.0.0.1:0` and,
+    ///   where the host supports it, `[::1]:0`. Used by offline tests and
+    ///   same-machine demo runs.
+    ///
+    ///   **Bound and advertised addresses are loopback only** (REQ-db6s7q,
+    ///   asserted by the tests carrying that ID). Confinement to this machine
+    ///   additionally requires the relay to stay disabled, which no gated test
+    ///   can observe — a relay home is acquired only after `online()`, so an
+    ///   assertion made at bind time cannot see one. Treat `RelayMode::Disabled`
+    ///   on this arm as load-bearing and unverified: changing it silently
+    ///   un-confines the mode.
     /// - [`TransportMode::Networked`]: uses `presets::N0` (n0 relay servers +
     ///   DNS/Pkarr address discovery).  Binds on all interfaces (default iroh
     ///   bind).  Required for two laptops communicating across the internet.
@@ -59,8 +76,46 @@ impl OrgEndpoint {
     ) -> Result<Self, TransportError> {
         let sk = iroh::SecretKey::from_bytes(&device.to_seed());
         let inner = match mode {
+            // `clear_ip_transports()` then two explicit loopback binds, rather
+            // than the builder's defaults. iroh pre-configures a wildcard
+            // socket per address family (`0.0.0.0` and `[::]`), and naming a
+            // bind address only replaces the default for ITS OWN family — so
+            // binding `127.0.0.1` alone would leave `[::]` listening on every
+            // interface. **Naming both families is what makes the "loopback
+            // only" claim above true**; that is measured, by a mutation that
+            // drops the `[::1]` bind and watches `[::]` reappear.
+            //
+            // `clear_ip_transports()` is NOT load-bearing on iroh 0.98.2 —
+            // two user-defined binds already override both family defaults,
+            // and dropping the call alone leaves the tests green and the
+            // property intact. It is kept as defence in depth against a later
+            // edit removing one of the two binds, and because it is the form
+            // iroh's own documented example uses. Review rounds 3 and 4 both
+            // measured this; the comment said "clearing first and naming both
+            // is what makes the claim true", which credited it with more than
+            // measurement supports.
+            //
+            // The missing bind address is PR-d4nye8, absent from this builder
+            // since the file was written and verified by
+            // `loopback_mode_binds_and_advertises_loopback_only`.
+            //
+            // The IPv6 bind is NOT required, and that asymmetry is deliberate.
+            // `BindOpts::is_required` defaults to true, which would abort the
+            // whole endpoint when `[::1]` cannot be bound — an IPv6-disabled
+            // kernel, a minimal container, a locked-down CI runner. iroh's own
+            // pre-configured `[::]` bind, which this replaces, is documented as
+            // allowed to fail, so taking the default here would have narrowed
+            // the set of hosts this crate runs on while fixing a defect whose
+            // whole lesson is not to depend on the host silently. IPv4 loopback
+            // stays required: without it there is no usable Loopback transport
+            // at all, and failing closed is correct.
             TransportMode::Loopback => iroh::Endpoint::builder(presets::Minimal)
                 .relay_mode(RelayMode::Disabled)
+                .clear_ip_transports()
+                .bind_addr("127.0.0.1:0")
+                .map_err(|e| TransportError::Bind(e.to_string()))?
+                .bind_addr_with_opts("[::1]:0", BindOpts::default().set_is_required(false))
+                .map_err(|e| TransportError::Bind(e.to_string()))?
                 .secret_key(sk)
                 .alpns(vec![ALPN.to_vec()])
                 .bind()

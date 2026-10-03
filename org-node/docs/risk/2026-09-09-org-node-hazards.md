@@ -215,7 +215,9 @@ REQ-ysyu9g exists. Until on-chain-client states it as an exported requirement,
 the decisive input to RC-6a2dke rests on a comment. The same read is what the
 chain-reader problem report that moved into this ledger is about: the
 node's own `OnChainReader::refresh` documents it as "current best"
-(`org-node/src/chain_read.rs:34-35`), contradicting both the client and
+(`org-node/src/chain_read.rs:34-35` **as this paragraph was written**;
+corrected 2026-10-03, and line 34 now carries the opposite assertion — see the
+resolution note at the end of this hazard), contradicting both the client and
 `preflight.rs`. Its reach is narrower than an earlier draft of this paragraph
 claimed, and narrower is the honest word: `receive_and_verify` does not use
 this reader, and neither does preflight, which calls
@@ -231,6 +233,16 @@ that does not touch: the doc-comment of a security-relevant control says
 that comment would implement the weaker read. (Corrected 2026-10-03: the
 report is resolved — `refresh()`'s doc-comment now states the finalised read and
 the caching, and the line reference above is to the comment as it then stood.)
+
+**What the resolution above does not change**, added here by the transport
+change (`worktree-org-node-loopback-timeout`) rather than by the change that
+resolved the report: the decisive input to RC-6a2dke still rests on a
+doc-comment rather than on an exported requirement, because that comment is
+on-chain-client's and REQ-ysyu9g is still open. Correcting org-node's
+description of the read did not move that, and the paragraph above is left
+standing because it is the assessment made of RC-6a2dke while the contradiction
+existed — an assessment that quietly becomes a description of a fixed tree
+stops being evidence of anything.
 
 And the published signing key is a single ed25519 member key: `org_pub_key`
 is the admin's Member-as-a-group key, derived at genesis
@@ -337,7 +349,7 @@ by `rejects_root_mismatch_when_chain_root_differs` and
 `MAX_FRAME` (`org-node/src/transport/mod.rs:47`), enforced on encode, on
 decode, and by the `read_to_end` limit of the receiving stream
 (`org-node/src/transport/wire.rs:26-28`, `:37-39`,
-`org-node/src/transport/endpoint.rs:257`).
+`org-node/src/transport/endpoint.rs:300`).
 
 Residual risk: reduced, **not acceptable**. The fuzz targets run under
 bolero's generative engine for one second each at the merge gate, which finds
@@ -349,9 +361,9 @@ bounded only by the frame that carries them, and there is no rate limit,
 allowlist or read timeout at the accept boundary — an **unauthorised**
 stranger, one the record does not name, obtains a chain read, a record rebuild
 and a signature check per connection. The handshake does authenticate the
-peer's Device key (`org-node/src/transport/endpoint.rs:3-5`, `:245-248`); what
+peer's Device key (`org-node/src/transport/endpoint.rs:3-5`, `:288-291`); what
 it does not do is decide whether that key belongs to a member before the work
-is spent (`org-node/src/transport/endpoint.rs:236-263`; the chain read at
+is spent (`org-node/src/transport/endpoint.rs:279-306`; the chain read at
 `org-node/src/service.rs:922-926`, the record rebuild at `:933-978`, and the
 signature check inside `verify_envelope_against_chain` at `:1013`). Those are
 not-minted controls below.
@@ -553,7 +565,7 @@ register's count of distinct hazards is twelve rather than eleven.
   entry was wrong is *when* that bound bites. It is not a refusal at the start
   of the act. On both paths the chain write comes first (`:814`, `:1172`); the
   send frames the message through `encode_frame`, which is where the bound is
-  enforced (`org-node/src/transport/endpoint.rs:215`, the check at
+  enforced (`org-node/src/transport/endpoint.rs:258`, the check at
   `org-node/src/transport/wire.rs:26-28`); and the local record is updated only
   after the send has returned (`:864-871`, `:1254-1261`). So for an
   Organisation whose snapshot exceeds the frame, the error the administrator
@@ -1092,3 +1104,203 @@ The two expectations, REQ-ysyu9g and REQ-q92yac, were assessed in
 `2026-09-06-dependency-expectations.md`, which remains the assessment of
 record; this file adds the hazards each was written toward — HAZ-tawvm2 and
 HAZ-vxabf9 respectively — and the dates they fall due.
+
+## Added 2026-10-03 — the binding scope of the transport, assessed
+
+**REQ-db6s7q** (in Loopback mode, bind only loopback addresses and offer a
+peer only loopback addresses) was minted while resolving PR-d4nye8, and is
+assessed here because it is `satisfies: derived` and realises no control in
+this register. It is recorded as an assessment rather than as a new hazard,
+and the reasoning is given in full so that disagreeing with it is cheap.
+
+**What the defect changed about this register's picture.** For as long as
+`bind_with_mode` existed, a node in Loopback mode bound the wildcard — `0.0.0.0`
+and `[::]` — and offered a dialling peer whichever non-loopback address iroh
+discovered, on this machine the LAN one. The mode's own documentation said it
+bound `127.0.0.1`.
+
+The wildcard is **every interface the host has**, and naming only the LAN
+understates it: a VPN or tunnel interface, a container or VM bridge, and a
+public address if the host carries one, are all bound by `0.0.0.0` exactly as
+the LAN interface is. So the population that could open an authenticated
+connection to a node in Loopback mode was not "processes on this machine" but
+"whatever can route to any address this host answers on" — which on a laptop
+behind NAT is usually the LAN, and on a host with a public address or a
+corporate tunnel is not. No document in this unit said so.
+
+**It mints no new hazard, because the harms it widens access to are already
+registered.** The reachable surface is what changed, so the hazards it bears on
+are the ones whose probability rationale is about who can reach the node, and
+there are **three**, not one. An earlier draft of this section surveyed only
+HAZ-ep6uzs and was wrong to; the other two are quoted here because their
+rationales are more plainly reachability-scoped than the one it did survey.
+
+- **HAZ-ep6uzs** — a connection "whose remote end is authenticated as a Device
+  key and nothing more", the harm being a device the record does not list
+  pushing an update the node acts on.
+- **HAZ-tawvm2** — rationale, verbatim: "P2: **any device that can reach the
+  node** can deliver an envelope, the transport authenticates a device key and
+  nothing more, and the envelope is hostile input by construction."
+- **HAZ-5f9jcm** — rationale, verbatim: "P2: the input is attacker-chosen and
+  the surface is a decoder **reachable by anything that can open a QUIC
+  connection to the node**."
+
+Each is an existing hazard whose population of reachers the wildcard bind
+widened and this fix narrows. None of them is a *new* harm, which is why
+nothing is minted — but all three had their P terms set while the register
+believed Loopback meant same-machine, and the probability note below applies to
+all three rather than to HAZ-ep6uzs alone.
+
+**The control does not weaken with distance — but it does not run everywhere.**
+RC-b6mydy rejects a Wire message from any Device key the record does not list,
+after verification and before the store is written, and that is as true of a
+LAN peer as of a same-machine one. An earlier draft stopped there, which
+overstated it. This register records seven hundred lines above that RC-b6mydy's
+residual risk is **not acceptable** and that the control is "weaker than its
+wording in three places": the first-admission check runs only when an invite
+was imported, falling through to signature and chain proof alone otherwise
+(`org-node/src/service.rs:993-1000`), and the revocation receive path performs
+neither clause, its `UpdatedNotRevoked` branch committing a record from an
+unchecked sender (`:1337`, filed as PR-u4c2vp). **On exactly those paths,
+distance was the only thing standing between the node and an arbitrary peer**,
+and the wildcard bind removed it. That does not change what is minted, and it
+does sharpen what the fix is worth.
+
+**Probability: three P2 figures rest on a premise this defect falsified, and
+all three are owed a re-derivation.** An earlier draft of this paragraph
+asserted that HAZ-ep6uzs's P2 was "a judgement made about the Networked path"
+and therefore unaffected. The register does not support that. The rationale as
+written is, in full: "P2: relaying is what a network does, and the receiving
+device on first admission has no record yet to check the sender against." It
+carries no mode scoping, and its second clause — first admission with no record
+to check against — happens in both modes. The register's own Loopback-mode
+instance of this hazard, PR-2dmjzj, is assessed S3/**P1**.
+
+The same applies, and more directly, to HAZ-tawvm2 and HAZ-5f9jcm, whose
+rationales are quoted above and are *expressly* about who can reach the node.
+If any figure in this register was derived from a picture of the reachable
+population, it is those two.
+
+The honest reading is that all three P terms were assessed at a time when every
+document in this unit said Loopback meant same-machine, and that premise was
+false. **That is a reason to re-derive them, not a reason to assert they are
+unchanged**, and retrofitting a Networked-only scope onto a sentence that never
+had one was the weakest step in this assessment. The figures are left at P2
+here because moving a rated number is not a side effect a defect fix may have;
+they are owed a pass of their own, booked as an owner item in
+`docs/plans/2026-09-05-ratchet-setup.md`.
+
+**The organisation secret: inbound unchanged, outbound materially narrowed.**
+An earlier draft said flatly that the secret "is not newly exposed", reasoning
+that the admission Wire message travels inside QUIC under TLS authenticated to
+the peer's Device key, so a device on the path that is not the intended peer
+holds ciphertext. That remains true, and it disposes of the **inbound**
+direction: the wildcard bind widened who could attempt a connection, not who
+could read one.
+
+It is wrong about the **outbound** direction, and PR-2dmjzj in this same
+register is why. In Loopback mode `admit_member` dials the full `EndpointAddr`
+carried in the join-request blob (`org-node/src/service.rs:838`), which is
+unsigned and unauthenticated by design, and does **not** bind that address to
+the joiner's Device key — the Networked arm does, deriving the peer from
+`join_request.device_key` (`:847-849`). An altered blob therefore redirects the
+administrator's dial to an attacker-chosen EndpointId, and the TLS this
+assessment relies on then authenticates to *that* key. The ciphertext argument
+protects the secret from an observer; it does nothing against a recipient the
+sender was tricked into choosing.
+
+Under the wildcard bind that dial could reach any destination the host could
+route to. With loopback-only sockets it cannot leave the machine **by an IP
+path**: every bound socket is loopback, so there is no socket from which an
+off-machine destination is reachable.
+
+That argument has a second leg, which an earlier draft left unstated.
+`bound_sockets()` reports IP transports only; a relay is a separate transport
+and never appears there, so loopback-only sockets do not by themselves confine
+an endpoint — traffic could still leave by a relay. The confinement therefore
+rests equally on `RelayMode::Disabled` and on no address-lookup service being
+configured, neither of which REQ-db6s7q states.
+
+**Of those two, one is asserted by the tests and one is not**, and an earlier
+draft of this paragraph claimed both were. Review round 3 measured the
+difference. Address lookup is genuinely closed: replacing `presets::Minimal`
+with `presets::N0` reddens both tests on `an address-lookup service is
+configured`. The relay leg is **not** closed: replacing
+`RelayMode::Disabled` with `RelayMode::Custom(default_relay_map())` — real n0
+relay servers, every bound socket still loopback — leaves both tests green,
+while the endpoint goes on to acquire a home relay
+(`relay_urls = [RelayUrl("https://euc1-1.relay.n0.iroh-canary.iroh.link./")]`,
+`online()` true in about three seconds) and traffic does leave the machine.
+
+The `relay_urls().next().is_none()` assertion that was supposed to cover this
+runs immediately after `bind()`, before any home relay can have been acquired,
+so it is vacuous in exactly the way the `TransportAddr::Relay` match arm it
+replaced was vacuous. **That is the third time in this change that an
+assertion was credited with a property it cannot observe**, which is worth more
+than the individual corrections: the shape is not a slip, it is what happens
+whenever a property is asserted at a moment when it cannot yet be false.
+
+Closing it properly needs an assertion after `online()` resolves, and that is
+host-dependent in the direction this change refuses — on a machine with no
+route to a relay the mutant would acquire none and the test would pass, so the
+assertion would measure the network rather than the configuration. iroh exposes
+no relay map on `Endpoint`, so there is no synchronous alternative. **The
+relay leg is therefore stated and unverified**, recorded here and in this
+change's verification record rather than asserted.
+
+**With both legs — one verified, one argued — this fix narrows PR-2dmjzj's
+reachable destination set from "anything this host can route to" to "this
+machine",**
+which is a real reduction in that defect's worst case and was not claimed when
+the fix was made. It does not resolve PR-2dmjzj: a hostile process on the same
+machine still receives the secret, and the control that would close it — dial
+the peer by the Device key the join request carries, as the networked branch
+does — is still not minted.
+
+**No control is minted.** RC-b6mydy already covers the harm. A control reading
+"the node binds only loopback in Loopback mode" would restate REQ-db6s7q in
+the register's vocabulary without mitigating anything RC-b6mydy does not
+already mitigate, and a control minted only so that a requirement has a parent
+to cite is a traceability artifact rather than a risk control.
+
+**REQ-2wzfzv, assessed: a deliberate unavailability, in the direction this
+register already prefers.** That requirement states which sockets must come up
+— IPv4 loopback required, IPv6 loopback optional — and it is `satisfies:
+derived` with no control, for the same reason as REQ-db6s7q.
+
+Its first clause *chooses* an unavailability: on a host that cannot bind IPv4
+loopback the node gets no endpoint at all and its membership function is down,
+which is the harm pathway HAZ-5f9jcm's severity is drawn from ("a member cannot
+receive a membership change or act on the record at the moment a decision needs
+it", S3). That is accepted rather than overlooked. The alternative is an
+endpoint that came up on something other than loopback, which is PR-d4nye8
+again and silently, where this failure is loud and at startup. A class C node
+that cannot bind the socket its mode requires should refuse to run.
+
+Its second clause removes an unavailability that the first draft of the fix
+would have introduced: `BindOpts::is_required` defaults to true, so a mandatory
+`[::1]` bind would have taken the whole endpoint down on every IPv6-less host,
+for no safety benefit — the IPv4 socket alone satisfies REQ-db6s7q. Caught by
+review round 1.
+
+Neither clause changes a hazard's S or P. The probability note above applies to
+this requirement too: it was written while the register's picture of Loopback
+reachability was wrong, and the figures it leaves untouched are the same ones
+owed a re-derivation.
+
+**What this assessment does not establish.** It is the judgement of the change
+that fixed the defect, not the output of a full `analyze-risks` pass over the
+unit, and it was made by the author rather than the owner.
+
+Two places it could still be wrong, and the first is not the one an earlier
+draft nominated. That draft invited disagreement on whether reachability is
+itself a harm — and the claim that actually failed review was a different one,
+the inbound-only reading of the secret's exposure, corrected above. A section
+that names its own weakest step can name the wrong step, so:
+
+1. **P2 is carried forward on a premise known to be false**, as the
+   probability paragraph above now says. Nothing here re-derives it.
+2. **Reachability may be a harm in its own right.** A reviewer who holds that a
+   class C node listening on interfaces its own documentation disclaims is a
+   hazard independent of what the receive path then does with the connection
+   should mint it. This paragraph is where to say so.
