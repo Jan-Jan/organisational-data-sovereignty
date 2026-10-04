@@ -1,4 +1,3 @@
-use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
@@ -10,7 +9,7 @@ use crate::hasher::TrieHasher;
 use crate::node::Node;
 use crate::smt::DefaultHashes;
 use crate::trie::{KeyIndex, OrgTrie};
-use crate::types::{MemberId, MemberLeaf, RootHash};
+use crate::types::{Handle, HandleSkeleton, MemberId, MemberLeaf, RootHash};
 
 /// A set of changes anchored to a specific base trie root.
 ///
@@ -34,8 +33,8 @@ use crate::types::{MemberId, MemberLeaf, RootHash};
 /// **This is not byte-level uniqueness, and must not be relied on as if it
 /// were.** Corrected 2026-09-17 after an independent review found the earlier
 /// wording ("exactly one postcard byte string") false. `MemberLeaf`'s
-/// `Deserialize` impl *normalises* rather than rejects: it runs `to_nfc` over
-/// `name` and `surname` and stores the NFC form `validate_handle` returns, so
+/// `Deserialize` *normalises* rather than rejects: its `handle`, `name` and
+/// `surname` decode through `parse`, which stores the NFC form, so
 /// an NFD-encoded leaf and its NFC equivalent are two distinct postcard byte
 /// strings that decode to the same `MemberLeaf` and produce the same root. The
 /// encoding is therefore **not injective** on the deserialisation path.
@@ -125,8 +124,8 @@ pub struct CandidateTrie<H: TrieHasher> {
     pub(crate) defaults: Arc<DefaultHashes>,
     pub(crate) member_count: usize,
     pub(crate) root_hash: RootHash,
-    pub(crate) skeleton_index: HashMap<String, String>,
-    pub(crate) handle_index: HashMap<String, MemberId>,
+    pub(crate) skeleton_index: HashMap<HandleSkeleton, Handle>,
+    pub(crate) handle_index: HashMap<Handle, MemberId>,
     pub(crate) key_index: KeyIndex,
     pub(crate) _hasher: core::marker::PhantomData<H>,
 }

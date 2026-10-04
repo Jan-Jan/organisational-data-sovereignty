@@ -24,7 +24,7 @@ use common::chopsticks_fork::spawn_fork;
 use common::chopsticks_reorg::mine_block;
 use common::conn::legacy_client;
 use on_chain_client::OrgRegistryClient;
-use org_members::{MemberId, MemberLeaf};
+use org_members::{Handle, MemberId, MemberLeaf, Name, Surname};
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
 use org_node::chain_write::multisig::multi_account_id;
@@ -131,10 +131,10 @@ fn deploy_org_registry() -> [u8; 20] {
 fn admin_leaf(admin_kp: &SigningKeypair, admin_device: &SigningKeypair) -> MemberLeaf {
     MemberLeaf::new(
         MemberId::new([1u8; 32]),
-        "admin",
+        Handle::parse("admin").unwrap(),
         admin_kp.member_key(),
-        "Admin",
-        "User",
+        Name::parse("Admin").unwrap(),
+        Surname::parse("User").unwrap(),
         vec![admin_device.device_key()],
     )
     .expect("valid admin leaf")
@@ -143,10 +143,10 @@ fn admin_leaf(admin_kp: &SigningKeypair, admin_device: &SigningKeypair) -> Membe
 fn member_b_leaf(b_kp: &SigningKeypair, b_device: &SigningKeypair) -> MemberLeaf {
     MemberLeaf::new(
         MemberId::new([2u8; 32]),
-        "bob",
+        Handle::parse("bob").unwrap(),
         b_kp.member_key(),
-        "Bob",
-        "Member",
+        Name::parse("Bob").unwrap(),
+        Surname::parse("Member").unwrap(),
         vec![b_device.device_key()],
     )
     .expect("valid member B leaf")

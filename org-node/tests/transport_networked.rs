@@ -21,7 +21,7 @@ use org_node::transport::wire::WireMessage;
 use org_node::verify::{VerifyContext, verify_envelope_against_chain};
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
-use org_members::{MemberId, MemberLeaf};
+use org_members::{Handle, MemberId, MemberLeaf, Name, Surname};
 
 type Trie = OrgTrie<Blake3Hasher>;
 
@@ -37,10 +37,10 @@ fn genesis_and_admit(
 ) -> (Trie, Trie, org_members::delta::Delta) {
     let admin_leaf = MemberLeaf::new(
         MemberId::new([1u8; 32]),
-        "admin",
+        Handle::parse("admin").unwrap(),
         admin.member_key(),
-        "Admin",
-        "User",
+        Name::parse("Admin").unwrap(),
+        Surname::parse("User").unwrap(),
         vec![admin_device.device_key()],
     )
     .unwrap();
@@ -50,10 +50,10 @@ fn genesis_and_admit(
     let b_device = SigningKeypair::from_seed([3u8; 32]);
     let b_leaf = MemberLeaf::new(
         MemberId::new([2u8; 32]),
-        "bob",
+        Handle::parse("bob").unwrap(),
         b_member.member_key(),
-        "Bob",
-        "User",
+        Name::parse("Bob").unwrap(),
+        Surname::parse("User").unwrap(),
         vec![b_device.device_key()],
     )
     .unwrap();

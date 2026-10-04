@@ -19,8 +19,7 @@ main worktree, not always in feature worktrees).
 - **Prefer Result over panics.** Crate root denies `clippy::unwrap_used`,
   `clippy::expect_used`, `clippy::panic`. No exceptions in lib code; `unwrap()`
   is fine in tests.
-- **Named types over naked primitives.** `MemberId([u8; 32])` not `[u8; 32]`.
-  `MemberKey(VerifyingKey)` not raw bytes. Wrap PII with redacting `Debug`.
+- **Named types over naked primitives.** See "Type safety" below -- hard rule.
 - **`no_std` is a hard requirement.** Verify with
   `cargo check --no-default-features --features serde --target wasm32-unknown-unknown`
   after any dependency change.
@@ -61,6 +60,79 @@ main worktree, not always in feature worktrees).
 
 Do NOT introduce: "user", "account", "node id" (ambiguous), or naked "group"
 (use "member-as-a-group" if you mean the principal that a `p2p_key` represents).
+
+## Type safety: parse at the system's edge (hard rule)
+
+Why: `../docs/adr/2026-10-04-parse-at-the-system-edge.md`.
+
+- **Plain types (`&str`, `String`, `[u8; 32]`) only where data enters the
+  system** -- user input, serde decoding, chain reads -- and parsed there,
+  once. Every other signature, public or internal, takes and returns the
+  newtype. No naked `[u8; 32]`/`String` for a domain value anywhere else.
+- **Validated type** (has an invariant: `Handle`, `Name`, `Surname`,
+  `P2pDeviceSlots`, keys from bytes): private field, `parse` + `TryFrom`
+  delegating to it, `type Error = OrgMembersError`. `parse` may canonicalize
+  (NFC). Exported. No unchecked constructor.
+  **Status (2026-10-04):** `P2pDeviceSlots` still constructs with `new`
+  (fallible, not yet `parse`), and the key types have no bytes constructor
+  yet (callers go through `VerifyingKey::from_bytes` then `new`). Both are
+  brought under the rule in the org-node type-safety follow-up change.
+- **Tag type** (any value is valid): public `MemberId`, `NodeHash`,
+  `RootHash` have infallible `new` + `From<[u8; 32]>`. Crate-internal ones
+  take no raw bytes: `HeldKey` only `From` a member/device key,
+  `HandleSkeleton` only `HandleSkeleton::of(&Handle)`. No `parse`, no `Result`.
+  Promote to validated when an invariant appears (Poseidon hashes must be
+  canonical field elements).
+- **Serde parses too:** `#[serde(try_from = "String")]` (or a manual
+  `Deserialize` calling `parse`). Never `derive(Deserialize)` past an invariant.
+- **Accessors return the newtype.** `Debug` redacts PII and secrets;
+  `Display`/`as_str()` are for deliberate output. Secrets get no `Display`.
+- Wrapping must not change wire bytes or `canonical_bytes` (root hashes).
+
+```rust
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct Handle(String); // field private: parse is the only way in
+
+impl Handle {
+    /// NFC-normalizes, then enforces REQ-h5ret5.
+    pub fn parse(value: &str) -> Result<Self, OrgMembersError> {
+        let normalized = to_nfc(value);
+        // ... empty / MAX_HANDLE_LEN / lowercase / no '.' / UTS#39 / single-script
+        Ok(Self(normalized))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for Handle {
+    type Error = OrgMembersError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::parse(value)
+    }
+}
+
+impl TryFrom<String> for Handle {
+    type Error = OrgMembersError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::parse(&value)
+    }
+}
+
+impl fmt::Debug for Handle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Handle([REDACTED])")
+    }
+}
+
+// The edge parses; the trie only ever sees a Handle.
+let handle = Handle::parse(input)?;               // Err(InvalidHandle) here
+let trie = trie.update_handle(&id, handle.clone())?;
+let leaf = trie.get_by_handle(&handle);           // Option<MemberLeaf>
+```
 
 ## Public API style
 
@@ -107,8 +179,10 @@ extending an existing one. Test each domain operation independently in
    - Rejects if `delta.base_root != self.root_hash()`.
    - Ignores stale removals (doesn't underflow `member_count`).
    - Re-checks confusable handles for both new and renamed members.
-5. Wire-format leaves (deserialize) re-run handle validation and DeviceSlots
-   construction. Don't bypass via `derive(Deserialize)`.
+5. Wire-format leaves decode through each field's validating `Deserialize`
+   (`Handle`/`Name`/`Surname` via `serde(try_from)`, `P2pDeviceSlots`, keys).
+   `derive(Deserialize)` on `MemberLeaf` is safe only because every field
+   validates; never derive it on a validated type itself.
 6. `Node`, `MemberLeaf`, `OrgTrie<H>` are `Send + Sync` for downstream parallel
    use. `spin::Once` (not std `OnceLock`) for the hash cell.
 
@@ -142,8 +216,9 @@ Test count varies by commit; `cargo test` is the source of truth.
   `ahash`). `foldhash` is `no_std`-compatible.
 - **Derived `Deserialize` is a trust boundary footgun.** If a type has
   invariants enforced in its constructor, deserialize must re-run them.
-  Standard pattern: deserialize into a private struct, then call the
-  validating constructor.
+  Standard pattern: `#[serde(try_from = "String")]` (or a manual
+  `Deserialize`) that calls `parse`; a container of validated fields may
+  then derive its own impls.
 - **WASM `cargo check` only confirms it compiles**, not that it runs. For
   runtime verification add `wasm-bindgen-test` later.
 - **`spin::Once::call_once` panics if it recurses on itself** -- don't call
@@ -152,7 +227,7 @@ Test count varies by commit; `cargo test` is the source of truth.
 ## Where to look first
 
 - `src/lib.rs` -- crate root, re-exports
-- `src/types.rs` -- MemberId, MemberKey, DeviceKey, MemberLeaf, RootHash, handle validation
+- `src/types.rs` -- MemberId, keys, Handle/Name/Surname, MemberLeaf, RootHash
 - `src/trie.rs` -- `OrgTrie` public API
 - `src/smt.rs` -- low-level SMT operations (path copying, recalculate)
 - `src/delta.rs` -- Delta, CandidateTrie

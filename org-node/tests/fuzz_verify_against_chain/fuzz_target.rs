@@ -16,7 +16,7 @@ use std::panic::AssertUnwindSafe;
 use bolero::check;
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
-use org_members::{MemberId, MemberLeaf};
+use org_members::{Handle, MemberId, MemberLeaf, Name, Surname};
 use org_node::chain::{ChainReader, MockChain, OrgState};
 use org_node::envelope::SignedDeltaEnvelope;
 use org_node::ids::OrgId;
@@ -29,10 +29,10 @@ use org_node::verify::{verify_envelope_against_chain, VerifyContext};
 fn fixed_trie(admin: &SigningKeypair, admin_device: &SigningKeypair) -> OrgTrie<Blake3Hasher> {
     let leaf = MemberLeaf::new(
         MemberId::new([1u8; 32]),
-        "admin",
+        Handle::parse("admin").unwrap(),
         admin.member_key(),
-        "T",
-        "U",
+        Name::parse("T").unwrap(),
+        Surname::parse("U").unwrap(),
         vec![admin_device.device_key()],
     )
     .unwrap();

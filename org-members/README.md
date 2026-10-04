@@ -13,7 +13,7 @@ The contract is one invariant, precisely:
 
 **Status:** the invariant above holds, as a statement about the decoded `Delta` value. Established by the [Hyperbridge fix series](../docs/superpowers/plans/2026-05-28-org-members-hyperbridge-fixes.md), which lands H-1, H-2, H-3, M-1, M-2, M-3, and Info-4 from the [review spec](../docs/superpowers/specs/2026-05-28-org-members-hyperbridge-review.md). Callers can rely on `apply_delta` rejecting any non-canonical wire form; defensive re-canonicalisation upstream is no longer required.
 
-> **Corrected 2026-09-17 — this section used to claim byte uniqueness, and that claim is false.** It read "`d` is the unique postcard **byte string** …", and the review spec linked above still states it that way (with a dated note at its head). Two independent reviews of the architecture change measured otherwise, most recently with an explicit counterexample: with `name = "é"`, a `Delta` encodes to **141 bytes**; byte-patching the NFC name to its NFD form gives a distinct **142-byte** string; both decode, both are accepted by `apply_delta` on the same base trie, and both `verify_against` the same target root. The cause is that `MemberLeaf`'s `Deserialize` impl **normalises** — `to_nfc` over `name` and `surname`, and the NFC form `validate_handle` returns for the handle — where `P2pDeviceSlots`' `Deserialize` **rejects**. So the postcard encoding is not injective, and canonical form constrains the decoded value only.
+> **Corrected 2026-09-17 — this section used to claim byte uniqueness, and that claim is false.** It read "`d` is the unique postcard **byte string** …", and the review spec linked above still states it that way (with a dated note at its head). Two independent reviews of the architecture change measured otherwise, most recently with an explicit counterexample: with `name = "é"`, a `Delta` encodes to **141 bytes**; byte-patching the NFC name to its NFD form gives a distinct **142-byte** string; both decode, both are accepted by `apply_delta` on the same base trie, and both `verify_against` the same target root. The cause is that `MemberLeaf`'s `Deserialize` **normalises** — `handle`, `name` and `surname` decode through `parse`, which stores the NFC form — where `P2pDeviceSlots`' `Deserialize` **rejects**. So the postcard encoding is not injective, and canonical form constrains the decoded value only.
 >
 > **What to key on instead.** Dedup, replay caches and any notion of "the same change" must key on the **decoded `Delta`**, or on the `(base_root, target_root)` pair — **never on the blob bytes**. A signature over the encoded bytes still authenticates *those bytes*, which is what a signature is for, but the signed bytes are not a canonical identifier for the transition and must not be used as one. See the `Delta` doc comment in `src/delta.rs` and the LLR-8jttpb assessment in `docs/risk/2026-09-17-design-derived.md`.
 >
@@ -65,7 +65,7 @@ let expected = onchain.read_org_root(org_id)?; // attacker can't forge this
 let trie = candidate.verify_against(&expected)?;
 ```
 
-The crate cannot enforce this. `RootHash::from_bytes` accepts any 32 bytes; what matters is *where those bytes came from*.
+The crate cannot enforce this. `RootHash::new` accepts any 32 bytes; what matters is *where those bytes came from*.
 
 ### 2. Authenticate the delta blob before applying
 

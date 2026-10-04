@@ -11,7 +11,7 @@
 use org_members::delta::Delta;
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
-use org_members::{MemberId, MemberLeaf};
+use org_members::{Handle, MemberId, MemberLeaf, Name, Surname};
 
 use crate::keys::SigningKeypair;
 
@@ -28,10 +28,10 @@ pub struct NodeFixture {
 pub fn member(fix: &NodeFixture, handle: &str) -> MemberLeaf {
     MemberLeaf::new(
         fix.id,
-        handle,
+        Handle::parse(handle).unwrap(),
         fix.keypair.member_key(),
-        "Test",
-        "User",
+        Name::parse("Test").unwrap(),
+        Surname::parse("User").unwrap(),
         vec![fix.device.device_key()],
     )
     .unwrap()

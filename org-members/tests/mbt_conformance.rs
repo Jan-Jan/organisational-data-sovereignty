@@ -25,7 +25,7 @@ use ed25519_dalek::SigningKey;
 use org_members::delta::test_support;
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
-use org_members::types::{MemberId, MemberLeaf, P2pDeviceKey, P2pMemberKey};
+use org_members::types::{Handle, MemberId, MemberLeaf, Name, P2pDeviceKey, P2pMemberKey, Surname};
 use org_members::OrgMembersError;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
@@ -168,10 +168,10 @@ fn key(owner: &str, gen: i64) -> Key {
 fn new_leaf(id: &str, h: &str) -> core::result::Result<MemberLeaf, OrgMembersError> {
     MemberLeaf::new(
         real_id(id),
-        h,
+        Handle::parse(h)?,
         real_member_key(&key(id, 0)),
-        "n",
-        "s",
+        Name::parse("n")?,
+        Surname::parse("s")?,
         vec![real_device_key(&key(id, 1))],
     )
 }
@@ -180,10 +180,10 @@ fn new_leaf(id: &str, h: &str) -> core::result::Result<MemberLeaf, OrgMembersErr
 fn seed_leaf(s: &Seed) -> core::result::Result<MemberLeaf, OrgMembersError> {
     MemberLeaf::new(
         real_id(&s.id),
-        &s.h,
+        Handle::parse(&s.h)?,
         real_member_key(&key(&s.id, 0)),
-        "n",
-        "s",
+        Name::parse("n")?,
+        Surname::parse("s")?,
         (1..=s.devs)
             .map(|g| real_device_key(&key(&s.id, g)))
             .collect(),
@@ -195,10 +195,10 @@ fn seed_leaf(s: &Seed) -> core::result::Result<MemberLeaf, OrgMembersError> {
 fn leaf_of_model(l: &Leaf) -> core::result::Result<MemberLeaf, OrgMembersError> {
     MemberLeaf::new(
         real_id(&l.id),
-        &l.handle,
+        Handle::parse(&l.handle)?,
         real_member_key(&l.p_key),
-        &l.name,
-        &l.surname,
+        Name::parse(&l.name)?,
+        Surname::parse(&l.surname)?,
         l.devices.iter().map(real_device_key).collect(),
     )
 }
@@ -275,7 +275,7 @@ fn apply_op(t: &Trie, o: &Op) -> core::result::Result<Trie, OrgMembersError> {
     match o.op.as_str() {
         "add" => t.add_member(new_leaf(&o.id, &o.h)?),
         "delete" => t.delete_member(&real_id(&o.id)),
-        "handle" => t.update_handle(&real_id(&o.id), &o.h),
+        "handle" => t.update_handle(&real_id(&o.id), Handle::parse(&o.h)?),
         "rotate" => t.rotate_p2p_key(&real_id(&o.id), real_member_key(&key(&o.ko, o.g))),
         _ => Err(OrgMembersError::InvariantViolated),
     }
@@ -494,11 +494,13 @@ impl Driver for MembershipDriver {
                     self.commit(res);
                 },
                 UpdateHandle(id: String, h: String) => {
-                    let res = self.cur().and_then(|t| t.update_handle(&real_id(&id), &h));
+                    let res = self.cur().and_then(|t| t.update_handle(&real_id(&id), Handle::parse(&h)?));
                     self.commit(res);
                 },
                 UpdateNameSurname(id: String, nm: String, sn: String) => {
-                    let res = self.cur().and_then(|t| t.update_name_surname(&real_id(&id), &nm, &sn));
+                    let res = self.cur().and_then(|t| {
+                        t.update_name_surname(&real_id(&id), Name::parse(&nm)?, Surname::parse(&sn)?)
+                    });
                     self.commit(res);
                 },
                 RotateKey(id: String, k: Key) => {

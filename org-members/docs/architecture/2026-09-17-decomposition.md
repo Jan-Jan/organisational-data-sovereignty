@@ -25,38 +25,49 @@ immutable identifier, the handle, the member-as-a-group key, the device key
 set and the personal fields — together with the validation and
 normalisation every construction path applies, including the path from
 deserialised bytes. traces: REQ-crjxk8, REQ-h5ret5, REQ-m8aexh, REQ-xdx2c2,
-REQ-shk82j
+REQ-shk82j, REQ-t46uad
 
-**LLR-xzqs9r**: `validate_handle` returns the NFC form and rejects a handle
-that is empty, exceeds 128 bytes after normalisation, contains an uppercase
-character, contains `.`, or mixes Unicode scripts — `-` being permitted
-alongside any script. satisfies: REQ-h5ret5
+**LLR-xzqs9r**: `Handle::parse` (and `TryFrom<&str>`/`TryFrom<String>`,
+which delegate to it) is the only constructor of a `Handle`; it stores the NFC
+form and rejects, with `InvalidHandle`, a handle that is empty, exceeds 128
+bytes after normalisation, contains an uppercase character, contains `.`,
+contains a character not permitted in identifiers by UTS#39 (the Unicode
+General Security Profile, `unicode_security` `identifier_allowed`) other than
+`-`, or mixes Unicode scripts — `-` being permitted alongside any script.
+satisfies: REQ-h5ret5, REQ-t46uad
 
-**LLR-5w2jx8**: `handle_skeleton` returns the UTS#39 skeleton of a handle, so
-that two handles rendering alike share a skeleton. satisfies: REQ-m8aexh
+(Amended 2026-10-04: the identifier-character rule, applied since 2026-05-12,
+added to the rejection list with REQ-h5ret5's owner-ruled amendment.)
+
+**LLR-5w2jx8**: a `HandleSkeleton` is built only from a `&Handle` and holds
+its UTS#39 skeleton, so that two handles rendering alike share a skeleton.
+satisfies: REQ-m8aexh
 
 **LLR-pys2ek**: a member holds at most `MAX_DEVICES` device keys, and
 `MAX_DEVICES` is 4 because the device sub-trie is a fixed depth-2 binary tree
 of four slots. satisfies: REQ-xdx2c2
 
-**LLR-w5nkbu**: `name` and `surname` are each bounded at 128 bytes after NFC
-normalisation, and a field exceeding its bound is rejected as
-`FieldTooLong { field, max }` naming which field and which limit.
-satisfies: derived
+**LLR-w5nkbu**: `Name::parse` and `Surname::parse` (and their `TryFrom`
+impls) are the only constructors of a `Name` and a `Surname`; each stores the
+NFC form, bounded at 128 bytes after normalisation, and a field exceeding its
+bound is rejected as `FieldTooLong { field, max }` naming which field and which
+limit. satisfies: derived
 
 **LLR-paxj7b**: `MemberLeaf::new` rejects a member constructed with no device
 key, so that the zero-device state is reachable only through the isolation
 operation. satisfies: derived
 
 **LLR-4czn8t**: the `Debug` rendering of a member record redacts the handle,
-the name and the surname. satisfies: derived
+the name and the surname, and the `Debug` rendering of a `Handle`, `Name` or
+`Surname` on its own redacts its value. satisfies: derived
 
 **LLR-xyv6p9**: deserialising a device key set accepts only a strictly
 increasing, duplicate-free list within `MAX_DEVICES`, and accepts the empty
 list. satisfies: REQ-shk82j, REQ-xdx2c2
 
-**LLR-68tka5**: deserialising a member record re-runs handle validation, so a
-handle the software would refuse cannot enter through the wire form.
+**LLR-68tka5**: deserialising a member record decodes its handle, name and
+surname through `Handle::parse`, `Name::parse` and `Surname::parse`, so a
+value the software would refuse cannot enter through the wire form.
 satisfies: REQ-shk82j
 
 LLR-pys2ek is owed. `org-members/docs/requirements/2026-08-31-org-membership.md`
@@ -252,11 +263,12 @@ would be one the mutation protocol could never discharge.
 together with the handle and skeleton indexes that make uniqueness and
 confusability decidable without walking the store. traces: REQ-crjxk8,
 REQ-kmvc96, REQ-m8aexh, REQ-xdx2c2, REQ-ewdg2q, REQ-r784fu, REQ-avmu3j,
-REQ-d3prca, REQ-h5ret5, REQ-ds8ryr
+REQ-d3prca, REQ-h5ret5, REQ-ds8ryr, REQ-t46uad
 
-**LLR-ub6dw9**: the trie carries a handle-to-identifier index and a
-skeleton-to-handle index, and every operation that adds, changes or removes a
-member updates both. satisfies: derived
+**LLR-ub6dw9**: the trie carries a handle-to-identifier index keyed by
+`Handle` and a skeleton-to-handle index keyed by `HandleSkeleton`, and every
+operation that adds, changes or removes a member updates both.
+satisfies: derived
 
 **LLR-fv75ec**: `add_member` rejects an identifier already present, a handle
 already held, and a handle whose skeleton matches one already held.
@@ -294,12 +306,13 @@ no other field, the device set included; a replacement key equal to the
 member's current key is refused with `P2pKeyNotReplaced`, checked after the
 member lookup, and the refusal changes nothing. satisfies: derived
 
-**LLR-mmst86**: `update_handle` revalidates the new handle and re-checks it for
-uniqueness and confusability against every other member. satisfies: REQ-h5ret5,
-REQ-kmvc96, REQ-m8aexh
+**LLR-mmst86**: `update_handle` takes the new handle as a `Handle` (valid by
+construction, LLR-xzqs9r) and re-checks it for uniqueness and confusability
+against every other member. satisfies: REQ-h5ret5, REQ-kmvc96, REQ-m8aexh
 
-**LLR-g6arcs**: `update_name_surname` NFC-normalises both fields and applies
-the bounds of LLR-w5nkbu. satisfies: derived
+**LLR-g6arcs**: `update_name_surname` takes a `Name` and a `Surname`, so both
+fields carry the NFC form and the bounds of LLR-w5nkbu by construction.
+satisfies: derived
 
 **LLR-v3jqau**: every operation naming a member that is not in the organisation
 is refused with `IdNotFound`. satisfies: REQ-ds8ryr
@@ -404,10 +417,9 @@ register covers it.
 paragraph said it did.** The independent review at merge found the claim false
 and it is corrected here rather than quietly dropped. Canonical form constrains
 the decoded `Delta`; it says nothing about how many wire encodings decode to
-it. `MemberLeaf`'s `Deserialize` impl (`types.rs`) **normalises rather than
-rejects** — `to_nfc` over `name` and `surname`, and the NFC form that
-`validate_handle` returns for the handle, with the code's own comment noting
-that "the stored handle is canonical even if the wire payload wasn't". So an
+it. `MemberLeaf` (`types.rs`) derives `Deserialize` over its `Handle`, `Name`
+and `Surname` fields, and each of those decodes through its own `parse`, which
+stores the NFC form — so decoding **normalises rather than rejects**. So an
 NFD-encoded leaf and its NFC equivalent are two distinct postcard byte strings
 that decode to the same `MemberLeaf`, yield the same `Delta` value and produce
 the same root. The postcard encoding of an accepted change set is **not

@@ -16,4 +16,6 @@ pub mod types;
 pub use error::OrgMembersError;
 pub use hasher::TrieHasher;
 pub use trie::OrgTrie;
-pub use types::{P2pDeviceKey, MemberId, MemberLeaf, P2pMemberKey, RootHash};
+pub use types::{
+    Handle, MemberId, MemberLeaf, Name, P2pDeviceKey, P2pMemberKey, RootHash, Surname,
+};

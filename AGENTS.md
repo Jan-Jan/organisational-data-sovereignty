@@ -13,6 +13,10 @@ when granting access) but is out of scope here.
 
 For crate-specific guidance, see the AGENTS.md inside each crate directory:
 - `org-members/AGENTS.md` -- Phase 1.a SMT library
+- `org-node/AGENTS.md` -- Phase 2 node (core, chain, transport)
+
+Type safety is a hard rule in both: parse at the system's edge, newtypes
+everywhere else (`docs/adr/2026-10-04-parse-at-the-system-edge.md`).
 
 ## User preferences (sticky)
 

@@ -1,7 +1,10 @@
 use ed25519_dalek::SigningKey;
 use org_members::hasher::{Blake3Hasher, TrieHasher};
 use org_members::trie::OrgTrie;
-use org_members::types::{P2pDeviceKey, MemberId, NodeHash, P2pMemberKey, MemberLeaf, RootHash, MAX_DEVICES};
+use org_members::types::{
+    Handle, P2pDeviceKey, MemberId, Name, NodeHash, P2pMemberKey, MemberLeaf, RootHash, Surname,
+    MAX_DEVICES, MAX_NAME_LEN,
+};
 use org_members::OrgMembersError;
 
 type TestTrie = OrgTrie<Blake3Hasher>;
@@ -26,13 +29,25 @@ fn device_key(seed: &str) -> P2pDeviceKey {
     P2pDeviceKey::new(SigningKey::from_bytes(&bytes).verifying_key())
 }
 
+fn h(s: &str) -> Handle {
+    Handle::parse(s).unwrap()
+}
+
+fn nm(s: &str) -> Name {
+    Name::parse(s).unwrap()
+}
+
+fn sn(s: &str) -> Surname {
+    Surname::parse(s).unwrap()
+}
+
 fn alice() -> MemberLeaf {
     MemberLeaf::new(
         member_id("alice-id"),
-        "alice",
+        h("alice"),
         member_key("alice-mk"),
-        "Alice",
-        "Smith",
+        nm("Alice"),
+        sn("Smith"),
         vec![device_key("alice-d1")])
     .unwrap()
 }
@@ -40,10 +55,10 @@ fn alice() -> MemberLeaf {
 fn bob() -> MemberLeaf {
     MemberLeaf::new(
         member_id("bob-id"),
-        "bob",
+        h("bob"),
         member_key("bob-mk"),
-        "Bob",
-        "Jones",
+        nm("Bob"),
+        sn("Jones"),
         vec![device_key("bob-d1")])
     .unwrap()
 }
@@ -51,10 +66,10 @@ fn bob() -> MemberLeaf {
 fn charlie() -> MemberLeaf {
     MemberLeaf::new(
         member_id("charlie-id"),
-        "charlie",
+        h("charlie"),
         member_key("charlie-mk"),
-        "Charlie",
-        "Brown",
+        nm("Charlie"),
+        sn("Brown"),
         vec![device_key("charlie-d1")])
     .unwrap()
 }
@@ -62,10 +77,10 @@ fn charlie() -> MemberLeaf {
 fn jan_jan() -> MemberLeaf {
     MemberLeaf::new(
         member_id("jan-jan-id"),
-        "jan-jan",
+        h("jan-jan"),
         member_key("jan-jan-mk"),
-        "Jan-Jan",
-        "Gödel",
+        nm("Jan-Jan"),
+        sn("Gödel"),
         vec![device_key("jan-jan-d1"), device_key("jan-jan-d2")])
     .unwrap()
 }
@@ -73,10 +88,10 @@ fn jan_jan() -> MemberLeaf {
 fn diana() -> MemberLeaf {
     MemberLeaf::new(
         member_id("diana-id"),
-        "diana",
+        h("diana"),
         member_key("diana-mk"),
-        "Diana",
-        "Prince",
+        nm("Diana"),
+        sn("Prince"),
         vec![device_key("diana-d1")])
     .unwrap()
 }
@@ -105,11 +120,11 @@ fn genesis_single_member() {
 fn genesis_multiple_members() {
     let trie = TestTrie::genesis(vec![alice(), bob(), charlie(), jan_jan(), diana()]).unwrap();
     assert_eq!(trie.member_count(), 5);
-    assert!(trie.contains_handle("alice"));
-    assert!(trie.contains_handle("bob"));
-    assert!(trie.contains_handle("charlie"));
-    assert!(trie.contains_handle("jan-jan"));
-    assert!(trie.contains_handle("diana"));
+    assert!(trie.contains_handle(&h("alice")));
+    assert!(trie.contains_handle(&h("bob")));
+    assert!(trie.contains_handle(&h("charlie")));
+    assert!(trie.contains_handle(&h("jan-jan")));
+    assert!(trie.contains_handle(&h("diana")));
 }
 
 /// verifies: REQ-crjxk8, LLR-ch2pkw
@@ -125,10 +140,10 @@ fn genesis_duplicate_handle_different_id_fails() {
     let m1 = alice();
     let m2 = MemberLeaf::new(
         member_id("different-id"),
-        "alice", // same handle as m1
+        h("alice"), // same handle as m1
         member_key("different-mk"),
-        "Alice2",
-        "Different",
+        nm("Alice2"),
+        sn("Different"),
         vec![device_key("d")])
     .unwrap();
     let err = TestTrie::genesis(vec![m1, m2]);
@@ -154,7 +169,7 @@ fn insert_adds_member() {
     let trie = trie.add_member(bob()).unwrap();
     assert!(!trie.is_calculated());
     assert_eq!(trie.member_count(), 2);
-    assert!(trie.contains_handle("bob"));
+    assert!(trie.contains_handle(&h("bob")));
 
     let (trie, delta) = trie.recalculate().unwrap();
     assert!(trie.is_calculated());
@@ -176,10 +191,10 @@ fn insert_duplicate_handle_different_id_fails() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
     let imposter = MemberLeaf::new(
         member_id("imposter-id"),
-        "alice",
+        h("alice"),
         member_key("imposter-mk"),
-        "I'm",
-        "Alice",
+        nm("I'm"),
+        sn("Alice"),
         vec![device_key("imposter-d")])
     .unwrap();
     let err = trie.add_member(imposter);
@@ -195,15 +210,15 @@ fn update_name_surname_changes_pii() {
     let root_before = trie.root_hash().unwrap();
 
     let trie = trie
-        .update_name_surname(&member_id("alice-id"), "Alyx", "Wonderland")
+        .update_name_surname(&member_id("alice-id"), nm("Alyx"), sn("Wonderland"))
         .unwrap();
     let (trie, _) = trie.recalculate().unwrap();
 
     let member = trie.get(&member_id("alice-id")).unwrap();
-    assert_eq!(member.name(), "Alyx");
-    assert_eq!(member.surname(), "Wonderland");
+    assert_eq!(member.name().as_str(), "Alyx");
+    assert_eq!(member.surname().as_str(), "Wonderland");
     // Other fields unchanged
-    assert_eq!(member.handle(), "alice");
+    assert_eq!(member.handle().as_str(), "alice");
     assert_eq!(member.p2p_key(), &member_key("alice-mk"));
     assert_eq!(member.p2p_device_count(), 1);
     assert_ne!(trie.root_hash().unwrap(), root_before);
@@ -214,18 +229,62 @@ fn update_name_surname_changes_pii() {
 fn update_name_surname_nfc_normalizes() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
     let trie = trie
-        .update_name_surname(&member_id("alice-id"), "e\u{0301}ric", "X")
+        .update_name_surname(&member_id("alice-id"), nm("e\u{0301}ric"), sn("X"))
         .unwrap();
     let (trie, _) = trie.recalculate().unwrap();
     let member = trie.get(&member_id("alice-id")).unwrap();
-    assert_eq!(member.name(), "\u{00E9}ric"); // NFC composed
+    assert_eq!(member.name().as_str(), "\u{00E9}ric"); // NFC composed
+}
+
+/// verifies: LLR-g6arcs
+///
+/// Abnormal side: the inputs sit at the edges `Name` and `Surname` admit. The
+/// name is exactly `MAX_NAME_LEN` bytes and is stored byte for byte; the
+/// surname is parsed from decomposed (NFD) text and is stored in NFC form.
+/// Only those two fields change: handle, p2p key and devices are untouched.
+#[test]
+fn update_name_surname_stores_boundary_and_nfd_fields_only() {
+    let trie = TestTrie::genesis(vec![alice()]).unwrap();
+    let before = trie.get(&member_id("alice-id")).unwrap();
+    let longest = "n".repeat(MAX_NAME_LEN);
+
+    let trie = trie
+        .update_name_surname(&member_id("alice-id"), nm(&longest), sn("Mu\u{0308}ller"))
+        .unwrap();
+    let (trie, _) = trie.recalculate().unwrap();
+
+    let member = trie.get(&member_id("alice-id")).unwrap();
+    assert_eq!(member.name().as_str(), longest);
+    assert_eq!(member.name().as_str().len(), MAX_NAME_LEN);
+    assert_eq!(member.surname().as_str(), "M\u{00fc}ller");
+    assert_eq!(member.handle(), before.handle());
+    assert_eq!(member.p2p_key(), before.p2p_key());
+    assert_eq!(member.p2p_devices(), before.p2p_devices());
+}
+
+/// verifies: LLR-v3jqau
+///
+/// Abnormal side: `update_name_surname` on an id no member holds is refused
+/// with `IdNotFound`, and the trie it was called on is left as it was.
+#[test]
+fn update_name_surname_unknown_id_leaves_trie_unchanged() {
+    let trie = TestTrie::genesis(vec![alice()]).unwrap();
+    let root_before = trie.root_hash().unwrap();
+    let err = trie
+        .update_name_surname(&member_id("ghost-id"), nm("Ghost"), sn("Writer"))
+        .unwrap_err();
+    assert_eq!(err, OrgMembersError::IdNotFound);
+    assert_eq!(trie.member_count(), 1);
+    assert!(!trie.contains(&member_id("ghost-id")));
+    assert_eq!(trie.root_hash().unwrap(), root_before);
+    assert_eq!(trie.get(&member_id("alice-id")).unwrap().name().as_str(), "Alice");
 }
 
 /// verifies: LLR-v3jqau
 #[test]
 fn update_name_surname_nonexistent_fails() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
-    let err = trie.update_name_surname(&member_id("ghost-id"), "X", "Y");
+    let err = trie.update_name_surname(&member_id("ghost-id"), nm("X"), sn("Y"));
     assert_eq!(err.unwrap_err(), OrgMembersError::IdNotFound);
 }
 
@@ -238,28 +297,67 @@ fn update_name_surname_nonexistent_fails() {
 #[test]
 fn update_handle_renames_member() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
-    let trie = trie.update_handle(&member_id("alice-id"), "alicia").unwrap();
+    let trie = trie.update_handle(&member_id("alice-id"), h("alicia")).unwrap();
     let (trie, _) = trie.recalculate().unwrap();
 
-    assert!(!trie.contains_handle("alice"));
-    assert!(trie.contains_handle("alicia"));
+    assert!(!trie.contains_handle(&h("alice")));
+    assert!(trie.contains_handle(&h("alicia")));
     assert!(trie.contains(&member_id("alice-id")));
-    assert_eq!(trie.get_by_handle("alicia").unwrap().name(), "Alice");
+    assert_eq!(trie.get_by_handle(&h("alicia")).unwrap().name().as_str(), "Alice");
+}
+
+/// verifies: LLR-ub6dw9
+///
+/// Abnormal side: a handle no member holds any more -- vacated by a rename,
+/// then by a delete -- is not found by either lookup.
+#[test]
+fn handle_index_forgets_renamed_and_deleted_handles() {
+    let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
+    let trie = trie.update_handle(&member_id("alice-id"), h("alicia")).unwrap();
+
+    assert!(trie.get_by_handle(&h("alice")).is_none());
+    assert!(!trie.contains_handle(&h("alice")));
+    assert_eq!(trie.get_by_handle(&h("alicia")).unwrap().id(), &member_id("alice-id"));
+    assert!(trie.contains_handle(&h("alicia")));
+
+    let trie = trie.delete_member(&member_id("alice-id")).unwrap();
+    assert!(trie.get_by_handle(&h("alicia")).is_none());
+    assert!(!trie.contains_handle(&h("alicia")));
+    assert!(trie.get_by_handle(&h("bob")).is_some());
+}
+
+/// verifies: LLR-f3zrwd
+///
+/// Abnormal side: the handle index matches exactly. A valid handle that is
+/// confusable with a held one is not that member's handle and is not found.
+#[test]
+fn handle_lookup_is_exact_not_confusable() {
+    let (held, lookalike) =
+        find_confusable_pair().expect("test setup: no confusable pair found among candidates");
+    let trie = TestTrie::genesis(vec![leaf_with_handle(&held).unwrap()]).unwrap();
+
+    assert!(trie.get_by_handle(&h(&held)).is_some());
+    assert!(trie.get_by_handle(&h(&lookalike)).is_none(), "{lookalike:?} matched {held:?}");
+    assert!(!trie.contains_handle(&h(&lookalike)));
 }
 
 /// verifies: LLR-v3jqau
 #[test]
 fn update_handle_nonexistent_fails() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
-    let err = trie.update_handle(&member_id("ghost-id"), "newname");
+    let err = trie.update_handle(&member_id("ghost-id"), h("newname"));
     assert_eq!(err.unwrap_err(), OrgMembersError::IdNotFound);
 }
 
-/// verifies: REQ-h5ret5, LLR-mmst86
+/// verifies: REQ-h5ret5, LLR-xzqs9r
+///
+/// An invalid handle never reaches `update_handle`: it is refused when the
+/// caller parses it, which is the only way to obtain a `Handle` to pass.
 #[test]
-fn update_handle_rejects_invalid() {
+fn handle_for_update_rejects_invalid() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
-    let err = trie.update_handle(&member_id("alice-id"), "Alice"); // uppercase
+    let err = Handle::parse("Alice") // uppercase
+        .and_then(|nh| trie.update_handle(&member_id("alice-id"), nh));
     assert!(matches!(
         err.unwrap_err(),
         OrgMembersError::InvalidHandle(_)
@@ -270,7 +368,7 @@ fn update_handle_rejects_invalid() {
 #[test]
 fn update_handle_rejects_collision() {
     let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
-    let err = trie.update_handle(&member_id("alice-id"), "bob");
+    let err = trie.update_handle(&member_id("alice-id"), h("bob"));
     assert_eq!(err.unwrap_err(), OrgMembersError::DuplicateHandle);
 }
 
@@ -295,8 +393,8 @@ fn rotate_p2p_key_changes_only_key() {
     let member = trie.get(&member_id("alice-id")).unwrap();
     assert_eq!(member.p2p_key(), &new_key);
     // Other fields unchanged
-    assert_eq!(member.handle(), "alice");
-    assert_eq!(member.name(), "Alice");
+    assert_eq!(member.handle().as_str(), "alice");
+    assert_eq!(member.name().as_str(), "Alice");
     assert_eq!(member.p2p_device_count(), 1);
     assert_ne!(trie.root_hash().unwrap(), root_before);
 }
@@ -551,8 +649,8 @@ fn emergency_isolate_member_removes_all_devices_and_rotates_key() {
     assert!(!member.has_p2p_device(&device_key("jan-jan-d2")));
     assert_eq!(member.p2p_key(), &new_key);
     // Other PII unchanged
-    assert_eq!(member.handle(), "jan-jan");
-    assert_eq!(member.surname(), "Gödel");
+    assert_eq!(member.handle().as_str(), "jan-jan");
+    assert_eq!(member.surname().as_str(), "Gödel");
 }
 
 /// verifies: REQ-r784fu, LLR-w92psx
@@ -566,7 +664,7 @@ fn emergency_isolate_member_keeps_member_in_trie() {
 
     assert_eq!(trie.member_count(), 2); // alice still there, just isolated
     assert!(trie.contains(&member_id("alice-id")));
-    assert!(trie.contains_handle("alice"));
+    assert!(trie.contains_handle(&h("alice")));
 }
 
 /// verifies: REQ-r784fu, LLR-w92psx
@@ -652,7 +750,7 @@ fn emergency_isolate_member_already_isolated_rejects_unchanged_key() {
 /// `delete_member_frees_the_handle_for_reuse`, only reaches one: reuse is
 /// gated by the *skeleton* index, so dropping
 /// `new_handle_index.remove(existing.handle())` from `delete_by_id` leaves
-/// that test green and reds this one at `!trie.contains_handle("alice")`.
+/// that test green and reds this one at `!trie.contains_handle(&h("alice"))`.
 /// Measured on 2026-09-17, both ways round. This is also the item's
 /// abnormal-input side: a lookup of a handle no member holds.
 #[test]
@@ -662,8 +760,8 @@ fn delete_removes_member() {
     let (trie, delta) = trie.recalculate().unwrap();
 
     assert_eq!(trie.member_count(), 1);
-    assert!(!trie.contains_handle("alice"));
-    assert!(trie.contains_handle("bob"));
+    assert!(!trie.contains_handle(&h("alice")));
+    assert!(trie.contains_handle(&h("bob")));
     assert_eq!(delta.removed().len(), 1);
 }
 
@@ -688,10 +786,10 @@ fn delete_member_frees_the_handle_for_reuse() {
     // A different member, same handle as the departed one.
     let successor = MemberLeaf::new(
         member_id("successor"),
-        "alice",
+        h("alice"),
         member_key("s"),
-        "Alicia",
-        "Brown",
+        nm("Alicia"),
+        sn("Brown"),
         vec![device_key("s-dev")],
     )
     .unwrap();
@@ -713,7 +811,7 @@ fn insert_does_not_mutate_original() {
 
     assert_eq!(original.member_count(), 1);
     assert_eq!(original.root_hash().unwrap(), original_root);
-    assert!(!original.contains_handle("bob"));
+    assert!(!original.contains_handle(&h("bob")));
 }
 
 /// verifies: REQ-d3prca, LLR-tk4qxu
@@ -725,7 +823,7 @@ fn delete_does_not_mutate_original() {
 
     assert_eq!(original.member_count(), 2);
     assert_eq!(original.root_hash().unwrap(), original_root);
-    assert!(original.contains_handle("alice"));
+    assert!(original.contains_handle(&h("alice")));
 }
 
 // --- Delta and CandidateTrie tests ---
@@ -768,9 +866,9 @@ fn delta_apply_and_verify() {
 
     assert_eq!(verified.root_hash().unwrap(), updated.root_hash().unwrap());
     assert_eq!(verified.member_count(), 2);
-    assert!(!verified.contains_handle("alice"));
-    assert!(verified.contains_handle("bob"));
-    assert!(verified.contains_handle("charlie"));
+    assert!(!verified.contains_handle(&h("alice")));
+    assert!(verified.contains_handle(&h("bob")));
+    assert!(verified.contains_handle(&h("charlie")));
 }
 
 /// verifies: REQ-4umsuz, LLR-au8het
@@ -805,7 +903,7 @@ fn candidate_verify_wrong_root_fails() {
     let (_, delta) = modified.recalculate().unwrap();
 
     let candidate = trie.apply_delta(&delta).unwrap();
-    let wrong_root = RootHash::from_bytes([0xFF; 32]);
+    let wrong_root = RootHash::new([0xFF; 32]);
     let err = candidate.verify_against(&wrong_root);
     assert_eq!(err.unwrap_err(), OrgMembersError::VerificationFailed);
 }
@@ -998,10 +1096,10 @@ fn members_returns_all() {
 fn leaf_with_handle(handle: &str) -> Result<MemberLeaf, OrgMembersError> {
     MemberLeaf::new(
         member_id("k"),
-        handle,
+        Handle::parse(handle)?,
         member_key("k"),
-        "A",
-        "B",
+        nm("A"),
+        sn("B"),
         vec![device_key("d")])
 }
 
@@ -1072,7 +1170,7 @@ fn handle_digits_allowed() {
 fn handle_too_long_rejected() {
     // MAX_HANDLE_LEN is 128 bytes after NFC normalization. A 128-char ASCII
     // handle is at the cap (valid); 129 exceeds it and must be rejected with
-    // InvalidHandle. This is the one validate_handle branch the fuzz strategy
+    // InvalidHandle. This is the one Handle::parse branch the fuzz strategy
     // (capped at 64 chars) could never reach.
     let at_cap = "a".repeat(128);
     assert!(leaf_with_handle(&at_cap).is_ok());
@@ -1089,27 +1187,29 @@ fn handle_too_long_rejected() {
 /// verifies: REQ-m8aexh, LLR-5w2jx8, LLR-ch2pkw
 #[test]
 fn genesis_rejects_confusables() {
-    // Find two handles whose UTS#39 skeletons match by probing candidates at runtime.
+    // Pick two valid handles whose UTS#39 skeletons match, by computing the
+    // skeletons directly with unicode_security rather than asking the trie.
     // We can't hard-code a confusable pair safely because the skeleton table is
-    // a library-controlled mapping that could shift. The test would silently pass
-    // if our pair stopped being confusable. Probe instead, then assert rejection.
+    // a library-controlled mapping that could shift; the oracle re-derives the
+    // pair from that table, independently of HandleSkeleton::of, and the
+    // assertion below then checks the trie agrees.
     let (h1, h2) = find_confusable_pair()
         .expect("test setup: no confusable pair found among candidates");
 
     let m1 = MemberLeaf::new(
         member_id("k1"),
-        &h1,
+        h(&h1),
         member_key("k1"),
-        "A",
-        "B",
+        nm("A"),
+        sn("B"),
         vec![device_key("d1")])
     .unwrap();
     let m2 = MemberLeaf::new(
         member_id("k2"),
-        &h2,
+        h(&h2),
         member_key("k2"),
-        "A",
-        "B",
+        nm("A"),
+        sn("B"),
         vec![device_key("d2")])
     .unwrap();
     let err = TestTrie::genesis(vec![m1, m2]).unwrap_err();
@@ -1123,18 +1223,18 @@ fn insert_rejects_confusable_handle() {
         find_confusable_pair().expect("test setup: no confusable pair found among candidates");
     let m1 = MemberLeaf::new(
         member_id("k1"),
-        &h1,
+        h(&h1),
         member_key("k1"),
-        "A",
-        "B",
+        nm("A"),
+        sn("B"),
         vec![device_key("d1")])
     .unwrap();
     let m2 = MemberLeaf::new(
         member_id("k2"),
-        &h2,
+        h(&h2),
         member_key("k2"),
-        "A",
-        "B",
+        nm("A"),
+        sn("B"),
         vec![device_key("d2")])
     .unwrap();
 
@@ -1151,10 +1251,10 @@ fn update_rejects_confusable_handle() {
     // Two members, neither confusable initially.
     let m1 = MemberLeaf::new(
         member_id("k1"),
-        &h1,
+        h(&h1),
         member_key("k1"),
-        "A",
-        "B",
+        nm("A"),
+        sn("B"),
         vec![device_key("d1")])
     .unwrap();
     let m2 = alice();
@@ -1162,24 +1262,29 @@ fn update_rejects_confusable_handle() {
     let trie = TestTrie::genesis(vec![m1, m2]).unwrap();
 
     // Now try to update alice's handle to a confusable of h1.
-    let err = trie.update_handle(&member_id("alice-id"), &h2).unwrap_err();
+    let err = trie.update_handle(&member_id("alice-id"), h(&h2)).unwrap_err();
     assert_eq!(err, OrgMembersError::ConfusableHandle);
 }
 
-/// Searches a small pool of candidate handles for a pair with matching UTS#39
-/// skeletons, suitable for confusable-detection tests. Returns None if no
-/// pair was found (in which case the test will skip / signal a setup issue).
+/// Finds two distinct handles that `Handle::parse` accepts and whose UTS#39
+/// skeletons match, computed directly with
+/// `unicode_security::confusable_detection::skeleton` (as `fuzz_tests.rs`
+/// does). The oracle is independent of the trie and of `HandleSkeleton::of`,
+/// so a skeleton function that stops detecting confusables makes the callers'
+/// `ConfusableHandle` assertions fail instead of changing the pair chosen.
+/// Returns None if no pair was found (in which case the test will signal a
+/// setup issue).
 fn find_confusable_pair() -> Option<(String, String)> {
-    use org_members::types::handle_skeleton;
-    // Candidates passing handle validation (lowercase, no '.', valid identifier chars).
+    use unicode_security::confusable_detection::skeleton;
     let candidates = [
         "paypal", "paypa1", "h0use", "house", "g00gle", "google", "ab1", "abl", "amaz0n", "amazon",
         "g0t", "got", "0lice", "olice", "01ice", "alice",
     ];
-    for (i, &a) in candidates.iter().enumerate() {
-        let sk_a = handle_skeleton(a);
-        for &b in &candidates[i + 1..] {
-            if a != b && sk_a == handle_skeleton(b) {
+    let valid: Vec<&str> = candidates.into_iter().filter(|c| Handle::parse(c).is_ok()).collect();
+    let skel = |s: &str| -> String { skeleton(s).collect() };
+    for (i, &a) in valid.iter().enumerate() {
+        for &b in &valid[i + 1..] {
+            if skel(a) == skel(b) {
                 return Some((a.to_string(), b.to_string()));
             }
         }
@@ -1193,18 +1298,18 @@ fn find_confusable_pair() -> Option<(String, String)> {
 fn member_leaf_nfc_normalization() {
     let m1 = MemberLeaf::new(
         member_id("k"),
-        "alice",
+        h("alice"),
         member_key("k"),
-        "e\u{0301}",
-        "X",
+        nm("e\u{0301}"),
+        sn("X"),
         vec![device_key("d")])
     .unwrap();
     let m2 = MemberLeaf::new(
         member_id("k"),
-        "alice",
+        h("alice"),
         member_key("k"),
-        "\u{00E9}",
-        "X",
+        nm("\u{00E9}"),
+        sn("X"),
         vec![device_key("d")])
     .unwrap();
     assert_eq!(m1.name(), m2.name());
@@ -1216,10 +1321,10 @@ fn member_leaf_too_many_devices() {
     let devices: Vec<_> = (0..5).map(|i| device_key(&format!("d{}", i))).collect();
     let err = MemberLeaf::new(
         member_id("k"),
-        "alice",
+        h("alice"),
         member_key("k"),
-        "Alice",
-        "Smith",
+        nm("Alice"),
+        sn("Smith"),
         devices);
     assert_eq!(err.unwrap_err(), OrgMembersError::DeviceSlotsFull);
 }
@@ -1229,10 +1334,10 @@ fn member_leaf_too_many_devices() {
 fn member_leaf_empty_devices() {
     let err = MemberLeaf::new(
         member_id("k"),
-        "alice",
+        h("alice"),
         member_key("k"),
-        "Alice",
-        "Smith",
+        nm("Alice"),
+        sn("Smith"),
         vec![]);
     assert_eq!(err.unwrap_err(), OrgMembersError::EmptyDeviceList);
 }
@@ -1259,7 +1364,7 @@ fn member_leaf_debug_redacts_pii() {
 fn member_leaf_has_id_handle_and_key() {
     let leaf = alice();
     assert_eq!(leaf.id(), &member_id("alice-id"));
-    assert_eq!(leaf.handle(), "alice");
+    assert_eq!(leaf.handle().as_str(), "alice");
     assert_eq!(leaf.p2p_key(), &member_key("alice-mk"));
 }
 
@@ -1296,10 +1401,10 @@ fn batch_mutations_then_recalculate() {
     let (trie, delta) = trie.recalculate().unwrap();
 
     assert_eq!(trie.member_count(), 3);
-    assert!(!trie.contains_handle("alice"));
-    assert!(trie.contains_handle("bob"));
-    assert!(trie.contains_handle("charlie"));
-    assert!(trie.contains_handle("jan-jan"));
+    assert!(!trie.contains_handle(&h("alice")));
+    assert!(trie.contains_handle(&h("bob")));
+    assert!(trie.contains_handle(&h("charlie")));
+    assert!(trie.contains_handle(&h("jan-jan")));
 
     assert_eq!(delta.removed().len(), 1);
     assert_eq!(delta.upserted().len(), 3);
@@ -1310,10 +1415,10 @@ fn batch_mutations_then_recalculate() {
 #[test]
 fn jan_jan_has_two_devices() {
     let trie = TestTrie::genesis(vec![jan_jan()]).unwrap();
-    let member = trie.get_by_handle("jan-jan").unwrap();
+    let member = trie.get_by_handle(&h("jan-jan")).unwrap();
     assert_eq!(member.p2p_device_count(), 2);
-    assert_eq!(member.name(), "Jan-Jan");
-    assert_eq!(member.surname(), "Gödel");
+    assert_eq!(member.name().as_str(), "Jan-Jan");
+    assert_eq!(member.surname().as_str(), "Gödel");
 }
 
 #[test]
@@ -1321,10 +1426,10 @@ fn member_lookup_by_id() {
     let trie = TestTrie::genesis(vec![alice(), bob(), jan_jan()]).unwrap();
 
     let found = trie.get(&member_id("jan-jan-id")).unwrap();
-    assert_eq!(found.name(), "Jan-Jan");
+    assert_eq!(found.name().as_str(), "Jan-Jan");
 
     let found = trie.get(&member_id("alice-id")).unwrap();
-    assert_eq!(found.name(), "Alice");
+    assert_eq!(found.name().as_str(), "Alice");
 
     assert!(trie.get(&member_id("eve-id")).is_none());
 }
@@ -1336,22 +1441,22 @@ fn member_lookup_by_id() {
 fn get_by_handle() {
     let trie = TestTrie::genesis(vec![alice(), bob(), jan_jan()]).unwrap();
 
-    let found = trie.get_by_handle("jan-jan").unwrap();
-    assert_eq!(found.name(), "Jan-Jan");
+    let found = trie.get_by_handle(&h("jan-jan")).unwrap();
+    assert_eq!(found.name().as_str(), "Jan-Jan");
 
-    let found = trie.get_by_handle("alice").unwrap();
-    assert_eq!(found.name(), "Alice");
+    let found = trie.get_by_handle(&h("alice")).unwrap();
+    assert_eq!(found.name().as_str(), "Alice");
 
-    assert!(trie.get_by_handle("eve").is_none());
+    assert!(trie.get_by_handle(&h("eve")).is_none());
 }
 
 /// verifies: LLR-ub6dw9
 #[test]
 fn contains_handle() {
     let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
-    assert!(trie.contains_handle("alice"));
-    assert!(trie.contains_handle("bob"));
-    assert!(!trie.contains_handle("charlie"));
+    assert!(trie.contains_handle(&h("alice")));
+    assert!(trie.contains_handle(&h("bob")));
+    assert!(!trie.contains_handle(&h("charlie")));
 }
 
 // --- Pending changes (review before recalculate) ---
@@ -1470,10 +1575,10 @@ fn apply_delta_rejects_confusable_in_upsert() {
     // Receiver trie holds a member with handle h1.
     let m1 = MemberLeaf::new(
         member_id("k1"),
-        &h1,
+        h(&h1),
         member_key("k1"),
-        "A",
-        "B",
+        nm("A"),
+        sn("B"),
         vec![device_key("d1")])
     .unwrap();
     let trie = TestTrie::genesis(vec![m1]).unwrap();
@@ -1486,10 +1591,10 @@ fn apply_delta_rejects_confusable_in_upsert() {
         &mut delta,
         vec![MemberLeaf::new(
             member_id("k2"),
-            &h2,
+            h(&h2),
             member_key("k2"),
-            "A",
-            "B",
+            nm("A"),
+            sn("B"),
             vec![device_key("d2")],
         )
         .unwrap()],
@@ -1583,10 +1688,10 @@ fn deserialize_accepts_empty_device_list() {
 fn member_leaf_new_rejects_empty_device_list() {
     let err = MemberLeaf::new(
         member_id("k"),
-        "alice",
+        h("alice"),
         member_key("k"),
-        "A",
-        "B",
+        nm("A"),
+        sn("B"),
         vec![],
     );
     assert_eq!(err.unwrap_err(), OrgMembersError::EmptyDeviceList);
@@ -1614,14 +1719,16 @@ fn field_too_long_error_displays_field_and_max() {
 #[test]
 fn member_leaf_new_rejects_oversized_name() {
     let long_name = "a".repeat(129);
-    let err = MemberLeaf::new(
-        member_id("k"),
-        "alice",
-        member_key("k"),
-        &long_name,
-        "B",
-        vec![device_key("d")],
-    );
+    let err = Name::parse(&long_name).and_then(|name| {
+        MemberLeaf::new(
+            member_id("k"),
+            h("alice"),
+            member_key("k"),
+            name,
+            sn("B"),
+            vec![device_key("d")],
+        )
+    });
     assert_eq!(
         err.unwrap_err(),
         OrgMembersError::FieldTooLong { field: "name", max: 128 }
@@ -1632,14 +1739,16 @@ fn member_leaf_new_rejects_oversized_name() {
 #[test]
 fn member_leaf_new_rejects_oversized_surname() {
     let long_surname = "b".repeat(129);
-    let err = MemberLeaf::new(
-        member_id("k"),
-        "alice",
-        member_key("k"),
-        "A",
-        &long_surname,
-        vec![device_key("d")],
-    );
+    let err = Surname::parse(&long_surname).and_then(|surname| {
+        MemberLeaf::new(
+            member_id("k"),
+            h("alice"),
+            member_key("k"),
+            nm("A"),
+            surname,
+            vec![device_key("d")],
+        )
+    });
     assert_eq!(
         err.unwrap_err(),
         OrgMembersError::FieldTooLong { field: "surname", max: 128 }
@@ -1653,17 +1762,17 @@ fn member_leaf_new_accepts_max_length_name_and_surname() {
     let surname_128 = "b".repeat(128);
     let ok = MemberLeaf::new(
         member_id("k"),
-        "alice",
+        h("alice"),
         member_key("k"),
-        &name_128,
-        &surname_128,
+        nm(&name_128),
+        sn(&surname_128),
         vec![device_key("d")],
     );
     assert!(ok.is_ok());
 }
 
 #[cfg(feature = "serde")]
-/// verifies: LLR-w5nkbu
+/// verifies: LLR-w5nkbu, LLR-68tka5
 #[test]
 fn deserialize_rejects_oversized_name() {
     use postcard::{from_bytes, to_allocvec};
@@ -1693,7 +1802,7 @@ fn deserialize_rejects_oversized_name() {
 }
 
 #[cfg(feature = "serde")]
-/// verifies: LLR-w5nkbu
+/// verifies: LLR-w5nkbu, LLR-68tka5
 #[test]
 fn deserialize_rejects_oversized_surname() {
     use postcard::{from_bytes, to_allocvec};
@@ -1722,24 +1831,32 @@ fn deserialize_rejects_oversized_surname() {
     assert!(result.is_err());
 }
 
-/// verifies: LLR-w5nkbu, LLR-g6arcs
+/// verifies: LLR-w5nkbu
+///
+/// An oversized name never reaches `update_name_surname`: `Name::parse`
+/// refuses it first.
 #[test]
-fn update_name_surname_rejects_oversized_name() {
+fn name_for_update_rejects_oversized() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
     let long_name = "a".repeat(129);
-    let err = trie.update_name_surname(&member_id("alice-id"), &long_name, "Smith");
+    let err = Name::parse(&long_name)
+        .and_then(|name| trie.update_name_surname(&member_id("alice-id"), name, sn("Smith")));
     assert_eq!(
         err.unwrap_err(),
         OrgMembersError::FieldTooLong { field: "name", max: 128 }
     );
 }
 
-/// verifies: LLR-w5nkbu, LLR-g6arcs
+/// verifies: LLR-w5nkbu
+///
+/// An oversized surname never reaches `update_name_surname`:
+/// `Surname::parse` refuses it first.
 #[test]
-fn update_name_surname_rejects_oversized_surname() {
+fn surname_for_update_rejects_oversized() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
     let long_surname = "b".repeat(129);
-    let err = trie.update_name_surname(&member_id("alice-id"), "Alice", &long_surname);
+    let err = Surname::parse(&long_surname)
+        .and_then(|surname| trie.update_name_surname(&member_id("alice-id"), nm("Alice"), surname));
     assert_eq!(
         err.unwrap_err(),
         OrgMembersError::FieldTooLong { field: "surname", max: 128 }
@@ -1955,10 +2072,10 @@ fn apply_delta_rejects_noop_upsert() {
 fn with_handle(leaf: &MemberLeaf, handle: &str) -> MemberLeaf {
     MemberLeaf::new(
         *leaf.id(),
-        handle,
+        h(handle),
         *leaf.p2p_key(),
-        leaf.name(),
-        leaf.surname(),
+        leaf.name().clone(),
+        leaf.surname().clone(),
         leaf.p2p_devices().to_vec())
     .unwrap()
 }
@@ -1968,10 +2085,10 @@ fn with_handle(leaf: &MemberLeaf, handle: &str) -> MemberLeaf {
 fn upsert_only_delta(trie: &TestTrie, mut upserted: Vec<MemberLeaf>) -> org_members::delta::Delta {
     let base_member = MemberLeaf::new(
         member_id("delta-base"),
-        "deltabase",
+        h("deltabase"),
         member_key("delta-base"),
-        "D",
-        "B",
+        nm("D"),
+        sn("B"),
         vec![device_key("delta-base-d1")])
     .unwrap();
     let (_, mut delta) = trie.add_member(base_member).unwrap().recalculate().unwrap();
@@ -2034,10 +2151,10 @@ fn apply_delta_rejects_confusable_of_untouched_member_after_release() {
         find_confusable_pair().expect("test setup: no confusable pair found among candidates");
     let holder = MemberLeaf::new(
         member_id("k1"),
-        &h1,
+        h(&h1),
         member_key("k1"),
-        "A",
-        "B",
+        nm("A"),
+        sn("B"),
         vec![device_key("d1")])
     .unwrap();
     let trie = TestTrie::genesis(vec![holder, alice(), bob()]).unwrap();
@@ -2087,10 +2204,10 @@ fn irregular_history_reaches_same_root_as_direct_build() {
     let start = TestTrie::genesis(vec![charlie(), diana()]).unwrap();
     let impostor = MemberLeaf::new(
         member_id("charlie-id"),
-        "mallory",
+        h("mallory"),
         member_key("mallory-mk"),
-        "Mallory",
-        "Impostor",
+        nm("Mallory"),
+        sn("Impostor"),
         vec![device_key("mallory-d1")])
     .unwrap();
     let rejected = start.add_member(impostor);
@@ -2101,10 +2218,10 @@ fn irregular_history_reaches_same_root_as_direct_build() {
     // Rejection 2: a new member taking a held handle.
     let handle_thief = MemberLeaf::new(
         member_id("thief-id"),
-        "alice",
+        h("alice"),
         member_key("thief-mk"),
-        "T",
-        "H",
+        nm("T"),
+        sn("H"),
         vec![device_key("thief-d1")])
     .unwrap();
     let rejected = trie.add_member(handle_thief);
@@ -2115,13 +2232,13 @@ fn irregular_history_reaches_same_root_as_direct_build() {
     let (trie, _) = trie.add_member(charlie()).unwrap().recalculate().unwrap();
 
     // Rejection 3: a present member taking a held handle on update.
-    let rejected = trie.update_handle(&member_id("alice-id"), "charlie");
+    let rejected = trie.update_handle(&member_id("alice-id"), h("charlie"));
     assert!(matches!(rejected, Err(OrgMembersError::DuplicateHandle)), "got {rejected:?}");
 
     // Change alice's handle away and back across a recalculate.
-    let (trie, _) = trie.update_handle(&member_id("alice-id"), "alicia").unwrap().recalculate().unwrap();
-    assert!(trie.contains_handle("alicia"), "test setup: alice's handle must have moved");
-    let (trie, _) = trie.update_handle(&member_id("alice-id"), "alice").unwrap().recalculate().unwrap();
+    let (trie, _) = trie.update_handle(&member_id("alice-id"), h("alicia")).unwrap().recalculate().unwrap();
+    assert!(trie.contains_handle(&h("alicia")), "test setup: alice's handle must have moved");
+    let (trie, _) = trie.update_handle(&member_id("alice-id"), h("alice")).unwrap().recalculate().unwrap();
 
     // Rejection 4: a delta built on another root is stale against `trie`.
     let (_, stale) = TestTrie::genesis(vec![charlie()])
@@ -2311,19 +2428,19 @@ fn device_slot_order_does_not_change_the_root() {
 
     let forward = MemberLeaf::new(
         member_id("m"),
-        "alice",
+        h("alice"),
         member_key("k"),
-        "Alice",
-        "Anderson",
+        nm("Alice"),
+        sn("Anderson"),
         vec![d1, d2],
     )
     .unwrap();
     let reverse = MemberLeaf::new(
         member_id("m"),
-        "alice",
+        h("alice"),
         member_key("k"),
-        "Alice",
-        "Anderson",
+        nm("Alice"),
+        sn("Anderson"),
         vec![d2, d1],
     )
     .unwrap();
@@ -2375,10 +2492,10 @@ fn every_device_slot_reaches_the_root() {
     let root_of = |devices: Vec<P2pDeviceKey>| {
         let leaf = MemberLeaf::new(
             member_id("m"),
-            "alice",
+            h("alice"),
             member_key("k"),
-            "Alice",
-            "Anderson",
+            nm("Alice"),
+            sn("Anderson"),
             devices,
         )
         .unwrap();
@@ -2456,7 +2573,7 @@ fn add_then_delete_returns_to_the_empty_root() {
 
 /// A leaf with a fixed name, for key-uniqueness fixtures.
 fn keyed_leaf(seed: &str, mk: P2pMemberKey, devices: Vec<P2pDeviceKey>) -> MemberLeaf {
-    MemberLeaf::new(member_id(&format!("{seed}-id")), seed, mk, "Key", "Holder", devices).unwrap()
+    MemberLeaf::new(member_id(&format!("{seed}-id")), h(seed), mk, nm("Key"), sn("Holder"), devices).unwrap()
 }
 
 /// Every key held in `trie`, member and device keys together, as bytes.
@@ -2537,10 +2654,10 @@ fn genesis_reports_id_and_handle_before_shared_key() {
     // Different id, same handle, same member key.
     let twin = MemberLeaf::new(
         member_id("alice-twin-id"),
-        "alice",
+        h("alice"),
         member_key("alice-mk"),
-        "A",
-        "B",
+        nm("A"),
+        sn("B"),
         vec![device_key("alice-d1")],
     )
     .unwrap();
@@ -2589,10 +2706,10 @@ fn add_member_reports_id_and_handle_before_shared_key() {
     assert_eq!(trie.add_member(alice()).unwrap_err(), OrgMembersError::DuplicateId);
     let twin = MemberLeaf::new(
         member_id("alice-twin-id"),
-        "alice",
+        h("alice"),
         member_key("alice-mk"),
-        "A",
-        "B",
+        nm("A"),
+        sn("B"),
         vec![device_key("alice-d1")],
     )
     .unwrap();
@@ -2796,7 +2913,15 @@ fn forged_delta(
 
 /// `leaf` with its member key and devices replaced, everything else kept.
 fn rekeyed(leaf: &MemberLeaf, mk: P2pMemberKey, devices: Vec<P2pDeviceKey>) -> MemberLeaf {
-    MemberLeaf::new(*leaf.id(), leaf.handle(), mk, leaf.name(), leaf.surname(), devices).unwrap()
+    MemberLeaf::new(
+        *leaf.id(),
+        leaf.handle().clone(),
+        mk,
+        leaf.name().clone(),
+        leaf.surname().clone(),
+        devices,
+    )
+    .unwrap()
 }
 
 /// verifies: LLR-gjj6bx
@@ -2928,10 +3053,10 @@ fn apply_delta_reports_earlier_refusals_before_shared_key() {
     // Same handle as alice, alice's member key.
     let twin = MemberLeaf::new(
         member_id("alice-twin-id"),
-        "alice",
+        h("alice"),
         member_key("alice-mk"),
-        "A",
-        "B",
+        nm("A"),
+        sn("B"),
         vec![device_key("twin-d1")],
     )
     .unwrap();
@@ -3019,4 +3144,23 @@ fn apply_delta_result_refuses_keys_the_delta_introduced() {
     let root = candidate.root_hash();
     let trie = candidate.verify_against(&root).unwrap();
     trie.rotate_p2p_key(&member_id("alice-id"), member_key("bob-d1")).unwrap();
+}
+
+/// verifies: REQ-t46uad, LLR-f3zrwd
+#[test]
+fn handle_query_reports_invalid_absent_and_held() {
+    let trie = TestTrie::genesis(vec![alice()]).unwrap();
+
+    // Invalid: refused before any lookup can run.
+    assert!(matches!(Handle::parse("Alice"), Err(OrgMembersError::InvalidHandle(_))));
+
+    // Valid, held by no member.
+    let absent = Handle::parse("zoe").unwrap();
+    assert_eq!(trie.get_by_handle(&absent), None);
+    assert!(!trie.contains_handle(&absent));
+
+    // Valid, held.
+    let held = Handle::parse("alice").unwrap();
+    assert_eq!(trie.get_by_handle(&held).map(|m| *m.id()), Some(member_id("alice-id")));
+    assert!(trie.contains_handle(&held));
 }

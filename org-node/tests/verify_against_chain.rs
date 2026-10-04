@@ -143,7 +143,7 @@ fn rejects_when_org_absent_from_chain() {
 fn rejects_root_mismatch_when_chain_root_differs() {
     let (admin, org, local, env, _new_root) = setup();
     // Attacker-influenced delta but honest chain root that does NOT match.
-    let chain = chain_at(org, RootHash::from_bytes([0xde; 32]), 2);
+    let chain = chain_at(org, RootHash::new([0xde; 32]), 2);
     let vk = admin.verifying_key();
     let ctx = ctx(org, &vk);
     assert_eq!(ctx.seq_guard.last_seen(), 1, "the mark this test hands in");

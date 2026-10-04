@@ -1,5 +1,3 @@
-use alloc::borrow::ToOwned;
-use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
@@ -11,10 +9,9 @@ use crate::error::OrgMembersError;
 use crate::hasher::TrieHasher;
 use crate::node::Node;
 use crate::smt::{self, DefaultHashes};
-use crate::normalize::to_nfc;
 use crate::types::{
-    handle_skeleton, validate_handle, MemberId, MemberLeaf, P2pDeviceKey, P2pDeviceSlots,
-    P2pMemberKey, RootHash,
+    Handle, HandleSkeleton, HeldKey, MemberId, MemberLeaf, Name, P2pDeviceKey,
+    P2pDeviceSlots, P2pMemberKey, RootHash, Surname,
 };
 
 /// An immutable binary Sparse Merkle Tree for organisation membership.
@@ -47,12 +44,12 @@ pub struct OrgTrie<H: TrieHasher> {
     /// Always populated -- every constructor sets it, and mutations propagate
     /// it forward unchanged. Used as the diff base for `pending_changes()`.
     last_calculated_root: Arc<Node>,
-    /// Maps skeleton → handle string for confusable detection.
-    skeleton_index: HashMap<String, String>,
+    /// Maps skeleton → handle for confusable detection.
+    skeleton_index: HashMap<HandleSkeleton, Handle>,
     /// Maps handle → MemberId for handle-based lookups.
     /// Necessary because handle and id are independent (handle can change rarely
     /// while id stays the same).
-    handle_index: HashMap<String, MemberId>,
+    handle_index: HashMap<Handle, MemberId>,
     /// Maps every key held in the organisation -- each member key and each
     /// enrolled device key, by its 32 encoded bytes -- to the member holding
     /// it. One entry per key is the LLR-v6gfc7 invariant.
@@ -60,14 +57,13 @@ pub struct OrgTrie<H: TrieHasher> {
     _hasher: core::marker::PhantomData<H>,
 }
 
-/// Key bytes → holder. See `OrgTrie::key_index`.
-pub(crate) type KeyIndex = HashMap<[u8; 32], MemberId>;
+/// Held key → holder. See `OrgTrie::key_index`.
+pub(crate) type KeyIndex = HashMap<HeldKey, MemberId>;
 
-/// The 32-byte encodings of every key `leaf` holds: its member key, then its
-/// devices. A member key and a device key with the same bytes are the same key.
-fn leaf_keys(leaf: &MemberLeaf) -> impl Iterator<Item = [u8; 32]> + '_ {
-    core::iter::once(*leaf.p2p_key().as_bytes())
-        .chain(leaf.p2p_devices().iter().map(|d| *d.as_bytes()))
+/// Every key `leaf` holds: its member key, then its devices.
+fn leaf_keys(leaf: &MemberLeaf) -> impl Iterator<Item = HeldKey> + '_ {
+    core::iter::once(HeldKey::from(leaf.p2p_key()))
+        .chain(leaf.p2p_devices().iter().map(HeldKey::from))
 }
 
 /// Records every key `leaf` holds in `index`. Fails with `DuplicateKey` if
@@ -112,7 +108,7 @@ impl<H: TrieHasher> OrgTrie<H> {
             }
 
             // Check for duplicate/confusable handle
-            let skeleton = handle_skeleton(member.handle());
+            let skeleton = HandleSkeleton::of(member.handle());
             if let Some(existing) = skeleton_index.get(&skeleton) {
                 if existing != member.handle() {
                     return Err(OrgMembersError::ConfusableHandle);
@@ -123,8 +119,8 @@ impl<H: TrieHasher> OrgTrie<H> {
 
             index_leaf_keys(&mut key_index, &member)?;
 
-            skeleton_index.insert(skeleton, member.handle().to_owned());
-            handle_index.insert(member.handle().to_owned(), *member.id());
+            skeleton_index.insert(skeleton, member.handle().clone());
+            handle_index.insert(member.handle().clone(), *member.id());
             root = smt::insert::<H>(&root, member, &defaults);
             count += 1;
         }
@@ -162,19 +158,18 @@ impl<H: TrieHasher> OrgTrie<H> {
         smt::get_member(&self.root, id).is_some()
     }
 
-    pub fn contains_handle(&self, handle: &str) -> bool {
-        // NFC-normalize input so callers passing decomposed Unicode still match.
-        let normalized = to_nfc(handle);
-        self.handle_index.contains_key(normalized.as_str())
+    /// LLR-f3zrwd.
+    pub fn contains_handle(&self, handle: &Handle) -> bool {
+        self.handle_index.contains_key(handle)
     }
 
     pub fn get(&self, id: &MemberId) -> Option<MemberLeaf> {
         smt::get_member(&self.root, id)
     }
 
-    pub fn get_by_handle(&self, handle: &str) -> Option<MemberLeaf> {
-        let normalized = to_nfc(handle);
-        let id = self.handle_index.get(normalized.as_str())?;
+    /// LLR-f3zrwd.
+    pub fn get_by_handle(&self, handle: &Handle) -> Option<MemberLeaf> {
+        let id = self.handle_index.get(handle)?;
         smt::get_member(&self.root, id)
     }
 
@@ -225,44 +220,22 @@ impl<H: TrieHasher> OrgTrie<H> {
         self.delete_by_id(id)
     }
 
-    /// Updates a member's name and surname. Both are NFC-normalized.
+    /// Updates a member's name and surname. LLR-g6arcs.
     pub fn update_name_surname(
         &self,
         id: &MemberId,
-        name: &str,
-        surname: &str,
+        name: Name,
+        surname: Surname,
     ) -> Result<Self, OrgMembersError> {
         let existing = smt::get_member(&self.root, id).ok_or(OrgMembersError::IdNotFound)?;
-        let nfc_name = to_nfc(name);
-        if nfc_name.len() > crate::types::MAX_NAME_LEN {
-            return Err(OrgMembersError::FieldTooLong {
-                field: "name",
-                max: crate::types::MAX_NAME_LEN,
-            });
-        }
-        let nfc_surname = to_nfc(surname);
-        if nfc_surname.len() > crate::types::MAX_SURNAME_LEN {
-            return Err(OrgMembersError::FieldTooLong {
-                field: "surname",
-                max: crate::types::MAX_SURNAME_LEN,
-            });
-        }
-        let new_leaf = existing.with_name_surname(nfc_name, nfc_surname);
-        self.update_leaf(new_leaf)
+        self.update_leaf(existing.with_name_surname(name, surname))
     }
 
-    /// Updates a member's handle. The new handle must pass validation
-    /// (UTS#39, NFC, lowercase, no `.`, single-script) and must not be
-    /// taken by, or confusably collide with, another member's handle.
-    pub fn update_handle(
-        &self,
-        id: &MemberId,
-        new_handle: &str,
-    ) -> Result<Self, OrgMembersError> {
+    /// Updates a member's handle. The handle is valid by construction; it must
+    /// not be taken by, or confusably collide with, another member's. LLR-mmst86.
+    pub fn update_handle(&self, id: &MemberId, new_handle: Handle) -> Result<Self, OrgMembersError> {
         let existing = smt::get_member(&self.root, id).ok_or(OrgMembersError::IdNotFound)?;
-        let validated = validate_handle(new_handle)?;
-        let new_leaf = existing.with_handle(validated);
-        self.update_leaf(new_leaf)
+        self.update_leaf(existing.with_handle(new_handle))
     }
 
     /// Rotates a member's peer-to-peer key -- the "member-as-a-group" key
@@ -292,7 +265,7 @@ impl<H: TrieHasher> OrgTrie<H> {
         if existing.p2p_key() == &new_p2p_key {
             return Err(OrgMembersError::P2pKeyNotReplaced);
         }
-        self.refuse_held_key(new_p2p_key.as_bytes())?;
+        self.refuse_held_key(HeldKey::from(&new_p2p_key))?;
         let new_leaf = existing.with_p2p_key(new_p2p_key);
         self.update_leaf(new_leaf)
     }
@@ -314,7 +287,7 @@ impl<H: TrieHasher> OrgTrie<H> {
     ) -> Result<Self, OrgMembersError> {
         let existing = smt::get_member(&self.root, id).ok_or(OrgMembersError::IdNotFound)?;
         let new_slots = existing.p2p_device_slots().add_device(device)?;
-        self.refuse_held_key(device.as_bytes())?;
+        self.refuse_held_key(HeldKey::from(&device))?;
         let new_leaf = existing.with_p2p_device_slots(new_slots);
         self.update_leaf(new_leaf)
     }
@@ -354,7 +327,7 @@ impl<H: TrieHasher> OrgTrie<H> {
         }
         // Checked against the record before the operation, so the removed
         // device's own key counts as held.
-        self.refuse_held_key(new_p2p_key.as_bytes())?;
+        self.refuse_held_key(HeldKey::from(&new_p2p_key))?;
         let new_leaf = existing
             .with_p2p_device_slots(new_slots)
             .with_p2p_key(new_p2p_key);
@@ -393,7 +366,7 @@ impl<H: TrieHasher> OrgTrie<H> {
         }
         // Checked against the record before the operation, so the removed
         // devices' keys count as held.
-        self.refuse_held_key(new_p2p_key.as_bytes())?;
+        self.refuse_held_key(HeldKey::from(&new_p2p_key))?;
         let empty_slots = P2pDeviceSlots::new(Vec::new())?;
         let new_leaf = existing
             .with_p2p_device_slots(empty_slots)
@@ -412,7 +385,7 @@ impl<H: TrieHasher> OrgTrie<H> {
 
         let mut new_skeleton_index = self.skeleton_index.clone();
         let mut new_handle_index = self.handle_index.clone();
-        let skeleton = handle_skeleton(leaf.handle());
+        let skeleton = HandleSkeleton::of(leaf.handle());
         if let Some(existing) = new_skeleton_index.get(&skeleton) {
             if existing != leaf.handle() {
                 return Err(OrgMembersError::ConfusableHandle);
@@ -420,8 +393,8 @@ impl<H: TrieHasher> OrgTrie<H> {
                 return Err(OrgMembersError::DuplicateHandle);
             }
         }
-        new_skeleton_index.insert(skeleton, leaf.handle().to_owned());
-        new_handle_index.insert(leaf.handle().to_owned(), *leaf.id());
+        new_skeleton_index.insert(skeleton, leaf.handle().clone());
+        new_handle_index.insert(leaf.handle().clone(), *leaf.id());
 
         let mut new_key_index = self.key_index.clone();
         index_leaf_keys(&mut new_key_index, &leaf)?;
@@ -444,8 +417,8 @@ impl<H: TrieHasher> OrgTrie<H> {
     }
 
     /// `DuplicateKey` if `key` is held anywhere in the organisation now.
-    fn refuse_held_key(&self, key: &[u8; 32]) -> Result<(), OrgMembersError> {
-        if self.key_index.contains_key(key) {
+    fn refuse_held_key(&self, key: HeldKey) -> Result<(), OrgMembersError> {
+        if self.key_index.contains_key(&key) {
             return Err(OrgMembersError::DuplicateKey);
         }
         Ok(())
@@ -466,11 +439,11 @@ impl<H: TrieHasher> OrgTrie<H> {
         index_leaf_keys(&mut new_key_index, &leaf)?;
 
         if existing.handle() != leaf.handle() {
-            let old_skeleton = handle_skeleton(existing.handle());
+            let old_skeleton = HandleSkeleton::of(existing.handle());
             new_skeleton_index.remove(&old_skeleton);
             new_handle_index.remove(existing.handle());
 
-            let new_skeleton = handle_skeleton(leaf.handle());
+            let new_skeleton = HandleSkeleton::of(leaf.handle());
             if let Some(existing_handle) = new_skeleton_index.get(&new_skeleton) {
                 if existing_handle != leaf.handle() {
                     return Err(OrgMembersError::ConfusableHandle);
@@ -478,8 +451,8 @@ impl<H: TrieHasher> OrgTrie<H> {
                     return Err(OrgMembersError::DuplicateHandle);
                 }
             }
-            new_skeleton_index.insert(new_skeleton, leaf.handle().to_owned());
-            new_handle_index.insert(leaf.handle().to_owned(), *leaf.id());
+            new_skeleton_index.insert(new_skeleton, leaf.handle().clone());
+            new_handle_index.insert(leaf.handle().clone(), *leaf.id());
         }
 
         let new_root = smt::insert::<H>(&self.root, leaf, &self.defaults);
@@ -504,7 +477,7 @@ impl<H: TrieHasher> OrgTrie<H> {
 
         let mut new_skeleton_index = self.skeleton_index.clone();
         let mut new_handle_index = self.handle_index.clone();
-        let skeleton = handle_skeleton(existing.handle());
+        let skeleton = HandleSkeleton::of(existing.handle());
         new_skeleton_index.remove(&skeleton);
         new_handle_index.remove(existing.handle());
         let mut new_key_index = self.key_index.clone();
@@ -717,7 +690,7 @@ impl<H: TrieHasher> OrgTrie<H> {
             // Existence verified in validate_canonical_delta; the lookup here is
             // to extract the handle/skeleton for index maintenance.
             let existing = smt::get_member(&root, id).ok_or(OrgMembersError::InvariantViolated)?;
-            new_skeleton_index.remove(&handle_skeleton(existing.handle()));
+            new_skeleton_index.remove(&HandleSkeleton::of(existing.handle()));
             new_handle_index.remove(existing.handle());
             root = smt::remove(&root, id, &self.defaults);
             count = count.checked_sub(1).ok_or(OrgMembersError::InvariantViolated)?;
@@ -730,7 +703,7 @@ impl<H: TrieHasher> OrgTrie<H> {
         for member in &delta.upserted {
             if let Some(old) = smt::get_member(&root, member.id()) {
                 if old.handle() != member.handle() {
-                    new_skeleton_index.remove(&handle_skeleton(old.handle()));
+                    new_skeleton_index.remove(&HandleSkeleton::of(old.handle()));
                     new_handle_index.remove(old.handle());
                 }
             }
@@ -745,7 +718,7 @@ impl<H: TrieHasher> OrgTrie<H> {
             };
 
             if needs_check {
-                let skeleton = handle_skeleton(member.handle());
+                let skeleton = HandleSkeleton::of(member.handle());
                 if let Some(existing_handle) = new_skeleton_index.get(&skeleton) {
                     if existing_handle != member.handle() {
                         return Err(OrgMembersError::ConfusableHandle);
@@ -753,8 +726,8 @@ impl<H: TrieHasher> OrgTrie<H> {
                         return Err(OrgMembersError::DuplicateHandle);
                     }
                 }
-                new_skeleton_index.insert(skeleton, member.handle().to_owned());
-                new_handle_index.insert(member.handle().to_owned(), *member.id());
+                new_skeleton_index.insert(skeleton, member.handle().clone());
+                new_handle_index.insert(member.handle().clone(), *member.id());
             }
 
             root = smt::insert::<H>(&root, member.clone(), &self.defaults);
@@ -827,8 +800,8 @@ impl<H: TrieHasher> OrgTrie<H> {
         defaults: Arc<DefaultHashes>,
         member_count: usize,
         root_hash: RootHash,
-        skeleton_index: HashMap<String, String>,
-        handle_index: HashMap<String, MemberId>,
+        skeleton_index: HashMap<HandleSkeleton, Handle>,
+        handle_index: HashMap<Handle, MemberId>,
         key_index: KeyIndex,
     ) -> Self {
         Self {

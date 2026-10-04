@@ -4,7 +4,6 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use ed25519_dalek::VerifyingKey;
-use unicode_normalization::UnicodeNormalization;
 use unicode_security::GeneralSecurityProfile;
 use unicode_security::MixedScript;
 
@@ -64,6 +63,12 @@ impl MemberId {
         let byte_idx = (index / 8) as usize;
         let bit_idx = 7 - (index % 8);
         (self.0[byte_idx] >> bit_idx) & 1 == 1
+    }
+}
+
+impl From<[u8; 32]> for MemberId {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(bytes)
     }
 }
 
@@ -185,68 +190,174 @@ impl<'de> serde::Deserialize<'de> for P2pDeviceKey {
     }
 }
 
-/// Validates a handle string and returns the NFC-normalized form.
-///
-/// Rules:
-/// - Non-empty
-/// - NFC normalized (applied automatically)
-/// - All characters must be UTS#39 `GeneralSecurityProfile` allowed, or `-`
-/// - No `.` characters
-/// - No uppercase characters
-/// - Single-script (no script mixing per UTS#39)
-pub fn validate_handle(handle: &str) -> Result<String, OrgMembersError> {
-    if handle.is_empty() {
-        return Err(OrgMembersError::InvalidHandle(
-            "handle must not be empty".to_string(),
-        ));
+/// The 32 encoded bytes of a key held in the organisation -- member key or
+/// device key alike: the same bytes are the same key (LLR-v6gfc7). Tag type.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct HeldKey([u8; 32]);
+
+impl From<&P2pMemberKey> for HeldKey {
+    fn from(k: &P2pMemberKey) -> Self {
+        Self(*k.as_bytes())
     }
+}
 
-    let normalized: String = handle.nfc().collect();
-
-    if normalized.len() > MAX_HANDLE_LEN {
-        return Err(OrgMembersError::InvalidHandle(format!(
-            "handle exceeds {} bytes after NFC normalization",
-            MAX_HANDLE_LEN
-        )));
+impl From<&P2pDeviceKey> for HeldKey {
+    fn from(k: &P2pDeviceKey) -> Self {
+        Self(*k.as_bytes())
     }
+}
 
-    for ch in normalized.chars() {
-        if ch.is_uppercase() {
+/// The UTS#39 skeleton of a handle: handles rendering alike share one
+/// (LLR-5w2jx8). Tag type, built only from a `Handle`.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(crate) struct HandleSkeleton(String);
+
+impl HandleSkeleton {
+    pub(crate) fn of(handle: &Handle) -> Self {
+        use unicode_security::confusable_detection::skeleton;
+        Self(skeleton(handle.as_str()).collect())
+    }
+}
+
+/// The impls shared by the validated string newtypes (`Handle`, `Name`,
+/// `Surname`): `as_str`, `TryFrom<&str>`/`TryFrom<String>` delegating to the
+/// type's own `parse`, `From<_> for String` (serde's `into`), `Display`, and a
+/// redacted `Debug` (PII).
+macro_rules! validated_string_impls {
+    ($ty:ident) => {
+        impl $ty {
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl TryFrom<&str> for $ty {
+            type Error = OrgMembersError;
+
+            fn try_from(value: &str) -> Result<Self, Self::Error> {
+                Self::parse(value)
+            }
+        }
+
+        impl TryFrom<String> for $ty {
+            type Error = OrgMembersError;
+
+            fn try_from(value: String) -> Result<Self, Self::Error> {
+                Self::parse(&value)
+            }
+        }
+
+        impl From<$ty> for String {
+            fn from(value: $ty) -> Self {
+                value.0
+            }
+        }
+
+        impl fmt::Display for $ty {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(&self.0)
+            }
+        }
+
+        impl fmt::Debug for $ty {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(concat!(stringify!($ty), "([REDACTED])"))
+            }
+        }
+    };
+}
+
+/// A validated member handle (REQ-h5ret5): NFC, non-empty, at most
+/// `MAX_HANDLE_LEN` bytes, lowercase, no `.`, UTS#39 identifier characters or
+/// `-`, single-script. `parse` is the only way in; PII, so `Debug` redacts.
+#[derive(Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "String", into = "String"))]
+pub struct Handle(String);
+
+impl Handle {
+    /// Normalizes to NFC and enforces the handle rules. LLR-xzqs9r.
+    pub fn parse(value: &str) -> Result<Self, OrgMembersError> {
+        if value.is_empty() {
             return Err(OrgMembersError::InvalidHandle(
-                "handle must be lowercase".to_string(),
+                "handle must not be empty".to_string(),
             ));
         }
-        if ch == '.' {
-            return Err(OrgMembersError::InvalidHandle(
-                "handle must not contain '.'".to_string(),
-            ));
-        }
-        if ch == '-' {
-            continue;
-        }
-        if !ch.identifier_allowed() {
+        let normalized = to_nfc(value);
+        if normalized.len() > MAX_HANDLE_LEN {
             return Err(OrgMembersError::InvalidHandle(format!(
-                "character {:?} not allowed by UTS#39",
-                ch
+                "handle exceeds {} bytes after NFC normalization",
+                MAX_HANDLE_LEN
             )));
         }
+        for ch in normalized.chars() {
+            if ch.is_uppercase() {
+                return Err(OrgMembersError::InvalidHandle(
+                    "handle must be lowercase".to_string(),
+                ));
+            }
+            if ch == '.' {
+                return Err(OrgMembersError::InvalidHandle(
+                    "handle must not contain '.'".to_string(),
+                ));
+            }
+            if ch == '-' {
+                continue;
+            }
+            if !ch.identifier_allowed() {
+                return Err(OrgMembersError::InvalidHandle(format!(
+                    "character {:?} not allowed by UTS#39",
+                    ch
+                )));
+            }
+        }
+        if !normalized.is_single_script() {
+            return Err(OrgMembersError::InvalidHandle(
+                "handle must not mix scripts".to_string(),
+            ));
+        }
+        Ok(Self(normalized))
     }
-
-    if !normalized.is_single_script() {
-        return Err(OrgMembersError::InvalidHandle(
-            "handle must not mix scripts".to_string(),
-        ));
-    }
-
-    Ok(normalized)
 }
 
-/// Returns the UTS#39 skeleton form of a handle string.
-/// Used to detect confusable/homoglyph handles.
-pub fn handle_skeleton(handle: &str) -> String {
-    use unicode_security::confusable_detection::skeleton;
-    skeleton(handle).collect()
+validated_string_impls!(Handle);
+
+/// NFC-normalizes `value` and bounds it at `max` bytes. LLR-w5nkbu.
+fn nfc_bounded(value: &str, field: &'static str, max: usize) -> Result<String, OrgMembersError> {
+    let nfc = to_nfc(value);
+    if nfc.len() > max {
+        return Err(OrgMembersError::FieldTooLong { field, max });
+    }
+    Ok(nfc)
 }
+
+/// A member's given name: NFC, at most `MAX_NAME_LEN` bytes. PII.
+#[derive(Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "String", into = "String"))]
+pub struct Name(String);
+
+impl Name {
+    pub fn parse(value: &str) -> Result<Self, OrgMembersError> {
+        nfc_bounded(value, "name", MAX_NAME_LEN).map(Self)
+    }
+}
+
+validated_string_impls!(Name);
+
+/// A member's surname: NFC, at most `MAX_SURNAME_LEN` bytes. PII.
+#[derive(Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "String", into = "String"))]
+pub struct Surname(String);
+
+impl Surname {
+    pub fn parse(value: &str) -> Result<Self, OrgMembersError> {
+        nfc_bounded(value, "surname", MAX_SURNAME_LEN).map(Self)
+    }
+}
+
+validated_string_impls!(Surname);
 
 /// A 32-byte hash output. The fundamental hash unit produced by the
 /// `TrieHasher` trait -- used for member leaf hashes, internal node hashes,
@@ -270,6 +381,12 @@ impl NodeHash {
     }
 }
 
+impl From<[u8; 32]> for NodeHash {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
+
 impl fmt::Debug for NodeHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -288,12 +405,18 @@ impl fmt::Debug for NodeHash {
 pub struct RootHash(pub(crate) [u8; 32]);
 
 impl RootHash {
-    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+    pub fn new(bytes: [u8; 32]) -> Self {
         Self(bytes)
     }
 
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
+    }
+}
+
+impl From<[u8; 32]> for RootHash {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(bytes)
     }
 }
 
@@ -431,115 +554,46 @@ impl fmt::Debug for P2pDeviceSlots {
 }
 
 /// A single member leaf in the trie. All PII fields are redacted in Debug.
+///
+/// Serde is derived: the field order is the wire order, and each field's own
+/// `Deserialize` validates it, so a wire payload cannot bypass the handle,
+/// name or surname rules.
 #[derive(Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MemberLeaf {
     /// Immutable member id. Used as the SMT key.
     id: MemberId,
-    /// Validated, NFC-normalized handle string (PII). Can change rarely.
-    handle: String,
+    /// Validated, NFC-normalized handle (PII). Can change rarely.
+    handle: Handle,
     /// The member's peer-to-peer key -- the "member-as-a-group" key used by
     /// the local-first software to grant access at the member level. Can
     /// change over time. Future versions may also add an on-chain key.
     p2p_key: P2pMemberKey,
-    name: String,
-    surname: String,
+    name: Name,
+    surname: Surname,
     p2p_devices: P2pDeviceSlots,
-}
-
-#[cfg(feature = "serde")]
-#[derive(serde::Serialize, serde::Deserialize)]
-struct MemberLeafSerde {
-    id: MemberId,
-    handle: String,
-    p2p_key: P2pMemberKey,
-    name: String,
-    surname: String,
-    p2p_devices: P2pDeviceSlots,
-}
-
-#[cfg(feature = "serde")]
-impl serde::Serialize for MemberLeaf {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        MemberLeafSerde {
-            id: self.id,
-            handle: self.handle.clone(),
-            p2p_key: self.p2p_key,
-            name: self.name.clone(),
-            surname: self.surname.clone(),
-            p2p_devices: self.p2p_devices.clone(),
-        }
-        .serialize(s)
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for MemberLeaf {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let raw = MemberLeafSerde::deserialize(d)?;
-        // Re-validate the handle so an attacker-supplied wire format cannot
-        // bypass NFC normalization, lowercase, single-script, no-`.`, or UTS#39
-        // restrictions. `validate_handle` also returns the NFC-normalized form,
-        // so the stored handle is canonical even if the wire payload wasn't.
-        let validated_handle = validate_handle(&raw.handle).map_err(serde::de::Error::custom)?;
-        let name = to_nfc(&raw.name);
-        if name.len() > MAX_NAME_LEN {
-            return Err(serde::de::Error::custom(
-                OrgMembersError::FieldTooLong { field: "name", max: MAX_NAME_LEN },
-            ));
-        }
-        let surname = to_nfc(&raw.surname);
-        if surname.len() > MAX_SURNAME_LEN {
-            return Err(serde::de::Error::custom(
-                OrgMembersError::FieldTooLong { field: "surname", max: MAX_SURNAME_LEN },
-            ));
-        }
-        Ok(Self {
-            id: raw.id,
-            handle: validated_handle,
-            p2p_key: raw.p2p_key,
-            name,
-            surname,
-            p2p_devices: raw.p2p_devices,
-        })
-    }
 }
 
 impl MemberLeaf {
     /// Constructs a new member leaf.
     ///
-    /// The handle is validated (UTS#39, lowercase, single-script, NFC).
-    /// Name and surname are NFC-normalized. Requires ≥1 device -- new members
-    /// must have at least one device. (An existing member can be reduced to
-    /// zero devices via `emergency_isolate_member` on the trie.)
+    /// Handle, name and surname are valid by construction (their `parse`).
+    /// Requires ≥1 device -- new members must have at least one device. (An
+    /// existing member can be reduced to zero devices via
+    /// `emergency_isolate_member` on the trie.)
     pub fn new(
         id: MemberId,
-        handle: &str,
+        handle: Handle,
         p2p_key: P2pMemberKey,
-        name: &str,
-        surname: &str,
+        name: Name,
+        surname: Surname,
         p2p_devices: Vec<P2pDeviceKey>,
     ) -> Result<Self, OrgMembersError> {
         if p2p_devices.is_empty() {
             return Err(OrgMembersError::EmptyDeviceList);
         }
-        let validated_handle = validate_handle(handle)?;
-        let nfc_name = to_nfc(name);
-        if nfc_name.len() > MAX_NAME_LEN {
-            return Err(OrgMembersError::FieldTooLong { field: "name", max: MAX_NAME_LEN });
-        }
-        let nfc_surname = to_nfc(surname);
-        if nfc_surname.len() > MAX_SURNAME_LEN {
-            return Err(OrgMembersError::FieldTooLong { field: "surname", max: MAX_SURNAME_LEN });
-        }
-        let device_slots = P2pDeviceSlots::new(p2p_devices)?;
-        Ok(Self {
-            id,
-            handle: validated_handle,
-            p2p_key,
-            name: nfc_name,
-            surname: nfc_surname,
-            p2p_devices: device_slots,
-        })
+        let p2p_devices = P2pDeviceSlots::new(p2p_devices)?;
+        Ok(Self { id, handle, p2p_key, name, surname, p2p_devices })
     }
 
     // === Crate-private field modifiers ===
@@ -547,17 +601,18 @@ impl MemberLeaf {
     // These produce modified copies of `self`. They bypass MemberLeaf::new's
     // invariants and are intended for use by the trie's domain operations
     // (update_name_surname, update_handle, rotate_p2p_key, add/delete p2p_device,
-    // emergency_isolate_member). They do NOT validate the handle -- callers
-    // must validate before calling `with_handle`.
+    // emergency_isolate_member). They do not check trie-level rules
+    // (uniqueness, confusables, held keys); the newtype arguments carry field
+    // validity.
 
-    pub(crate) fn with_name_surname(mut self, name: String, surname: String) -> Self {
+    pub(crate) fn with_name_surname(mut self, name: Name, surname: Surname) -> Self {
         self.name = name;
         self.surname = surname;
         self
     }
 
-    pub(crate) fn with_handle(mut self, validated_handle: String) -> Self {
-        self.handle = validated_handle;
+    pub(crate) fn with_handle(mut self, handle: Handle) -> Self {
+        self.handle = handle;
         self
     }
 
@@ -579,15 +634,15 @@ impl MemberLeaf {
         &self.p2p_key
     }
 
-    pub fn handle(&self) -> &str {
+    pub fn handle(&self) -> &Handle {
         &self.handle
     }
 
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> &Name {
         &self.name
     }
 
-    pub fn surname(&self) -> &str {
+    pub fn surname(&self) -> &Surname {
         &self.surname
     }
 
@@ -616,17 +671,17 @@ impl MemberLeaf {
         // id: 32 bytes raw
         buf.extend_from_slice(self.id.as_bytes());
         // handle_len + handle bytes
-        let handle_bytes = self.handle.as_bytes();
+        let handle_bytes = self.handle.as_str().as_bytes();
         buf.extend_from_slice(&(handle_bytes.len() as u32).to_le_bytes());
         buf.extend_from_slice(handle_bytes);
         // p2p_key: 32 bytes raw
         buf.extend_from_slice(self.p2p_key.as_bytes());
         // name_len + name bytes
-        let name_bytes = self.name.as_bytes();
+        let name_bytes = self.name.as_str().as_bytes();
         buf.extend_from_slice(&(name_bytes.len() as u32).to_le_bytes());
         buf.extend_from_slice(name_bytes);
         // surname_len + surname bytes
-        let surname_bytes = self.surname.as_bytes();
+        let surname_bytes = self.surname.as_str().as_bytes();
         buf.extend_from_slice(&(surname_bytes.len() as u32).to_le_bytes());
         buf.extend_from_slice(surname_bytes);
         // p2p_device_sub_trie_root: 32 bytes raw

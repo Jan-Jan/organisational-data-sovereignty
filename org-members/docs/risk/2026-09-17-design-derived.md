@@ -309,9 +309,11 @@ What is actually true:
 - Canonical form constrains the **decoded `Delta` value** — ordering, presence,
   disjointness, no-op rejection — so the set of accepted change sets is
   restricted, and every change set this crate produces is already canonical.
-- It does **not** make the encoding injective. `MemberLeaf`'s `Deserialize` impl
-  **normalises rather than rejects**: `to_nfc` over `name` and `surname`, and
-  the NFC form `validate_handle` returns for the handle. An NFD-encoded leaf and
+- It does **not** make the encoding injective. `MemberLeaf`'s `Deserialize`
+  **normalises rather than rejects**: it is derived over its `Handle`, `Name`
+  and `Surname` fields, each of which decodes through its own `parse`, which
+  stores the NFC form (updated 2026-10-04: mechanism now per-field parse). An
+  NFD-encoded leaf and
   its NFC equivalent are two distinct postcard byte strings that decode to one
   `MemberLeaf`, give one `Delta` value and produce one root. Several wire forms
   map to one value; that is exactly what injectivity forbids. (`P2pDeviceSlots`

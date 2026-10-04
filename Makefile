@@ -138,8 +138,8 @@ ON_CHAIN_CLIENT_REGIONS := 42
 # were 353 of 715 and 96.23%.
 coverage: coverage-org-members coverage-on-chain-client
 
-# Scope note: this omits `mbt_conformance`, the fourth org-members test
-# target, and the floors are calibrated against the reduced measurement — so
+# Scope note: this omits `mbt_conformance` (`newtypes` and `encoding_golden`,
+# added 2026-10-04, are measured), and the floors are calibrated against the reduced measurement — so
 # the gate is conservative relative to the crate's true coverage, but NOT
 # relative to its own floor. The reason for omitting it is that it shells out
 # to the quint CLI and, measured with quint off PATH, FAILS rather than skips
@@ -153,6 +153,7 @@ coverage: coverage-org-members coverage-on-chain-client
 coverage-org-members:
 	cargo llvm-cov -p org-members \
 		--lib --test integration_test --test fuzz_tests \
+		--test newtypes --test encoding_golden \
 		--summary-only \
 		--fail-under-lines $(ORG_MEMBERS_LINES) \
 		--fail-under-regions $(ORG_MEMBERS_REGIONS)

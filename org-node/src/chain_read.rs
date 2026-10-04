@@ -16,7 +16,7 @@ use crate::ids::OrgId;
 /// Maps on-chain-client's typed OrgState to org-node's OrgState.
 fn map_state(s: on_chain_client::OrgState) -> OrgState {
     OrgState {
-        root_hash: RootHash::from_bytes(s.root_hash.0),
+        root_hash: RootHash::new(s.root_hash.0),
         org_pub_key: s.org_pub_key.0,
         epoch: s.epoch.0,
     }

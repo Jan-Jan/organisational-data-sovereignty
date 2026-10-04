@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use ed25519_dalek::VerifyingKey;
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
-use org_members::{MemberId, MemberLeaf, RootHash};
+use org_members::{Handle, MemberId, MemberLeaf, Name, RootHash, Surname};
 use rand_core::{CryptoRng, RngCore};
 
 use crate::chain::OrgState;
@@ -124,7 +124,7 @@ impl ChainOps for MockChainOps {
         g.next_id_seed = g.next_id_seed.wrapping_add(1);
         let org_id = OrgId::new(id_bytes);
         g.slots.insert(org_id, OrgState {
-            root_hash: RootHash::from_bytes(genesis_root),
+            root_hash: RootHash::new(genesis_root),
             org_pub_key,
             epoch: 1,
         });
@@ -149,7 +149,7 @@ impl ChainOps for MockChainOps {
             )));
         }
         g.slots.insert(org_id, OrgState {
-            root_hash: RootHash::from_bytes(new_root),
+            root_hash: RootHash::new(new_root),
             org_pub_key,
             epoch: expected_epoch + 1,
         });
@@ -195,7 +195,7 @@ mod subxt_impl {
 
     fn map_state(s: on_chain_client::OrgState) -> OrgState {
         OrgState {
-            root_hash: RootHash::from_bytes(s.root_hash.0),
+            root_hash: RootHash::new(s.root_hash.0),
             org_pub_key: s.org_pub_key.0,
             epoch: s.epoch.0,
         }
@@ -492,10 +492,10 @@ fn trie_from_snapshots(snapshots: &[MemberSnapshot]) -> Result<Trie, OrgNodeErro
                 .collect();
             let leaf = MemberLeaf::new(
                 MemberId::new(s.id),
-                &s.handle,
+                Handle::parse(&s.handle)?,
                 org_members::P2pMemberKey::new(member_vk),
-                &s.name,
-                &s.surname,
+                Name::parse(&s.name)?,
+                Surname::parse(&s.surname)?,
                 device_keys?,
             )
             .map_err(OrgNodeError::Trie)?;
@@ -621,10 +621,10 @@ impl OrgService {
         let admin_id = fresh_member_id(rng);
         let admin_leaf = MemberLeaf::new(
             admin_id,
-            &handle,
+            Handle::parse(&handle)?,
             member_kp.member_key(),
-            &name,
-            &surname,
+            Name::parse(&name)?,
+            Surname::parse(&surname)?,
             vec![device_kp.device_key()],
         )
         .map_err(OrgNodeError::Trie)?;
@@ -814,10 +814,10 @@ impl OrgService {
 
         let new_leaf = MemberLeaf::new(
             new_member_id,
-            &join_request.handle,
+            Handle::parse(&join_request.handle)?,
             org_members::P2pMemberKey::new(member_vk),
-            &join_request.name,
-            &join_request.surname,
+            Name::parse(&join_request.name)?,
+            Surname::parse(&join_request.surname)?,
             vec![org_members::P2pDeviceKey::new(device_vk)],
         )
         .map_err(OrgNodeError::Trie)?;

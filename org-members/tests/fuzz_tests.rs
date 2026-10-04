@@ -1,7 +1,7 @@
 use ed25519_dalek::SigningKey;
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
-use org_members::types::{validate_handle, P2pDeviceKey, MemberId, P2pMemberKey, MemberLeaf};
+use org_members::types::{Handle, P2pDeviceKey, MemberId, Name, P2pMemberKey, MemberLeaf, Surname};
 use proptest::prelude::*;
 
 type TestTrie = OrgTrie<Blake3Hasher>;
@@ -46,7 +46,19 @@ fn make_member(handle: &str, variant: u8) -> Option<MemberLeaf> {
     let id = member_id(&format!("{}-id-{}", handle, variant));
     let mk = member_key(&format!("{}-mk-{}", handle, variant));
     let dk = device_key(&format!("{}-d-{}", handle, variant));
-    MemberLeaf::new(id, handle, mk, "Test", "User", vec![dk]).ok()
+    MemberLeaf::new(id, Handle::parse(handle).ok()?, mk, nm("Test"), sn("User"), vec![dk]).ok()
+}
+
+fn h(s: &str) -> Handle {
+    Handle::parse(s).unwrap()
+}
+
+fn nm(s: &str) -> Name {
+    Name::parse(s).unwrap()
+}
+
+fn sn(s: &str) -> Surname {
+    Surname::parse(s).unwrap()
 }
 
 // ============================================================
@@ -57,12 +69,12 @@ proptest! {
     /// verifies: REQ-ds8ryr, REQ-h5ret5, LLR-h9gs32
     #[test]
     fn handle_validation_never_panics(s in "\\PC{0,64}") {
-        if let Ok(normalized) = validate_handle(&s) {
-            prop_assert!(!normalized.is_empty());
-            for ch in normalized.chars() {
+        if let Ok(normalized) = Handle::parse(&s) {
+            prop_assert!(!normalized.as_str().is_empty());
+            for ch in normalized.as_str().chars() {
                 prop_assert!(!ch.is_uppercase(), "validated handle contains uppercase: {:?}", ch);
             }
-            prop_assert!(!normalized.contains('.'), "validated handle contains '.'");
+            prop_assert!(!normalized.as_str().contains('.'), "validated handle contains '.'");
         }
     }
 }
@@ -122,7 +134,7 @@ proptest! {
                     // this should fail with DuplicateHandle (must not panic).
                     let id = member_id(&format!("{}-id-0", HANDLES[*id_idx]));
                     let new_handle = HANDLES[*handle_idx];
-                    if let Ok(new_trie) = trie.update_handle(&id, new_handle) {
+                    if let Ok(new_trie) = trie.update_handle(&id, h(new_handle)) {
                         trie = new_trie;
                     }
                 }
@@ -393,10 +405,10 @@ proptest! {
             }
             let leaf = MemberLeaf::new(
                 id,
-                HANDLES[*handle_idx],
+                h(HANDLES[*handle_idx]),
                 member_key(&format!("{}-mk-{}", seed, variant)),
-                "Test",
-                "User",
+                nm("Test"),
+                sn("User"),
                 vec![device_key(&format!("{}-d-0", seed))],
             )
             .unwrap();
@@ -430,7 +442,7 @@ proptest! {
         let members = after.members();
         let mut skeletons: Vec<String> = members
             .iter()
-            .map(|m| org_members::types::handle_skeleton(m.handle()))
+            .map(|m| unicode_security::confusable_detection::skeleton(m.handle().as_str()).collect())
             .collect();
         skeletons.sort();
         skeletons.dedup();
@@ -438,7 +450,7 @@ proptest! {
             skeletons.len(),
             members.len(),
             "apply_delta admitted a handle collision: {:?}",
-            members.iter().map(|m| m.handle().to_owned()).collect::<Vec<_>>(),
+            members.iter().map(|m| m.handle().to_string()).collect::<Vec<_>>(),
         );
     }
 }
@@ -528,7 +540,7 @@ proptest! {
             Mutator::AppendStaleRemoval => {
                 let ghost = member_id("zzz-fuzz-ghost-id-xyzzy");
                 let mut r = delta.removed().to_vec();
-                if r.iter().any(|x| *x == ghost) || base.contains(&ghost) {
+                if r.contains(&ghost) || base.contains(&ghost) {
                     return Ok(());
                 }
                 r.push(ghost);
@@ -684,10 +696,10 @@ fn pool_member(member_idx: usize) -> MemberLeaf {
     let devices = (0..3).map(|d| pool_device(member_idx, d)).collect();
     MemberLeaf::new(
         pool_id(member_idx),
-        HANDLES[member_idx],
+        h(HANDLES[member_idx]),
         pool_key(member_idx, 0),
-        "Test",
-        "User",
+        nm("Test"),
+        sn("User"),
         devices,
     )
     .unwrap()
@@ -830,10 +842,10 @@ fn uniq_dk(k: usize) -> P2pDeviceKey {
 fn uniq_leaf(m: usize, mk: usize, devices: &[usize]) -> Option<MemberLeaf> {
     MemberLeaf::new(
         uniq_id(m),
-        HANDLES[m],
+        h(HANDLES[m]),
         uniq_mk(mk),
-        "Test",
-        "User",
+        nm("Test"),
+        sn("User"),
         devices.iter().map(|d| uniq_dk(*d)).collect(),
     )
     .ok()
@@ -1004,7 +1016,7 @@ proptest! {
                     let old = base.get(&uniq_id(*m));
                     let leaf = match &old {
                         Some(o) if o.p2p_device_count() > 0 => MemberLeaf::new(
-                            *o.id(), o.handle(), uniq_mk(*mk), o.name(), o.surname(), o.p2p_devices().to_vec(),
+                            *o.id(), o.handle().clone(), uniq_mk(*mk), o.name().clone(), o.surname().clone(), o.p2p_devices().to_vec(),
                         ).ok(),
                         _ => uniq_leaf(*m, *mk, &[*dk]),
                     };
@@ -1023,7 +1035,7 @@ proptest! {
                     let (Some(gone), Some(kept)) = (base.get(&uniq_id(*from)), base.get(&uniq_id(*to))) else { continue };
                     if kept.p2p_device_count() == 0 { continue; }
                     let Ok(leaf) = MemberLeaf::new(
-                        *kept.id(), kept.handle(), *gone.p2p_key(), kept.name(), kept.surname(), kept.p2p_devices().to_vec(),
+                        *kept.id(), kept.handle().clone(), *gone.p2p_key(), kept.name().clone(), kept.surname().clone(), kept.p2p_devices().to_vec(),
                     ) else { continue };
                     // The key was held in the base, by `from`; only the
                     // resulting record counts.

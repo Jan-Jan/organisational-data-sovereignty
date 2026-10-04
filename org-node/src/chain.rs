@@ -55,7 +55,7 @@ mod tests {
         let org = OrgId::new([1u8; 20]);
         assert_eq!(chain.get_org_state(&org).unwrap(), None);
 
-        let state = OrgState { root_hash: RootHash::from_bytes([9u8; 32]), org_pub_key: [3u8; 32], epoch: 1 };
+        let state = OrgState { root_hash: RootHash::new([9u8; 32]), org_pub_key: [3u8; 32], epoch: 1 };
         chain.set(org, state);
         assert_eq!(chain.get_org_state(&org).unwrap(), Some(state));
     }

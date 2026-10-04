@@ -129,9 +129,14 @@ an adversary targeting a newsroom would attempt.
 
 **RC-n2taat**: handles form a canonical, unambiguous namespace — every handle
 is normalised to NFC, restricted to a form in which comparison is total
-(lowercase, no `.`, a single Unicode script), required to be unique within the
-organisation, and rejected when its UTS#39 confusable skeleton collides with
-one already held. mitigates: HAZ-jkc6tj, HAZ-bmv7cy
+(lowercase, no `.`, identifier characters only, a single Unicode script),
+required to be unique within the organisation, and rejected when its UTS#39
+confusable skeleton collides with one already held.
+mitigates: HAZ-jkc6tj, HAZ-bmv7cy
+
+(Amended 2026-10-04: "identifier characters only" — UTS#39 General Security
+Profile, `-` excepted — added by owner ruling with REQ-h5ret5's amendment; the
+software has applied it since 2026-05-12.)
 
 **RC-4u22ba**: a member is identified by an identifier that does not change
 when that member's handle changes or when any of that member's keys are

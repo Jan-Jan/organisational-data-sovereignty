@@ -48,3 +48,18 @@ _Avoid_: regression trace, quint test (as a noun)
 The part of the membership model another unit's model may import; nothing
 outside it is visible across the unit boundary.
 _Avoid_: shared types, public model
+
+**Newtype**:
+A single-field type that gives a value its own type, so it cannot be confused
+with another value of the same representation; either a Validated type or a
+Tag type.
+
+**Validated type**:
+A value type that can only be constructed by checking an invariant, so input
+that breaks the invariant is rejected rather than represented.
+_Avoid_: smart constructor, checked type
+
+**Tag type**:
+A value type with no invariant beyond its representation, used to keep values
+of different meaning apart.
+_Avoid_: wrapper, marker type

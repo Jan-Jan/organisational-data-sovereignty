@@ -438,7 +438,7 @@ async fn unverified_revocation_leaves_the_record_in_place() {
 
     use org_members::hasher::Blake3Hasher;
     use org_members::trie::OrgTrie;
-    use org_members::{MemberId, MemberLeaf};
+    use org_members::{Handle, MemberId, MemberLeaf, Name, Surname};
     use org_node::envelope::SignedDeltaEnvelope;
     use org_node::error::OrgNodeError;
     use org_node::store::MemberSnapshot;
@@ -542,10 +542,10 @@ async fn unverified_revocation_leaves_the_record_in_place() {
         };
         MemberLeaf::new(
             MemberId::new(s.id),
-            &s.handle,
+            Handle::parse(&s.handle).unwrap(),
             member.member_key(),
-            &s.name,
-            &s.surname,
+            Name::parse(&s.name).unwrap(),
+            Surname::parse(&s.surname).unwrap(),
             vec![device.device_key()],
         )
         .unwrap()

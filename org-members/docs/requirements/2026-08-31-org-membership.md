@@ -47,11 +47,15 @@ exported: yes
 
 **REQ-h5ret5**: The software shall normalize every member handle to NFC and
 shall reject a handle that, after normalization, is empty, exceeds 128 bytes,
-contains an uppercase character, contains `.`, or mixes Unicode scripts (`-`
-being permitted alongside any script).
+contains an uppercase character, contains `.`, contains a character not
+permitted in identifiers by UTS#39 (the Unicode General Security Profile) other
+than `-`, or mixes Unicode scripts (`-` being permitted alongside any script).
 (implements: RC-n2taat)
 satisfies: derived
 exported: yes
+
+(Amended 2026-10-04: the identifier-character rule the software has applied
+since 2026-05-12 is now stated (owner ruling).)
 
 **REQ-m8aexh**: The software shall reject a member handle whose UTS#39
 confusable skeleton matches that of a handle already held by another member,
