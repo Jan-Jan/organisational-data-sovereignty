@@ -45,8 +45,7 @@ pub fn genesis_trie(admin: &SigningKeypair, admin_device: &SigningKeypair) -> Tr
         id: MemberId::new([1u8; 32]),
     };
     let leaf = member(&admin_fix, "admin");
-    let (trie, _delta) = Trie::genesis(vec![leaf]).unwrap().recalculate().unwrap();
-    trie
+    Trie::genesis(vec![leaf]).unwrap()
 }
 
 /// Seed of the admin's device keypair. Distinct from every other seed the

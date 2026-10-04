@@ -628,8 +628,7 @@ impl OrgService {
             vec![device_kp.device_key()],
         )
         .map_err(OrgNodeError::Trie)?;
-        let (trie, _delta) =
-            Trie::genesis(vec![admin_leaf]).map_err(OrgNodeError::Trie)?.recalculate().map_err(OrgNodeError::Trie)?;
+        let trie = Trie::genesis(vec![admin_leaf]).map_err(OrgNodeError::Trie)?;
 
         let genesis_root_hash = trie.root_hash().map_err(OrgNodeError::Trie)?;
         let genesis_root = *genesis_root_hash.as_bytes();

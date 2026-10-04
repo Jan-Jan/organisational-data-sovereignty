@@ -52,6 +52,12 @@ pub enum OrgMembersError {
     #[error("hashes not calculated")]
     HashesNotCalculated,
 
+    /// `recalculate()` on a calculated trie, one not mutated since it was
+    /// calculated: its node hashes are write-once and already filled.
+    /// LLR-j35sxz.
+    #[error("hashes already calculated")]
+    HashesAlreadyCalculated,
+
     #[error("internal invariant violated")]
     InvariantViolated,
 

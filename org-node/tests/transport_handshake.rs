@@ -36,10 +36,7 @@ fn genesis_and_admit(
         vec![admin_device.device_key()],
     )
     .unwrap();
-    let (genesis, _) = Trie::genesis(vec![admin_leaf])
-        .unwrap()
-        .recalculate()
-        .unwrap();
+    let genesis = Trie::genesis(vec![admin_leaf]).unwrap();
 
     let b_member = SigningKeypair::from_seed([2u8; 32]);
     let b_device = SigningKeypair::from_seed([3u8; 32]);

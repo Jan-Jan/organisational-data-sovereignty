@@ -202,10 +202,7 @@ async fn genesis_then_admit_verifies_against_chain() {
     let org_pub_key: [u8; 32] = admin_kp.verifying_key().to_bytes();
 
     let leaf_a = admin_leaf(&admin_kp, &admin_device);
-    let (genesis_trie, _genesis_delta) = Trie::genesis(vec![leaf_a])
-        .expect("genesis trie")
-        .recalculate()
-        .expect("recalculate genesis");
+    let genesis_trie = Trie::genesis(vec![leaf_a]).expect("genesis trie");
     let genesis_root = genesis_trie.root_hash().expect("genesis root");
     eprintln!("genesis root: {:?}", genesis_root);
 
@@ -378,10 +375,7 @@ async fn single_admin_genesis_e2e() {
     let org_pub_key: [u8; 32] = admin_kp.verifying_key().to_bytes();
 
     let leaf_a = admin_leaf(&admin_kp, &admin_device);
-    let (genesis_trie, _genesis_delta) = Trie::genesis(vec![leaf_a])
-        .expect("genesis trie")
-        .recalculate()
-        .expect("recalculate genesis");
+    let genesis_trie = Trie::genesis(vec![leaf_a]).expect("genesis trie");
     let genesis_root = genesis_trie.root_hash().expect("genesis root");
     eprintln!("[single_admin] genesis root: {:?}", genesis_root);
 

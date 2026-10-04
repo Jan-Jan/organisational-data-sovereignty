@@ -5,7 +5,22 @@ succeeds, returning the same root and an empty change set, where the owner's
 intent is that it is refused with an error.
 affects: REQ-avmu3j, LLR-n7nya3.
 opened: 2026-10-03
-status: open
+status: resolved
+Resolved 2026-10-04 by the change on `worktree-recalculate-refusal`
+(plan `docs/plans/2026-10-03-recalculate-refusal.md`). The refusal is stated by
+a new derived item, LLR-j35sxz, not by amending LLR-n7nya3 as the scope below
+proposed. The independent review found that REQ-avmu3j does not ask for the
+refusal, and the owner ruled that it is derived and assessed as such.
+`recalculate()` returns `HashesAlreadyCalculated` when `!has_pending_changes()`.
+The direct sites below no longer recalculate a calculated trie, and the fuzz
+tests no longer discard the refusal. Verified by the tests annotated
+LLR-j35sxz.
+The `receive_and_verify` fallback listed below no longer exists: `0f85cb9`,
+merged into master while this change was open, replaced it with
+`first_admission_base`, which does not recalculate the trie it builds.
+The lists below missed two tests that the refusal also turned red, and both are
+fixed: org-members fuzz `keys_stay_unique`, and org-node `wire_frame_bound`
+(through `test_fixtures.rs`).
 
 Found during review of the change that resolves PR-499dzp. A review round
 proposed writing the current behaviour down as a clause of LLR-n7nya3. The owner

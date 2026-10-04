@@ -2187,7 +2187,6 @@ fn apply_delta_canonical_delta_still_works() {
 #[test]
 fn root_hash_errs_until_recalculated() {
     let trie = TestTrie::genesis(vec![alice(), bob()]).unwrap();
-    let (trie, _) = trie.recalculate().unwrap();
     let published = trie.root_hash().unwrap();
 
     let mutated = trie.add_member(charlie()).unwrap();
@@ -2198,6 +2197,77 @@ fn root_hash_errs_until_recalculated() {
     // one the pre-mutation trie published.
     let (mutated, _) = mutated.recalculate().unwrap();
     assert_ne!(mutated.root_hash().unwrap(), published);
+}
+
+/// verifies: LLR-j35sxz
+///
+/// The abnormal case: every way a trie comes back calculated -- `genesis()`,
+/// `recalculate()` and `verify_against()` -- refuses a further `recalculate()`.
+/// Its node hashes are write-once, so there is nothing left to fill.
+#[test]
+fn recalculate_refuses_a_calculated_trie() {
+    let genesis = TestTrie::genesis(vec![alice(), bob()]).unwrap();
+    assert_eq!(genesis.recalculate().unwrap_err(), OrgMembersError::HashesAlreadyCalculated);
+
+    let (recalculated, delta) = genesis.add_member(charlie()).unwrap().recalculate().unwrap();
+    assert_eq!(recalculated.recalculate().unwrap_err(), OrgMembersError::HashesAlreadyCalculated);
+
+    let verified = genesis
+        .apply_delta(&delta)
+        .unwrap()
+        .verify_against(&recalculated.root_hash().unwrap())
+        .unwrap();
+    assert_eq!(verified.recalculate().unwrap_err(), OrgMembersError::HashesAlreadyCalculated);
+
+    // The refusal does not depend on the trie holding members: an empty
+    // organisation's genesis trie is calculated too.
+    let empty = TestTrie::genesis(vec![]).unwrap();
+    assert_eq!(empty.recalculate().unwrap_err(), OrgMembersError::HashesAlreadyCalculated);
+
+    // Nor on how many it holds: a one-member organisation's genesis trie is
+    // refused like any other.
+    let single = TestTrie::genesis(vec![alice()]).unwrap();
+    assert_eq!(single.recalculate().unwrap_err(), OrgMembersError::HashesAlreadyCalculated);
+}
+
+/// verifies: LLR-j35sxz
+///
+/// The normal case: a mutated trie recalculates, and the refusal starts exactly
+/// when its pending changes end -- the trie that comes back is refused.
+#[test]
+fn recalculate_succeeds_until_no_changes_are_pending() {
+    let genesis = TestTrie::genesis(vec![alice()]).unwrap();
+    let mutated = genesis.add_member(bob()).unwrap();
+    assert!(mutated.has_pending_changes());
+
+    let (calculated, _) = mutated.recalculate().unwrap();
+    assert!(!calculated.has_pending_changes());
+    assert_eq!(calculated.recalculate().unwrap_err(), OrgMembersError::HashesAlreadyCalculated);
+}
+
+/// verifies: LLR-j35sxz
+///
+/// The normal case at the boundary: a trie mutated and then reverted to its
+/// original members has an empty change set, but it was mutated, so it is not
+/// refused. It recalculates to an empty delta based on, and arriving at, the
+/// original root.
+#[test]
+fn recalculate_accepts_a_mutated_trie_with_an_empty_change_set() {
+    let genesis = TestTrie::genesis(vec![alice()]).unwrap();
+    let original = genesis.root_hash().unwrap();
+
+    let reverted = genesis
+        .add_member(bob())
+        .unwrap()
+        .delete_member(bob().id())
+        .unwrap();
+    assert!(reverted.has_pending_changes());
+    assert!(reverted.pending_changes().unwrap().is_empty());
+
+    let (recalculated, delta) = reverted.recalculate().unwrap();
+    assert!(delta.is_empty());
+    assert_eq!(delta.base_root(), &original);
+    assert_eq!(recalculated.root_hash().unwrap(), original);
 }
 
 // A `deserialize_revalidates_handle` test stood here briefly. It was removed:
@@ -2258,20 +2328,8 @@ fn device_slot_order_does_not_change_the_root() {
     )
     .unwrap();
 
-    let a = TestTrie::genesis(vec![forward])
-        .unwrap()
-        .recalculate()
-        .unwrap()
-        .0
-        .root_hash()
-        .unwrap();
-    let b = TestTrie::genesis(vec![reverse])
-        .unwrap()
-        .recalculate()
-        .unwrap()
-        .0
-        .root_hash()
-        .unwrap();
+    let a = TestTrie::genesis(vec![forward]).unwrap().root_hash().unwrap();
+    let b = TestTrie::genesis(vec![reverse]).unwrap().root_hash().unwrap();
 
     assert_eq!(a, b);
 }
@@ -2324,13 +2382,7 @@ fn every_device_slot_reaches_the_root() {
             devices,
         )
         .unwrap();
-        TestTrie::genesis(vec![leaf])
-            .unwrap()
-            .recalculate()
-            .unwrap()
-            .0
-            .root_hash()
-            .unwrap()
+        TestTrie::genesis(vec![leaf]).unwrap().root_hash().unwrap()
     };
 
     let all = root_of(base.clone());
@@ -2377,13 +2429,7 @@ fn member_id_bit_indexes_msb_first() {
 /// of an empty organisation then depending on how it got there.
 #[test]
 fn add_then_delete_returns_to_the_empty_root() {
-    let empty = TestTrie::genesis(vec![])
-        .unwrap()
-        .recalculate()
-        .unwrap()
-        .0
-        .root_hash()
-        .unwrap();
+    let empty = TestTrie::genesis(vec![]).unwrap().root_hash().unwrap();
 
     let populated = TestTrie::genesis(vec![])
         .unwrap()

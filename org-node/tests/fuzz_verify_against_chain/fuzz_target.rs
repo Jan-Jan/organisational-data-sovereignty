@@ -36,8 +36,7 @@ fn fixed_trie(admin: &SigningKeypair, admin_device: &SigningKeypair) -> OrgTrie<
         vec![admin_device.device_key()],
     )
     .unwrap();
-    let (trie, _) = OrgTrie::<Blake3Hasher>::genesis(vec![leaf]).unwrap().recalculate().unwrap();
-    trie
+    OrgTrie::<Blake3Hasher>::genesis(vec![leaf]).unwrap()
 }
 
 fn main() {

@@ -551,13 +551,22 @@ impl<H: TrieHasher> OrgTrie<H> {
     }
 
     /// Returns true if there are uncommitted mutations since the last `recalculate()`.
+    /// When false, the trie is calculated and `recalculate()` refuses it.
     pub fn has_pending_changes(&self) -> bool {
         self.cached_root_hash.is_none()
     }
 
-    /// Walks the trie bottom-up, filling every empty OnceLock hash.
+    /// Walks the trie bottom-up, filling every unset `spin::Once` hash cell.
     /// Returns the trie (now fully hashed) and a delta of all pending changes.
+    ///
+    /// Returns `Err(HashesAlreadyCalculated)` if the trie has not been mutated
+    /// since it was calculated: a trie from `genesis()`, `recalculate()` or
+    /// `verify_against()` already has every cell filled. A mutated trie
+    /// recalculates even when its change set is empty (LLR-j35sxz).
     pub fn recalculate(&self) -> Result<(Self, Delta), OrgMembersError> {
+        if !self.has_pending_changes() {
+            return Err(OrgMembersError::HashesAlreadyCalculated);
+        }
         let delta = self.pending_changes()?;
         let root_hash = smt::recalculate_hashes::<H>(&self.root)?;
 

@@ -15,6 +15,14 @@ fn arb_handle_idx() -> impl Strategy<Value = usize> {
     0..HANDLES.len()
 }
 
+/// `recalculate()` on a trie with pending changes, which must succeed.
+fn recalculate_pending(
+    trie: &TestTrie,
+) -> Result<(TestTrie, org_members::delta::Delta), TestCaseError> {
+    trie.recalculate()
+        .map_err(|e| TestCaseError::fail(format!("recalculate of a pending trie failed: {:?}", e)))
+}
+
 fn member_id(seed: &str) -> MemberId {
     let hash: [u8; 32] = blake3::hash(seed.as_bytes()).into();
     MemberId::new(hash)
@@ -125,17 +133,25 @@ proptest! {
                     }
                 }
                 Op::Recalculate => {
-                    if let Ok((new_trie, _)) = trie.recalculate() {
-                        let actual = new_trie.members().len();
-                        prop_assert_eq!(
-                            new_trie.member_count(), actual,
-                            "member_count={} but actual members={}",
-                            new_trie.member_count(), actual,
-                        );
+                    // A pending trie recalculates; a calculated one is refused.
+                    if trie.has_pending_changes() {
+                        let (new_trie, _) = recalculate_pending(&trie)?;
                         trie = new_trie;
+                    } else {
+                        prop_assert_eq!(
+                            trie.recalculate().unwrap_err(),
+                            OrgMembersError::HashesAlreadyCalculated
+                        );
                     }
                 }
             }
+
+            let actual = trie.members().len();
+            prop_assert_eq!(
+                trie.member_count(), actual,
+                "member_count={} but actual members={}",
+                trie.member_count(), actual,
+            );
         }
     }
 }
@@ -196,10 +212,11 @@ proptest! {
             }
         }
 
-        let (trie_b, delta) = match trie_b.recalculate() {
-            Ok(r) => r,
-            Err(_) => return Ok(()),
-        };
+        // No op succeeded: trie_b is still the calculated genesis, nothing to send.
+        if !trie_b.has_pending_changes() {
+            return Ok(());
+        }
+        let (trie_b, delta) = recalculate_pending(&trie_b)?;
 
         if delta.is_empty() {
             return Ok(());
@@ -262,10 +279,11 @@ proptest! {
             }
         }
 
-        let (trie_b, _) = match trie_b.recalculate() {
-            Ok(r) => r,
-            Err(_) => return Ok(()),
-        };
+        // No op succeeded: trie_b is still the calculated genesis, nothing to diff.
+        if !trie_b.has_pending_changes() {
+            return Ok(());
+        }
+        let (trie_b, _) = recalculate_pending(&trie_b)?;
 
         let diff_delta = match trie_b.calculate_delta(&trie_a) {
             Ok(d) => d,
@@ -494,10 +512,11 @@ proptest! {
                 }
             }
         }
-        let (_target, mut delta) = match work.recalculate() {
-            Ok(r) => r,
-            Err(_) => return Ok(()),
-        };
+        // No seed op succeeded: work is still the calculated base, no delta.
+        if !work.has_pending_changes() {
+            return Ok(());
+        }
+        let (_target, mut delta) = recalculate_pending(&work)?;
         if delta.is_empty() {
             return Ok(());
         }
@@ -888,6 +907,16 @@ fn arb_uniq_op() -> impl Strategy<Value = UniqOp> {
     ]
 }
 
+/// `trie` if it has no pending changes (genesis, or a `verify_against()`
+/// result), otherwise the trie `recalculate()` returns.
+fn calculated(trie: &TestTrie) -> TestTrie {
+    if trie.has_pending_changes() {
+        trie.recalculate().unwrap().0
+    } else {
+        trie.clone()
+    }
+}
+
 /// A delta against `base` (calculated) with the given removals and upserts.
 fn uniq_delta(
     base: &TestTrie,
@@ -971,7 +1000,7 @@ proptest! {
                     (trie.emergency_isolate_member(&uniq_id(*m), uniq_mk(*k)), is_held(&uniq_bytes(*k)), vec![uniq_bytes(*k)])
                 }
                 UniqOp::DeltaUpsert(m, mk, dk) => {
-                    let (base, _) = trie.recalculate().unwrap();
+                    let base = calculated(&trie);
                     let old = base.get(&uniq_id(*m));
                     let leaf = match &old {
                         Some(o) if o.p2p_device_count() > 0 => MemberLeaf::new(
@@ -990,7 +1019,7 @@ proptest! {
                 }
                 UniqOp::DeltaHandOver(from, to) => {
                     if from == to { continue; }
-                    let (base, _) = trie.recalculate().unwrap();
+                    let base = calculated(&trie);
                     let (Some(gone), Some(kept)) = (base.get(&uniq_id(*from)), base.get(&uniq_id(*to))) else { continue };
                     if kept.p2p_device_count() == 0 { continue; }
                     let Ok(leaf) = MemberLeaf::new(
@@ -1024,7 +1053,7 @@ proptest! {
 
             // Whatever sequence was accepted, its change set against genesis
             // is accepted and reproduces the root.
-            let (current, _) = trie.recalculate().unwrap();
+            let current = calculated(&trie);
             let root = current.root_hash().unwrap();
             let delta = current.calculate_delta(&start).unwrap();
             let replayed = start

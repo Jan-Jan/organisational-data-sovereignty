@@ -98,7 +98,9 @@ extending an existing one. Test each domain operation independently in
 2. After any mutation (`add_member`, `delete_member`, `update_*`,
    `rotate_p2p_key`, `add_p2p_device`, `delete_p2p_device`, `emergency_isolate_member`),
    hashes are NOT computed. `recalculate()` fills them. `root_hash()` returns
-   `Err(HashesNotCalculated)` until then.
+   `Err(HashesNotCalculated)` until then. `recalculate()` on a trie not
+   mutated since it was calculated returns `Err(HashesAlreadyCalculated)`
+   (LLR-j35sxz); a mutated trie recalculates even if its change set is empty.
 3. Path-copying preserves immutability: old trie's `root_hash()` is unchanged
    after mutating a new copy.
 4. `apply_delta`:
