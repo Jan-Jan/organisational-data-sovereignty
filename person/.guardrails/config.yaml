@@ -1,0 +1,67 @@
+# guardrails configuration for the `person` unit — flat schema only:
+#   `key: value` scalars and two-space `- item` lists, every key at column one,
+#   set once, in its own form (LIST keys: strict_paths, test_paths,
+#   verify_commands, coverage_command, depends_on, segregated_from; everything
+#   else a scalar). The schema is CLOSED and validated before any gate runs;
+#   the full rule list, with the reason each rule exists, is the header of
+#   templates/config.yaml in the guardrails repository this was copied from.
+#
+# This is a UNIT config (.guardrails/units.yaml at the repository root names
+# the units). Every doc_* value and every strict_paths/test_paths entry must
+# sit inside this unit's own directory, and doc_verification must NOT be set —
+# the verification record is repository-level (docs/verification).
+#
+# Scripts run from the repository root, so paths and commands below are
+# repository-relative.
+guardrails_version: 0.5.1
+guardrails_commit: e2eac86ff8db2157735b9604b7ade190d4f465f3
+
+# IEC 62304 software safety class. C: org-members (class C) is to depend on
+# this unit for the device key, device slots, device sub-trie, Name and Surname
+# (docs/adr/2026-10-04-parse-at-the-system-edge.md forbids a parallel copy), and
+# a provider below its consumer's class is MISCLASSED-DEPENDENCY. The Person
+# definition itself governs who holds a delegated individual's access — the
+# same pathway to serious injury the 2026-09-01 ADR names for membership. See
+# docs/adr/2026-09-05-units-and-per-unit-classes.md.
+safety_class: C
+
+id_prefixes: REQ HAZ RC SDD LLR PR
+
+# Canonical document locations. Registered 2026-10-04 by the change that writes
+# the unit's first requirements.
+doc_srs: person/docs/requirements
+doc_rmf: person/docs/risk
+doc_sad: person/docs/architecture
+doc_soup: person/docs/architecture/soup.md
+doc_problems: person/docs/problems
+
+strict_paths:
+  - person/src
+
+# Annotated integration tests, split across files by type and by concern
+# (one type's constructors, its decoding, its errors, the no-panic property
+# tests, crate discipline); together they cover the three software items.
+test_paths:
+  - person/tests
+
+verify_commands:
+  - cargo test -p person
+  - cargo clippy -p person --all-targets -- -D warnings
+
+problem_age_days: 30
+problem_open_max: 10
+
+# Statement coverage, floors in the root Makefile (first set 2026-10-04,
+# ratchet upward only).
+coverage_command:
+  - make coverage-person
+
+expectation_age_days: 90
+expectation_open_max: 10
+
+# person depends on no unit, by owner decision (2026-10-04): org-members may
+# depend on person, never the reverse.
+# depends_on:
+#   - <unit>
+# segregated_from:
+#   - <unit> (RC-xxxxxx)

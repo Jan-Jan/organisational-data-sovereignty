@@ -1,9 +1,10 @@
 # Guardrails verification targets.
 #
-# `coverage-org-members` and `coverage-on-chain-client` are the targets named
-# by `coverage_command` in org-members/.guardrails/config.yaml and
-# on-chain-client/.guardrails/config.yaml (per-unit configs since 2026-09-05;
-# `coverage` runs both and is what CI calls). Note what that does and does not mean: NO check
+# `coverage-org-members`, `coverage-on-chain-client` and `coverage-person` are
+# the targets named by `coverage_command` in org-members/.guardrails/config.yaml,
+# on-chain-client/.guardrails/config.yaml and person/.guardrails/config.yaml
+# (per-unit configs since 2026-09-05; person's since 2026-10-04; `coverage`
+# runs all three and is what CI calls). Note what that does and does not mean: NO check
 # script reads `coverage_command` — `grep -rn coverage_command
 # .guardrails/scripts/` finds it only in lib.sh's schema key list. The gate is
 # an instruction to whoever runs `verify-before-merge` (step 5: run it and
@@ -13,7 +14,7 @@
 # Requires: cargo-llvm-cov and the llvm-tools-preview component.
 #   cargo install cargo-llvm-cov && rustup component add llvm-tools-preview
 
-.PHONY: coverage coverage-org-members coverage-on-chain-client
+.PHONY: coverage coverage-org-members coverage-on-chain-client coverage-person
 
 # TWO metrics, because the STATEMENT-coverage half of the class target (class
 # C: statement AND decision) is measured two ways here and the two
@@ -124,6 +125,33 @@ ORG_MEMBERS_REGIONS := 91
 # these floors are deliberately unchanged under it.
 ON_CHAIN_CLIENT_LINES := 41
 ON_CHAIN_CLIENT_REGIONS := 42
+# person, first floors, 2026-10-04 — same rule: one point below the
+# measurement, rounded down to an integer. Measured on the task branch that
+# added this target, with `cargo llvm-cov -p person --summary-only` (stable
+# rustc 1.99.0 (b940084d7 2026-09-28), cargo-llvm-cov 0.9.0, aarch64-darwin):
+#
+#   measured 2026-10-04        lines     regions
+#   person                     81.03%     82.37%   (158 of 195 lines; 243 of 295 regions)
+#
+# Raised 2026-10-04 by the review-findings task (worktree-person-unit-findings1),
+# same toolchain, after the derived-LLR and property tests:
+#
+#   person                    100.00%    100.00%   (215 of 215 lines; 324 of 324 regions)
+#
+# Re-measured 2026-10-05 by the fourth review-findings task
+# (worktree-person-unit-findings4), same toolchain, after the torsion-free
+# device-key check:
+#
+#   person                    100.00%    100.00%   (215 of 215 lines; 331 of 331 regions)
+#
+# The decision half of the class C target is measured with the nightly
+# toolchain: `cargo +nightly llvm-cov -p person --branch --summary-only`
+# (cargo 1.101.0-nightly (f3865b2a4 2026-09-29), cargo-llvm-cov 0.9.0),
+# re-measured 2026-10-05 by the fourth review-findings task
+# (worktree-person-unit-findings4): 28 of 28 branches, 100% decision coverage.
+# That figure is not enforced here — stable llvm-cov reports no branches.
+PERSON_LINES := 99
+PERSON_REGIONS := 99
 
 # Per-crate, so a regression in the well-covered crate cannot hide behind the
 # poorly-covered one. Known limit, unfixable today: each floor is still an
@@ -136,7 +164,7 @@ ON_CHAIN_CLIENT_REGIONS := 42
 # 64.29%, so the block is gone and enabling it is available work (see the
 # RESOLVED note above). Figures updated 2026-09-10; the pre-relocation ones
 # were 353 of 715 and 96.23%.
-coverage: coverage-org-members coverage-on-chain-client
+coverage: coverage-org-members coverage-on-chain-client coverage-person
 
 # Scope note: this omits `mbt_conformance` (`newtypes` and `encoding_golden`,
 # added 2026-10-04, are measured), and the floors are calibrated against the reduced measurement — so
@@ -204,3 +232,12 @@ coverage-on-chain-client:
 		--summary-only \
 		--fail-under-lines $(ON_CHAIN_CLIENT_LINES) \
 		--fail-under-regions $(ON_CHAIN_CLIENT_REGIONS)
+
+# Every person test target, none excluded: the crate has no lane that needs a
+# tool outside cargo, so the measurement and `cargo test -p person` (its
+# verify_commands entry) run the same suite.
+coverage-person:
+	cargo llvm-cov -p person \
+		--summary-only \
+		--fail-under-lines $(PERSON_LINES) \
+		--fail-under-regions $(PERSON_REGIONS)

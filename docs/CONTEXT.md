@@ -58,6 +58,26 @@ The key identifying one of a Member's devices. A Member holds a bounded number
 of them.
 _Avoid_: device id, endpoint key
 
+**DevicePublicKey**:
+The ed25519 public key identifying one device. The name `person` gives a
+Device key; org-members adopts it when it switches to `person`'s types, and
+this entry then replaces Device key.
+_Avoid_: P2pDeviceKey, device id, endpoint key
+
+**Person**:
+An individual acting in their own capacity, apart from any Organisation. The
+same individual may also be a Member of any number of Organisations; nothing
+links their Person to those memberships except what the individual chooses to
+reveal.
+_Avoid_: user, account, individual member, profile
+
+**PersonPublicKey**:
+The key a grant is encoded against, and from which the holder's devices derive
+their own access: an X25519 public key resulting from group key agreement
+among those devices. Defined by `person`; when org-members switches to it, the
+Member-as-a-group key becomes a PersonPublicKey held in a Membership record.
+_Avoid_: P2pMemberKey, P2pPersonKey, group key, p2p key
+
 **Isolated member**:
 A Member holding zero device keys. Still a member of the Organisation, and able
 to be restored by adding a device key. The state an Organisation puts a Member

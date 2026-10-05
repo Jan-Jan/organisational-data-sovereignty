@@ -1,0 +1,26 @@
+[package]
+name = "person"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "GPL-3.0-only"
+description = "An individual's identity types: names, device keys, the PersonPublicKey, device slots and the device sub-trie"
+
+[features]
+default = ["serde"]
+serde = ["dep:serde"]
+
+[dependencies]
+ed25519-dalek = { version = "2", default-features = false, features = ["alloc"] }
+unicode-normalization = { version = "0.1", default-features = false }
+serde = { version = "1", default-features = false, features = ["derive", "alloc"], optional = true }
+thiserror = { version = "2", default-features = false }
+
+[dev-dependencies]
+blake3 = "1"
+postcard = { version = "1", features = ["alloc"] }
+curve25519-dalek = "4"
+proptest = "1"
+
+[lints]
+workspace = true

@@ -47,12 +47,22 @@
 # `exported: yes` requirement.
 # A change to org-members now runs org-node's and
 # app's gates too (check-units.sh --impact).
+#
+# `person` added 2026-10-04 (class C, no depends_on): it holds the shared
+# identity types (names, device keys, the PersonPublicKey, device slots and the
+# device sub-trie) and the X25519 public-key validity check; the Person
+# definition, an individual's own, apart from any Organisation, is added by a
+# later change. org-members is to depend on it for
+# the shared validated types (docs/adr/2026-10-04-parse-at-the-system-edge.md);
+# the assessment is walked (docs/plans/2026-10-04-person-shared-types.md) and
+# the edge is declared by the change that switches org-members to them.
 
 units:
   - org-members
   - on-chain-client
   - org-node
   - app
+  - person
 
 not_a_unit:
   - on-chain          # Foundry contracts (OrgRegistry.sol); separate toolchain — later tooth

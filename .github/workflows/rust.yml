@@ -2,9 +2,10 @@
 #
 # Multi-unit repository since 2026-09-05 (.guardrails/units.yaml): each unit's
 # `verify_commands` live in `<unit>/.guardrails/config.yaml`. The `test` job
-# runs the cargo entries of org-members, on-chain-client and org-node
+# runs the cargo entries of org-members, on-chain-client, org-node and person
 # verbatim, so that CI and the local merge gate cannot disagree about what
-# "passing" means. The app unit has THREE verify_commands as of 2026-09-14,
+# "passing" means; person's clippy entry runs verbatim in the `clippy` job
+# (since 2026-10-05). The app unit has THREE verify_commands as of 2026-09-14,
 # and TWO of them run here, in the `app-frontend` job below:
 # `npm --prefix app run check` and `npm --prefix app run test`, each preceded
 # by the `npm --prefix app ci` they need because app/node_modules is
@@ -25,8 +26,8 @@ name: rust
 on: [push, pull_request]
 
 jobs:
-  # The cargo entries of org-members', on-chain-client's and org-node's
-  # verify_commands. The quint typecheck entries are covered by the `quint`
+  # The cargo test entries of org-members', on-chain-client's, org-node's and
+  # person's verify_commands. The quint typecheck entries are covered by the `quint`
   # job in quint.yml.
   #
   # quint is installed because `cargo test -p org-members` includes the
@@ -76,6 +77,8 @@ jobs:
             --test fuzz_envelope_decode --test fuzz_verify_against_chain \
             --test verify_against_chain --test wire_frame_bound --test store_at_rest \
             --test admission_sender
+      # person's verify_commands test entry: every target, none excluded.
+      - run: cargo test -p person
 
   # The declared MSRV, measured (docs/adr/2026-10-03-quint-conformance-gate.md,
   # decision 6): quint-connect is edition 2024, so the test build needs 1.85.
@@ -88,6 +91,8 @@ jobs:
       - run: npm i -g @informalsystems/quint
       - uses: dtolnay/rust-toolchain@1.85
       - run: cargo test -p org-members
+      # person declares the same rust-version.
+      - run: cargo test -p person
 
   # app's npm verify_commands. The cargo entry still runs NOWHERE in CI: it
   # needs Tauri's Linux system packages (webkit2gtk, libsoup, …) this workflow
@@ -108,7 +113,9 @@ jobs:
       - run: npm --prefix app run check
       - run: npm --prefix app run test
 
-  # Lib targets only. Two separate reasons, and only the first is principled:
+  # Lib targets only for org-members and on-chain-client (person, the last
+  # step, is --all-targets). Two separate reasons, and only the first is
+  # principled:
   #
   # 1. on-chain-client's test code is ALLOWED to panic. Measured today,
   #    `--all-targets -- -D warnings` reports 144 lint errors across 13 test
@@ -133,11 +140,17 @@ jobs:
         with: { components: clippy }
       - run: cargo clippy -p org-members --lib -- -D warnings
       - run: cargo clippy --manifest-path on-chain-client/Cargo.toml --lib -- -D warnings
+      # person's verify_commands clippy entry, verbatim. Unlike the two above it
+      # covers --all-targets: person inherits the workspace lints, and its test
+      # targets allow `expect` by an explicit attribute where they use it.
+      - run: cargo clippy -p person --all-targets -- -D warnings
 
-  # org-members' documented build matrix (org-members/AGENTS.md): no_std is a
-  # hard requirement for it, and the wasm32 check is what proves the dependency
-  # graph stayed no_std-compatible. Compile-check only — it does not prove the
-  # crate RUNS under wasm32.
+  # org-members' documented build matrix (org-members/AGENTS.md), and person's
+  # wasm32 checks. no_std is a hard requirement for both, but
+  # wasm32-unknown-unknown has std, so a wasm32 check proves only that a crate
+  # builds for that target, not that it is no_std. For person the no_std proof
+  # is `#![no_std]` in person/src/lib.rs, which the crate-discipline test
+  # checks. Compile-check only — it does not prove a crate RUNS under wasm32.
   no-std:
     runs-on: ubuntu-latest
     steps:
@@ -149,13 +162,19 @@ jobs:
       - run: |
           cargo check -p org-members --no-default-features --features serde \
             --target wasm32-unknown-unknown
+      # person builds for wasm32, with and without its default `serde`
+      # feature.
+      - run: cargo check -p person --target wasm32-unknown-unknown
+      - run: cargo check -p person --no-default-features --target wasm32-unknown-unknown
 
-  # The statement-coverage gate, running both per-unit coverage targets the
-  # merge gates run (`make coverage` = coverage-org-members +
-  # coverage-on-chain-client). Floors live in the Makefile and ratchet upward
+  # The statement-coverage gate, running all three per-unit coverage targets
+  # the merge gates run (`make coverage` = coverage-org-members +
+  # coverage-on-chain-client + coverage-person). Floors live in the Makefile and ratchet upward
   # only. This covers the statement half of the class C target; decision
-  # coverage is not measured anywhere yet
-  # (docs/adr/2026-09-01-safety-class-c.md).
+  # coverage is not measured in CI (docs/adr/2026-09-01-safety-class-c.md).
+  # Branch coverage needs nightly; for person the Makefile records it as
+  # measured by hand on nightly: 28 of 28 branches, re-measured 2026-10-05
+  # (see the person floors there).
   #
   # Note that the floors were calibrated on aarch64-darwin and are enforced
   # here on x86_64-linux, against a floating `stable` toolchain and an

@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "org-members",
     "org-node",
+    "person",
     "spike-common",
     "spike-keyhive",
     "spike-p2panda",
