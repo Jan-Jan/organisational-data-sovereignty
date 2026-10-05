@@ -1,0 +1,110 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+//! Value types and the rejection vocabulary (SDD-swtd3w).
+//!
+//! Relocated from the `#[cfg(test)]` modules in `org-node/src/ids.rs` so the
+//! `verifies:` annotations sit under `test_paths`, which this unit's config
+//! reads only from `org-node/tests`. The variant-distinctness and
+//! error-carrying cases are new.
+
+use org_node::error::OrgNodeError;
+use org_node::ids::OrgId;
+use org_node::sequence::SeqGuard;
+
+// verifies: REQ-gju89b, LLR-7gnrnz
+#[test]
+fn org_id_is_twenty_bytes_and_round_trips_through_postcard() {
+    let id = OrgId::new([7u8; 20]);
+    assert_eq!(id.as_bytes().len(), 20);
+    let bytes = postcard::to_allocvec(&id).unwrap();
+    let back: OrgId = postcard::from_bytes(&bytes).unwrap();
+    assert_eq!(id, back);
+}
+
+// verifies: REQ-gju89b, LLR-7gnrnz
+#[test]
+fn org_ids_differing_in_one_byte_are_not_equal() {
+    let mut raw = [7u8; 20];
+    let a = OrgId::new(raw);
+    raw[19] = 8;
+    assert_ne!(a, OrgId::new(raw));
+}
+
+// verifies: LLR-gu6u53
+#[test]
+fn org_id_debug_is_the_twenty_bytes_in_order_as_forty_lowercase_hex_digits() {
+    // The fixture bytes are all DIFFERENT. Review round 1 found the previous
+    // `[0xab; 20]` could not see byte order at all: reversing the iteration in
+    // `OrgId`'s Debug left the assertion satisfied.
+    let mut raw = [0u8; 20];
+    for (i, b) in raw.iter_mut().enumerate() {
+        *b = (i as u8) + 0xa0;
+    }
+    let rendered = format!("{:?}", OrgId::new(raw));
+
+    let expected: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+    assert_eq!(rendered, format!("OrgId(0x{expected})"));
+
+    let inner = rendered.trim_start_matches("OrgId(0x").trim_end_matches(')');
+    assert_eq!(inner.len(), 40, "twenty bytes is forty digits");
+    assert!(inner.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+    // First and last byte land at the ends, so a reversal is visible.
+    assert!(inner.starts_with("a0"), "first byte must come first: {inner}");
+    assert!(inner.ends_with("b3"), "last byte must come last: {inner}");
+}
+
+// verifies: REQ-9g6as6, REQ-bcxz96, LLR-z8fubr
+#[test]
+fn every_rejection_variant_is_distinct_from_every_other() {
+    let all = [
+        OrgNodeError::OrgIdMismatch,
+        OrgNodeError::BadSignature,
+        OrgNodeError::StaleSeq { got: 1, last_seen: 2 },
+        OrgNodeError::MalformedDelta,
+        OrgNodeError::DeltaBaseMismatch,
+        OrgNodeError::OrgNotOnChain,
+        OrgNodeError::RootMismatch,
+        OrgNodeError::StaleEpoch { got: 1, last: 2 },
+        OrgNodeError::Chain("read failed".into()),
+        OrgNodeError::Trie(org_members::OrgMembersError::DuplicateHandle),
+    ];
+    for (i, a) in all.iter().enumerate() {
+        for (j, b) in all.iter().enumerate() {
+            if i != j {
+                assert_ne!(a, b, "variants {i} and {j} compare equal");
+            }
+        }
+    }
+}
+
+// verifies: REQ-9g6as6, REQ-bcxz96, LLR-z8fubr
+#[test]
+fn a_stale_sequence_rejection_carries_the_offered_number_and_the_mark() {
+    // Rewritten 2026-10-04 after review round 1. The previous version
+    // destructured literals it had just constructed and then asserted they
+    // equalled themselves, and checked the rendering with `contains('4') &&
+    // contains('9')` — symmetric, so exchanging the two fields was invisible.
+    // This one takes the error from a real producer and pins the ORDER of the
+    // two numbers in the message, which is the only part a reader relies on.
+    let guard = SeqGuard::from_last_seen(9);
+    let err = guard.check(4).unwrap_err();
+    assert_eq!(err, OrgNodeError::StaleSeq { got: 4, last_seen: 9 });
+
+    let rendered = format!("{err}");
+    let at_offered = rendered.find('4').expect("the offered number must be rendered");
+    let at_mark = rendered.find('9').expect("the mark must be rendered");
+    assert!(
+        at_offered < at_mark,
+        "the message must name the offered number before the mark it was judged against: {rendered}"
+    );
+}
+
+// verifies: REQ-9g6as6, LLR-7cgg8a
+#[test]
+fn a_provider_error_is_carried_into_the_trie_variant_without_loss() {
+    let provider = org_members::OrgMembersError::InvalidHandle("bad handle".into());
+    let carried: OrgNodeError = provider.clone().into();
+    match carried {
+        OrgNodeError::Trie(inner) => assert_eq!(inner, provider),
+        other => panic!("wrong variant: {other:?}"),
+    }
+}

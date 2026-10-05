@@ -74,6 +74,37 @@ test_paths:
 # transport_handshake 1, transport_networked 1. The two bolero targets report
 # no pass count: each prints its iteration total and exits on its one-second
 # budget.
+# 2026-10-03: six targets added by org-node's architecture tooth
+# (docs/plans/2026-10-03-org-node-architecture.md). Each holds unit tests
+# relocated out of a `#[cfg(test)]` module in `src` into `tests/`, because
+# `test_paths` above reads `verifies:` annotations only from `org-node/tests`
+# and a low-level requirement whose only evidence sits in `src` cannot be
+# traced at all. The `src` modules they came from were deleted in the same
+# change, so nothing is duplicated and the lib target now carries one test.
+# Measured 2026-10-03 (agent sandbox, CARGO_HOME=/tmp/cargo_home_fuzz) on the
+# line below (re-measured 2026-10-04 after review round 1 and the `0f85cb9`
+# merge; the figure recorded here on 2026-10-03 said 80 and was not refreshed
+# when the sweep's remedies added tests, which review round 1 caught):
+# 101 passed, 0 failed — admission_sender 22, verify_against_chain 18,
+# envelope_binding 8, chain_write_pure 7, service_lifecycle 7, store_at_rest 7,
+# key_custody 6, value_types 6, blob_exchange 5, transport_handshake 5,
+# wire_frame_bound 5, service_stories 3, transport_networked 1, lib 1
+# (re-measured 2026-10-04 after review round 3; round 2 added ten tests and
+# round 3 two more). Re-measured again 2026-10-04 at gate round 6, after
+# review rounds 4 and 5 added eight tests: 109 passed, 0 failed —
+# admission_sender 30, every other target as above. And at gate round 7,
+# after review round 6 added four more: 113 passed, 0 failed —
+# admission_sender 33, chain_write_pure 8. Gate round 8, after review round
+# 7: 116 passed, 0 failed — admission_sender 36. Gate round 9, after review
+# round 8: 121 passed, 0 failed — admission_sender 38, verify_against_chain
+# 19, service_lifecycle 8, transport_handshake 6. Gate round 10, after
+# review round 9: 122 passed, 0 failed — admission_sender 39. The
+# three bolero targets report no pass count: each prints its iteration total
+# and exits on its one-second budget — and that is exactly why two of them were
+# found this round to have been exercising a guard that never fired. See Gap 18
+# of docs/verification/2026-10-03-worktree-guardrails-org-node-arch.md: nothing
+# here measures whether a fuzz target reaches the code it is named for.
+#
 # 2026-10-03, part 2 of docs/adr/2026-10-03-quint-conformance-gate.md: the
 # protocol models moved into org-node/quint/, and their checks are
 # unconditional entries here (decision 3) — both typechecks and the five
@@ -85,11 +116,23 @@ test_paths:
 # the five together. These are checks of the system model only: org-node has
 # no conformance test, so a Rust change to org-node is not checked against
 # the model (decision 13's known gap).
-# 2026-10-03, T2 of docs/plans/2026-10-03-random-member-id.md: a third bolero
-# target, fuzz_first_admission_base (REQ-d9g6nt), asserts a first admission
-# without a record snapshot is refused and fuzzes the snapshot decode.
+#
+# Merged 2026-10-03: `5850ed7` and this change both rewrote this key. The
+# cargo line is this change's (it names the six relocated-test targets the
+# other change could not have known about); the quint lines are `5850ed7`'s
+# unchanged. Neither side's intent is lost and the key is still set once.
+# The list must be contiguous — a comment between two `- item` lines fails the
+# config validator, which is how this merge's first resolution was caught.
+#
+# Merged 2026-10-04: `0f85cb9` added `--test fuzz_first_admission_base` (a
+# third bolero target, T2 of docs/plans/2026-10-03-random-member-id.md,
+# REQ-d9g6nt: a first admission without a record snapshot is refused, and the
+# snapshot decode is fuzzed). It is carried below alongside this change's six
+# relocated-test targets; both sides' targets run. Note the rule stated two
+# comments up — it applies between the key and its first item too, which is
+# how this second merge repeated the first one's mistake.
 verify_commands:
-  - cargo test -p org-node --features app,test-support --lib --test service_stories --test transport_handshake --test transport_networked --test fuzz_envelope_decode --test fuzz_verify_against_chain --test verify_against_chain --test wire_frame_bound --test store_at_rest --test admission_sender --test fuzz_first_admission_base
+  - cargo test -p org-node --features app,test-support --lib --test service_stories --test transport_handshake --test transport_networked --test fuzz_envelope_decode --test fuzz_verify_against_chain --test fuzz_first_admission_base --test verify_against_chain --test wire_frame_bound --test store_at_rest --test admission_sender --test value_types --test key_custody --test envelope_binding --test blob_exchange --test chain_write_pure --test service_lifecycle
   - quint --version
   - quint typecheck org-node/quint/protocol.qnt
   - quint typecheck org-node/quint/ods_instances.qnt

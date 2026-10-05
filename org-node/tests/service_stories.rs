@@ -33,7 +33,7 @@ use org_node::transport::endpoint::OrgEndpoint;
 // (REQ-uxv2x2). Further abnormal cases are in verify_against_chain.rs and
 // admission_sender.rs; REQ-uxv2x2's own abnormal-input case — a revocation
 // whose envelope fails verification — is the last test in this file.
-// verifies: REQ-nhe2zu, REQ-xa6smf, REQ-uxv2x2
+// verifies: REQ-nhe2zu, REQ-xa6smf, REQ-uxv2x2, LLR-rb8r65, LLR-ghja3x, LLR-bg3vsw, LLR-t4znbk, LLR-37cj3n, LLR-q8emds, LLR-68yd3j, LLR-6zjzn2, LLR-cns6q6, LLR-6p4pj2
 #[tokio::test(flavor = "multi_thread")]
 async fn five_stories_full_e2e() {
     use rand::rngs::OsRng;
@@ -52,16 +52,16 @@ async fn five_stories_full_e2e() {
     let b_addr_admit = ep_b_admit.inner().addr();
 
     // ---- Stores ----
-    let store_a_path = {
-        let dir = std::env::temp_dir().join(format!("ods-e2e-a-{}", std::process::id()));
+    let store_path = |party: &str| {
+        let dir = std::env::temp_dir().join(format!("ods-e2e-{party}-{}", std::process::id()));
+        // Cleared first, as the other helpers in this file do: a reused pid
+        // would open a store an earlier run left (review round 6).
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("store.bin")
     };
-    let store_b_path = {
-        let dir = std::env::temp_dir().join(format!("ods-e2e-b-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir.join("store.bin")
-    };
+    let store_a_path = store_path("a");
+    let store_b_path = store_path("b");
 
     let store_a = PersonaStore::open(store_a_path.clone(), "pw_a").unwrap();
     let store_b = PersonaStore::open(store_b_path.clone(), "pw_b").unwrap();
@@ -238,7 +238,7 @@ async fn five_stories_full_e2e() {
 // *different* member must be verified, committed as an ordinary update, and must
 // NOT trigger a self-delete. Story 5 above is the normal case (the device's own
 // removal); this is the other side of the same requirement.
-// verifies: REQ-uxv2x2
+// verifies: REQ-uxv2x2, LLR-jsx922
 #[tokio::test(flavor = "multi_thread")]
 async fn revocation_of_another_member_is_committed_not_self_deleted() {
     use rand::rngs::OsRng;
@@ -431,7 +431,7 @@ async fn revocation_of_another_member_is_committed_not_self_deleted() {
 // that is NOT the Organisation's published signing key, must be rejected — and
 // the rejection must leave the OrgRecord exactly as it was. The node must never
 // delete its record of the Organisation on a message it refused to verify.
-// verifies: REQ-uxv2x2
+// verifies: REQ-uxv2x2, LLR-6qmq2g, LLR-vw2jn6
 #[tokio::test(flavor = "multi_thread")]
 async fn unverified_revocation_leaves_the_record_in_place() {
     use rand::rngs::OsRng;

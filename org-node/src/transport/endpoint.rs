@@ -81,9 +81,31 @@ impl OrgEndpoint {
             // socket per address family (`0.0.0.0` and `[::]`), and naming a
             // bind address only replaces the default for ITS OWN family — so
             // binding `127.0.0.1` alone would leave `[::]` listening on every
-            // interface. **Naming both families is what makes the "loopback
-            // only" claim above true**; that is measured, by a mutation that
-            // drops the `[::1]` bind and watches `[::]` reappear.
+            // interface.
+            //
+            // *Corrected 2026-10-03 by the architecture tooth's falsifiability
+            // sweep.* This comment used to say that naming both families is
+            // what makes the "loopback only" claim true, "measured by a
+            // mutation that drops the `[::1]` bind and watches `[::]`
+            // reappear". **That mutation was never run.** What was measured
+            // (verification record for `f635acc`) was dropping
+            // `clear_ip_transports()` AND the `[::1]` bind together. Dropping
+            // the `[::1]` bind alone, with `clear_ip_transports()` still in
+            // place, was run on 2026-10-03 and is **green**: the transports
+            // are already cleared, so no `[::]` reappears and the endpoint
+            // stays loopback-only on IPv4 alone. The sentence credited a
+            // measurement nobody had made.
+            //
+            // Putting the five measurements together: confinement needs every
+            // NAMED address to be a loopback one — both address mutations,
+            // `127.0.0.1:0` -> `0.0.0.0:0` and `[::1]:0` -> `[::]:0`, redden
+            // `loopback_mode_binds_and_advertises_loopback_only` — and it
+            // needs the pre-configured wildcards gone, for which
+            // `clear_ip_transports()` and naming both families are **two
+            // redundant mechanisms, either sufficient alone**. That is why
+            // dropping either one by itself is green and dropping both is
+            // red. What the second bind buys beyond that redundancy is
+            // dual-stack reach, not confinement.
             //
             // `clear_ip_transports()` is NOT load-bearing on iroh 0.98.2 —
             // two user-defined binds already override both family defaults,
@@ -318,18 +340,3 @@ impl OrgEndpoint {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::keys::SigningKeypair;
-
-    #[tokio::test]
-    #[allow(clippy::unwrap_used)]
-    async fn endpoint_id_equals_device_key() {
-        let device = SigningKeypair::from_seed([7u8; 32]);
-        let ep = OrgEndpoint::bind(&device).await.unwrap();
-        // The iroh EndpointId bytes must equal the device key bytes.
-        assert_eq!(ep.inner().id().as_bytes(), device.device_key().as_bytes());
-        assert_eq!(ep.device_key().as_bytes(), device.device_key().as_bytes());
-    }
-}

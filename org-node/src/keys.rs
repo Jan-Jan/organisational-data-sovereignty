@@ -48,32 +48,3 @@ pub fn verify(vk: &VerifyingKey, msg: &[u8], sig: &Signature) -> bool {
     vk.verify(msg, sig).is_ok()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rand::rngs::OsRng;
-
-    #[test]
-    fn sign_verify_round_trip() {
-        let kp = SigningKeypair::generate(&mut OsRng);
-        let msg = b"hello org";
-        let sig = kp.sign(msg);
-        assert!(verify(&kp.verifying_key(), msg, &sig));
-        assert!(!verify(&kp.verifying_key(), b"tampered", &sig));
-    }
-
-    #[test]
-    fn seed_round_trip_preserves_key() {
-        let kp = SigningKeypair::generate(&mut OsRng);
-        let seed = kp.to_seed();
-        let kp2 = SigningKeypair::from_seed(seed);
-        assert_eq!(kp.verifying_key(), kp2.verifying_key());
-    }
-
-    #[test]
-    fn member_and_device_keys_wrap_the_verifying_key() {
-        let kp = SigningKeypair::generate(&mut OsRng);
-        assert_eq!(kp.member_key().as_bytes(), kp.verifying_key().as_bytes());
-        assert_eq!(kp.device_key().as_bytes(), kp.verifying_key().as_bytes());
-    }
-}

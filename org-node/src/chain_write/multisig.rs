@@ -121,7 +121,7 @@ async fn submit_and_watch<Call: subxt::transactions::Payload>(
 /// `others` empty ⇒ the call as a top-level extrinsic (single admin, direct);
 /// `others` non-empty ⇒ `Multisig.as_multi_threshold_1(others, call)`
 /// (threshold-1 "any one of N"). Pure (no chain I/O) so it is unit-testable.
-fn build_dispatch_tx(
+pub(crate) fn build_dispatch_tx(
     other_signatories: &[[u8; 32]],
     call: Value,
 ) -> Result<StaticPayload<Composite<()>>, WriteError> {
@@ -182,50 +182,3 @@ pub async fn fund(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn build_dispatch_tx_selects_direct_vs_multisig() {
-        use subxt::dynamic::Value;
-        use subxt::ext::scale_value::Composite;
-        // A minimal composed RuntimeCall: System.remark { remark }.
-        // Shape: Variant("System", Unnamed([Variant("remark", Named([("remark", bytes)]))]))
-        let call = || {
-            Value::variant(
-                "System",
-                Composite::unnamed(vec![Value::variant(
-                    "remark",
-                    Composite::named(vec![("remark".to_string(), Value::from_bytes([1u8; 4]))]),
-                )]),
-            )
-        };
-
-        // Empty others → direct path: the composed call is unwrapped and the
-        // pallet+call become System / remark.
-        let direct = build_dispatch_tx(&[], call()).expect("direct payload");
-        assert_eq!(direct.pallet_name(), "System");
-        assert_eq!(direct.call_name(), "remark");
-
-        // Non-empty others → wrapped in Multisig.as_multi_threshold_1.
-        let multi = build_dispatch_tx(&[[9u8; 32]], call()).expect("multisig payload");
-        assert_eq!(multi.pallet_name(), "Multisig");
-        assert_eq!(multi.call_name(), "as_multi_threshold_1");
-    }
-
-    #[test]
-    fn multi_account_id_is_order_independent() {
-        let a = [1u8; 32];
-        let b = [2u8; 32];
-        // Sorting inside the derivation must make signer order irrelevant.
-        assert_eq!(multi_account_id(&[a, b], 1), multi_account_id(&[b, a], 1));
-    }
-
-    #[test]
-    fn multi_account_id_depends_on_threshold() {
-        let a = [1u8; 32];
-        let b = [2u8; 32];
-        assert_ne!(multi_account_id(&[a, b], 1), multi_account_id(&[a, b], 2));
-    }
-}

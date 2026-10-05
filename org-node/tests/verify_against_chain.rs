@@ -59,7 +59,7 @@ fn sign_over(signer: &SigningKeypair, org: OrgId, seq: u64, delta_bytes: &[u8]) 
 
 // ---- relocated from src/verify.rs ------------------------------------------
 
-// verifies: REQ-nhe2zu
+// verifies: REQ-nhe2zu, LLR-8n95rf, LLR-d6kvbx, LLR-8hwqru
 #[test]
 fn happy_path_commits_when_root_matches_chain() {
     let (admin, org, local, env, new_root) = setup();
@@ -72,7 +72,7 @@ fn happy_path_commits_when_root_matches_chain() {
     assert_eq!(out.trie.root_hash().unwrap(), new_root);
 }
 
-// verifies: REQ-gju89b
+// verifies: REQ-gju89b, LLR-4fbuy8
 #[test]
 fn rejects_wrong_org_id() {
     let (admin, _org, local, env, _) = setup();
@@ -85,7 +85,7 @@ fn rejects_wrong_org_id() {
     );
 }
 
-// verifies: REQ-ag6kqm
+// verifies: REQ-ag6kqm, LLR-mcdh85
 #[test]
 fn rejects_bad_signature() {
     let (_admin, org, local, env, _) = setup();
@@ -99,7 +99,7 @@ fn rejects_bad_signature() {
     );
 }
 
-// verifies: REQ-6yu72z
+// verifies: REQ-6yu72z, LLR-xpbkp5, LLR-wx3php
 #[test]
 fn rejects_stale_seq() {
     let (admin, org, local, env, new_root) = setup();
@@ -115,7 +115,7 @@ fn rejects_stale_seq() {
     );
 }
 
-// verifies: REQ-bvh8v6
+// verifies: REQ-bvh8v6, LLR-8m99q2, LLR-rm9x4z
 #[test]
 fn rejects_when_org_absent_from_chain() {
     let (admin, org, local, env, _) = setup();
@@ -128,6 +128,48 @@ fn rejects_when_org_absent_from_chain() {
     );
 }
 
+/// A `ChainReader` whose read FAILS, as distinct from one that reports the
+/// Organisation absent. Added 2026-10-04 after review round 2: no reader
+/// reachable at this gate could return `Err` — `MockChain::get_org_state`
+/// always returns `Ok`, and `ChainOpsReader` wraps a state already read — so
+/// the second clause of LLR-8m99q2 and the whole of LLR-rm9x4z's "a failure is
+/// the `Err` arm" rested on nothing: changing `.map_err(OrgNodeError::Chain)`
+/// in `verify.rs` to any other variant left the gate green.
+struct FailingChain;
+
+impl org_node::chain::ChainReader for FailingChain {
+    fn get_org_state(&self, _org_id: &OrgId) -> Result<Option<OrgState>, String> {
+        Err("registry read failed".into())
+    }
+}
+
+// The abnormal-input case of SDD-pa6p7w: absence and failure are different
+// answers and must not collapse into one rejection. A caller that cannot tell
+// them apart would treat a transient registry failure as proof that the
+// Organisation does not exist — the trusted-root oracle reporting "no anchor"
+// when what happened is "no answer".
+// verifies: REQ-bvh8v6, LLR-8m99q2, LLR-rm9x4z
+#[test]
+fn a_chain_read_that_fails_is_refused_as_chain_not_as_absence() {
+    let (admin, org, local, env, _) = setup();
+    let vk = admin.verifying_key();
+
+    let failed = verify_envelope_against_chain(&local, &env, &ctx(org, &vk), &FailingChain)
+        .unwrap_err();
+    assert_eq!(
+        failed,
+        OrgNodeError::Chain("registry read failed".into()),
+        "a failed chain read must be refused with Chain, carrying the reason"
+    );
+
+    // The same envelope against an EMPTY chain is a different rejection, so
+    // the two answers are distinguished rather than merged.
+    let absent = verify_envelope_against_chain(&local, &env, &ctx(org, &vk), &MockChain::new())
+        .unwrap_err();
+    assert_eq!(absent, OrgNodeError::OrgNotOnChain);
+    assert_ne!(failed, absent, "a read failure and an absent slot must not be the same error");
+}
+
 // REQ-nhe2zu's commit rule is conditional, so withholding the commit when the
 // recomputed root does not match the chain's is that requirement's
 // abnormal-input case as well as REQ-wp2nyc's rejection.
@@ -138,7 +180,7 @@ fn rejects_when_org_absent_from_chain() {
 // `verify_envelope_against_chain` takes the context by shared reference and
 // returns the advanced guard only inside `Ok`, so the guard to assert on is
 // the one this test handed in.
-// verifies: REQ-wp2nyc, REQ-nhe2zu, REQ-mr5abb
+// verifies: REQ-wp2nyc, REQ-nhe2zu, REQ-mr5abb, LLR-8n95rf, LLR-d6kvbx
 #[test]
 fn rejects_root_mismatch_when_chain_root_differs() {
     let (admin, org, local, env, _new_root) = setup();
@@ -158,7 +200,7 @@ fn rejects_root_mismatch_when_chain_root_differs() {
     );
 }
 
-// verifies: REQ-8gz8bu
+// verifies: REQ-8gz8bu, LLR-vf5mjx
 #[test]
 fn rejects_stale_epoch() {
     let (admin, org, local, env, new_root) = setup();
@@ -173,7 +215,7 @@ fn rejects_stale_epoch() {
 
 // ---- relocated from src/sequence.rs ----------------------------------------
 
-// verifies: REQ-6yu72z
+// verifies: REQ-6yu72z, LLR-wx3php
 #[test]
 fn rejects_equal_and_lower_seq() {
     let g = SeqGuard::from_last_seen(5);
@@ -182,7 +224,11 @@ fn rejects_equal_and_lower_seq() {
     assert_eq!(g.check(4), Err(OrgNodeError::StaleSeq { got: 4, last_seen: 5 }));
 }
 
-// verifies: REQ-mr5abb
+// `advance` is LLR-uc7cej's. It never calls `from_last_seen`, so it carried
+// LLR-duwz79 in name only: review round 8 measured that starting every guard
+// at zero reddened six tests and none of them carried LLR-duwz79. The next test
+// does.
+// verifies: REQ-mr5abb, LLR-uc7cej
 #[test]
 fn advance_moves_high_water_mark_forward_only() {
     let mut g = SeqGuard::new();
@@ -194,7 +240,7 @@ fn advance_moves_high_water_mark_forward_only() {
 
 // ---- abnormal input: the cheap checks run before the delta is decoded ------
 
-// verifies: REQ-gju89b
+// verifies: REQ-gju89b, LLR-4fbuy8
 #[test]
 fn rejects_wrong_org_before_decoding_delta() {
     // Garbage delta bytes: if the org check did not come first, the error
@@ -214,7 +260,7 @@ fn rejects_wrong_org_before_decoding_delta() {
     );
 }
 
-// verifies: REQ-ag6kqm
+// verifies: REQ-ag6kqm, LLR-mcdh85
 #[test]
 fn rejects_bad_signature_before_decoding_delta() {
     // Garbage delta bytes signed by an imposter, for the expected org: if the
@@ -236,7 +282,7 @@ fn rejects_bad_signature_before_decoding_delta() {
     );
 }
 
-// verifies: REQ-6yu72z
+// verifies: REQ-6yu72z, LLR-xpbkp5
 #[test]
 fn rejects_stale_seq_before_decoding_delta() {
     // Garbage delta bytes, honestly signed at parent_seq 1 against a guard
@@ -257,7 +303,18 @@ fn rejects_stale_seq_before_decoding_delta() {
     );
 }
 
-// verifies: REQ-mr5abb
+// verifies: REQ-mr5abb, LLR-duwz79
+#[test]
+fn from_last_seen_starts_the_guard_at_the_given_mark() {
+    for mark in [0u64, 1, 7, u64::MAX - 1] {
+        let g = SeqGuard::from_last_seen(mark);
+        assert_eq!(g.last_seen(), mark, "last_seen reports the mark the guard was started at");
+        assert_eq!(g.check(mark), Err(OrgNodeError::StaleSeq { got: mark, last_seen: mark }));
+        assert!(g.check(mark + 1).is_ok());
+    }
+}
+
+// verifies: REQ-mr5abb, LLR-f5kq88
 #[test]
 fn check_does_not_advance_the_mark() {
     // `check` takes `&self`: a rejection (or an acceptance that is later
@@ -266,4 +323,81 @@ fn check_does_not_advance_the_mark() {
     let g = SeqGuard::from_last_seen(5);
     g.check(6).unwrap();
     assert_eq!(g.last_seen(), 5);
+}
+
+// ---- added 2026-10-03 by the architecture tooth ----------------------------
+
+// A delta whose base root is not the local trie's root is refused with the
+// specific error, before the delta is applied and before the chain is read.
+// verifies: REQ-wp2nyc, LLR-992mbf
+#[test]
+fn rejects_a_delta_whose_base_root_is_not_the_local_root() {
+    let (admin, org, _local, env, new_root) = setup();
+    // A local trie that is NOT the one the delta was built against: a genesis
+    // with a different admin, so its root differs from the delta's base_root.
+    // Two distinct seeds: org-members refuses an organisation in which one key
+    // is held twice, a member key equal to its own device key included
+    // (`DuplicateKey`, master `a547ff3`). Neither collides with the fixture
+    // seeds [1], [2], [3] or ADMIN_DEVICE_SEED [4].
+    let stranger = SigningKeypair::from_seed([42u8; 32]);
+    let stranger_device = SigningKeypair::from_seed([43u8; 32]);
+    let divergent = genesis_trie(&stranger, &stranger_device);
+
+    let chain = chain_at(org, new_root, 2);
+    let err = verify_envelope_against_chain(&divergent, &env, &ctx(org, &admin.verifying_key()), &chain)
+        .unwrap_err();
+    assert_eq!(err, OrgNodeError::DeltaBaseMismatch);
+}
+
+// The trie handed to verification is not mutated on the success path: the
+// caller's value is still readable and still holds its original root.
+// verifies: REQ-wp2nyc, LLR-8hwqru
+#[test]
+fn a_successful_verification_leaves_the_callers_trie_untouched() {
+    let (admin, org, local, env, new_root) = setup();
+    let root_before = local.root_hash().unwrap();
+
+    let chain = chain_at(org, new_root, 2);
+    let verified =
+        verify_envelope_against_chain(&local, &env, &ctx(org, &admin.verifying_key()), &chain)
+            .unwrap();
+
+    assert_eq!(local.root_hash().unwrap(), root_before, "the caller's trie moved");
+    assert_ne!(
+        verified.trie.root_hash().unwrap(),
+        root_before,
+        "the returned trie must be the new one, not the old"
+    );
+}
+
+// The same, on a rejection path.
+// verifies: REQ-wp2nyc, LLR-8hwqru
+#[test]
+fn a_rejected_verification_leaves_the_callers_trie_untouched() {
+    let (admin, org, local, mut env, new_root) = setup();
+    let root_before = local.root_hash().unwrap();
+    env.signature = [0u8; 64];
+
+    let chain = chain_at(org, new_root, 2);
+    assert!(
+        verify_envelope_against_chain(&local, &env, &ctx(org, &admin.verifying_key()), &chain)
+            .is_err()
+    );
+    assert_eq!(local.root_hash().unwrap(), root_before);
+}
+
+// `rejects_stale_epoch` above compares an epoch of 1 against a committed epoch
+// of 1, so the two numbers in the error are equal and swapping them is
+// invisible. The falsifiability sweep of 2026-10-03 found exactly that: a
+// mutation exchanging `got` and `last` in verify.rs left the gate green. This
+// case uses distinct numbers, so each field is pinned to the thing it names.
+// verifies: REQ-8gz8bu, LLR-vf5mjx
+#[test]
+fn a_stale_epoch_names_the_chain_epoch_and_the_committed_epoch_the_right_way_round() {
+    let (admin, org, local, env, new_root) = setup();
+    // ctx() commits epoch 1; the chain is behind it at epoch 0.
+    let chain = chain_at(org, new_root, 0);
+    let vk = admin.verifying_key();
+    let err = verify_envelope_against_chain(&local, &env, &ctx(org, &vk), &chain).unwrap_err();
+    assert_eq!(err, OrgNodeError::StaleEpoch { got: 0, last: 1 });
 }

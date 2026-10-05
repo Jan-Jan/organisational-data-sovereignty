@@ -53,7 +53,10 @@ the citations into those two moved: `transport_handshake.rs:91` is now `:94`,
 the mode's doc comment at `:50` is now `:59`. The other two are **unmoved**,
 because this change touches neither file: `admission_sender.rs:121` and
 `service_stories.rs:124` are still the exact `expect("B receive_and_verify
-timed out")` sites the paragraph cites.
+timed out")` sites the paragraph cites. *(Re-resolved 2026-10-04 by the org-node architecture change's review round
+7. `:100-111` was already stale at master, which had the arm at 112–113, and
+that change's inserted comment then moved it to **`endpoint.rs:134-140`**.
+`:53-55` still resolves, and the mode's doc comment is `:58-60`.)*
 
 The paragraph itself is kept as written, because it is the record of what was
 seen on the day; the present positions are given here so that following it does

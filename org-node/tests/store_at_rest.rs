@@ -53,7 +53,7 @@ fn contains(hay: &[u8], needle: &[u8]) -> bool {
     hay.windows(needle.len()).any(|w| w == needle)
 }
 
-// verifies: REQ-hzm4kt
+// verifies: REQ-hzm4kt, LLR-wusj89, LLR-8mfjey
 #[test]
 fn round_trips_encrypted_through_disk() {
     let path = tmp_path("roundtrip");
@@ -73,7 +73,7 @@ fn round_trips_encrypted_through_disk() {
     let _ = std::fs::remove_file(&path);
 }
 
-// verifies: REQ-hzm4kt
+// verifies: REQ-hzm4kt, LLR-t4u66w
 #[test]
 fn wrong_passphrase_yields_error_not_data() {
     let path = tmp_path("wrongpw");
@@ -85,7 +85,7 @@ fn wrong_passphrase_yields_error_not_data() {
     let _ = std::fs::remove_file(&path);
 }
 
-// verifies: REQ-hzm4kt
+// verifies: REQ-hzm4kt, LLR-s78sh7
 #[test]
 fn seeds_do_not_appear_in_the_file() {
     let path = tmp_path("plaintext");
@@ -101,7 +101,7 @@ fn seeds_do_not_appear_in_the_file() {
     let _ = std::fs::remove_file(&path);
 }
 
-// verifies: REQ-hzm4kt
+// verifies: REQ-hzm4kt, LLR-s78sh7
 #[test]
 fn organisation_secret_does_not_appear_in_the_file() {
     let path = tmp_path("orgsecret");
@@ -112,4 +112,72 @@ fn organisation_secret_does_not_appear_in_the_file() {
     let bytes = std::fs::read(&path).unwrap();
     assert!(!contains(&bytes, &org_secret), "org secret in clear");
     let _ = std::fs::remove_file(&path);
+}
+
+// ---- added 2026-10-03 by the architecture tooth ----------------------------
+
+// A file too short to hold the nonce is refused as such, rather than being
+// read as a nonce plus an empty ciphertext. The nonce is 24 bytes, so every
+// length below that is this case; the boundary and a few below it are probed.
+// verifies: REQ-hzm4kt, LLR-q5n28x
+#[test]
+fn a_file_shorter_than_the_nonce_is_refused() {
+    for len in [0usize, 1, 23] {
+        let path = tmp_path(&format!("short-{len}"));
+        std::fs::write(&path, vec![0u8; len]).unwrap();
+        let err = PersonaStore::open(path.clone(), "pw")
+            .err()
+            .unwrap_or_else(|| panic!("a {len}-byte file opened as a store"));
+        let rendered = format!("{err}");
+        assert!(
+            rendered.contains("too short"),
+            "a {len}-byte file must be refused as too short, got: {rendered}"
+        );
+    }
+}
+
+// Exactly the nonce length and no ciphertext is NOT the "too short" case: it
+// passes the length check and fails to decrypt, which is a different verdict.
+// This is what makes the bound `< 24` rather than `<= 24`.
+// verifies: REQ-hzm4kt, LLR-q5n28x
+#[test]
+fn a_file_of_exactly_the_nonce_length_is_refused_as_undecryptable_not_as_short() {
+    let path = tmp_path("exact-nonce");
+    std::fs::write(&path, vec![0u8; 24]).unwrap();
+    let err = PersonaStore::open(path, "pw").err().expect("opened a 24-byte file");
+    let rendered = format!("{err}");
+    assert!(!rendered.contains("too short"), "got the wrong verdict: {rendered}");
+    assert!(rendered.contains("decrypt failed"), "got: {rendered}");
+}
+
+// Nonce freshness. The falsifiability sweep of 2026-10-03 replaced
+// `rng.fill_bytes(&mut nonce)` with nothing — a fixed all-zero nonce on every
+// save — and the whole suite stayed green: nothing here was asserting that the
+// nonce ever changed. XChaCha20-Poly1305 does not survive nonce reuse under
+// the same key, and the key is derived from a fixed application salt and the
+// passphrase, so it IS the same key across saves of one store. This case is
+// what makes that mutation red.
+// verifies: REQ-hzm4kt, LLR-8mfjey
+#[test]
+fn each_save_draws_a_fresh_nonce() {
+    let path = tmp_path("nonce-freshness");
+    let mut store = PersonaStore::open(path.clone(), "pw").unwrap();
+    store.data_mut().personas.push(persona([1u8; 32], [2u8; 32]));
+
+    let mut nonces = Vec::new();
+    for _ in 0..4 {
+        store.save(&mut OsRng).unwrap();
+        let blob = std::fs::read(&path).unwrap();
+        nonces.push(blob[..24].to_vec());
+    }
+
+    for (i, a) in nonces.iter().enumerate() {
+        for (j, b) in nonces.iter().enumerate() {
+            if i != j {
+                assert_ne!(a, b, "saves {i} and {j} reused a nonce");
+            }
+        }
+    }
+    // And none of them is the all-zero nonce a dropped draw would leave.
+    assert!(nonces.iter().all(|n| n.iter().any(|b| *b != 0)));
 }

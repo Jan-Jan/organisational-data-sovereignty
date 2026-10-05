@@ -354,7 +354,19 @@ by `rejects_root_mismatch_when_chain_root_differs` and
 `MAX_FRAME` (`org-node/src/transport/mod.rs:47`), enforced on encode, on
 decode, and by the `read_to_end` limit of the receiving stream
 (`org-node/src/transport/wire.rs:26-28`, `:37-39`,
-`org-node/src/transport/endpoint.rs:300`).
+`org-node/src/transport/endpoint.rs:334`; *re-resolved 2026-10-04 by the
+org-node architecture change's review round 5 — it read `:300`*).
+
+*Correction, 2026-10-04 (org-node architecture change, review round 4): "that
+branch is not reached in practice" was true when written and was true for a
+second reason no one had noticed — the target seeded its chain with the
+pre-update root, so no input could be accepted at all. The target now seeds
+the root an honest update produces and builds its envelopes rather than
+decoding them from fuzz bytes; a `panic!()` on the accept path and a check 8
+weakened to compare against the candidate's own root both redden it. The
+target is therefore evidence of the root-match assertion as well as of
+panic-freedom. The two deterministic tests named above remain the primary
+evidence. Detail in `docs/verification/2026-10-03-worktree-guardrails-org-node-arch.md`.*
 
 Residual risk: reduced, **not acceptable**. The fuzz targets run under
 bolero's generative engine for one second each at the merge gate, which finds
@@ -366,9 +378,12 @@ bounded only by the frame that carries them, and there is no rate limit,
 allowlist or read timeout at the accept boundary — an **unauthorised**
 stranger, one the record does not name, obtains a chain read, a record rebuild
 and a signature check per connection. The handshake does authenticate the
-peer's Device key (`org-node/src/transport/endpoint.rs:3-5`, `:288-291`); what
+peer's Device key (`org-node/src/transport/endpoint.rs:3-5`, `:322-323`); what
 it does not do is decide whether that key belongs to a member before the work
-is spent (`org-node/src/transport/endpoint.rs:279-306`; in
+is spent (`org-node/src/transport/endpoint.rs:313-342`, *these two citations
+re-resolved 2026-10-04 by the org-node architecture change's review round 5;
+they read `:288-291` and `:279-306`, which that change's own edits to
+`endpoint.rs` had moved onto `send_conn`*; in
 `receive_and_verify` in `org-node/src/service.rs`, the chain read, the record
 rebuild — from the node's stored record, or on a first admission the base
 record rebuilt from the administrator's snapshot by `first_admission_base` —
@@ -582,7 +597,8 @@ register's count of distinct hazards is twelve rather than eleven.
   of the act. On both paths the chain write comes first (the `submit_update`
   call in each); the
   send frames the message through `encode_frame`, which is where the bound is
-  enforced (`org-node/src/transport/endpoint.rs:258`, the check at
+  enforced (`org-node/src/transport/endpoint.rs:292`, *re-resolved 2026-10-04,
+review round 5; it read `:258`*, the check at
   `org-node/src/transport/wire.rs:26-28`); and the local record is updated only
   after the send has returned (the record update at the end of each
   function). So for an

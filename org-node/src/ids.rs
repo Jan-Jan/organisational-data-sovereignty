@@ -25,21 +25,3 @@ impl core::fmt::Debug for OrgId {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn round_trips_through_postcard() {
-        let id = OrgId::new([7u8; 20]);
-        let bytes = postcard::to_allocvec(&id).unwrap();
-        let back: OrgId = postcard::from_bytes(&bytes).unwrap();
-        assert_eq!(id, back);
-    }
-
-    #[test]
-    fn debug_is_hex() {
-        let id = OrgId::new([0xab; 20]);
-        assert!(format!("{id:?}").starts_with("OrgId(0xabab"));
-    }
-}

@@ -80,21 +80,3 @@ pub fn revive_update_runtime_call(
     )
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn calldata_layout_is_exact() {
-        let root = [0x11u8; 32];
-        let key = [0x22u8; 32];
-        let data = build_update_calldata(root, key, 7);
-        assert_eq!(data.len(), 100);
-        assert_eq!(&data[0..4], &UPDATE_SELECTOR);
-        assert_eq!(&data[4..36], &root);
-        assert_eq!(&data[36..68], &key);
-        // epoch 7 as uint256 big-endian: 31 zero bytes then 0x07.
-        assert_eq!(data[99], 7);
-        assert!(data[68..99].iter().all(|b| *b == 0));
-    }
-}

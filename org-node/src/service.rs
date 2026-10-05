@@ -1380,6 +1380,17 @@ impl OrgService {
         &self.store.data().personas
     }
 
+    /// The invites imported but not yet consumed by a first admission.
+    ///
+    /// A read accessor alongside `list_personas` and `list_orgs`. It exists
+    /// because "leaving its record unchanged" on a rejected first admission
+    /// (REQ-xa6smf) includes the invite, and without a way to observe the
+    /// in-memory list a test can only see what reached the disk — which a
+    /// rejection never writes.
+    pub fn list_pending_invites(&self) -> &[PendingInvite] {
+        &self.store.data().pending_invites
+    }
+
     pub fn list_orgs(&self) -> &[OrgRecord] {
         &self.store.data().orgs
     }
@@ -1558,53 +1569,3 @@ fn fresh_member_id<R: RngCore + CryptoRng>(rng: &mut R) -> MemberId {
 // Unit tests (lib tests for service.rs; integration test is service_stories.rs).
 // ============================================================
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rand::rngs::OsRng;
-
-    fn tmp_store(suffix: &str) -> PersonaStore {
-        let dir = std::env::temp_dir()
-            .join(format!("ods-service-test-{}-{}", std::process::id(), suffix));
-        std::fs::create_dir_all(&dir).unwrap();
-        PersonaStore::open(dir.join("store.bin"), "testpass").unwrap()
-    }
-
-    #[test]
-    #[allow(clippy::unwrap_used)]
-    fn create_persona_persists_and_reloads() {
-        let store_path = {
-            let dir = std::env::temp_dir()
-                .join(format!("ods-svc-pers-{}", std::process::id()));
-            std::fs::create_dir_all(&dir).unwrap();
-            dir.join("store.bin")
-        };
-        let store = PersonaStore::open(store_path.clone(), "pw").unwrap();
-        let mut svc = OrgService::new(store, Box::new(MockChainOps::new()));
-        let pid = svc.create_persona(&mut OsRng, "alice", "Alice", "Smith").unwrap();
-        assert!(!pid.is_empty());
-        assert_eq!(svc.list_personas().len(), 1);
-
-        // Reload from disk.
-        let store2 = PersonaStore::open(store_path, "pw").unwrap();
-        let svc2 = OrgService::new(store2, Box::new(MockChainOps::new()));
-        assert_eq!(svc2.list_personas().len(), 1);
-        assert_eq!(svc2.list_personas()[0].handle, "alice");
-    }
-
-    #[tokio::test]
-    #[allow(clippy::unwrap_used)]
-    async fn create_organisation_advances_mock_chain() {
-        let store = tmp_store("org");
-        let chain = MockChainOps::new();
-        let chain_view = chain.clone();
-        let mut svc = OrgService::new(store, Box::new(chain));
-        let pid =
-            svc.create_persona(&mut OsRng, "admin", "Admin", "User").unwrap();
-        let org_id = svc.create_organisation(&mut OsRng, &pid).await.unwrap();
-        let state = chain_view.get(&org_id).unwrap();
-        assert_eq!(state.epoch, 1);
-        assert_eq!(svc.list_orgs().len(), 1);
-        assert_eq!(svc.list_personas()[0].status, PersonaStatus::Active);
-    }
-}

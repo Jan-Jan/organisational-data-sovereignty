@@ -46,6 +46,12 @@ base64 = { version = "0.22", optional = true }
 
 [dev-dependencies]
 rand = "0.8"
+# Normal [dependencies] too, re-declared for the same reason org-members is
+# below: an integration test crate cannot see the library's normal deps, and
+# the relocated unit tests in tests/value_types.rs and tests/blob_exchange.rs
+# name them directly.
+postcard = { version = "1", features = ["alloc", "use-std"] }
+base64 = "0.22"
 # The e2e test needs tokio's macros even when running `--features chain`.
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 # bolero 0.13 matches the version used in on-chain-client (the repo's other fuzz targets).
@@ -153,3 +159,39 @@ required-features = ["app"]
 name = "admission_sender"
 path = "tests/admission_sender.rs"
 required-features = ["app", "test-support"]
+
+# The six targets below were added 2026-10-03 by org-node's architecture tooth
+# (docs/plans/2026-10-03-org-node-architecture.md). Each holds unit tests
+# relocated out of a `#[cfg(test)]` module in `src` into `tests/`, where
+# `test_paths` reads their `verifies:` annotations — the same move this unit
+# made on 2026-09-09 for the verify, store and frame cases. A low-level
+# requirement whose only evidence sits in `src` cannot be traced, so an item
+# would otherwise read as having no test at all.
+
+[[test]]
+name = "value_types"
+path = "tests/value_types.rs"
+
+[[test]]
+name = "key_custody"
+path = "tests/key_custody.rs"
+
+[[test]]
+name = "envelope_binding"
+path = "tests/envelope_binding.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "blob_exchange"
+path = "tests/blob_exchange.rs"
+required-features = ["app"]
+
+[[test]]
+name = "chain_write_pure"
+path = "tests/chain_write_pure.rs"
+required-features = ["chain", "test-support"]
+
+[[test]]
+name = "service_lifecycle"
+path = "tests/service_lifecycle.rs"
+required-features = ["app"]

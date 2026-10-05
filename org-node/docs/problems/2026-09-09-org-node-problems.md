@@ -117,7 +117,7 @@ Envelope has been sent to the peer, so a failed send or a crash between the
 two leaves the chain one epoch ahead of the administrator's record, every
 later publish refused by the contract's epoch check, and — for a revocation —
 a removal on the chain that no device is ever told about.
-affects: RC-wqgm2p
+affects: RC-wqgm2p, LLR-t4znbk, LLR-qg9utu
 opened: 2026-09-09
 status: open
 
@@ -160,7 +160,7 @@ from the Join request, without checking that the address's identity is the
 Device key the Join request carries, so an altered Join request hands the
 secret to whoever the altered address names while the record admits the
 joiner's genuine keys.
-affects: RC-b6mydy
+affects: RC-b6mydy, LLR-jn5jeh
 opened: 2026-09-09
 status: open
 
@@ -195,7 +195,7 @@ same commit as `receive_and_verify` — the record, the epoch and the
 high-water mark — with neither the invite cross-check on first admission nor
 the membership cross-check afterwards, so a Change set relayed by a device
 the record does not name shapes the node's record.
-affects: RC-b6mydy
+affects: RC-b6mydy, LLR-3q63zv
 opened: 2026-09-09
 status: open
 

@@ -42,6 +42,33 @@ pub use service::SubxtChainOps;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_fixtures;
 
+/// Test seam for crate-internal items that carry a low-level requirement.
+///
+/// `test_paths` in this unit's guardrails config reads `verifies:` annotations
+/// only from `org-node/tests`, so an item whose evidence lives in a `src`
+/// unit test cannot be traced. This module is the route by which such an item
+/// reaches an integration test. It adds no behaviour, and it is never part of
+/// a production build (`test-support` is not enabled by `app`).
+#[cfg(all(feature = "test-support", feature = "chain"))]
+pub mod test_support {
+    use subxt::dynamic::Value;
+    use subxt::ext::scale_value::Composite;
+    use subxt::transactions::StaticPayload;
+
+    use crate::chain_write::WriteError;
+
+    /// Wrapper over the crate-private `chain_write::multisig::build_dispatch_tx`,
+    /// which carries LLR-f74xwb. A wrapper rather than a re-export because the
+    /// function stays `pub(crate)`: the production surface is unchanged by this
+    /// seam existing.
+    pub fn build_dispatch_tx(
+        other_signatories: &[[u8; 32]],
+        call: Value,
+    ) -> Result<StaticPayload<Composite<()>>, WriteError> {
+        crate::chain_write::multisig::build_dispatch_tx(other_signatories, call)
+    }
+}
+
 pub use chain::{ChainReader, OrgState};
 pub use envelope::SignedDeltaEnvelope;
 pub use error::OrgNodeError;

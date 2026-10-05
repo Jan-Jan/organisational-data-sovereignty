@@ -61,6 +61,10 @@ fn genesis_and_admit(
     (genesis, new_trie, delta)
 }
 
+// LLR-jn5jeh was removed from this annotation 2026-10-04 by review round 2:
+// this is the dial-by-id case, which is what LLR-jn5jeh's Loopback clause
+// excludes, and it never calls `admit_member`.
+// verifies: LLR-v873fx
 #[tokio::test]
 async fn delivers_and_verifies_admit_over_relay_by_id() {
     // Admin MEMBER key signs the envelope.

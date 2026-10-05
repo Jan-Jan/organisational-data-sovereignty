@@ -19,7 +19,7 @@ fn sample_msg() -> WireMessage {
     WireMessage { envelope: env, org_secret: Some([9u8; 32]), genesis_snapshot: None }
 }
 
-// verifies: REQ-eg5j8u
+// verifies: REQ-eg5j8u, LLR-fa7jt8, LLR-er2x8n
 #[test]
 fn frame_round_trips() {
     let msg = sample_msg();
@@ -31,7 +31,7 @@ fn frame_round_trips() {
     assert_eq!(back, msg);
 }
 
-// verifies: REQ-eg5j8u
+// verifies: REQ-eg5j8u, LLR-8kh3zf
 #[test]
 fn oversize_body_is_rejected() {
     // A body claiming > MAX_FRAME must be rejected by decode_body.
@@ -39,10 +39,41 @@ fn oversize_body_is_rejected() {
     assert!(matches!(decode_body(&big), Err(TransportError::FrameTooLarge(_))));
 }
 
-// verifies: REQ-eg5j8u
+// verifies: REQ-eg5j8u, LLR-sc6zuh
 #[test]
 fn oversize_message_is_rejected_on_encode() {
     let mut msg = sample_msg();
     msg.genesis_snapshot = Some(vec![0u8; MAX_FRAME + 1]);
     assert!(matches!(encode_frame(&msg), Err(TransportError::FrameTooLarge(_))));
+}
+
+// ---- added 2026-10-03 by the architecture tooth ----------------------------
+
+// Bytes that are within the bound but are not an encoded message are refused
+// with the typed Malformed error rather than panicking. This is the decode
+// side's abnormal-input case that is NOT about the size bound.
+// verifies: REQ-9g6as6, LLR-pkruy8
+#[test]
+fn a_body_that_is_not_an_encoded_message_is_refused() {
+    assert!(matches!(
+        decode_body(b"not a postcard WireMessage"),
+        Err(TransportError::Malformed)
+    ));
+    // Empty input is the boundary of the same case.
+    assert!(matches!(decode_body(&[]), Err(TransportError::Malformed)));
+    // A truncated prefix of a real body: valid bytes, cut short.
+    let framed = encode_frame(&sample_msg()).unwrap();
+    let truncated = &framed[4..framed.len() - 1];
+    assert!(matches!(decode_body(truncated), Err(TransportError::Malformed)));
+}
+
+// A body of exactly MAX_FRAME is within the bound, so the refusal is `>` and
+// not `>=` — the boundary itself must not be rejected for being the boundary.
+// verifies: REQ-eg5j8u, LLR-8kh3zf
+#[test]
+fn a_body_of_exactly_the_bound_is_not_refused_for_its_size() {
+    let at_bound = vec![0u8; MAX_FRAME];
+    // It is not a valid message, so it is refused — but as Malformed, which is
+    // the decode verdict, never as FrameTooLarge, which is the size verdict.
+    assert!(matches!(decode_body(&at_bound), Err(TransportError::Malformed)));
 }
