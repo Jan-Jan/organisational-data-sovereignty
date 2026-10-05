@@ -47,12 +47,16 @@ credible outcome.
 
 ## Identity and naming
 
+assesses: REQ-crjxk8
+
 REQ-crjxk8 (stable 32-byte member identifier, distinct from handle and keys).
 Hazard impact: mitigates. An organisation that identified members by a mutable
 handle would silently re-target every grant made to a member when that member
 was renamed, and would confuse two members across a rename-and-reuse. Both are
 wrong-grant paths. This requirement is what makes a grant survive a rename
 without following the name to whoever holds it next.
+
+assesses: REQ-kmvc96
 
 REQ-kmvc96 (handle uniqueness within the organisation). Hazard impact:
 mitigates. Two members holding one handle makes any human instruction naming
@@ -66,6 +70,8 @@ rather than approximate; single-script and the `.` exclusion narrow the space
 of handles that can be made to read as another. The length bound is resource
 protection, with no direct hazard path.
 
+assesses: REQ-m8aexh
+
 REQ-m8aexh (confusable-skeleton rejection). Hazard impact: mitigates, and this
 is the sharpest of the naming set. Its threat is an attacker enrolling a handle
 that renders identically to an existing member's, so an administrator grants to
@@ -76,11 +82,15 @@ own right.
 
 ## Keys and devices
 
+assesses: REQ-xdx2c2
+
 REQ-xdx2c2 (bounded device keys per member, no duplicates). Hazard impact:
 mitigates, weakly. The bound limits how many endpoints a single member's
 compromise exposes and bounds the work of isolating that member; it does not
 prevent any harm by itself. Duplicate rejection is an integrity property of the
 device set rather than a safety one.
+
+assesses: REQ-ewdg2q
 
 REQ-ewdg2q (member-as-a-group key replaced when a device key is removed).
 Hazard impact: mitigates, and directly on the retained-access path. A removed
@@ -100,6 +110,8 @@ should treat this as a control whose effectiveness is currently unverified
 rather than as one in place. (Corrected 2026-10-03: fixed — an unchanged
 replacement key is refused with `P2pKeyNotReplaced`; PR-zz4exm resolved.)
 
+assesses: REQ-r784fu
+
 REQ-r784fu (isolate a member in one step, retaining membership, reversible by
 adding a device). Hazard impact: mitigates, on both harms at once. It is the
 emergency response to a member whose devices are compromised, so its absence
@@ -110,11 +122,15 @@ re-admission. A candidate risk control for tooth 5.
 
 ## Integrity of the record
 
+assesses: REQ-avmu3j
+
 REQ-avmu3j (no membership root reported for an un-recomputed record). Hazard
 impact: mitigates. A stale root published as current would attest to a
 membership that no longer holds — including one still containing a member just
 removed. Erroring instead is what prevents a revocation from being contradicted
 by the very value used to prove membership.
+
+assesses: REQ-d3prca
 
 REQ-d3prca (modification leaves the existing record unchanged). Hazard impact:
 mitigates. A published membership record that could be altered in place would
@@ -122,6 +138,8 @@ invalidate whatever was decided against it and would break the ability to
 compare two membership states — which is what a distributed organisation needs
 in order to converge. No direct injury path; it protects the evidence rather
 than the decision.
+
+assesses: REQ-4umsuz
 
 REQ-4umsuz (reject a change set whose base does not match; reject a result
 whose root does not match the expected root). Hazard impact: mitigates. Both
@@ -132,6 +150,8 @@ simultaneously. This is the requirement closest to the fork-safety and
 convergence invariants already mechanised in the quint models, and tooth 5
 should connect them.
 
+assesses: REQ-shk82j
+
 REQ-shk82j (re-validate handles and device sets received from outside the
 process). Hazard impact: mitigates. Without it, every rule above — validity,
 uniqueness, confusables, the device bound — is enforced only on the path
@@ -140,6 +160,8 @@ member the software would have refused. It is what makes the other
 requirements properties of the membership record rather than of one code path.
 
 ## Robustness
+
+assesses: REQ-ds8ryr
 
 REQ-ds8ryr (report errors, never panic, for any input). Hazard impact:
 mitigates availability harm. A panic in a library embedded in the node or the

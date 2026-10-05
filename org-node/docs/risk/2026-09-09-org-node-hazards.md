@@ -1084,6 +1084,8 @@ given an RC identifier until it does.
 
 ## Derived requirements assessment
 
+assesses: REQ-wp2nyc, REQ-bvh8v6, REQ-gju89b, REQ-ag6kqm, REQ-8gz8bu, REQ-nhe2zu, REQ-6yu72z, REQ-mr5abb, REQ-9g6as6, REQ-bcxz96, REQ-eg5j8u, REQ-xa6smf, REQ-ztdza4, REQ-uxv2x2, REQ-hzm4kt
+
 Every requirement minted by this change is `satisfies: derived`: each exists
 because of how the node was built — a signed envelope, a sequence number, a
 passphrase-protected store — and not because a system-needs document asked
@@ -1162,6 +1164,8 @@ record; this file adds the hazards each was written toward — HAZ-tawvm2 and
 HAZ-vxabf9 respectively — and the dates they fall due.
 
 ## Added 2026-10-03 — the binding scope of the transport, assessed
+
+assesses: REQ-db6s7q
 
 **REQ-db6s7q** (in Loopback mode, bind only loopback addresses and offer a
 peer only loopback addresses) was minted while resolving PR-d4nye8, and is
@@ -1320,6 +1324,8 @@ does — is still not minted.
 the register's vocabulary without mitigating anything RC-b6mydy does not
 already mitigate, and a control minted only so that a requirement has a parent
 to cite is a traceability artifact rather than a risk control.
+
+assesses: REQ-2wzfzv
 
 **REQ-2wzfzv, assessed: a deliberate unavailability, in the direction this
 register already prefers.** That requirement states which sockets must come up

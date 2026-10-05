@@ -131,7 +131,8 @@ about the sandbox, in both directions.
       the capture fixed (`rc=$?`), reported **602 ok, 0 not ok, exit 0**.
       Re-record version, commit and result whenever `/ratchet` updates the
       scripts. Do not modify the scripts in this project; change them
-      upstream, where the tests live.
+      upstream, where the tests live. **Re-recorded 2026-10-05** at upstream
+      `35570e8`, five units: `docs/plans/2026-10-05-ratchet-setup-35570e8.md`.
 - [ ] **Scope note.** Guardrails supports a quality management system; it is
       not itself regulatory compliance. The quality manual, design controls
       and human sign-offs govern.

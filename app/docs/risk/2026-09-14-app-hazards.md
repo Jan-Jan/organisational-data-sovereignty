@@ -1141,6 +1141,8 @@ input checks (REQ-he8ejb, REQ-sjkp8z), make an existing outcome visible
 already held (REQ-6hgm8r), fix a leak (REQ-rq8g2v), or constrain a message's
 content (REQ-bmk2z2).
 
+assesses: REQ-7g3k9a, REQ-rxc8sp, REQ-2k7ys4, REQ-3hfggn, REQ-vgr7s2, REQ-645jq9, REQ-e4ah9h, REQ-bvx4nh, REQ-dp95pv, REQ-tw4cb5, REQ-he8ejb, REQ-sjkp8z, REQ-affyf5, REQ-a83vqr, REQ-akt4p7, REQ-jfxah3, REQ-6hgm8r, REQ-rq8g2v, REQ-bmk2z2
+
 **REQ-kn5rtx and REQ-wu6z9p**, added after the independent review, are assessed
 here too. Both realise RC-3rddh7, and RC-3rddh7 exists *because* §5's fourth
 entry is a hazard the earlier controls introduced — so the assessment is not
@@ -1153,6 +1155,8 @@ The one thing to watch is that `classify_receive_error` is total over
 `OrgNodeError` with no wildcard arm, which is deliberate — a variant added
 upstream must be classified explicitly rather than defaulting — and that
 totality is what a future `org-node` change will meet as a compile error.
+
+assesses: REQ-kn5rtx, REQ-wu6z9p
 
 5 + 14 = 19 for the requirements written by the original analysis, plus
 REQ-kn5rtx and REQ-wu6z9p from the review round = 21 ordinary requirements;
@@ -1172,9 +1176,13 @@ hazard: the previous behaviour showed a value the software was not using, which
 is the hazard being removed, and the restart is the same restart the corrected
 variable requires anyway.
 
+assesses: REQ-bvx4nh
+
 **REQ-x3c8n2**, the expectation on `org-node`, introduces no hazard in this
 unit because it changes no behaviour here: it records a need. Its hazard
 relevance is the reverse — it is the item on which HAZ-cfp4jb's and
 HAZ-ny7yvt's unreduced probabilities depend, and §4.6 and §4.5 say so. If it
 goes unmet past 2026-12-13, neither residual improves and both stay exactly
 where this register leaves them.
+
+assesses: REQ-x3c8n2

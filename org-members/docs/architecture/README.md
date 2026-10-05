@@ -1,10 +1,10 @@
 # Architecture ledger
 
 This directory is a per-change ledger: each merged change contributes one
-dated file, `YYYY-MM-DD-<slug>.md` (merge date, assigned by `merge-change`
+dated file, `YYYY-MM-DD-<slug>.md` (the finalize date, assigned by `merge-change`
 from your worktree's `DRAFT-<branch>-<slug>.md`). **Edit existing items in
 the file that defines them.** Use this README's Overview section for the
-system-wide decomposition picture; `soup.md` (single file) holds the SOUP
+system-wide decomposition picture; `soup.md` (single file) contains the SOUP
 inventory.
 
 <!--
@@ -20,7 +20,7 @@ the high-level REQs), written under the software item they belong to:
 
 - Every design item must trace to at least one requirement.
 - Every LLR satisfies a REQ or is marked derived; derived LLRs must be
-  assessed in the risk ledger.
+  assessed in the risk ledger, where an `assesses:` line names them.
 - Tests verify LLRs where they exist; the parent REQ is covered
   transitively.
 - Class C items require LLRs (interfaces, algorithms, error behavior,

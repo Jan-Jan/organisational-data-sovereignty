@@ -69,6 +69,8 @@ a later analysis finds it already considered.
 
 ### LLR-paxj7b — `MemberLeaf::new` rejects a member with no device key
 
+assesses: LLR-paxj7b
+
 Affects an existing hazardous situation; introduces no new hazard; changes no
 control's effectiveness.
 
@@ -131,6 +133,8 @@ gets decided.
 
 ### LLR-72p8bz — four separated hash domains
 
+assesses: LLR-72p8bz
+
 Changes no control's wording; supplies an unstated premise two controls rest on;
 introduces no new hazard.
 
@@ -164,6 +168,8 @@ methods the same domain context.
 
 ### LLR-zbe553 — MSB-first bit addressing of the member identifier
 
+assesses: LLR-zbe553
+
 No hazard impact, because the convention is internal, compiled in, and not
 negotiated with any counterparty at run time.
 
@@ -183,6 +189,8 @@ a migration rather than as a refactor. That is a statement about change control,
 not a hazard in the current design.
 
 ### LLR-wm5hpc — per-level empty-subtree hashes; an emptied record returns to the empty root
+
+assesses: LLR-wm5hpc
 
 Affects an existing hazardous situation — HAZ-h58jn6 — and does not change the
 effectiveness of the control on it. Introduces no new hazard. Raises one question
@@ -216,6 +224,8 @@ it is not re-rated here.
 
 ### LLR-4n8zqx — the root is determined by the member set alone
 
+assesses: LLR-4n8zqx
+
 Affects existing hazardous situations HAZ-y8h835 and HAZ-h58jn6; RC-9z65hw's
 effectiveness **depends** on it; introduces no new hazard.
 
@@ -246,6 +256,8 @@ unused, not a gap, and it is the best candidate for a measured follow-up in a
 later change.
 
 ### LLR-8jttpb — the diff walk descends left before right
+
+assesses: LLR-8jttpb
 
 The plan asked whether RC-9z65hw's effectiveness depends on the traversal order
 this LLR fixes. **It does not**, and saying so precisely is more useful than
@@ -397,6 +409,8 @@ negatives.
 
 ### LLR-k89ahd — `rotate_p2p_key` replaces the key and changes nothing else
 
+assesses: LLR-k89ahd
+
 Affects an existing hazardous situation; introduces no new hazard; implements no
 control.
 
@@ -462,6 +476,8 @@ rendering, which is consistency rather than a safety property here; the bounds a
 LLR-w5nkbu's, assessed above under HAZ-8suua9.
 
 ### LLR-h7stq2 — `calculate_delta` transforms `old` into the receiver, and is refused on uncomputed hashes
+
+assesses: LLR-h7stq2
 
 Affects HAZ-y8h835; supports RC-ty8qdw and RC-9z65hw at the producing end;
 introduces no new hazard.

@@ -219,9 +219,8 @@ abnormal-input waiver for LLR-zbe553 therefore does not stand on unreachability.
 
 What is actually the case: the panic is real and reachable through the public
 API, it is filed as **PR-jq43gx** (opened 2026-09-17, open) in
-`../problems/2026-09-17-review-fixes.md` (written as
-`DRAFT-worktree-guardrails-org-members-arch-review-fixes.md` until
-`finalize-docs.sh` dated it; the reference was corrected 2026-09-17), and
+`../problems/2026-09-17-review-fixes.md` (written under its draft name
+until `finalize-docs.sh` dated it; the reference was corrected 2026-09-17), and
 the open question inside it is whether `bit()` is a "membership operation" in
 REQ-ds8ryr's sense at all — an addressing primitive that adds nothing and
 rejects nothing, or public input the requirement's "for any input" governs. The
@@ -317,6 +316,8 @@ satisfies: derived
 **LLR-v3jqau**: every operation naming a member that is not in the organisation
 is refused with `IdNotFound`. satisfies: REQ-ds8ryr
 
+### Amendments to LLR-s97ywt, LLR-w92psx and LLR-k89ahd
+
 LLR-s97ywt as first written (2026-09-17) stated what the software did, which
 was less than REQ-ewdg2q requires: the requirement's second clause — reject a
 replacement key equal to the key being replaced — was not implemented, recorded
@@ -334,7 +335,7 @@ installing the key already held replaces nothing. `rotate_p2p_key`
 (LLR-k89ahd) is not amended: it removes no device, so REQ-ewdg2q does not reach
 it. (LLR-k89ahd amended after all, 2026-10-03, by owner ruling, in a later
 change: `rotate_p2p_key` refuses the member's current key with the same error.
-It stays `satisfies: derived` — no requirement asks for it — and is assessed in
+It stays derived — no requirement asks for it — and is assessed in
 `../risk/2026-09-17-design-derived.md` under LLR-k89ahd. The same ruling settled
 that a key no longer held — a member key used earlier, the key of a device
 removed earlier — and a non-canonical encoding of a held key are not checked,

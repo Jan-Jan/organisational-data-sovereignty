@@ -14,7 +14,7 @@
 # Scripts run from the repository root, so paths and commands below are
 # repository-relative.
 guardrails_version: 0.5.1
-guardrails_commit: e2eac86ff8db2157735b9604b7ade190d4f465f3
+guardrails_commit: 35570e874193e9082b9e5e690efedb355cf36768
 
 # IEC 62304 software safety class. C: the app is the shipped product — the
 # surface through which an organisation admits, verifies and revokes members.
@@ -24,7 +24,7 @@ guardrails_commit: e2eac86ff8db2157735b9604b7ade190d4f465f3
 # docs/adr/2026-09-05-units-and-per-unit-classes.md.
 safety_class: C
 
-id_prefixes: REQ HAZ RC SDD LLR PR
+id_prefixes: REQ HAZ RC SDD LLR PR ADR
 
 # Canonical document locations. README-only ledgers as of 2026-09-05.
 doc_srs: app/docs/requirements

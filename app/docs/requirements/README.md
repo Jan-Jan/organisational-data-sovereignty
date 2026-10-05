@@ -1,8 +1,8 @@
 # Requirements ledger
 
 This directory is a per-change ledger: each merged change contributes one
-dated file, `YYYY-MM-DD-<slug>.md`, named at merge time (the date is the
-merge date, so `ls` reads chronologically). In a worktree, create
+dated file, `YYYY-MM-DD-<slug>.md`, named at merge time (the date is the day
+`merge-change` finalized the draft, so `ls` reads chronologically). In a worktree, create
 `DRAFT-<branch>-<slug>.md`; `merge-change` renames it. **Edit existing items
 in the file that defines them** — definitions never move.
 
@@ -17,13 +17,13 @@ Item grammar (enforced by .guardrails/scripts/check-trace.sh):
 - `(implements: RC-...)` is required when the requirement realizes a risk
   control from the risk management file.
 - A requirement with no parent in system needs is marked `satisfies: derived`
-  and must be assessed in the risk ledger.
+  and must be assessed in the risk ledger, where an `assesses:` line names it.
 - Mint the ID when you write the item: run
   `.guardrails/scripts/new-id.sh <PREFIX>` and paste what it prints. The token
   is random and is allocated against nothing, so two worktrees and two GitHub
   PRs never contend for it. Never invent one by hand — the digit rule and the
   alphabet are what keep an ID from matching ordinary English.
-- Every requirement must be verified by at least one test carrying a
+- Every requirement must be verified by at least one test containing a
   `verifies:` annotation (directly, or transitively via a tested LLR).
 - IDs in the examples above use `NNNNNN` as a placeholder, and the examples
   are indented. Both matter. A real ID here would be a reference to an item

@@ -14,6 +14,7 @@
 #   DUPLICATE-ID  — an ID defined (**ID**: ...) at more than one site in the
 #                   tree. A definition line declares the ID at its start and no
 #                   other, so naming further IDs in the same sentence is safe.
+#                   A copy-pasted item is the usual cause.
 #   MALFORMED-ID  — a line that opens with a definition form for a declared
 #                   prefix whose body is not a valid ID: **REQ-abcdef**: with no
 #                   digit, or a legacy **REQ-01** too short to have ever
@@ -26,19 +27,36 @@
 # random draws collide is caught by DUPLICATE-ID above, because merge-change
 # merges the base branch into the worktree (step 1) before running this script
 # (step 4). There is likewise no mint ceiling and so no UNANCHORED-DEF: a
-# definition form sitting in prose reserves nothing.
+# definition form in prose reserves nothing.
 #
 # Scoped runs engage only when .guardrails/units.yaml exists and GR_CONFIG
 # names a declared unit's config. Engaged, the DRAFT-ID, DRAFT-FILE and
 # MALFORMED-ID scans narrow to the unit; DUPLICATE-ID stays tree-wide.
 #
+# After the violation lines, one `fix <RULE>: <remedy>` line per rule that
+# fired, in the order the rules first fired (D8 of
+# docs/plans/2026-09-28-agent-first-skills.md). check_ids_remedy below is the
+# remedy table; tests/remedies.bats checks that it has one entry per rule
+# above.
+#
 # Exit codes: 0 pass, 1 violations, 2 usage/environment error.
 set -u
+
+# Prints the remedy for report $1, or returns 1 for a report with none.
+check_ids_remedy() {
+    case "$1" in
+        (DRAFT-ID) echo 'Run .guardrails/scripts/new-id.sh <PREFIX> and replace each draft token with the ID it prints.' ;;
+        (DRAFT-FILE) echo 'Mid-change, leave it: check-ids.sh --allow-draft-files passes it. At merge, run merge-change step 3 (finalize-docs.sh), which renames it, then run this check again.' ;;
+        (DUPLICATE-ID) echo 'Keep one definition and give the other item a fresh ID from .guardrails/scripts/new-id.sh <PREFIX>.' ;;
+        (MALFORMED-ID) echo 'Give each item an ID from .guardrails/scripts/new-id.sh <PREFIX>; never widen a pattern to accept the token that is there.' ;;
+        (*) return 1 ;;
+    esac
+}
 
 . "$(dirname "$0")/lib.sh"
 # NOT `cd "$(gr_root)" || exit 2`: gr_root's gr_die exits only the command
 # substitution, and under dash `cd ""` returns 0 and stays put — so outside a
-# git repository the script carried on in the caller's directory with a
+# git repository the script continued in the caller's directory with a
 # relative config path. The status has to be taken from the substitution.
 gr_repo_root=$(gr_root) || exit 2
 cd "$gr_repo_root" || exit 2
@@ -52,7 +70,7 @@ gr_unit_engage
 # This gate validated nothing about the config until change B — recorded as gap
 # 3 in docs/verification/2026-08-18-config-schema.md. It reads only
 # id_prefixes, so the omission looked harmless; it was not. Every shape
-# gr_check_config exists to refuse — a misspelled key, a key hidden behind a
+# gr_check_config exists to reject — a misspelled key, a key hidden behind a
 # BOM, a declared prefix whose gate inputs are unconfigured — was caught by the
 # traceability and finalize gates only, so a project running check-ids.sh alone
 # got no config validation at all.
@@ -62,7 +80,7 @@ allow_draft_files=0
 while [ $# -gt 0 ]; do
     case "$1" in
         (--allow-draft-files) allow_draft_files=1 ;;
-        # --allow-drafts and --base are refused, not ignored. Both named a gate
+        # --allow-drafts and --base are rejected, not ignored. Both named a gate
         # that no longer exists, and a flag accepted in silence is a check the
         # caller believes they configured. Failing here is what makes a stale
         # CI line or an un-upgraded skill visible at the upgrade.
@@ -84,6 +102,8 @@ P=$(gr_prefix_re) || exit 2
 draft_re="$GR_DRAFT_TOKEN_RE"
 def_re=$(gr_def_re "$P")
 fail=0
+# The rules that fired, space-separated, in the order they fired.
+fired_rules=""
 
 # --- DRAFT-ID: no draft identifiers may remain, under any flag --------------
 # Status checked, stderr not suppressed. A scan that errors finds nothing, and
@@ -107,9 +127,7 @@ _st=$?
 [ "$_st" -le 1 ] || gr_die "scanning for draft IDs failed (git grep exit $_st)"
 if [ -n "$drafts" ]; then
     printf '%s\n' "$drafts" | sed 's/^/DRAFT-ID /'
-    echo "guardrails: draft IDs are no longer minted — an item gets its final ID" >&2
-    echo "when it is written. Run .guardrails/scripts/new-id.sh <PREFIX> and replace" >&2
-    echo "each token above with the ID it prints." >&2
+    fired_rules="$fired_rules DRAFT-ID"
     fail=1
 fi
 
@@ -123,6 +141,7 @@ if [ "$allow_draft_files" -eq 0 ]; then
         | grep -E "$GR_DRAFT_FILE_RE" || true)
     if [ -n "$draft_files" ]; then
         printf '%s\n' "$draft_files" | sed 's/^/DRAFT-FILE /'
+        fired_rules="$fired_rules DRAFT-FILE"
         fail=1
     fi
 fi
@@ -134,14 +153,16 @@ fi
 # announces is invisible to every gate while the run still exits 0 — the exact
 # false green this project exists to remove.
 #
-# Anchored to the DECLARED prefixes so that ordinary bold markdown and another
-# project's conventions (**ADR-abcdef**:) are left alone, and to column one so
-# that a definition form quoted in prose is treated the same way a well-formed
-# one in prose is: as prose.
+# Anchored to the DECLARED prefixes, so that ordinary bold markdown and a
+# prefix the project does not declare are left alone: **ADR-abcdef**: is
+# MALFORMED-ID in a project whose id_prefixes lists ADR, as the shipped config
+# does, and is not reported in one that does not. Anchored also to column one,
+# so that a definition form quoted in prose is treated the same way a
+# well-formed one in prose is: as prose.
 #
 # One scan, not two. git grep composes the two patterns on the LINE — every
 # line that opens a definition form, minus every line that opens a VALID one —
-# so there is nothing to frame and nothing to parse: the surviving lines are
+# so there is nothing to frame and nothing to parse: the remaining lines are
 # the violations and are printed as they come. An earlier version harvested the
 # forms with -o and then searched for each one literally to find its location,
 # which reported every line that MENTIONED a malformed form, not the lines that
@@ -169,9 +190,7 @@ _st=$?
 [ "$_st" -le 1 ] || gr_die "MALFORMED-ID scan failed (git grep exit $_st)"
 if [ -n "$malformed" ]; then
     printf '%s\n' "$malformed" | sed 's/^/MALFORMED-ID /'
-    echo "guardrails: the lines above open with a definition form whose ID is not" >&2
-    echo "valid, so no gate can see the item they announce. Give each one an ID from" >&2
-    echo ".guardrails/scripts/new-id.sh <PREFIX>." >&2
+    fired_rules="$fired_rules MALFORMED-ID"
     fail=1
 fi
 
@@ -196,6 +215,12 @@ dups=$(printf '%s\n' "$_defs" | sed 's/[*:]//g' | sort | uniq -d)
 for id in $dups; do
     echo "DUPLICATE-ID $id (defined more than once in tree)"
     fail=1
+done
+[ -z "$dups" ] || fired_rules="$fired_rules DUPLICATE-ID"
+
+for rule in $fired_rules; do
+    remedy=$(check_ids_remedy "$rule") || continue
+    printf 'fix %s: %s\n' "$rule" "$remedy"
 done
 
 exit $fail

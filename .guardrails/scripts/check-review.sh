@@ -6,13 +6,13 @@
 # The review artefact gate. Independent review (merge-change step 6a) is the
 # highest-yield step in the sequence and was the only one with nothing behind
 # it: no check that a reviewer was dispatched, that findings were answered, or
-# that the record says anything at all. Reported by a class B project running
+# that the record states anything at all. Reported by a class B project running
 # sixty-nine verification records entirely on the honour system.
 #
 # Fails (exit 1) on:
 #   MISSING-RECORD BRANCH — no record in doc_verification declares this change.
 #   INCOMPLETE-RECORD FILE (no KEYWORD:) — the record for this change omits a
-#                            required field, or carries it with no value. An
+#                            required field, or contains it with no value. An
 #                            empty `reproduced:` is an omission wearing the
 #                            shape of compliance and is reported as one.
 #   UNDISPOSED-FINDING FILE:LINE ID — a finding block in this change's record
@@ -25,11 +25,17 @@
 #                            Such a line opens no block, so the finding is
 #                            invisible and its disposition is credited to
 #                            whatever block happens to be open.
-#   ORPHAN-DISPOSITION FILE:LINE — a `disposition:` at column one belonging to
-#                            no finding block. The backstop for every shape of
-#                            detached finding the rule above cannot name, and
-#                            the same mechanism check-trace.sh calls
-#                            ORPHAN-ANNOTATION.
+#   ORPHAN-DISPOSITION FILE:LINE — a `disposition:` at column one, or at
+#                            column one after one or more list markers,
+#                            belonging to no finding block. The backstop for
+#                            every shape of detached finding the rule above
+#                            cannot name, and the same mechanism check-trace.sh
+#                            calls ORPHAN-ANNOTATION — including its width:
+#                            this is one of exactly two places that take the
+#                            WIDE predicate, gr_kw_orphan_here, and it is wider
+#                            than every reader in this file on purpose. See the
+#                            note at the rule itself, and the invariant in
+#                            lib.sh.
 #   STALE-RECORD FILE — a record declaring this branch that this change did not
 #                            write or touch. A reused branch name would
 #                            otherwise let the previous change's record answer
@@ -47,7 +53,7 @@ set -u
 . "$(dirname "$0")/lib.sh"
 # NOT `cd "$(gr_root)" || exit 2`: gr_root's gr_die exits only the command
 # substitution, and under dash `cd ""` returns 0 and stays put — so outside a
-# git repository the script carried on in the caller's directory with a
+# git repository the script continued in the caller's directory with a
 # relative config path. The status has to be taken from the substitution.
 gr_repo_root=$(gr_root) || exit 2
 cd "$gr_repo_root" || exit 2
@@ -96,9 +102,10 @@ done
 # In a single checkout gr_base_branch reports whatever is checked out, so every
 # branch there is its own base and --branch is the only way in. That is not a
 # defect: this gate runs at merge-change step 6c, from the change's worktree.
-# The base branch is needed either way: to refuse the base as the subject
+# The base branch is needed either way: to reject the base as the subject
 # (below), and to decide which records this change wrote (further down).
-base=$(gr_base_branch)
+base=$(gr_base_branch) || gr_die \
+"git worktree list failed, so the base branch cannot be read."
 
 if [ "$named" -eq 1 ]; then
     # --branch relaxes WHICH change is asked about. It does not relax the
@@ -137,7 +144,7 @@ IFS='
 
 # Pathname expansion OFF from here on, the same rule check-trace.sh follows at
 # its scan sites. The record list above was BUILT by a glob and is complete; a
-# record whose name carries a `*` or a `?` must not be expanded a second time
+# record whose name contains a `*` or a `?` must not be expanded a second time
 # against the working directory when the loop below splits the list.
 set -f
 
@@ -145,9 +152,9 @@ set -f
 # line, for the shell to judge:
 #
 #   B <value>   the record's OWN branch claim (the first `branch:` only)
-#   F <keyword>  a required field carrying a value
+#   F <keyword>  a required field with a value
 #   N            one finding block, disposed or not (the denominator)
-#   U <line> <id>  a finding block carrying no disposition
+#   U <line> <id>  a finding block with no disposition
 #   M <line>     a line shaped like a finding header that opens no block
 #   O <line>     a `disposition:` belonging to no finding block
 #
@@ -165,7 +172,7 @@ GR_RECORD_SCAN="$GR_AWK_ITEM_BLOCK$GR_AWK_FRONT_MATTER"'
 # here. That is what makes the `open_line &&` guard on the disposition rule
 # below unable to change any verdict today (mutation M15, differentially fuzzed
 # over 8000 generated records with zero differences). Let a block open by any
-# other route and the guard becomes load-bearing with no test to notice.
+# other route and the guard becomes critical with no test to notice.
 function gr_flush() {
     print "N"
     if (!disposed) printf "U %d %s\n", open_line, open_id
@@ -206,9 +213,10 @@ gr_fm_skip(FNR) { next }
 { line = $0; sub(/\r$/, "", line) }
 # A finding is an item block in the ledger shape this toolkit uses everywhere,
 # so where one starts and ends is decided by the shared rule and by nothing
-# local. A bold line carrying a colon, or a heading, ends it — which is why
-# `disposition:` is a plain column-one annotation and not a bold field: bold,
-# it would close the very block it belongs to.
+# local. A bold line containing a colon, or a heading, ends it — which is why
+# `disposition:` is a plain annotation and not a bold field: bold, it would
+# close the very block it belongs to. The READER for it is column one and
+# nothing else; the backstop below it is wider, and the rule there states how.
 gr_block_closes(line) {
     if (open_line) gr_flush()
     if (gr_block_opens(line)) {
@@ -223,9 +231,28 @@ gr_block_closes(line) {
 !gr_block_opens(line) && gr_finding_shaped(line) {
     printf "M %d\n", FNR
 }
-gr_kw_here(line, "disposition:") {
-    if (gr_value(line, "disposition:") == "") next
-    if (open_line) disposed = 1
+# TWO rules in one pattern, and they are deliberately not the same width. The
+# backstop test selects the line — gr_kw_orphan_here, which also admits one or
+# more leading list markers, bulleted or ordered — and the READER inside it is
+# gr_kw_here, column one and nothing else. lib.sh states the invariant at
+# gr_kw_here: the backstop must see at least what every reader sees, never
+# exactly what it sees.
+#
+# Splitting them is not fastidiousness. A single wide test would make a
+# bulleted `- disposition: …` quoted in a finding the disposition OF that
+# finding, and the same widening on `branch:` below turned a record for
+# other-change into the record for my-change — a pass reported over a review
+# that never happened. Narrow here, a bulleted disposition inside a block
+# disposes of nothing and the finding stays UNDISPOSED, which is loud and
+# correct; wide there, one outside every block is still reported.
+#
+# The value test goes through gr_kw_lead so it reads the same position the
+# selecting test did: gr_value alone slices from byte one and would hand a
+# bulleted line a fragment of the keyword, never an empty string, so an empty
+# bulleted `- disposition:` would slip past the emptiness guard.
+gr_kw_orphan_here(line, "disposition:") {
+    if (gr_value(gr_kw_lead(line), "disposition:") == "") next
+    if (open_line) { if (gr_kw_here(line, "disposition:")) disposed = 1 }
     # Outside every block, this is an orphan: read, matched, and — until this
     # backstop — dropped in silence. It is where the finding went. The same
     # mechanism check-trace.sh calls ORPHAN-ANNOTATION, for the same reason.
@@ -239,7 +266,7 @@ gr_kw_here(line, "disposition:") {
         if (!gr_kw_here(line, K[i])) continue
         if (gr_value(line, K[i]) == "") continue
         print "F " K[i]
-        # A record claims ONE branch: the FIRST `branch:` it carries, and no
+        # A record claims ONE branch: the FIRST `branch:` it contains, and no
         # other. Every later one is quotation — an example, a fenced extract of
         # another record, a schema pasted into a review finding — and a record
         # that quotes `branch: other-change` must not become the record FOR
@@ -255,7 +282,7 @@ gr_kw_here(line, "disposition:") {
 END { if (open_line) gr_flush() }
 '
 
-# GR_RECORD_FIELDS — the fields the record must carry, checked once it has been
+# GR_RECORD_FIELDS — the fields the record must contain, checked once it has been
 # found. `branch:` is deliberately NOT among them: it is the SELECTOR, and a
 # record that declares no branch is not this change's record at all, which is
 # reported as MISSING-RECORD rather than as an incomplete one.
@@ -276,14 +303,14 @@ reproduced:'
 # must STAY newline-separated — IFS is a newline for this whole script, so the
 # `for _kw in $GR_RECORD_FIELDS` loop below would otherwise split a
 # space-separated value into ONE word and look for a field named
-# `reviewer: verdict: reproduced:`, which no record carries, reporting
+# `reviewer: verdict: reproduced:`, which no record contains, reporting
 # INCOMPLETE-RECORD against every record in the repository.
 GR_RECORD_KWS=$(printf '%s' "branch: $GR_RECORD_FIELDS" | tr '\n' ' ')
 
 scan_record() {
     # GR_RECORD_KWS, never GR_RECORD_FIELDS: macOS's awk (BWK, "awk version
     # 20200816" — the one that ships with the OS, and the only awk on a stock
-    # box) refuses a LITERAL newline inside a -v assignment: `awk: newline in
+    # box) rejects a LITERAL newline inside a -v assignment: `awk: newline in
     # string ... at source line 1`, exit 2, before the program runs. gawk,
     # mawk and busybox awk all accept it, and every measurement recorded in
     # this toolkit's comments was taken on one of those three — which is how
@@ -298,7 +325,7 @@ scan_record() {
 
 # Which records did THIS change write or touch?
 #
-# The selector is a branch NAME, and a name carries no identity: a project that
+# The selector is a branch NAME, and a name contains no identity: a project that
 # reuses `fix-ci` or `docs` gets the previous change's complete record
 # answering for this one, at exit 0, with no record for this change anywhere.
 # Git knows the difference, so ask it. Three sources, all NUL-separated so a
@@ -371,9 +398,9 @@ fi
 
 # The denominator, printed on pass and on failure alike, for the reason
 # check-trace.sh prints `checked:`: a pass over nothing looks exactly like a
-# pass over everything. `records` is how many the directory held, `for` how
+# pass over everything. `records` is how many the directory contained, `for` how
 # many of them declare this change, `findings` how many finding blocks those
-# carry, and the last field says whether the records were checked against what
+# contain, and the last field states whether the records were checked against what
 # this change actually wrote. A green run reporting `findings 0` is a review that raised nothing,
 # which is legal and now visible; the same line over a record that was silently
 # not the one you thought would read `for 0`, and that cannot happen — no

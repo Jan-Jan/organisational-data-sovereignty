@@ -92,6 +92,8 @@ reaches past the last byte is beyond the requirement's words. Rather than widen
 the requirement after the fact, the behaviour is recorded as derived and
 assessed here.
 
+assesses: LLR-2y9qdc
+
 ## The deviation this change records, and why it is not a new hazard
 
 SDD-3b8zef — the chain-facing transport shell, the majority of `client.rs`, of

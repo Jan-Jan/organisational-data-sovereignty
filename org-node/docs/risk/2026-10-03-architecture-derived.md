@@ -46,6 +46,8 @@ it says why for each.
 
 ## LLR-3q63zv — the revocation path does not cross-check the sender
 
+assesses: LLR-3q63zv
+
 **What it records.** `receive_and_self_delete_if_revoked` authenticates the
 remote device key through the QUIC handshake like every other receive path, and
 then deliberately does not compare it against the Membership record — the
@@ -104,6 +106,8 @@ risk is the one PR-u4c2vp carries. LLR-3q63zv now names the report, and a pin
 test reddens when it is fixed.*
 
 ## LLR-gu6u53 — the Debug rendering of an Organisation identifier
+
+assesses: LLR-gu6u53
 
 **What it records.** `OrgId`'s `Debug` renders the twenty bytes as forty
 lowercase hexadecimal digits inside `OrgId(0x…)`.
@@ -165,6 +169,8 @@ sub-task of an architecture tooth.
 
 ### A. The write path — LLR-rv4vux, LLR-txqmz4, LLR-66h529, LLR-463d89, LLR-8m3bwj, LLR-f74xwb, LLR-rb8r65, LLR-ghja3x, LLR-t4znbk
 
+assesses: LLR-rv4vux, LLR-txqmz4, LLR-66h529, LLR-463d89, LLR-8m3bwj, LLR-f74xwb, LLR-rb8r65, LLR-ghja3x, LLR-t4znbk
+
 **What they do.** Build the hundred bytes that move an Organisation's root
 forward, derive the pseudo-account entitled to send them, choose direct versus
 threshold-1 dispatch, and push the signed Change set to the new member.
@@ -206,6 +212,8 @@ left this paragraph.*
 
 ### B. The chain-operations seam — LLR-65py3d, LLR-hg3xzf
 
+assesses: LLR-65py3d, LLR-hg3xzf
+
 **What they do.** Express the chain as an object-safe trait and give the mock
 shared state across clones, so the five user stories can be exercised without a
 chain.
@@ -230,6 +238,8 @@ new one, and RC-6a2dke already states the control it would defeat. Probability
 unchanged — it requires a deliberate miswiring, not an input.
 
 ### C. Persona and Organisation construction — LLR-tev8h8, LLR-s7yu4k, LLR-v82xds, LLR-68yd3j
+
+assesses: LLR-tev8h8, LLR-s7yu4k, LLR-v82xds, LLR-68yd3j
 
 **What they do.** Draw two independent keypairs per Persona and persist their
 seeds; derive the Persona identifier from the member verifying key; record a new
@@ -289,6 +299,8 @@ not an oversight in the ledger.
 
 ### D. The administrator's revocation path — LLR-6dc598, LLR-tax3pm, LLR-qg9utu
 
+assesses: LLR-6dc598, LLR-tax3pm, LLR-qg9utu
+
 These are the exact twins, on the removal side, of LLR-rb8r65, LLR-ghja3x and
 LLR-t4znbk on the admission side, and they are derived for the same reason:
 REQ-uxv2x2 governs what a node does when it *receives* its own removal, and
@@ -339,6 +351,8 @@ has been; what changed is that a mutation to it now reddens
 `a_revocation_reaches_the_administrators_disk`.
 
 ### E. The out-of-band blobs — LLR-zj88e6, LLR-437fvx, LLR-836z24
+
+assesses: LLR-zj88e6, LLR-437fvx, LLR-836z24
 
 **What they state.** The Invite carries the device key of the administrator
 persona of the Organisation it names (LLR-zj88e6); the Join request carries the
@@ -397,6 +411,8 @@ three are derived, for the reason the two sections above give: **org-node has
 no high-level requirement for its administrator-side write path.**
 
 ### F. The lookups act on the record the caller named — LLR-vdyu65, LLR-w3fhhg
+
+assesses: LLR-vdyu65, LLR-w3fhhg
 
 **What they state.** `admit_member` acts on the Organisation record the
 `org_id` argument names and signs with that Organisation's administrator
@@ -460,6 +476,8 @@ and what changed is that a mutation to it now reddens
 
 ### G. The revocation dial — LLR-pw369n
 
+assesses: LLR-pw369n
+
 **What it states.** In Loopback mode the Member being revoked is dialled at the full
 `EndpointAddr` the call carries, and a Loopback revocation offered no address
 is refused with a typed error rather than attempted against a peer it cannot
@@ -510,6 +528,8 @@ derived, and are assessed here.
 
 ### LLR-xq9nrq — the administrator's Member-as-a-group key on a member's record
 
+assesses: LLR-xq9nrq
+
 **What it states.** On first admission the new record holds, as its
 administrator's Member-as-a-group key, the Published signing key read from the
 chain, never a value from the Wire message.
@@ -534,6 +554,8 @@ reddens it now.
 
 ### LLR-ckk5nz — the Organisation secret, stored and overwritten
 
+assesses: LLR-ckk5nz
+
 **What it states.** First admission stores the secret the Wire message
 carries. A later update overwrites it with whatever the Wire message carries, including nothing.
 
@@ -552,6 +574,8 @@ and rotation is what `revokedExcludedFromOrgSecret` in
 ruling.
 
 ### LLR-e5c9ud — which Persona a receive marks Active
+
+assesses: LLR-e5c9ud
 
 **What it states.** The Persona marked Active is one whose device key is in
 the verified trie and is not the administrator's. It is given the member id
@@ -572,6 +596,8 @@ the member uses in another Organisation, or the member founding one, and that
 estimate belongs with the fix.
 
 ### LLR-rc74nq — the update call's names and constants
+
+assesses: LLR-rc74nq
 
 **What it states.** `revive_update_runtime_call` builds `Revive.call` with the
 field names and constants the runtime matches by name, around
@@ -599,6 +625,8 @@ one. The assessment stands.)*
 
 ### LLR-mbjfq8 — a first admission with no invite
 
+assesses: LLR-mbjfq8
+
 **What it states.** With no imported invite, a first admission is accepted on
 the chain anchor and the signature alone.
 
@@ -613,6 +641,8 @@ states it and a test pins it, so a future change that makes the invite
 mandatory reddens a named test instead of passing silently.
 
 ### LLR-379hnv — the self-delete path and a missing record
+
+assesses: LLR-379hnv
 
 **What it states.** A change about an Organisation the node holds no record of
 is refused, and nothing is written.
@@ -639,6 +669,8 @@ reddens, and assessed here. **None introduces a hazard or a risk control.**
 
 ### LLR-8hdu9x — what a revocation's Wire message carries
 
+assesses: LLR-8hdu9x
+
 **What it states.** `revoke_member` sends the signed envelope, the member
 snapshots from before the removal, and no Organisation secret.
 
@@ -653,6 +685,8 @@ behaviour unruled.
 
 ### LLR-qezw3n — the Invite's dialling address
 
+assesses: LLR-qezw3n
+
 **What it states.** `export_invite` carries the bound endpoint's address,
 whichever Persona bound it, or none.
 
@@ -665,6 +699,8 @@ was bound from another Persona, that failure is PR-8qsnhx's, already booked.
 **Assessment.** No new hazard and no new control.
 
 ### LLR-dzte8x, LLR-3v5nu9, LLR-drgdy8 — the pure-proxy account
+
+assesses: LLR-dzte8x, LLR-3v5nu9, LLR-drgdy8
 
 **What they state.** `create_organisation` keeps the proxy account the chain
 returned, on disk, and `admit_member` and `revoke_member` hand it to every
@@ -681,6 +717,8 @@ cost already assessed for the write path in section A.
 
 ### LLR-q3aj8z — the founding Persona's member id
 
+assesses: LLR-q3aj8z
+
 **What it states.** `create_organisation` leaves the Persona's member id as it
 was: none on a new Persona, and a stale one on PR-mdv38y's second-writer path.
 
@@ -694,6 +732,8 @@ path, which is already booked.
 
 ### LLR-ryzr8m — the mock chain's compare-and-swap
 
+assesses: LLR-ryzr8m
+
 **What it states.** `MockChainOps` refuses an update at the wrong epoch and
 leaves its slot unchanged.
 
@@ -706,6 +746,8 @@ the contract on that one property.
 **Assessment.** No new hazard and no new control.
 
 ### LLR-2smrvx — the unchecked length prefix
+
+assesses: LLR-2smrvx
 
 **What it states.** `recv_one` discards the four-byte prefix without
 comparing it with the body, and a stream shorter than four bytes is decoded

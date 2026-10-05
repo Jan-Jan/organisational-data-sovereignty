@@ -1875,6 +1875,9 @@ parent. All twenty-one are assessed here, and each has a hazard to point at.
   RC-5e3bdk, and what remains is what the evidence supports. The dominance is
   still true of `on-chain-client/src/client.rs:513-519`; it is recorded there as
   a fact about the code, not asserted as a verified property.
+
+assesses: REQ-9vwcwc
+
 - **REQ-5upq6n** (the *decoder* reports the Emitting contract's address with
   every `OrgRegistry` event it decodes): realises RC-5e3bdk against HAZ-werm85.
   The surface is named in the requirement's own text from review round 3
@@ -1898,6 +1901,9 @@ parent. All twenty-one are assessed here, and each has a hazard to point at.
   different files, against this ledger's single-behaviour form. Its evidence is
   `on-chain-client/tests/contract_address_filter.rs`, which after finding-3's
   fix is exactly what that file is for.
+
+assesses: REQ-5upq6n
+
 - **REQ-nygs7k** (with an admin filter set, deliver a log only if the event's
   admin is the filtered one): realises RC-5e3bdk against HAZ-werm85. No hazard
   impact of its own — the contract check dominates it, so a matching admin can
@@ -1911,6 +1917,9 @@ parent. All twenty-one are assessed here, and each has a hazard to point at.
   no test can gate an ordering internal to a total boolean predicate. What
   survives of it is the consequence, stated by REQ-9vwcwc and gated: a matching
   admin can never rescue a log from a foreign contract.
+
+assesses: REQ-nygs7k
+
 - **REQ-wnjz9j** (a first topic matching no known signature, or no topics at
   all, yields no event and no error): realises RC-6gfh8d against HAZ-95sc43.
   Introduces one situation worth naming: an event this decoder does not know is
@@ -1918,6 +1927,9 @@ parent. All twenty-one are assessed here, and each has a hazard to point at.
   type would be silently ignored by an old reader rather than refused. That is
   the intended direction for a stream carrying every contract's logs, and it is
   the same silence not-minted control 12 addresses.
+
+assesses: REQ-wnjz9j
+
 - **REQ-52uc8f** (recognise exactly the two Event signatures the deployed
   contract declares, each the `keccak256` of its canonical Solidity signature
   string): realises RC-675a3h against HAZ-v2cmtx. Introduces one situation, and
@@ -1929,20 +1941,32 @@ parent. All twenty-one are assessed here, and each has a hazard to point at.
   review round 1 (finding-7a), because the behaviour was pinned by a test
   annotated to REQ-wnjz9j, which states only the negative — an unknown first
   topic yields nothing — and never says which signatures are known.
+
+assesses: REQ-52uc8f
+
 - **REQ-88fp2h** (refuse a log whose topic count or data length does not match
   the signature it claims, with both figures named): realises RC-6gfh8d against
   HAZ-95sc43. Its hazard impact is the fail-closed cost assessed above: a
   malformed log from any contract puts an error on the stream. Measured
   mutations of its guards panic inside `src` on the too-few side, which is why
   the requirement is worded as an exact match rather than a minimum.
+
+assesses: REQ-88fp2h
+
 - **REQ-twdu84** (refuse an indexed address topic with any non-zero byte in its
   twelve-byte padding): realises RC-6gfh8d against HAZ-95sc43. No hazard impact:
   a refusal yields an error and no event. It is the boundary at which a
   non-Solidity emitter is told apart from a Solidity one.
+
+assesses: REQ-twdu84
+
 - **REQ-axcxf7** (refuse a payload with trailing bytes, or one that ends inside
   its own framing): realises RC-8w9wtp against HAZ-95sc43. No hazard impact; it
   is what stops a well-formed prefix of a hostile payload being accepted as the
   whole of it.
+
+assesses: REQ-axcxf7
+
 - **REQ-sx5b6g** (any byte sequence yields `Ok` or a typed `Err`, never a
   panic): realises RC-8w9wtp against HAZ-95sc43. No hazard impact. Its evidence
   is the three bolero targets, and the honest statement of what they establish
@@ -1952,6 +1976,9 @@ parent. All twenty-one are assessed here, and each has a hazard to point at.
   Review round 1 (finding-4) removed a clause from this requirement that claimed
   more than that evidence supports — that no decoder allocates from an unchecked
   length taken out of the input — which this unit implements no check for.
+
+assesses: REQ-sx5b6g
+
 - **REQ-n6v896** (for a structurally valid event, decoding its canonical
   encoding reproduces every field, the emitting address included): realises
   RC-6gfh8d against HAZ-95sc43. No hazard impact. This is the **inversion**
@@ -1973,6 +2000,9 @@ parent. All twenty-one are assessed here, and each has a hazard to point at.
   input to the same decoder is exactly what REQ-88fp2h, REQ-twdu84, REQ-axcxf7
   and REQ-sx5b6g state and evidence beside it, so the case is not missing from
   the unit; it is stated where it belongs.
+
+assesses: REQ-n6v896
+
 - **REQ-hd6m9d** (resolve, for a `spec_version`, only the decoder compiled for
   that exact version, and refuse an unrecognised one naming the version asked
   for): realises RC-d7r82e
@@ -1991,28 +2021,46 @@ parent. All twenty-one are assessed here, and each has a hazard to point at.
   the resolution decision the code makes, as REQ-ntn4ss is worded to the rule
   `scan_step` makes, and the per-decode obligation stays with PR-w5sk5k and
   not-minted control 4.
+
+assesses: REQ-hd6m9d
+
 - **REQ-tkhe3u** (take the reverse mapping case only when all twelve marker
   bytes are the marker): realises RC-mugta4 against HAZ-v2cmtx. No hazard
   impact. Its hardest case is the all-`0xEE` `AccountId32`, where the two paths
   are least distinguishable.
+
+assesses: REQ-tkhe3u
+
 - **REQ-rz7fja** (take the forward mapping case when any of the twelve marker
   bytes is not the marker): realises RC-mugta4 against HAZ-v2cmtx. No hazard
   impact. The pair with REQ-tkhe3u is what pins the window from both edges,
   which one of them alone does not: a mutation narrowing the window reds the
   near-miss, and only the per-position sweep catches which position moved.
+
+assesses: REQ-rz7fja
+
 - **REQ-9m2rnd** (derive the slot key by the Solidity mapping formula over the
   left-padded admin and the map index): realises RC-5ejucb against HAZ-v2cmtx.
   Introduces the `u64` narrowing of a `uint256` mapping index recorded under
   that hazard — not a live limit at slot 0, and recorded rather than fixed.
+
+assesses: REQ-9m2rnd
+
 - **REQ-xudf25** (read successive struct fields at successive slot keys, by
   big-endian increment with carry): realises RC-5ejucb against HAZ-v2cmtx. No
   hazard impact.
+
+assesses: REQ-xudf25
+
 - **REQ-4astjb** (decode an Organisation state only from exactly 96 bytes, and
   refuse any other length naming both figures): realises RC-sxjnx9 against
   HAZ-xfg9cz. Its hazard impact is the fail-closed cost: a wrong-width slot
   value fails the read rather than being decoded. The mutation that widens its
   guard panics on the empty blob, which is the most ordinary abnormal input this
   path sees.
+
+assesses: REQ-4astjb
+
 - **REQ-2qa5r5** (the public newtypes representing an Organisation state's
   fields, and the Organisation admin its slot is keyed on, have exactly the
   widths the contract's ABI gives them: Membership root 32 bytes, the
@@ -2048,11 +2096,17 @@ parent. All twenty-one are assessed here, and each has a hazard to point at.
   declaration and has no runtime input domain, so there is no input to malform.
   Its evidence reds by mutating the type, which is the only thing there is to
   mutate, and that is measured above.
+
+assesses: REQ-2qa5r5
+
 - **REQ-9wwenn** (refuse an epoch whose value does not fit the representable
   range rather than truncating it): realises RC-sxjnx9 against HAZ-xfg9cz. No
   hazard impact. It is unreachable through the contract as written — the epoch
   is a `+1` counter from 1 — which is exactly why it is stated: observing it
   means something upstream is not what this register believes.
+
+assesses: REQ-9wwenn
+
 - **REQ-ntn4ss** (report a best head **whose hash differs from the last
   processed head's** and which replaces it as a reorganisation carrying the
   discarded head's hash and number): realises
@@ -2086,6 +2140,9 @@ parent. All twenty-one are assessed here, and each has a hazard to point at.
   `child_of_the_last_head_reports_no_reorg`, which the condition excludes, and
   `the_first_notification_reports_no_reorg`, which the reworded clause excludes
   explicitly by requiring a head already processed.
+
+assesses: REQ-ntn4ss
+
 - **REQ-gr2ver** (do not report a head already processed a second time):
   realises RC-kemv75 against HAZ-xd4urb. Introduces one situation, and it is the
   reason the dedup is on hash and not on number: a genuine replacement block at
@@ -2093,6 +2150,9 @@ parent. All twenty-one are assessed here, and each has a hazard to point at.
   number would discard a depth-1 reorg's replacement entirely. That mutation was
   applied and watched, and the requirement is worded on the hash for that
   reason.
+
+assesses: REQ-gr2ver
+
 - **REQ-5zux82** (read every height between the last processed head and the
   new one, in ascending order, and report the observations found there):
   realises RC-kemv75 against HAZ-xd4urb.
@@ -2122,6 +2182,8 @@ parent. All twenty-one are assessed here, and each has a hazard to point at.
   REQ-9vwcwc and REQ-nygs7k govern where they meet it: this requirement says
   which heights are read and reported from, those two say which events reach a
   subscriber, and the specific rule wins.
+
+assesses: REQ-5zux82
 
 The expectation addressed to this unit, REQ-ysyu9g, is not a requirement of this
 unit and acquires no assessment here. What this change adds to it is the

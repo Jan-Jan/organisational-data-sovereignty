@@ -19,7 +19,7 @@ guardrails_version: 0.5.1
 
 # The commit the installed scripts were copied from — the checkable half of
 # the tool-qualification basis (docs/plans/2026-09-05-ratchet-setup.md).
-guardrails_commit: e2eac86ff8db2157735b9604b7ade190d4f465f3
+guardrails_commit: 35570e874193e9082b9e5e690efedb355cf36768
 
 # IEC 62304 software safety class. C: org-members is the membership authority
 # — the record every access decision derives from. See
@@ -30,7 +30,7 @@ safety_class: C
 # ID prefixes managed by the check/finalize scripts.
 # LLR = low-level requirements (design data, live in the SAD).
 # PR  = problem reports.
-id_prefixes: REQ HAZ RC SDD LLR PR
+id_prefixes: REQ HAZ RC SDD LLR PR ADR
 
 # Canonical document locations — the ledgers moved here from docs/ on
 # 2026-09-05 with their history; the item IDs are unchanged.

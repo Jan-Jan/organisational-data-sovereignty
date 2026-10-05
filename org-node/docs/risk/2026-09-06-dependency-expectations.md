@@ -28,6 +28,8 @@ The register in question is
 
 ## Assessment
 
+assesses: REQ-ysyu9g
+
 REQ-ysyu9g (on-chain-client returns the finalised Organisation state when no
 block is named). Hazard impact: **mitigates**, and directly on the decisive
 control of org-members' register. Its stale-or-divergent-record hazard and its
@@ -41,6 +43,8 @@ removed Member is believed removed on evidence that no longer exists — the
 retained-access pathway, S3. No new hazard is introduced by asking for the
 finalised read; its cost is latency, which that register's staleness
 discussion already carries.
+
+assesses: REQ-q92yac
 
 REQ-q92yac (org-members rejects a Change set that removes a Device key without
 replacing the Member-as-a-group key). Hazard impact: **mitigates** the
