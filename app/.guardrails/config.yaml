@@ -68,7 +68,11 @@ test_paths:
 # is a cargo ERROR rather than a silent skip, which is what makes this entry
 # fail loudly if the feature or a target is ever dropped. Measured:
 #   startup_policy 12 + connection_status 10 + org_id_parsing 14
-#   + receiver_events 27 + receiver_guard 6 + ipc 9 = 78 tests.
+#   + receiver_events 27 + receiver_guard 6 + ipc 9 = 78 tests (2026-09-14).
+# Measured again 2026-10-05 (agent sandbox, CARGO_HOME=/tmp/cargo_home_fuzz),
+# after later changes and the org-node type-safety change added tests:
+#   startup_policy 12 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 28 + receiver_guard 6 + ipc 12 = 82 tests.
 # Four of the six rose during the change, each from a gate or review finding:
 # receiver_events 14 -> 27 (REQ-tw4cb5 was verified on one fixture rather than
 # as a property; six more for REQ-kn5rtx; four more when the terminal-error
@@ -98,7 +102,7 @@ problem_open_max: 10
 
 # No coverage_command. The first half of this note used to read "nothing to
 # measure until the crate has tests" and is no longer true: as of 2026-09-14 the
-# unit has 78 cargo tests and 30 vitest tests. What remains true is the second
+# unit has 78 cargo tests (82 as measured 2026-10-05) and 30 vitest tests. What remains true is the second
 # half — under class C the absence is a gap against a mandatory requirement, and
 # it is recorded in docs/plans/2026-09-05-ratchet-setup.md.
 #

@@ -21,6 +21,22 @@ use org_node::keys::SigningKeypair;
 use org_node::service::{MockChainOps, OrgService, SelfDeleteOutcome};
 use org_node::store::{PersonaStatus, PersonaStore};
 use org_node::transport::endpoint::OrgEndpoint;
+use org_node::{DeviceSeed, Epoch, MemberSeed, OrgSecret, PersonaId, SequenceNumber};
+
+/// The Organisation secret every admission in this file hands over.
+fn org_secret() -> Option<OrgSecret> {
+    Some(OrgSecret::from([0xffu8; 32]))
+}
+
+fn h(s: &str) -> org_members::Handle {
+    org_members::Handle::parse(s).unwrap()
+}
+fn nm(s: &str) -> org_members::Name {
+    org_members::Name::parse(s).unwrap()
+}
+fn sn(s: &str) -> org_members::Surname {
+    org_members::Surname::parse(s).unwrap()
+}
 
 // The proper end-to-end test that runs all 5 stories in one function.
 // `five_stories_headless` (stories 1-4 only, no invite cross-check) was
@@ -45,7 +61,7 @@ async fn five_stories_full_e2e() {
     let chain_b_revoke = chain.clone();  // for story 5
 
     // B's device keypair (fixed seed so we can reconstruct it for story 5).
-    let b_device_kp = SigningKeypair::from_seed([0x22u8; 32]);
+    let b_device_kp = DeviceSeed::from([0x22u8; 32]).signing_keypair();
 
     // ---- Bind B's admission endpoint ----
     let ep_b_admit = OrgEndpoint::bind(&b_device_kp).await.unwrap();
@@ -71,27 +87,26 @@ async fn five_stories_full_e2e() {
     let mut svc_b = OrgService::new(store_b, Box::new(chain_b_admit));
 
     // ---- Story 1: A creates persona + org ----
-    let pid_a = svc_a.create_persona(&mut OsRng, "admin", "Admin", "User").unwrap();
+    let pid_a = svc_a.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
     let org_id = svc_a.create_organisation(&mut OsRng, &pid_a).await.unwrap();
 
-    assert_eq!(chain.get(&org_id).unwrap().epoch, 1);
+    assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(1));
     assert_eq!(svc_a.list_personas()[0].status, PersonaStatus::Active);
 
     // Bind A's endpoint from the SAME device seed that `create_persona` generated.
     // This ensures the QUIC-authenticated sender identity on B's side equals the
     // `admin_device_key` that `export_invite` will encode — the cross-check gate.
-    let a_device_seed = svc_a.list_personas()
+    let a_device_kp = svc_a.list_personas()
         .iter()
         .find(|p| p.persona_id == pid_a)
-        .map(|p| p.device_seed)
+        .map(|p| p.device_seed.signing_keypair())
         .expect("persona not found after create");
-    let a_device_kp = SigningKeypair::from_seed(a_device_seed);
     let ep_a_admit = OrgEndpoint::bind(&a_device_kp).await.unwrap();
     let svc_a = svc_a.with_endpoint(ep_a_admit);
     let mut svc_a = svc_a;
 
     // ---- Story 2: B creates persona; A exports Invite; B imports it ----
-    let pid_b = svc_b.create_persona(&mut OsRng, "bob", "Bob", "Builder").unwrap();
+    let pid_b = svc_b.create_persona(&mut OsRng, h("bob"), nm("Bob"), sn("Builder")).unwrap();
 
     // A exports the invite (admin_device_key = A's persona device key).
     let invite_blob = svc_a.export_invite(org_id).unwrap();
@@ -106,7 +121,7 @@ async fn five_stories_full_e2e() {
 
     let jr_blob = svc_b.export_join_request(&pid_b).unwrap();
     let join_request = OrgService::import_join_request(&jr_blob).unwrap();
-    assert_eq!(join_request.handle, "bob");
+    assert_eq!(join_request.handle.as_str(), "bob");
 
     // Rebuild svc_b with ep_b_admit so B can receive A's push.
     let store_b2 = PersonaStore::open(store_b_path.clone(), "pw_b").unwrap();
@@ -130,23 +145,23 @@ async fn five_stories_full_e2e() {
 
     let b_member_id = tokio::time::timeout(
         Duration::from_secs(30),
-        svc_a.admit_member(&mut OsRng, org_id, &join_request, b_addr_admit, Some([0xffu8; 32])),
+        svc_a.admit_member(&mut OsRng, org_id, &join_request, b_addr_admit, org_secret()),
     )
     .await
     .expect("admit_member timed out")
     .expect("admit_member failed");
 
     // MockChain: epoch 2.
-    assert_eq!(chain.get(&org_id).unwrap().epoch, 2, "admit must bump to epoch 2");
+    assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(2), "admit must bump to epoch 2");
 
     // Collect B's result + svc_b (moved out of the task).
     let (svc_b3, b_outcome) = recv_handle.await.unwrap();
 
     assert_eq!(b_outcome.org_id, org_id, "B's outcome org_id must match");
-    assert_eq!(b_outcome.epoch, 2, "B must commit epoch 2");
+    assert_eq!(b_outcome.epoch, Epoch::new(2), "B must commit epoch 2");
     assert_eq!(
         b_outcome.root,
-        *chain.get(&org_id).unwrap().root_hash.as_bytes(),
+        chain.get(&org_id).unwrap().root_hash,
         "B's committed root must match on-chain root"
     );
 
@@ -158,13 +173,13 @@ async fn five_stories_full_e2e() {
     );
     // B must have the OrgRecord.
     assert_eq!(svc_b3.list_orgs().len(), 1, "B must have exactly 1 OrgRecord");
-    assert_eq!(svc_b3.list_orgs()[0].epoch, 2);
-    assert_eq!(svc_b3.list_orgs()[0].org_secret, Some([0xffu8; 32]));
+    assert_eq!(svc_b3.list_orgs()[0].epoch, Epoch::new(2));
+    assert_eq!(svc_b3.list_orgs()[0].org_secret, org_secret());
 
     // ---- Story 5: A revokes B; B self-deletes ----
 
     // Bind a fresh B endpoint for receiving the revocation.
-    let b_device_kp2 = SigningKeypair::from_seed([0x22u8; 32]);
+    let b_device_kp2 = DeviceSeed::from([0x22u8; 32]).signing_keypair();
     let ep_b_revoke = OrgEndpoint::bind(&b_device_kp2).await.unwrap();
     let b_addr_revoke = ep_b_revoke.inner().addr();
 
@@ -198,7 +213,7 @@ async fn five_stories_full_e2e() {
     .expect("revoke_member failed");
 
     // MockChain: epoch 3.
-    assert_eq!(chain.get(&org_id).unwrap().epoch, 3, "revoke must bump to epoch 3");
+    assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(3), "revoke must bump to epoch 3");
 
     // Collect B's self-delete result.
     let (svc_b_final, delete_outcome) = revoke_recv_handle.await.unwrap();
@@ -228,7 +243,7 @@ async fn five_stories_full_e2e() {
 
     // A still has the org at epoch 3 with only the admin in the trie.
     assert_eq!(svc_a.list_orgs().len(), 1);
-    assert_eq!(svc_a.list_orgs()[0].epoch, 3);
+    assert_eq!(svc_a.list_orgs()[0].epoch, Epoch::new(3));
     assert_eq!(svc_a.list_orgs()[0].trie_members.len(), 1, "only admin should remain");
 
     let _ = (pid_b, b_addr_jr, chain_b_revoke); // suppress unused warnings
@@ -244,7 +259,6 @@ async fn revocation_of_another_member_is_committed_not_self_deleted() {
     use rand::rngs::OsRng;
 
     const NET: Duration = Duration::from_secs(30);
-    const ORG_SECRET: Option<[u8; 32]> = Some([0xffu8; 32]);
 
     /// Fresh encrypted store under `temp_dir()`, unique per party and process.
     fn store_path(party: &str) -> std::path::PathBuf {
@@ -256,14 +270,12 @@ async fn revocation_of_another_member_is_committed_not_self_deleted() {
     }
 
     /// The device keypair of a persona, from its persisted `device_seed`.
-    fn device_kp(svc: &OrgService, persona_id: &str) -> SigningKeypair {
-        let seed = svc
-            .list_personas()
+    fn device_kp(svc: &OrgService, persona_id: &PersonaId) -> SigningKeypair {
+        svc.list_personas()
             .iter()
-            .find(|p| p.persona_id == persona_id)
-            .map(|p| p.device_seed)
-            .expect("persona not found");
-        SigningKeypair::from_seed(seed)
+            .find(|p| &p.persona_id == persona_id)
+            .map(|p| p.device_seed.signing_keypair())
+            .expect("persona not found")
     }
 
     // ---- Shared chain and two services ----
@@ -278,16 +290,16 @@ async fn revocation_of_another_member_is_committed_not_self_deleted() {
     );
 
     // ---- Stories 1-2: A creates persona + org; B imports A's invite ----
-    let pid_a = svc_a.create_persona(&mut OsRng, "admin", "Admin", "User").unwrap();
+    let pid_a = svc_a.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
     let org_id = svc_a.create_organisation(&mut OsRng, &pid_a).await.unwrap();
-    assert_eq!(chain.get(&org_id).unwrap().epoch, 1);
+    assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(1));
 
     // A's endpoint is bound from A's persona device seed, so the authenticated
     // QUIC sender on B's side equals the invite's `admin_device_key`.
     let a_device_kp = device_kp(&svc_a, &pid_a);
     let mut svc_a = svc_a.with_endpoint(OrgEndpoint::bind(&a_device_kp).await.unwrap());
 
-    let pid_b = svc_b.create_persona(&mut OsRng, "bob", "Bob", "Builder").unwrap();
+    let pid_b = svc_b.create_persona(&mut OsRng, h("bob"), nm("Bob"), sn("Builder")).unwrap();
     let invite_blob = svc_a.export_invite(org_id).unwrap();
     let invite = svc_b.import_invite(&mut OsRng, &invite_blob).unwrap();
     assert_eq!(invite.org_id, org_id);
@@ -310,25 +322,25 @@ async fn revocation_of_another_member_is_committed_not_self_deleted() {
 
     tokio::time::timeout(
         NET,
-        svc_a.admit_member(&mut OsRng, org_id, &jr_b, b_addr, ORG_SECRET),
+        svc_a.admit_member(&mut OsRng, org_id, &jr_b, b_addr, org_secret()),
     )
     .await
     .expect("admit_member(B) timed out")
     .expect("admit_member(B) failed");
-    assert_eq!(chain.get(&org_id).unwrap().epoch, 2, "admitting B must bump to epoch 2");
+    assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(2), "admitting B must bump to epoch 2");
 
     let (svc_b, r) = b_task.await.unwrap();
     let outcome = r.expect("B's direct admission from A must verify");
-    assert_eq!(outcome.epoch, 2);
+    assert_eq!(outcome.epoch, Epoch::new(2));
     assert_eq!(svc_b.list_orgs()[0].trie_members.len(), 2, "admin + B");
 
     // ---- A creates persona C and admits it, pushing the update to B ----
     // C lives in A's store; `admin_persona_for_org` matches by member key, so A
     // stays the org's admin.
-    let pid_c = svc_a.create_persona(&mut OsRng, "carol", "Carol", "Coder").unwrap();
+    let pid_c = svc_a.create_persona(&mut OsRng, h("carol"), nm("Carol"), sn("Coder")).unwrap();
     let jr_c_blob = svc_a.export_join_request(&pid_c).unwrap();
     let jr_c = OrgService::import_join_request(&jr_c_blob).unwrap();
-    assert_eq!(jr_c.handle, "carol");
+    assert_eq!(jr_c.handle.as_str(), "carol");
 
     let ep_b = OrgEndpoint::bind(&b_device_kp).await.unwrap();
     let b_addr = ep_b.inner().addr();
@@ -343,16 +355,16 @@ async fn revocation_of_another_member_is_committed_not_self_deleted() {
 
     let c_member_id = tokio::time::timeout(
         NET,
-        svc_a.admit_member(&mut OsRng, org_id, &jr_c, b_addr, ORG_SECRET),
+        svc_a.admit_member(&mut OsRng, org_id, &jr_c, b_addr, org_secret()),
     )
     .await
     .expect("admit_member(C) timed out")
     .expect("admit_member(C) failed");
-    assert_eq!(chain.get(&org_id).unwrap().epoch, 3, "admitting C must bump to epoch 3");
+    assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(3), "admitting C must bump to epoch 3");
 
     let (svc_b, r) = b_task.await.unwrap();
     let outcome = r.expect("B must accept C's admission pushed by the admin's own device");
-    assert_eq!(outcome.epoch, 3, "B must commit epoch 3");
+    assert_eq!(outcome.epoch, Epoch::new(3), "B must commit epoch 3");
     assert_eq!(svc_b.list_orgs()[0].trie_members.len(), 3, "admin + B + C");
 
     // ---- A revokes C; B receives the revocation ----
@@ -377,7 +389,7 @@ async fn revocation_of_another_member_is_committed_not_self_deleted() {
     .await
     .expect("revoke_member(C) timed out")
     .expect("revoke_member(C) failed");
-    assert_eq!(chain.get(&org_id).unwrap().epoch, 4, "revoking C must bump to epoch 4");
+    assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(4), "revoking C must bump to epoch 4");
 
     let (svc_b_final, r) = b_task.await.unwrap();
     let delete_outcome = r.expect("B must verify and commit C's revocation");
@@ -401,10 +413,10 @@ async fn revocation_of_another_member_is_committed_not_self_deleted() {
     );
     let rec_b = &svc_b_final.list_orgs()[0];
     assert_eq!(rec_b.org_id, org_id);
-    assert_eq!(rec_b.epoch, 4, "B must commit epoch 4");
+    assert_eq!(rec_b.epoch, Epoch::new(4), "B must commit epoch 4");
     assert_eq!(
         rec_b.root_hash,
-        *chain.get(&org_id).unwrap().root_hash.as_bytes(),
+        chain.get(&org_id).unwrap().root_hash,
         "B's committed root must match the on-chain root"
     );
     assert_eq!(rec_b.trie_members.len(), 2, "admin + B only");
@@ -438,7 +450,7 @@ async fn unverified_revocation_leaves_the_record_in_place() {
 
     use org_members::hasher::Blake3Hasher;
     use org_members::trie::OrgTrie;
-    use org_members::{Handle, MemberId, MemberLeaf, Name, Surname};
+    use org_members::MemberLeaf;
     use org_node::envelope::SignedDeltaEnvelope;
     use org_node::error::OrgNodeError;
     use org_node::store::MemberSnapshot;
@@ -447,7 +459,6 @@ async fn unverified_revocation_leaves_the_record_in_place() {
     type Trie = OrgTrie<Blake3Hasher>;
 
     const NET: Duration = Duration::from_secs(30);
-    const ORG_SECRET: Option<[u8; 32]> = Some([0xffu8; 32]);
 
     /// Fresh encrypted store under `temp_dir()`, unique per party and process.
     fn store_path(party: &str) -> std::path::PathBuf {
@@ -459,15 +470,15 @@ async fn unverified_revocation_leaves_the_record_in_place() {
     }
 
     /// The member and device keypairs of a persona, from its persisted seeds.
-    fn keys_of(svc: &OrgService, persona_id: &str) -> (SigningKeypair, SigningKeypair) {
+    fn keys_of(svc: &OrgService, persona_id: &PersonaId) -> (SigningKeypair, SigningKeypair) {
         let p = svc
             .list_personas()
             .iter()
-            .find(|p| p.persona_id == persona_id)
+            .find(|p| &p.persona_id == persona_id)
             .expect("persona not found");
         (
-            SigningKeypair::from_seed(p.member_seed),
-            SigningKeypair::from_seed(p.device_seed),
+            p.member_seed.signing_keypair(),
+            p.device_seed.signing_keypair(),
         )
     }
 
@@ -483,14 +494,14 @@ async fn unverified_revocation_leaves_the_record_in_place() {
     );
 
     // ---- A creates persona + org; B imports A's invite ----
-    let pid_a = svc_a.create_persona(&mut OsRng, "admin", "Admin", "User").unwrap();
+    let pid_a = svc_a.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
     let org_id = svc_a.create_organisation(&mut OsRng, &pid_a).await.unwrap();
-    assert_eq!(chain.get(&org_id).unwrap().epoch, 1);
+    assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(1));
 
     let (a_member_kp, a_device_kp) = keys_of(&svc_a, &pid_a);
     let mut svc_a = svc_a.with_endpoint(OrgEndpoint::bind(&a_device_kp).await.unwrap());
 
-    let pid_b = svc_b.create_persona(&mut OsRng, "bob", "Bob", "Builder").unwrap();
+    let pid_b = svc_b.create_persona(&mut OsRng, h("bob"), nm("Bob"), sn("Builder")).unwrap();
     let invite_blob = svc_a.export_invite(org_id).unwrap();
     svc_b.import_invite(&mut OsRng, &invite_blob).unwrap();
 
@@ -512,12 +523,12 @@ async fn unverified_revocation_leaves_the_record_in_place() {
 
     let b_member_id = tokio::time::timeout(
         NET,
-        svc_a.admit_member(&mut OsRng, org_id, &jr_b, b_addr, ORG_SECRET),
+        svc_a.admit_member(&mut OsRng, org_id, &jr_b, b_addr, org_secret()),
     )
     .await
     .expect("admit_member(B) timed out")
     .expect("admit_member(B) failed");
-    assert_eq!(chain.get(&org_id).unwrap().epoch, 2, "admitting B must bump to epoch 2");
+    assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(2), "admitting B must bump to epoch 2");
 
     let (svc_b, r) = b_task.await.unwrap();
     r.expect("B's direct admission from A must verify");
@@ -533,19 +544,19 @@ async fn unverified_revocation_leaves_the_record_in_place() {
     };
 
     let leaf_of = |s: &MemberSnapshot| -> MemberLeaf {
-        let (member, device) = if s.member_key == *a_member_kp.member_key().as_bytes() {
+        let (member, device) = if s.member_key == a_member_kp.member_key() {
             (&a_member_kp, &a_device_kp)
-        } else if s.member_key == *b_member_kp.member_key().as_bytes() {
+        } else if s.member_key == b_member_kp.member_key() {
             (&b_member_kp, &b_device_kp)
         } else {
             panic!("snapshot member key belongs to neither A nor B");
         };
         MemberLeaf::new(
-            MemberId::new(s.id),
-            Handle::parse(&s.handle).unwrap(),
+            s.id,
+            s.handle.clone(),
             member.member_key(),
-            Name::parse(&s.name).unwrap(),
-            Surname::parse(&s.surname).unwrap(),
+            s.name.clone(),
+            s.surname.clone(),
             vec![device.device_key()],
         )
         .unwrap()
@@ -554,27 +565,27 @@ async fn unverified_revocation_leaves_the_record_in_place() {
         svc_b.list_orgs()[0].trie_members.iter().map(leaf_of).collect();
     let b_trie = Trie::genesis(leaves).unwrap();
     assert_eq!(
-        b_trie.root_hash().unwrap().as_bytes(),
-        &root_before,
+        b_trie.root_hash().unwrap(),
+        root_before,
         "the rebuilt trie must reproduce B's committed root"
     );
 
     // The Change set really does remove B's own Device key: were verification
     // skipped or its error ignored, the self-delete branch would fire on it.
     let (_after, delta) = b_trie
-        .delete_member(&MemberId::new(b_member_id))
+        .delete_member(&b_member_id)
         .unwrap()
         .recalculate()
         .unwrap();
 
     // Signed by a keypair that is not the Organisation's published signing key.
-    let forger = SigningKeypair::from_seed([0x99u8; 32]);
+    let forger = MemberSeed::from([0x99u8; 32]).signing_keypair();
     assert_ne!(
-        *forger.member_key().as_bytes(),
-        org_pub_key,
+        forger.member_key().as_bytes(),
+        org_pub_key.as_bytes(),
         "the forging key must not be the Organisation's published signing key"
     );
-    let envelope = SignedDeltaEnvelope::build(org_id, seq_before + 1, &delta, &forger).unwrap();
+    let envelope = SignedDeltaEnvelope::build(org_id, SequenceNumber::new(seq_before.get() + 1), &delta, &forger).unwrap();
     let msg = WireMessage { envelope, org_secret: None, genesis_snapshot: None };
 
     // ---- B receives the forged revocation ----
@@ -592,7 +603,7 @@ async fn unverified_revocation_leaves_the_record_in_place() {
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    let forger_device = SigningKeypair::from_seed([0x77u8; 32]);
+    let forger_device = DeviceSeed::from([0x77u8; 32]).signing_keypair();
     let ep_forger = OrgEndpoint::bind(&forger_device).await.unwrap();
     tokio::time::timeout(NET, ep_forger.send(b_addr, &msg))
         .await

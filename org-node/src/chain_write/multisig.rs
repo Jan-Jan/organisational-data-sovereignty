@@ -17,6 +17,7 @@ use subxt_signer::sr25519::Keypair;
 
 use crate::chain_write::{DispatchOutcome, WriteError};
 use crate::chain_write::proxy::BlockSink;
+use crate::types::ChainAccount;
 
 /// Turn a composed RuntimeCall `Value` — shaped `Variant(pallet,
 /// Unnamed([Variant(call_name, fields)]))` by `proxied`/`create_pure_call` — into
@@ -46,11 +47,11 @@ pub const FUND_AMOUNT: u128 = 1_000_000_000_000;
 /// pallet-multisig pseudo-account: `blake2_256(scale_encode((
 /// b"modlpy/utilisuba", sorted_signers, threshold)))`. Mirrors
 /// `pallet_multisig::Pallet::multi_account_id`.
-pub fn multi_account_id(signers: &[[u8; 32]], threshold: u16) -> [u8; 32] {
-    let mut sorted: Vec<[u8; 32]> = signers.to_vec();
+pub fn multi_account_id(signers: &[ChainAccount], threshold: u16) -> ChainAccount {
+    let mut sorted: Vec<[u8; 32]> = signers.iter().map(|a| *a.as_bytes()).collect();
     sorted.sort();
     let entropy = (b"modlpy/utilisuba", sorted, threshold).encode();
-    blake2_256(&entropy)
+    ChainAccount::new(blake2_256(&entropy))
 }
 
 fn blake2_256(data: &[u8]) -> [u8; 32] {
@@ -122,17 +123,17 @@ async fn submit_and_watch<Call: subxt::transactions::Payload>(
 /// `others` non-empty ⇒ `Multisig.as_multi_threshold_1(others, call)`
 /// (threshold-1 "any one of N"). Pure (no chain I/O) so it is unit-testable.
 pub(crate) fn build_dispatch_tx(
-    other_signatories: &[[u8; 32]],
+    other_signatories: &[ChainAccount],
     call: Value,
 ) -> Result<StaticPayload<Composite<()>>, WriteError> {
     if other_signatories.is_empty() {
         return runtime_call_to_tx(call);
     }
-    let mut sorted_others: Vec<[u8; 32]> = other_signatories.to_vec();
+    let mut sorted_others: Vec<ChainAccount> = other_signatories.to_vec();
     sorted_others.sort();
     let others: Vec<Value> = sorted_others
         .iter()
-        .map(|id| Value::from_bytes(id.as_slice()))
+        .map(|id| Value::from_bytes(id.as_bytes().as_slice()))
         .collect();
     Ok(dynamic::tx(
         "Multisig",
@@ -149,7 +150,7 @@ pub async fn dispatch_org_call(
     sink: &dyn BlockSink,
     api: &OnlineClient<PolkadotConfig>,
     signer: &Keypair,
-    other_signatories: &[[u8; 32]],
+    other_signatories: &[ChainAccount],
     call: Value,
 ) -> Result<DispatchOutcome, WriteError> {
     let tx = build_dispatch_tx(other_signatories, call)?;
@@ -166,12 +167,12 @@ pub async fn fund(
     sink: &dyn BlockSink,
     api: &OnlineClient<PolkadotConfig>,
     from: &Keypair,
-    dest: [u8; 32],
+    dest: ChainAccount,
     amount: u128,
 ) -> Result<(), WriteError> {
     let dest_value = Value::variant(
         "Id",
-        Composite::unnamed(vec![Value::from_bytes(dest.as_slice())]),
+        Composite::unnamed(vec![Value::from_bytes(dest.as_bytes().as_slice())]),
     );
     let tx = dynamic::tx(
         "Balances",

@@ -22,7 +22,8 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use org_node::blobs::JoinRequest;
 use org_node::service::SelfDeleteOutcome;
-use org_node::store::{OrgRecord, PersonaRecord};
+use org_node::store::{OrgRecord, PersonaDetails, PersonaRecord};
+use org_node::{MemberId, OrgNodeError, OrgSecret, PersonaId};
 
 use crate::parsing::parse_org_id;
 use crate::state::{AppState, ConnectionStatus};
@@ -46,11 +47,11 @@ pub struct PersonaDto {
 impl From<&PersonaRecord> for PersonaDto {
     fn from(p: &PersonaRecord) -> Self {
         Self {
-            persona_id: p.persona_id.clone(),
+            persona_id: p.persona_id.as_str().to_string(),
             org_id: p.org_id.map(|id| hex::encode(id.as_bytes())),
-            handle: p.handle.clone(),
-            name: p.name.clone(),
-            surname: p.surname.clone(),
+            handle: p.handle.to_string(),
+            name: p.name.to_string(),
+            surname: p.surname.to_string(),
             status: format!("{:?}", p.status),
         }
     }
@@ -69,8 +70,8 @@ impl From<&OrgRecord> for OrgDto {
     fn from(o: &OrgRecord) -> Self {
         Self {
             org_id: hex::encode(o.org_id.as_bytes()),
-            epoch: o.epoch,
-            root_hash: hex::encode(o.root_hash),
+            epoch: o.epoch.get(),
+            root_hash: hex::encode(o.root_hash.as_bytes()),
             member_count: o.trie_members.len(),
         }
     }
@@ -81,6 +82,10 @@ impl From<&OrgRecord> for OrgDto {
 // ---------------------------------------------------------------------------
 
 /// Create a new persona (no chain interaction).
+///
+/// The handle, name and surname are parsed here, at the command boundary,
+/// by org-node's `PersonaDetails::parse`; a refusal names the field it is
+/// about (`handle: …`, `name: …`, `surname: …`).
 #[tauri::command]
 pub async fn create_persona(
     state: State<'_, AppState>,
@@ -88,8 +93,16 @@ pub async fn create_persona(
     name: String,
     surname: String,
 ) -> Result<String, String> {
+    let PersonaDetails { handle, name, surname } =
+        PersonaDetails::parse(&handle, &name, &surname).map_err(|e| match e {
+            OrgNodeError::InvalidField { field, reason } => {
+                format!("{}: {reason}", field.trim_start_matches("persona."))
+            }
+            other => other.to_string(),
+        })?;
     let mut svc = state.service.lock().await;
-    svc.create_persona(&mut OsRng, &handle, &name, &surname)
+    svc.create_persona(&mut OsRng, handle, name, surname)
+        .map(|id| id.as_str().to_string())
         .map_err(|e| e.to_string())
 }
 
@@ -102,7 +115,7 @@ pub async fn create_organisation(
 ) -> Result<String, String> {
     let mut svc = state.service.lock().await;
     let org_id = svc
-        .create_organisation(&mut OsRng, &persona_id)
+        .create_organisation(&mut OsRng, &PersonaId::new(persona_id))
         .await
         .map_err(|e| e.to_string())?;
     Ok(hex::encode(org_id.as_bytes()))
@@ -137,7 +150,8 @@ pub async fn export_join_request(
     persona_id: String,
 ) -> Result<String, String> {
     let svc = state.service.lock().await;
-    svc.export_join_request(&persona_id).map_err(|e| e.to_string())
+    svc.export_join_request(&PersonaId::new(persona_id))
+        .map_err(|e| e.to_string())
 }
 
 /// Decode and return the fields of a join-request blob (no persistence).
@@ -145,11 +159,11 @@ pub async fn export_join_request(
 pub async fn import_join_request(blob: String) -> Result<JoinRequestDto, String> {
     let jr = decode_join_request(&blob)?;
     Ok(JoinRequestDto {
-        handle: jr.handle,
-        name: jr.name,
-        surname: jr.surname,
-        member_key: hex::encode(jr.member_key),
-        device_key: hex::encode(jr.device_key),
+        handle: jr.handle.to_string(),
+        name: jr.name.to_string(),
+        surname: jr.surname.to_string(),
+        member_key: hex::encode(jr.member_key.as_bytes()),
+        device_key: hex::encode(jr.device_key.as_bytes()),
         has_node_addr: !jr.node_addr.is_empty(),
         node_addr_blob: hex::encode(&jr.node_addr),
     })
@@ -198,7 +212,7 @@ pub async fn admit_member(
     // id-only EndpointAddr from the device key. In Loopback the blob carries the
     // full EndpointAddr to dial.
     let peer_addr: EndpointAddr = if jr.node_addr.is_empty() {
-        iroh::EndpointId::from_bytes(&jr.device_key)
+        iroh::EndpointId::from_bytes(jr.device_key.as_bytes())
             .map_err(|e| format!("device_key is not a valid iroh EndpointId: {e}"))?
             .into()
     } else {
@@ -206,7 +220,7 @@ pub async fn admit_member(
             .map_err(|e| format!("node_addr decode: {e}"))?
     };
 
-    let org_secret: Option<[u8; 32]> = match org_secret_hex {
+    let org_secret: Option<OrgSecret> = match org_secret_hex {
         Some(hex_str) => {
             let bytes = hex::decode(hex_str.trim_start_matches("0x"))
                 .map_err(|e| format!("org_secret hex: {e}"))?;
@@ -215,7 +229,7 @@ pub async fn admit_member(
             }
             let mut arr = [0u8; 32];
             arr.copy_from_slice(&bytes);
-            Some(arr)
+            Some(OrgSecret::from(arr))
         }
         None => None,
     };
@@ -225,7 +239,7 @@ pub async fn admit_member(
         .admit_member(&mut OsRng, oid, &jr, peer_addr, org_secret)
         .await
         .map_err(|e| e.to_string())?;
-    Ok(hex::encode(member_id))
+    Ok(hex::encode(member_id.as_bytes()))
 }
 
 /// Revoke a member by member_id (64 hex chars). `peer_addr_blob` (hex-encoded
@@ -270,7 +284,7 @@ pub async fn revoke_member(
     };
 
     let mut svc = state.service.lock().await;
-    svc.revoke_member(&mut OsRng, oid, member_id, peer_addr)
+    svc.revoke_member(&mut OsRng, oid, MemberId::new(member_id), peer_addr)
         .await
         .map_err(|e| e.to_string())
 }
@@ -358,7 +372,7 @@ async fn next_outcomes<R: Runtime>(app: &AppHandle<R>) -> Vec<events::ReceiverOu
                 svc.list_orgs()
                     .iter()
                     .find(|o| o.org_id == org_id)
-                    .map(|o| (o.epoch, hex::encode(o.root_hash)))
+                    .map(|o| (o.epoch.get(), hex::encode(o.root_hash.as_bytes())))
             };
             let org_id = hex::encode(org_id.as_bytes());
             match record {

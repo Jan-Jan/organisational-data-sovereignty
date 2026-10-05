@@ -10,22 +10,23 @@
 
 use org_members::RootHash;
 use org_node::chain::{MockChain, OrgState};
+use org_node::{MemberSeed};
 use org_node::ids::OrgId;
 use org_node::keys::SigningKeypair;
 use org_node::sequence::SeqGuard;
 use org_node::test_fixtures::{admin_device, admit_member_delta, genesis_trie, Trie};
 use org_node::verify::{verify_envelope_against_chain, VerifyContext};
-use org_node::{OrgNodeError, SignedDeltaEnvelope};
+use org_node::{Epoch, OrgNodeError, OrgPublicKey, SequenceNumber, SignedDeltaEnvelope};
 
 fn setup() -> (SigningKeypair, OrgId, Trie, SignedDeltaEnvelope, RootHash) {
-    let admin = SigningKeypair::from_seed([1u8; 32]);
+    let admin = MemberSeed::from([1u8; 32]).signing_keypair();
     let local = genesis_trie(&admin, &admin_device()); // receiver's mirror (epoch 1 state)
     // NOTE: admit_member_delta builds its own genesis internally from the same
     // admin and admin_device(); both genesis tries agree by construction
     // (deterministic fixtures).
     let (delta, new_trie) = admit_member_delta(&admin);
     let org = OrgId::new([5u8; 20]);
-    let env = SignedDeltaEnvelope::build(org, 2, &delta, &admin).unwrap();
+    let env = SignedDeltaEnvelope::build(org, SequenceNumber::new(2), &delta, &admin).unwrap();
     let new_root = new_trie.root_hash().unwrap();
     (admin, org, local, env, new_root)
 }
@@ -36,15 +37,15 @@ fn ctx<'a>(org: OrgId, author: &'a ed25519_dalek::VerifyingKey) -> VerifyContext
     VerifyContext {
         expected_org_id: org,
         author_member_key: author,
-        seq_guard: SeqGuard::from_last_seen(1),
-        last_committed_epoch: 1,
+        seq_guard: SeqGuard::from_last_seen(SequenceNumber::new(1)),
+        last_committed_epoch: Epoch::new(1),
     }
 }
 
 /// A chain whose state for `org` is `root` at `epoch`.
-fn chain_at(org: OrgId, root: RootHash, epoch: u64) -> MockChain {
+fn chain_at(org: OrgId, root: RootHash, epoch: Epoch) -> MockChain {
     let mut chain = MockChain::new();
-    chain.set(org, OrgState { root_hash: root, org_pub_key: [0u8; 32], epoch });
+    chain.set(org, OrgState { root_hash: root, org_pub_key: OrgPublicKey::parse(&[0u8; 32]).unwrap(), epoch });
     chain
 }
 
@@ -63,12 +64,12 @@ fn sign_over(signer: &SigningKeypair, org: OrgId, seq: u64, delta_bytes: &[u8]) 
 #[test]
 fn happy_path_commits_when_root_matches_chain() {
     let (admin, org, local, env, new_root) = setup();
-    let chain = chain_at(org, new_root, 2);
+    let chain = chain_at(org, new_root, Epoch::new(2));
     let vk = admin.verifying_key();
     let ctx = ctx(org, &vk);
     let out = verify_envelope_against_chain(&local, &env, &ctx, &chain).unwrap();
-    assert_eq!(out.epoch, 2);
-    assert_eq!(out.seq_guard.last_seen(), 2);
+    assert_eq!(out.epoch, Epoch::new(2));
+    assert_eq!(out.seq_guard.last_seen(), SequenceNumber::new(2));
     assert_eq!(out.trie.root_hash().unwrap(), new_root);
 }
 
@@ -89,7 +90,7 @@ fn rejects_wrong_org_id() {
 #[test]
 fn rejects_bad_signature() {
     let (_admin, org, local, env, _) = setup();
-    let imposter = SigningKeypair::from_seed([0xaa; 32]);
+    let imposter = MemberSeed::from([0xaa; 32]).signing_keypair();
     let chain = MockChain::new();
     let vk = imposter.verifying_key();
     let ctx = ctx(org, &vk);
@@ -103,10 +104,10 @@ fn rejects_bad_signature() {
 #[test]
 fn rejects_stale_seq() {
     let (admin, org, local, env, new_root) = setup();
-    let chain = chain_at(org, new_root, 2);
+    let chain = chain_at(org, new_root, Epoch::new(2));
     let vk = admin.verifying_key();
     let ctx = VerifyContext {
-        seq_guard: SeqGuard::from_last_seen(2), // env.parent_seq == 2, not > 2
+        seq_guard: SeqGuard::from_last_seen(SequenceNumber::new(2)), // env.parent_seq == 2, not > 2
         ..ctx(org, &vk)
     };
     assert_eq!(
@@ -185,17 +186,17 @@ fn a_chain_read_that_fails_is_refused_as_chain_not_as_absence() {
 fn rejects_root_mismatch_when_chain_root_differs() {
     let (admin, org, local, env, _new_root) = setup();
     // Attacker-influenced delta but honest chain root that does NOT match.
-    let chain = chain_at(org, RootHash::new([0xde; 32]), 2);
+    let chain = chain_at(org, RootHash::new([0xde; 32]), Epoch::new(2));
     let vk = admin.verifying_key();
     let ctx = ctx(org, &vk);
-    assert_eq!(ctx.seq_guard.last_seen(), 1, "the mark this test hands in");
+    assert_eq!(ctx.seq_guard.last_seen(), SequenceNumber::new(1), "the mark this test hands in");
     assert_eq!(
         verify_envelope_against_chain(&local, &env, &ctx, &chain).unwrap_err(),
         OrgNodeError::RootMismatch
     );
     assert_eq!(
         ctx.seq_guard.last_seen(),
-        1,
+        SequenceNumber::new(1),
         "a rejection at the root match must leave the high-water mark where it was"
     );
 }
@@ -204,7 +205,7 @@ fn rejects_root_mismatch_when_chain_root_differs() {
 #[test]
 fn rejects_stale_epoch() {
     let (admin, org, local, env, new_root) = setup();
-    let chain = chain_at(org, new_root, 1); // chain epoch 1 is not newer than committed 1
+    let chain = chain_at(org, new_root, Epoch::new(1)); // chain epoch 1 is not newer than committed 1
     let vk = admin.verifying_key();
     let ctx = ctx(org, &vk);
     assert_eq!(
@@ -218,10 +219,10 @@ fn rejects_stale_epoch() {
 // verifies: REQ-6yu72z, LLR-wx3php
 #[test]
 fn rejects_equal_and_lower_seq() {
-    let g = SeqGuard::from_last_seen(5);
-    assert!(g.check(6).is_ok());
-    assert_eq!(g.check(5), Err(OrgNodeError::StaleSeq { got: 5, last_seen: 5 }));
-    assert_eq!(g.check(4), Err(OrgNodeError::StaleSeq { got: 4, last_seen: 5 }));
+    let g = SeqGuard::from_last_seen(SequenceNumber::new(5));
+    assert!(g.check(SequenceNumber::new(6)).is_ok());
+    assert_eq!(g.check(SequenceNumber::new(5)), Err(OrgNodeError::StaleSeq { got: 5, last_seen: 5 }));
+    assert_eq!(g.check(SequenceNumber::new(4)), Err(OrgNodeError::StaleSeq { got: 4, last_seen: 5 }));
 }
 
 // `advance` is LLR-uc7cej's. It never calls `from_last_seen`, so it carried
@@ -232,10 +233,10 @@ fn rejects_equal_and_lower_seq() {
 #[test]
 fn advance_moves_high_water_mark_forward_only() {
     let mut g = SeqGuard::new();
-    g.advance(3);
-    assert_eq!(g.last_seen(), 3);
-    g.advance(2); // ignored
-    assert_eq!(g.last_seen(), 3);
+    g.advance(SequenceNumber::new(3));
+    assert_eq!(g.last_seen(), SequenceNumber::new(3));
+    g.advance(SequenceNumber::new(2)); // ignored
+    assert_eq!(g.last_seen(), SequenceNumber::new(3));
 }
 
 // ---- abnormal input: the cheap checks run before the delta is decoded ------
@@ -248,7 +249,7 @@ fn rejects_wrong_org_before_decoding_delta() {
     let (admin, org, local, _env, _) = setup();
     let garbage = SignedDeltaEnvelope {
         org_id: org,
-        parent_seq: 2,
+        parent_seq: SequenceNumber::new(2),
         delta_bytes: vec![0xff; 16],
         signature: sign_over(&admin, org, 2, &[0xff; 16]),
     };
@@ -267,10 +268,10 @@ fn rejects_bad_signature_before_decoding_delta() {
     // signature check did not precede decoding, the error would be
     // MalformedDelta.
     let (admin, org, local, _env, _) = setup();
-    let imposter = SigningKeypair::from_seed([0xaa; 32]);
+    let imposter = MemberSeed::from([0xaa; 32]).signing_keypair();
     let garbage = SignedDeltaEnvelope {
         org_id: org,
-        parent_seq: 2,
+        parent_seq: SequenceNumber::new(2),
         delta_bytes: vec![0xff; 16],
         signature: sign_over(&imposter, org, 2, &[0xff; 16]),
     };
@@ -291,7 +292,7 @@ fn rejects_stale_seq_before_decoding_delta() {
     let (admin, org, local, _env, _) = setup();
     let garbage = SignedDeltaEnvelope {
         org_id: org,
-        parent_seq: 1,
+        parent_seq: SequenceNumber::new(1),
         delta_bytes: vec![0xff; 16],
         signature: sign_over(&admin, org, 1, &[0xff; 16]),
     };
@@ -307,10 +308,10 @@ fn rejects_stale_seq_before_decoding_delta() {
 #[test]
 fn from_last_seen_starts_the_guard_at_the_given_mark() {
     for mark in [0u64, 1, 7, u64::MAX - 1] {
-        let g = SeqGuard::from_last_seen(mark);
-        assert_eq!(g.last_seen(), mark, "last_seen reports the mark the guard was started at");
-        assert_eq!(g.check(mark), Err(OrgNodeError::StaleSeq { got: mark, last_seen: mark }));
-        assert!(g.check(mark + 1).is_ok());
+        let g = SeqGuard::from_last_seen(SequenceNumber::new(mark));
+        assert_eq!(g.last_seen(), SequenceNumber::new(mark), "last_seen reports the mark the guard was started at");
+        assert_eq!(g.check(SequenceNumber::new(mark)), Err(OrgNodeError::StaleSeq { got: mark, last_seen: mark }));
+        assert!(g.check(SequenceNumber::new(mark + 1)).is_ok());
     }
 }
 
@@ -320,9 +321,9 @@ fn check_does_not_advance_the_mark() {
     // `check` takes `&self`: a rejection (or an acceptance that is later
     // rejected downstream) can never move the high-water mark. The assertion
     // documents the contract the type system enforces.
-    let g = SeqGuard::from_last_seen(5);
-    g.check(6).unwrap();
-    assert_eq!(g.last_seen(), 5);
+    let g = SeqGuard::from_last_seen(SequenceNumber::new(5));
+    g.check(SequenceNumber::new(6)).unwrap();
+    assert_eq!(g.last_seen(), SequenceNumber::new(5));
 }
 
 // ---- added 2026-10-03 by the architecture tooth ----------------------------
@@ -338,12 +339,12 @@ fn rejects_a_delta_whose_base_root_is_not_the_local_root() {
     // Two distinct seeds: org-members refuses an organisation in which one key
     // is held twice, a member key equal to its own device key included
     // (`DuplicateKey`, master `a547ff3`). Neither collides with the fixture
-    // seeds [1], [2], [3] or ADMIN_DEVICE_SEED [4].
-    let stranger = SigningKeypair::from_seed([42u8; 32]);
-    let stranger_device = SigningKeypair::from_seed([43u8; 32]);
+    // seeds [1], [2], [3] or the `admin_device()` seed [4].
+    let stranger = MemberSeed::from([42u8; 32]).signing_keypair();
+    let stranger_device = org_node::DeviceSeed::from([43u8; 32]).signing_keypair();
     let divergent = genesis_trie(&stranger, &stranger_device);
 
-    let chain = chain_at(org, new_root, 2);
+    let chain = chain_at(org, new_root, Epoch::new(2));
     let err = verify_envelope_against_chain(&divergent, &env, &ctx(org, &admin.verifying_key()), &chain)
         .unwrap_err();
     assert_eq!(err, OrgNodeError::DeltaBaseMismatch);
@@ -357,7 +358,7 @@ fn a_successful_verification_leaves_the_callers_trie_untouched() {
     let (admin, org, local, env, new_root) = setup();
     let root_before = local.root_hash().unwrap();
 
-    let chain = chain_at(org, new_root, 2);
+    let chain = chain_at(org, new_root, Epoch::new(2));
     let verified =
         verify_envelope_against_chain(&local, &env, &ctx(org, &admin.verifying_key()), &chain)
             .unwrap();
@@ -378,7 +379,7 @@ fn a_rejected_verification_leaves_the_callers_trie_untouched() {
     let root_before = local.root_hash().unwrap();
     env.signature = [0u8; 64];
 
-    let chain = chain_at(org, new_root, 2);
+    let chain = chain_at(org, new_root, Epoch::new(2));
     assert!(
         verify_envelope_against_chain(&local, &env, &ctx(org, &admin.verifying_key()), &chain)
             .is_err()
@@ -396,7 +397,7 @@ fn a_rejected_verification_leaves_the_callers_trie_untouched() {
 fn a_stale_epoch_names_the_chain_epoch_and_the_committed_epoch_the_right_way_round() {
     let (admin, org, local, env, new_root) = setup();
     // ctx() commits epoch 1; the chain is behind it at epoch 0.
-    let chain = chain_at(org, new_root, 0);
+    let chain = chain_at(org, new_root, Epoch::new(0));
     let vk = admin.verifying_key();
     let err = verify_envelope_against_chain(&local, &env, &ctx(org, &vk), &chain).unwrap_err();
     assert_eq!(err, OrgNodeError::StaleEpoch { got: 0, last: 1 });

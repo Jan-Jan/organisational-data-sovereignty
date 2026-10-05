@@ -40,8 +40,18 @@ _Avoid_: seq, parent_seq (the field name), nonce
 **Published signing key**:
 The key recorded in the Organisation state as the Organisation's signing key,
 under which every Envelope for that Organisation must verify. Today it is the
-administrator's Member-as-a-group key.
-_Avoid_: org key, admin key, org_pub_key (the field name)
+administrator's Member-as-a-group key, held in the Organisation state's
+Organisation public key field — a conflation recorded as PR-szkat6.
+_Avoid_: org key, admin key
+
+**Organisation public key**:
+The public half of the Organisation key pair: agreed by the administrators,
+published in the Organisation state, and shared with every current Member, so
+that access can be granted to the Organisation as a pseudo-group without
+running CGKA across all Members. By owner ruling (recorded in the `person`
+unit) it is an X25519 key; the field holds the Published signing key today
+(PR-szkat6).
+_Avoid_: org key, org_pub_key (the field name)
 
 **Persona**:
 One identity a device holds: a Member's keys and name, and the Organisation
@@ -55,8 +65,16 @@ _Avoid_: keystore, wallet, database
 
 **Organisation secret**:
 An opaque value the administrator hands to a Member at admission, shared by
-every current Member. What it protects is the next capability's concern.
+every current Member. What it protects is the next capability's concern. The
+design intends it as the secret half of the Organisation key pair; the node
+does not yet relate it to the Organisation public key (PR-szkat6).
 _Avoid_: org key, group secret, shared key
+
+**Secret**:
+A value whose holder can act as someone else: a member seed, a device seed,
+the Organisation secret, or the key the Persona store is encrypted under.
+Never shown in diagnostic output; given up only where it is deliberately used.
+_Avoid_: key material, private key (ambiguous with the public half)
 
 **Invite**:
 What an administrator gives a prospective Member out of band so that the

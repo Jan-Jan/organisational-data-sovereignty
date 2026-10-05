@@ -98,6 +98,12 @@ consumer org-node, report a different error than before:
   loads member snapshots from its encrypted local store, and when a first
   admission decodes the record snapshot the admin sent
   (`first_admission_base`).
+  *Amended 2026-10-04 by the org-node type-safety change: org-node now parses
+  member snapshots when they are decoded, in record order, and
+  `trie_from_snapshots` receives them parsed; the same snapshot now reports
+  `InvalidField { field: "member.handle", .. }` (recorded in
+  `org-node/docs/architecture/2026-10-04-type-safety.md`,
+  "Observable changes").*
 
 Every outcome is still a typed error. The operations themselves still refuse
 an unknown id with `IdNotFound` for every well-typed call, so LLR-v3jqau holds

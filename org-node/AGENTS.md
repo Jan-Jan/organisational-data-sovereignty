@@ -23,36 +23,42 @@ Same rule as org-members; why: `../docs/adr/2026-10-04-parse-at-the-system-edge.
 - **Serde parses too.** A persisted/wire struct field is the newtype; its
   `Deserialize` goes through `parse`. Wrapping must not change stored or wire
   bytes -- prove it with a round-trip test against bytes from before the change.
-- **Secrets** (member/device seed, Organisation secret) get a newtype with
-  redacted `Debug` and no `Display`. Never `derive(Debug)` on a struct that
-  holds a secret as a plain array (PR-hqwpg9).
+- **Secrets** (member/device seed, Organisation secret, store key) get a
+  newtype with redacted `Debug` and no `Display`. Never `derive(Debug)` on a
+  struct that holds a secret as a plain array (PR-hqwpg9).
 
-**Status (2026-10-04):** org-node does not yet follow this rule; 82 lines
-under `src/` mention `[u8; 32]`: `service.rs` 27, `store.rs` 15,
-`chain_write/proxy.rs` 12, `chain_write/multisig.rs` 7, `blobs.rs` 5,
-`ceremony.rs` 4, `chain_write/calldata.rs` 4, `keys.rs` 2,
-`chain_write/submit.rs` 2, and one each in `chain.rs`, `transport/wire.rs`,
-`test_fixtures.rs`, `bin/preflight.rs` (counted with
-`grep -c '\[u8; 32\]'`). Some are legitimate edge points (chain and wire
-decoding, calldata encoding); the rest are converted in a dedicated follow-up
-change. Don't add new ones.
+**Status (2026-10-04, re-counted 2026-10-05 after the merge of master
+`05f6f04`):** org-node follows this rule since the org-node
+type-safety change (`docs/plans/2026-10-04-org-node-type-safety.md`). Its
+design sits under the owning items of org-node's decomposition — value types
+in `types.rs` (including the Organisation public key's parse) under
+SDD-swtd3w, seeds to key pairs under SDD-sxp8hb, the store's records and the
+refusals on load and import under SDD-af5vnt, each cross-referenced from the
+other items it constrains (`docs/architecture/2026-10-04-type-safety.md`). 33 lines
+under `src/` still mention `[u8; 32]` (counted with `grep -c '\[u8; 32\]'`),
+each an edge, a type's own constructor/accessor, or a buffer:
+`types.rs` 14 (the newtypes' constructors, accessors and `Deserialize`),
+`store.rs` 9 (the `Raw…` decode mirrors and the private `StoreKey`),
+`chain_write/proxy.rs` 2 (`BlockSink::settle`, extrinsic-event decoding),
+`chain_write/multisig.rs` 2 (signer sort buffer, `blake2_256` output),
+`chain_write/calldata.rs` 2 (`build_update_calldata`, the pinned EVM encoder),
+`blobs.rs` 2 (the `RawJoinRequest` mirror), `service.rs` 1
+(`FinalitySink::settle`, the live-chain `BlockSink`), `bin/preflight.rs` 1
+(env parsing). Don't add new
+ones outside an edge.
 
 ```rust
-// Edge: a decoded JoinRequest is parsed once into domain types...
-let handle = Handle::parse(&req.handle)?; // OrgMembersError -> OrgNodeError via From
-let member_key = VerifyingKey::from_bytes(&req.member_key)  // bytes -> curve point
-    .map(P2pMemberKey::new)
-    .map_err(|e| OrgNodeError::Chain(format!("bad member key: {e}")))?;
+// Edge: a decoded JoinRequest is parsed once, each field named on refusal...
+let jr = blobs::decode_join_request(blob)?; // OrgNodeError::InvalidField { field: "join_request.handle", .. }
 
 // ...and everything past the edge takes the newtype, never &str / [u8; 32].
-fn admit(&mut self, handle: Handle, name: Name, surname: Surname,
-         member_key: P2pMemberKey, device: P2pDeviceKey) -> Result<(), OrgNodeError>;
+fn admit_member(&mut self, rng: &mut R, org_id: OrgId, join_request: &JoinRequest,
+                peer_addr: EndpointAddr, org_secret: Option<OrgSecret>) -> Result<MemberId, OrgNodeError>;
 
-// Secret: no Display, redacted Debug.
-pub struct Seed([u8; 32]);
-impl fmt::Debug for Seed {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("Seed([REDACTED])")
-    }
-}
+// Secret: no Display, redacted Debug, bytes only through expose_secret.
+let kp = persona.member_seed.signing_keypair();
 ```
+
+A record with a fallible field decodes through a `Raw…` mirror and `TryFrom`
+(`#[serde(try_from)]`), because postcard drops the message of an error raised
+inside `Deserialize`.

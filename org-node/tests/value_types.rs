@@ -9,6 +9,7 @@
 use org_node::error::OrgNodeError;
 use org_node::ids::OrgId;
 use org_node::sequence::SeqGuard;
+use org_node::SequenceNumber;
 
 // verifies: REQ-gju89b, LLR-7gnrnz
 #[test]
@@ -85,8 +86,8 @@ fn a_stale_sequence_rejection_carries_the_offered_number_and_the_mark() {
     // contains('9')` — symmetric, so exchanging the two fields was invisible.
     // This one takes the error from a real producer and pins the ORDER of the
     // two numbers in the message, which is the only part a reader relies on.
-    let guard = SeqGuard::from_last_seen(9);
-    let err = guard.check(4).unwrap_err();
+    let guard = SeqGuard::from_last_seen(SequenceNumber::new(9));
+    let err = guard.check(SequenceNumber::new(4)).unwrap_err();
     assert_eq!(err, OrgNodeError::StaleSeq { got: 4, last_seen: 9 });
 
     let rendered = format!("{err}");

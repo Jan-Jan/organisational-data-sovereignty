@@ -12,15 +12,15 @@
 use org_node::ids::OrgId;
 use org_node::keys::SigningKeypair;
 use org_node::test_fixtures::admit_member_delta;
-use org_node::{OrgNodeError, SignedDeltaEnvelope};
+use org_node::{MemberSeed, OrgNodeError, SequenceNumber, SignedDeltaEnvelope};
 
 const ORG: [u8; 20] = [5u8; 20];
 const SEQ: u64 = 7;
 
 fn built() -> (SigningKeypair, SignedDeltaEnvelope) {
-    let admin = SigningKeypair::from_seed([1u8; 32]);
+    let admin = MemberSeed::from([1u8; 32]).signing_keypair();
     let (delta, _) = admit_member_delta(&admin);
-    let env = SignedDeltaEnvelope::build(OrgId::new(ORG), SEQ, &delta, &admin).unwrap();
+    let env = SignedDeltaEnvelope::build(OrgId::new(ORG), SequenceNumber::new(SEQ), &delta, &admin).unwrap();
     (admin, env)
 }
 
@@ -96,7 +96,7 @@ fn altering_the_organisation_identifier_breaks_the_signature() {
 #[test]
 fn altering_the_sequence_number_breaks_the_signature() {
     let (admin, mut env) = built();
-    env.parent_seq = SEQ + 1;
+    env.parent_seq = SequenceNumber::new(SEQ + 1);
     assert!(!env.verify_signature(&admin.verifying_key()));
 }
 
@@ -116,6 +116,6 @@ fn altering_the_delta_bytes_breaks_the_signature() {
 #[test]
 fn the_signature_does_not_verify_under_another_members_key() {
     let (_, env) = built();
-    let stranger = SigningKeypair::from_seed([2u8; 32]);
+    let stranger = MemberSeed::from([2u8; 32]).signing_keypair();
     assert!(!env.verify_signature(&stranger.verifying_key()));
 }

@@ -12,6 +12,8 @@ use subxt_signer::sr25519::Keypair;
 
 use crate::chain_write::WriteError;
 use crate::chain_write::multisig::dispatch_org_call;
+use crate::ids::OrgId;
+use crate::types::ChainAccount;
 
 /// Abstraction over "make the chain advance so a just-submitted extrinsic is
 /// observable". Chopsticks tests implement this by calling dev_newBlock; a live
@@ -46,7 +48,7 @@ fn create_pure_call() -> Value {
 /// Wrap `call` so it executes with `pure_proxy` as origin:
 /// `RuntimeCall::Proxy(Call::proxy { real: Id(P), force_proxy_type:
 /// None, call })`.
-pub fn proxied(pure_proxy: [u8; 32], call: Value) -> Value {
+pub fn proxied(pure_proxy: ChainAccount, call: Value) -> Value {
     Value::variant(
         "Proxy",
         Composite::unnamed(vec![Value::variant(
@@ -56,7 +58,7 @@ pub fn proxied(pure_proxy: [u8; 32], call: Value) -> Value {
                     "real".to_string(),
                     Value::variant(
                         "Id",
-                        Composite::unnamed(vec![Value::from_bytes(pure_proxy.as_slice())]),
+                        Composite::unnamed(vec![Value::from_bytes(pure_proxy.as_bytes().as_slice())]),
                     ),
                 ),
                 (
@@ -85,7 +87,7 @@ pub fn map_account_call() -> Value {
     )
 }
 
-fn add_proxy_call(delegate: [u8; 32]) -> Value {
+fn add_proxy_call(delegate: ChainAccount) -> Value {
     Value::variant(
         "Proxy",
         Composite::unnamed(vec![Value::variant(
@@ -95,7 +97,7 @@ fn add_proxy_call(delegate: [u8; 32]) -> Value {
                     "delegate".to_string(),
                     Value::variant(
                         "Id",
-                        Composite::unnamed(vec![Value::from_bytes(delegate.as_slice())]),
+                        Composite::unnamed(vec![Value::from_bytes(delegate.as_bytes().as_slice())]),
                     ),
                 ),
                 (
@@ -108,7 +110,7 @@ fn add_proxy_call(delegate: [u8; 32]) -> Value {
     )
 }
 
-fn remove_proxy_call(delegate: [u8; 32]) -> Value {
+fn remove_proxy_call(delegate: ChainAccount) -> Value {
     Value::variant(
         "Proxy",
         Composite::unnamed(vec![Value::variant(
@@ -118,7 +120,7 @@ fn remove_proxy_call(delegate: [u8; 32]) -> Value {
                     "delegate".to_string(),
                     Value::variant(
                         "Id",
-                        Composite::unnamed(vec![Value::from_bytes(delegate.as_slice())]),
+                        Composite::unnamed(vec![Value::from_bytes(delegate.as_bytes().as_slice())]),
                     ),
                 ),
                 (
@@ -139,8 +141,8 @@ pub async fn create_pure(
     sink: &dyn BlockSink,
     api: &OnlineClient<PolkadotConfig>,
     signer: &Keypair,
-    others: &[[u8; 32]],
-) -> Result<[u8; 32], WriteError> {
+    others: &[ChainAccount],
+) -> Result<ChainAccount, WriteError> {
     // create_pure must EXECUTE to emit PureCreated; a (threshold-≥2) pending
     // approval has no proxy to return, so `into_executed` rejects it.
     let events = dispatch_org_call(sink, api, signer, others, create_pure_call())
@@ -164,11 +166,11 @@ pub async fn create_pure(
 pub async fn rotate(
     sink: &dyn BlockSink,
     api: &OnlineClient<PolkadotConfig>,
-    pure_proxy: [u8; 32],
+    pure_proxy: ChainAccount,
     signer_old: &Keypair,
-    others_old: &[[u8; 32]],
-    old_multi: [u8; 32],
-    new_multi: [u8; 32],
+    others_old: &[ChainAccount],
+    old_multi: ChainAccount,
+    new_multi: ChainAccount,
 ) -> Result<(), WriteError> {
     dispatch_org_call(sink, api, signer_old, others_old, proxied(pure_proxy, add_proxy_call(new_multi)))
         .await?
@@ -179,13 +181,18 @@ pub async fn rotate(
     Ok(())
 }
 
+/// The OrgId of the Organisation whose pure proxy is `p`: `h160_of(P)`.
+pub fn org_id_of(p: ChainAccount) -> OrgId {
+    OrgId::new(on_chain_client::h160_of(*p.as_bytes()))
+}
+
 /// Pull a 32-byte AccountId out of a named event field. The dynamic
 /// Value for an AccountId32 is a composite wrapping 32 u8 primitives
 /// (possibly nested one level — newtype). Handles both shapes.
 fn account32_from_named_field(
     fields: &Composite<()>,
     name: &str,
-) -> Result<[u8; 32], WriteError> {
+) -> Result<ChainAccount, WriteError> {
     let Composite::Named(named) = fields else {
         return Err(WriteError::MalformedEvent("event fields not named"));
     };
@@ -193,7 +200,9 @@ fn account32_from_named_field(
         .iter()
         .find(|(n, _)| n == name)
         .ok_or(WriteError::EventNotFound("named field not found"))?;
-    collect_account32(value).ok_or(WriteError::MalformedEvent("field is not a 32-byte account"))
+    collect_account32(value)
+        .map(ChainAccount::new)
+        .ok_or(WriteError::MalformedEvent("field is not a 32-byte account"))
 }
 
 fn collect_account32(value: &Value<()>) -> Option<[u8; 32]> {

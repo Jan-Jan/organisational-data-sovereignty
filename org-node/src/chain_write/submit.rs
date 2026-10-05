@@ -9,8 +9,11 @@ use subxt::config::PolkadotConfig;
 use subxt::dynamic::{self, Value};
 use subxt_signer::sr25519::Keypair;
 
+use org_members::RootHash;
+
 use crate::chain_write::WriteError;
-use crate::chain_write::calldata::build_update_calldata;
+use crate::chain_write::calldata::update_calldata;
+use crate::types::{Epoch, OrgPublicKey};
 
 /// Weight limit passed to `Revive.call`. Mirrors on-chain-client/tests/common/submit.rs.
 const WEIGHT_REF_TIME: u64 = 1_000_000_000_000;
@@ -32,11 +35,11 @@ pub async fn submit_update(
     api: &OnlineClient<PolkadotConfig>,
     signer: &Keypair,
     contract_h160: [u8; 20],
-    new_root_hash: [u8; 32],
-    new_org_pub_key: [u8; 32],
-    expected_epoch: u128,
+    new_root_hash: RootHash,
+    new_org_pub_key: OrgPublicKey,
+    expected_epoch: Epoch,
 ) -> Result<String, WriteError> {
-    let calldata = build_update_calldata(new_root_hash, new_org_pub_key, expected_epoch);
+    let calldata = update_calldata(new_root_hash, new_org_pub_key, expected_epoch);
 
     // pallet-revive `call` args (current Polkadot SDK):
     //   dest: H160, value: u128, gas_limit: Weight,

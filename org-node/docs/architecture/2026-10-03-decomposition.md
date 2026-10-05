@@ -45,7 +45,17 @@ node at all, where secrets rest, and how the five user stories compose those
 parts.
 
 Seven of the items live wholly or partly in `service.rs`, which is 1571 lines —
-forty-two percent of the unit. An item here is a responsibility with an interface,
+forty-two percent of the unit *(1501 lines, thirty-four per cent of a unit of
+4391 lines over 25 files, after the org-node type-safety change, measured
+2026-10-05 at its merge of this file; the change added `types.rs`)*.
+*(Amended 2026-10-05 by the org-node type-safety change, review round 7: this
+said the change "removed `service.rs`'s test module". `master` `05f6f04` had
+already relocated it — `service.rs` on `master` is 1571 lines with no
+`#[cfg(test)]` module. The drop to 1501 is that change's own refactor: the
+member-snapshot construction deduplicated into one `snapshot_of`, the
+`VerifyingKey::from_bytes` re-parsing of keys that now arrive typed removed,
+and the chain-state mapping moved to `chain_read::org_state_from_chain`.)*
+An item here is a responsibility with an interface,
 not a file: `receive_and_verify` and `revoke_member` are separate items that
 happen to be methods on one struct, and the `ChainOps` seam is a third that
 exists precisely so the first two can be exercised without a chain. *(This
@@ -61,13 +71,36 @@ for one item, it is that one.
 
 ## SDD-swtd3w — Value types and the rejection vocabulary
 
-`org-node/src/ids.rs`, `org-node/src/error.rs`
+`org-node/src/ids.rs`, `org-node/src/error.rs`, `org-node/src/types.rs`
 
 **SDD-swtd3w**: the identifier that keys an Organisation's on-chain slot,
 together with the vocabulary in which every refusal is reported — a typed
 variant per rejection path **on the receive-and-commit path**, so a caller can
 state *why* a change was refused rather than only that it was.
-traces: REQ-gju89b, REQ-9g6as6, REQ-bcxz96
+traces: REQ-gju89b, REQ-9g6as6, REQ-bcxz96, REQ-y7tsft
+
+*Amended 2026-10-05 by the org-node type-safety change, which re-homed its
+value types here at its merge of this file.* The item also owns
+`org-node/src/types.rs`: the secrets (member seed, device seed, Organisation
+secret), the Organisation public key and the tag types for the chain account,
+the Persona identifier, the epoch and the Sequence number, with their
+construction, formatting and serialised form — so it traces REQ-y7tsft too —
+and the two variants that change adds to `OrgNodeError`, `InvalidKey` and
+`InvalidField { field, reason }`. Its low-level requirements for them,
+LLR-sz4xhc, LLR-s7whrn and LLR-ayrdr8, are in `2026-10-04-type-safety.md`.
+The count of `OrgNodeError::Chain(String)` construction sites below is fifty
+on the tree it was measured on; after that change it is **forty-five**
+(`grep -o 'OrgNodeError::Chain(' -r org-node/src | wc -l`, 2026-10-05), the
+five removed being refusals that now name the field (`InvalidField`) or the
+key (`InvalidKey`). The catch-all is otherwise unchanged.
+
+*(Amended 2026-10-05 by the org-node type-safety change, review round 7:
+`types.rs` is this item's alone. LLR-mmdu38 — `OrgPublicKey`'s parse, and
+what the chain read view serves when that parse refuses a fetched state — now
+sits under this item in `2026-10-04-type-safety.md`, because four of its five
+clauses constrain `OrgPublicKey` in `types.rs`; its cache clause is named by
+SDD-pa6p7w. It had been placed under SDD-pa6p7w, whose section claimed
+`types.rs` for it.)*
 
 *Qualified 2026-10-04 by review round 3, with LLR-z8fubr below and for the same
 measurement: "one typed variant per rejection path" is true of
@@ -124,11 +157,29 @@ satisfies: REQ-9g6as6
 verifying key plays — the `P2pMemberKey` that signs a change to membership, and
 the `P2pDeviceKey` that is both the node's leaf in the trie and its transport
 identity.
-traces: REQ-ag6kqm, REQ-xa6smf, REQ-ztdza4
+traces: REQ-ag6kqm, REQ-xa6smf, REQ-ztdza4, REQ-y7tsft
 
-**LLR-e58j8m**: a keypair rebuilt from `to_seed` produces the same verifying
-key and the same signature over the same message as the keypair it came from.
+*Amended 2026-10-05 by the org-node type-safety change:* a keypair is built
+from a seed only through the typed seeds `MemberSeed` and `DeviceSeed`, and
+hands its seed back only as one of them (LLR-56hc77, in
+`2026-10-04-type-safety.md`).
+
+*(Amended 2026-10-05 by the org-node type-safety change, review round 7:
+also constrained by LLR-bwb9pu, under SDD-af5vnt — `SigningKeypair`'s `Debug`
+shows none of its seed, through ed25519-dalek's `SigningKey` — so the item
+traces REQ-y7tsft too.)*
+
+**LLR-e58j8m**: a keypair rebuilt from the seed it hands back — as either
+role, `member_seed().signing_keypair()` or `device_seed().signing_keypair()`
+— produces the same verifying key and the same signature over the same message
+as the keypair it came from.
 satisfies: REQ-ag6kqm
+
+*(Amended 2026-10-05 by the org-node type-safety change: this read "a keypair
+rebuilt from `to_seed`". That change removed `to_seed` and `from_seed`
+(LLR-56hc77, in `2026-10-04-type-safety.md`), so the seed comes back typed, as
+a `MemberSeed` or a `DeviceSeed`. `a_keypair_rebuilt_from_its_seed_signs_identically`
+checks both roles.)*
 
 **LLR-ctzkv7**: `member_key()` and `device_key()` both wrap **this keypair's one
 verifying key**, so a node's trie identity and its signing identity cannot
@@ -266,7 +317,8 @@ satisfies: REQ-bcxz96
 
 ## SDD-pa6p7w — The chain as a read oracle
 
-`org-node/src/chain.rs`
+`org-node/src/chain.rs`; in `org-node/src/chain_read.rs`, `org_state_from_chain`
+and `OrgStateCache` *(amended 2026-10-05, see below)*
 
 **SDD-pa6p7w**: the read-only view of what the chain says an Organisation's
 membership root and epoch are, as an interface rather than a client — the root
@@ -274,10 +326,42 @@ returned here must come from a path the sender of a change does not control,
 and expressing it as a trait is what makes that substitutable and testable.
 traces: REQ-bvh8v6, REQ-nhe2zu
 
+*Amended 2026-10-05 by the org-node type-safety change.* That change split the
+parse of a chain state and its cache out of `OnChainReader` into
+`org_state_from_chain` and `OrgStateCache`, an implementation of
+`ChainReader` that a gated test can drive without a chain, and stated what it
+serves when the chain's state is refused (LLR-mmdu38, in
+`2026-10-04-type-safety.md`). Those two parts of `chain_read.rs` are this
+item's; the rest of the file — `OnChainReader` and its `refresh`, which talk
+to a chain — stays SDD-z85ux9's.
+
+*(Amended 2026-10-05 by the org-node type-safety change, review round 7:
+also constrained by LLR-mmdu38, which now sits under SDD-swtd3w in
+`2026-10-04-type-safety.md`, the item that owns `OrgPublicKey` in `types.rs`.
+Its last clause is this item's: `org_state_from_chain` applies the parse, and
+`OrgStateCache` serves no state after a fetched state the parse refuses. This
+item owns no part of `types.rs`.)*
+
 **LLR-rm9x4z**: `get_org_state` returns `None` for an Organisation with no
 on-chain slot and `Some` for one that has state, distinguishing **absence from
-failure** — a failure is the `Err` arm.
+failure** — a failure is the `Err` arm — with one exception, stated by
+LLR-mmdu38: after a refresh whose fetched state holds an Organisation public
+key the parse refuses, `OrgStateCache` (and `OnChainReader` through it) returns
+`Ok(None)` for that Organisation, which is on chain, until a refresh succeeds.
+That refusal is the `Err` of the refresh, not of `get_org_state`.
 satisfies: REQ-bvh8v6
+
+*(Amended 2026-10-05 by the org-node type-safety change, review round 7: this
+said `None` only for an Organisation with no on-chain slot. By owner ruling
+(2026-10-05, LLR-mmdu38: fail closed) the cache now answers `Ok(None)` for an
+Organisation that is on chain once a fetched state is refused at parse, so
+verify-against-chain refuses with `OrgNotOnChain`. That reports a refused
+state as absence. It rejects the Change set, as REQ-bvh8v6 requires for
+absence, and it is recorded in the type-safety design's "Observable changes"
+under "Chain read". The production Receive path is not affected:
+`SubxtChainOps::read_state` caches nothing and returns a refusal at parse as
+an error, and `ChainOpsReader` only wraps a state that read has just
+returned.)*
 
 ## SDD-kwncn7 — The wire frame and its bound
 
@@ -287,7 +371,13 @@ satisfies: REQ-bvh8v6
 **SDD-kwncn7**: the framing of one Wire message on the channel — what a frame is
 made of, the one-mebibyte ceiling on a body, and the refusal of anything over
 it on both the sending and the receiving side.
-traces: REQ-eg5j8u, REQ-9g6as6
+traces: REQ-eg5j8u, REQ-9g6as6, REQ-y7tsft
+
+*(Amended 2026-10-05 by the org-node type-safety change, review round 7:
+also constrained by LLR-bwb9pu, under SDD-af5vnt in
+`2026-10-04-type-safety.md` — `WireMessage` holds the Organisation secret as
+an `OrgSecret`, so its `Debug` shows none of it — so the item traces
+REQ-y7tsft too.)*
 
 **LLR-fa7jt8**: `encode_frame` emits the body's length as four little-endian
 bytes followed by the encoded body, and nothing else.
@@ -366,7 +456,27 @@ decoder rather than by the read.*
 **SDD-af5vnt**: where every secret this node holds rests — the member and
 device seeds and the Organisation secret — and the form the file takes, which
 is ciphertext under a passphrase-derived key and nothing else.
-traces: REQ-hzm4kt
+traces: REQ-hzm4kt, REQ-qn2erx, REQ-y7tsft
+
+*Amended 2026-10-05 by the org-node type-safety change:* the item also owns
+the store encryption key's type, the records the store holds — each field in
+its typed form, parsed when the store is opened — the Persona details a
+Persona is created from, and what the debug rendering of a value holding a
+secret may show, so it traces REQ-qn2erx and REQ-y7tsft too. Its low-level
+requirements for them, LLR-bwb9pu, LLR-scgk5j, LLR-g76zqd and LLR-q6n25z, are
+in `2026-10-04-type-safety.md`.
+
+*(Amended 2026-10-05 by the org-node type-safety change, review round 7:
+LLR-8bum44 — a value its type's parse refuses is refused, naming the field —
+now sits under this item too, moved from SDD-vee2fq. Most of what it
+constrains is in `store.rs`: `PersonaStore::open`, the `Raw…` mirrors of the
+four records and of `StoreData`, `parse_field`, and the member-snapshot parse
+that `first_admission_base` decodes through. The Join request and Invite
+decode is named by SDD-vee2fq, the import operations by SDD-rx2yvy, and
+`first_admission_base` by SDD-8cpyfa. LLR-g76zqd and LLR-bwb9pu also
+constrain code outside `store.rs`: LLR-g76zqd is named by SDD-vee2fq
+(`JoinRequest`) and SDD-89es4z (`create_persona`), and LLR-bwb9pu by
+SDD-kwncn7 (`WireMessage`) and SDD-sxp8hb (`SigningKeypair`).)*
 
 **LLR-wusj89**: the store file is exactly a twenty-four byte nonce followed by
 the AEAD ciphertext of the encoded store, with no cleartext header.
@@ -395,7 +505,19 @@ satisfies: REQ-hzm4kt
 **SDD-vee2fq**: the two copy-pasteable blobs that bootstrap a relationship
 before any channel exists — the Invite an administrator hands out, and the
 Join request a prospective member hands back — and the armour they travel in.
-traces: REQ-xa6smf, REQ-9g6as6
+traces: REQ-xa6smf, REQ-9g6as6, REQ-qn2erx
+
+*Amended 2026-10-05 by the org-node type-safety change:* the blobs' fields are
+held typed, and a decoded value that does not parse is refused, naming the
+field for a Join request (`decode_join_request`); the requirement stating it,
+LLR-8bum44, is in `2026-10-04-type-safety.md`, so the item traces REQ-qn2erx
+too.
+
+*(Amended 2026-10-05 by the org-node type-safety change, review round 7:
+LLR-8bum44 now sits under SDD-af5vnt, which owns most of what it constrains.
+This item is also constrained by it, for `decode_join_request`,
+`RawJoinRequest` and the Invite decode, and by LLR-g76zqd, under SDD-af5vnt,
+for `JoinRequest`'s typed fields.)*
 
 **LLR-g9vmbx**: an Invite encoded and decoded yields an Invite equal to the
 original, carrying the Organisation identifier, its Published signing key, and the
@@ -417,7 +539,8 @@ satisfies: REQ-9g6as6
 ## SDD-msb6xh — Update calldata
 
 `org-node/src/chain_write/calldata.rs` (`build_update_calldata`,
-`UPDATE_SELECTOR`, `revive_update_runtime_call`)
+`UPDATE_SELECTOR`, `revive_update_runtime_call`, `update_calldata` *(added
+2026-10-05, see below)*)
 
 **SDD-msb6xh**: the exact bytes that ask the contract to move an
 Organisation's Membership root forward — the one part of the write path that
@@ -435,6 +558,22 @@ call by name: `dest` is the contract's twenty bytes, `value` is zero,
 `build_update_calldata`'s bytes for the same arguments. The field names and
 constants are matched against runtime metadata, so each is part of the claim.
 satisfies: derived
+
+*Amended 2026-10-05 by the org-node type-safety change:*
+`revive_update_runtime_call` takes a `RootHash`, an `OrgPublicKey` and an
+`Epoch` where it took two `[u8; 32]` and a `u128`, and "the same arguments"
+means their bytes and value: `data` is `build_update_calldata(*root.as_bytes(),
+*key.as_bytes(), u128::from(epoch.get()))`, which `build_update_calldata`
+itself, the plain-bytes encoder at the edge, still takes.
+
+*(Amended 2026-10-05 by the org-node type-safety change, review round 7: the
+item also owns `update_calldata(RootHash, OrgPublicKey, Epoch) -> Vec<u8>`,
+new and public in `calldata.rs`, which no item named. It is the one place
+both typed write paths unwrap the root, the key and the epoch into calldata:
+`revive_update_runtime_call`'s `data` is `update_calldata` of its arguments,
+and `submit::submit_update` (SDD-z85ux9's) calls it too. `calldata.rs` now
+holds three functions, all this item's. `typed_update_calldata_is_the_pinned_calldata`
+in `org-node/tests/calldata_typed.rs` pins its output (LLR-ayrdr8).)*
 
 *Added 2026-10-04 by review round 6, which found this function inside
 SDD-z85ux9, the item with no low-level requirements, under a list headed "the
@@ -514,7 +653,13 @@ it.*
 **SDD-89es4z**: how a node acquires an identity and how an Organisation comes
 into existence — two keypairs drawn once, a genesis trie, and the first
 on-chain slot.
-traces: REQ-hzm4kt, REQ-nhe2zu, REQ-d9g6nt
+traces: REQ-hzm4kt, REQ-nhe2zu, REQ-d9g6nt, REQ-qn2erx
+
+*(Amended 2026-10-05 by the org-node type-safety change, review round 7:
+also constrained by LLR-g76zqd, under SDD-af5vnt in
+`2026-10-04-type-safety.md`. `create_persona` takes the handle, name and
+surname as a parsed `Handle`, `Name` and `Surname`, so a Persona record is
+built only from parsed values. So the item traces REQ-qn2erx too.)*
 
 **LLR-tev8h8**: `create_persona` draws an independent member keypair and device
 keypair from the caller's random source and persists their seeds rather than
@@ -581,7 +726,14 @@ for the second-writer path, by
 **SDD-rx2yvy**: the administrator's side of letting someone in — minting the
 new member's leaf, moving the on-chain root forward, and handing the new member
 the signed change and everything they need to check it.
-traces: REQ-xa6smf, REQ-ztdza4, REQ-nhe2zu, REQ-d9g6nt
+traces: REQ-xa6smf, REQ-ztdza4, REQ-nhe2zu, REQ-d9g6nt, REQ-qn2erx
+
+*(Amended 2026-10-05 by the org-node type-safety change, review round 7:
+also constrained by LLR-8bum44, under SDD-af5vnt in
+`2026-10-04-type-safety.md`. `import_join_request` refuses a Join request
+holding a value its type's parse refuses, with `InvalidField` naming the
+field, and `import_invite` stores no pending Invite whose keys are not curve
+points. So the item traces REQ-qn2erx too.)*
 
 **LLR-rb8r65**: `admit_member` adds the joiner to the trie, submits the new
 Membership root on-chain at the next epoch, and only then sends the signed
@@ -709,13 +861,21 @@ satisfies: derived
 
 ## SDD-8cpyfa — The receive-and-commit path
 
-`org-node/src/service.rs` (`receive_and_verify`, `ReceiveOutcome`)
+`org-node/src/service.rs` (`receive_and_verify`, `ReceiveOutcome`,
+`first_admission_base` *(added 2026-10-05, see below)*)
 
 **SDD-8cpyfa**: the member's side — accept one Wire message, establish who sent it,
 verify it against the chain, and commit. This item owns the two sender
 cross-checks, which are the only place in the unit where the transport's
 authenticated identity is compared against the membership record.
-traces: REQ-xa6smf, REQ-ztdza4, REQ-nhe2zu, REQ-bvh8v6, REQ-d9g6nt
+traces: REQ-xa6smf, REQ-ztdza4, REQ-nhe2zu, REQ-bvh8v6, REQ-d9g6nt, REQ-qn2erx
+
+*(Amended 2026-10-05 by the org-node type-safety change, review round 7:
+`first_admission_base`, which only `receive_and_verify` calls and which no
+item named, is this item's. It is also constrained by LLR-8bum44, under
+SDD-af5vnt in `2026-10-04-type-safety.md`. A record snapshot holding a value
+its type's parse refuses fails as a whole with `InvalidField` naming the
+`member.…` field, and extends nothing. So the item traces REQ-qn2erx too.)*
 
 **LLR-j6j95z**: a first admission to an Organisation the node holds no record
 of is refused explicitly when the Wire message carries no snapshot of the Membership
@@ -1052,15 +1212,21 @@ Networked arm of `admit_member` is what closes both.*
 
 ## SDD-z85ux9 — The chain-facing I/O shell
 
-`org-node/src/chain_read.rs`, `org-node/src/chain_write/proxy.rs`,
-`org-node/src/chain_write/submit.rs`, `org-node/src/chain_write/mod.rs`,
+`org-node/src/chain_read.rs` (all but `org_state_from_chain` and
+`OrgStateCache`, which are SDD-pa6p7w's since 2026-10-05),
+`org-node/src/chain_write/proxy.rs`, `org-node/src/chain_write/submit.rs`, `org-node/src/chain_write/mod.rs`,
 `org-node/src/ceremony.rs`, `org-node/src/preflight.rs`,
 `org-node/src/bin/preflight.rs`, and in `org-node/src/service.rs`
 `connect_chain_client` and the `SubxtChainOps` implementation of `ChainOps`;
 in `org-node/src/chain_write/multisig.rs`, the asynchronous functions only —
 `dispatch_org_call`, `fund` and `submit_and_watch`. *Corrected 2026-10-05 by
 review round 8: this also named `calldata.rs`, which holds no asynchronous
-function. Its two functions are SDD-msb6xh's.*
+function. Its two functions are SDD-msb6xh's.* *(Amended 2026-10-05 by the
+org-node type-safety change, review round 7: three since that change added
+`update_calldata`, also SDD-msb6xh's. LLR-mmdu38, under SDD-swtd3w, names
+`OnChainReader::refresh` only as the caller of `OrgStateCache::store_fetched`.
+The clause is carried by the cache, SDD-pa6p7w's, and this item still
+carries no low-level requirement.)*
 
 *Corrected 2026-10-04 by review round 6. This list named
 `revive_update_runtime_call` as one of "the asynchronous functions" and left
@@ -1134,6 +1300,17 @@ implementation) 260, `connect_chain_client` 40, and in `multisig.rs`
 counted from its first doc comment or attribute to its closing brace. **1125
 lines in all, against a unit of 3768 lines over 24 files: about 30%.**
 
+*Re-measured 2026-10-05 by the org-node type-safety change, at its merge of
+this file, with the same rule.* `chain_read.rs` 55 (its 101 lines less the 46
+of `org_state_from_chain` and `OrgStateCache`, now SDD-pa6p7w's),
+`chain_write/proxy.rs` 234, `chain_write/submit.rs` 80, `chain_write/mod.rs`
+70, `ceremony.rs` 68, `preflight.rs` 138, `bin/preflight.rs` 97 — 742 lines
+of whole files and the remainder of one; the parts `mod subxt_impl` 249,
+`connect_chain_client` 40, `submit_and_watch` 46, `fund` 24 and
+`dispatch_org_call` 15 — 374. **1116 lines in all, against a unit of 4391
+lines over 25 files: about 25%.** The share fell because that change added
+`types.rs` and typed parts the gate does reach, not because the shell shrank.
+
 *Measured 2026-10-04 by review round 6, which found this paragraph counting
 only the whole files and calling the result "a fifth", while the parts were
 left uncounted. The parts are a further 385 lines. The ledger said "a fifth",
@@ -1148,14 +1325,18 @@ mutable claims, and the reason is stated above rather than implied.
 
 ## What is not an item
 
-`org-node/src/lib.rs` is seventy-eight lines and is named by no software item: the
+`org-node/src/lib.rs` is seventy-eight lines *(eighty-five since the org-node
+type-safety change, 2026-10-05, which re-exports its value types there)* and
+is named by no software item: the
 crate doc comment, the module declarations, the feature gates and the public
 re-export surface. Every behaviour it exposes belongs to the item that defines
 it. Naming no item for it is not a claim that it decides nothing — the feature
 gates decide whether `service.rs`, the chain modules and the transport compile
 at all, which is a segregation decision and is stated in the README's Overview.
 
-`org-node/src/test_fixtures.rs` is seventy-five lines behind the `test-support`
+`org-node/src/test_fixtures.rs` is seventy-five lines *(145 since the org-node
+type-safety change, 2026-10-05, which added typed key fixtures and the
+`Display`/`Copy` probes)* behind the `test-support`
 feature, which `org-node/Cargo.toml` states is never enabled in a production
 build. It is the route by which four of this unit's gated targets reach the
 constructors they need. It is a **test seam, not a software item**: it adds no
@@ -1179,9 +1360,11 @@ assumption on the **sending** side is not a deliberate absence. It is
 PR-8qsnhx.*
 
 **Which Persona a receive operation binds its endpoint from.** Both
-`receive_and_verify` (`service.rs:906`) and
-`receive_and_self_delete_if_revoked` (`:1268`) take `personas.first()` when no
-endpoint is already bound. Review round 4 found this refined by nothing —
+`receive_and_verify` (`service.rs:879`) and
+`receive_and_self_delete_if_revoked` (`:1216`) take `personas.first()` when no
+endpoint is already bound. *(Amended 2026-10-05 by the org-node type-safety
+change, review round 7: the citations read `:906` and `:1268`, the lines
+before that change's edits to `service.rs`.)* Review round 4 found this refined by nothing —
 behaviour with no requirement, and the same "one Persona per store" assumption
 round 2 convicted `ensure_endpoint` for.
 
@@ -1294,9 +1477,9 @@ of its two arguments claimed more than it could.*
 
 | Item | The abnormal input it does not test |
 |---|---|
-| SDD-89es4z | a Persona created with a handle org-members will not accept |
+| SDD-89es4z | a Persona created with a handle org-members will not accept. *Amended 2026-10-05 by the org-node type-safety change: `create_persona` now takes a parsed `Handle`, `Name` and `Surname` (LLR-g76zqd), so this input can no longer be offered to it; the refusal moved to `PersonaDetails::parse` (LLR-q6n25z, under SDD-af5vnt in `2026-10-04-type-safety.md`), whose tests carry the abnormal case. The item's own interface still has none.* |
 | SDD-b8tuv3 | an endpoint bind that fails |
-| SDD-rx2yvy | `admit_member` given a malformed member or device key (→ `OrgNodeError::Chain("bad member key")`) or a handle already held (→ `OrgNodeError::Trie`) — **the most material of the seven**, because both are reachable from a join request a stranger composes |
+| SDD-rx2yvy | `admit_member` given a malformed member or device key (→ `OrgNodeError::Chain("bad member key")`) or a handle already held (→ `OrgNodeError::Trie`) — **the most material of the seven**, because both are reachable from a join request a stranger composes. *Amended 2026-10-05 by the org-node type-safety change: `admit_member` now takes the parsed `JoinRequest`, and a malformed key or handle in a Join request is refused at `import_join_request` with `InvalidField` naming it (LLR-8bum44, under SDD-af5vnt in `2026-10-04-type-safety.md` — *amended 2026-10-05 by the org-node type-safety change, review round 7: it read "under SDD-vee2fq"*), so the first clause cannot reach `admit_member` and the `Chain("bad member key")` refusal no longer exists. A handle already held is still untested here.* |
 | SDD-ueh4tm | a `ChainOps` implementation whose `read_state` or `submit_update` fails. *Since review round 8 the item has one refusal case, the mock's wrong-epoch update (LLR-ryzr8m), but that is the mock refusing, not an implementation failing, so the line stands.* |
 | SDD-z85ux9 | every abnormal case it has. The item has no gated test of any kind — that is the deviation recorded at the end of this file — so it has no abnormal one either, and listing it here is the honest bookkeeping |
 | SDD-msb6xh | none — `build_update_calldata` is total over its argument types, so there is no abnormal input to offer it |
@@ -1326,7 +1509,11 @@ Every LLR above, excepting SDD-z85ux9's absent ones, is carried by a test **in
 `org-node/tests`** — one of the thirteen harnessed targets there that
 `verify_commands` names, or one of its three bolero targets. With `--lib`,
 which carries no low-level requirement, the command runs fourteen harnessed
-targets. *Corrected 2026-10-05 by review round 8, which counted thirteen in
+targets. *(Nineteen and twenty since the org-node type-safety change,
+2026-10-05, which added `encoding_golden`, `node_value_types`,
+`chain_read_state`, `persona_records`, `secret_redaction` and
+`calldata_typed`; its requirements' red-to-green record is in its own plan,
+`docs/plans/2026-10-04-org-node-type-safety.md`.)* *Corrected 2026-10-05 by review round 8, which counted thirteen in
 `org-node/tests`.*
 
 *Corrected 2026-10-04 by review round 1.* This paragraph used to say "eight

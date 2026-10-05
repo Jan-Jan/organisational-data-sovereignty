@@ -1645,7 +1645,7 @@ fn deserialize_rejects_invalid_handle() {
         let leaf = alice();
         let dev_bytes = to_allocvec(&leaf).unwrap();
         let leaf2: MemberLeaf = from_bytes(&dev_bytes).unwrap();
-        org_members::types::P2pDeviceSlots::new(leaf2.p2p_devices().to_vec()).unwrap()
+        org_members::types::P2pDeviceSlots::parse(leaf2.p2p_devices().to_vec()).unwrap()
     };
 
     let evil = EvilLeaf {
@@ -1794,7 +1794,7 @@ fn deserialize_rejects_oversized_name() {
         p2p_key: member_key("k"),
         name: &long_name,
         surname: "B",
-        p2p_devices: P2pDeviceSlots::new(vec![device_key("d")]).unwrap(),
+        p2p_devices: P2pDeviceSlots::parse(vec![device_key("d")]).unwrap(),
     };
     let bytes = to_allocvec(&wire).unwrap();
     let result: Result<MemberLeaf, _> = from_bytes(&bytes);
@@ -1824,7 +1824,7 @@ fn deserialize_rejects_oversized_surname() {
         p2p_key: member_key("k"),
         name: "A",
         surname: &long_surname,
-        p2p_devices: P2pDeviceSlots::new(vec![device_key("d")]).unwrap(),
+        p2p_devices: P2pDeviceSlots::parse(vec![device_key("d")]).unwrap(),
     };
     let bytes = to_allocvec(&wire).unwrap();
     let result: Result<MemberLeaf, _> = from_bytes(&bytes);

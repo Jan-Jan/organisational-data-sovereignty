@@ -11,14 +11,54 @@ use on_chain_client::{OrgAdmin, OrgRegistryClient};
 use org_members::RootHash;
 
 use crate::chain::{ChainReader, OrgState};
+use crate::error::OrgNodeError;
 use crate::ids::OrgId;
+use crate::types::{Epoch, OrgPublicKey};
 
-/// Maps on-chain-client's typed OrgState to org-node's OrgState.
-fn map_state(s: on_chain_client::OrgState) -> OrgState {
-    OrgState {
+/// Parses an Organisation state read from the chain into org-node's types.
+/// The Organisation public key is parsed here, at the read: bytes that are
+/// not a curve point are refused with `InvalidKey` (LLR-mmdu38).
+pub fn org_state_from_chain(s: on_chain_client::OrgState) -> Result<OrgState, OrgNodeError> {
+    Ok(OrgState {
         root_hash: RootHash::new(s.root_hash.0),
-        org_pub_key: s.org_pub_key.0,
-        epoch: s.epoch.0,
+        org_pub_key: OrgPublicKey::parse(&s.org_pub_key.0)?,
+        epoch: Epoch::new(s.epoch.0),
+    })
+}
+
+/// The cached Organisation state behind [`OnChainReader`], pinned to one
+/// Organisation. Split out of the reader so the cache update can be exercised
+/// without a live chain: `refresh()` fetches, then hands the result here.
+pub struct OrgStateCache {
+    org_id: OrgId,
+    cached: Mutex<Option<OrgState>>,
+}
+
+impl OrgStateCache {
+    /// An empty cache: `get_org_state` returns `Ok(None)` until a store.
+    pub fn new(org_id: OrgId) -> Self {
+        Self { org_id, cached: Mutex::new(None) }
+    }
+
+    /// Parses a state fetched from the chain and caches it (LLR-mmdu38).
+    /// A state refused at parse fails closed: the cache is cleared, so
+    /// `get_org_state` returns `None` until a refresh succeeds, and the parse
+    /// error is still returned. The superseded state is never served.
+    pub fn store_fetched(&self, fetched: Option<on_chain_client::OrgState>) -> Result<(), String> {
+        let parsed = fetched.map(org_state_from_chain).transpose().map_err(|e| e.to_string());
+        // Lock poisoning is unreachable here (no panics while held); map it to a string.
+        let mut cached = self.cached.lock().map_err(|_| "cache lock poisoned".to_string())?;
+        *cached = parsed.as_ref().ok().copied().flatten();
+        parsed.map(|_| ())
+    }
+}
+
+impl ChainReader for OrgStateCache {
+    fn get_org_state(&self, requested: &OrgId) -> Result<Option<OrgState>, String> {
+        if requested != &self.org_id {
+            return Ok(None); // this cache is pinned to one org
+        }
+        Ok(*self.cached.lock().map_err(|_| "cache lock poisoned".to_string())?)
     }
 }
 
@@ -26,12 +66,12 @@ fn map_state(s: on_chain_client::OrgState) -> OrgState {
 pub struct OnChainReader {
     client: OrgRegistryClient,
     org_id: OrgId,
-    cached: Mutex<Option<OrgState>>,
+    cache: OrgStateCache,
 }
 
 impl OnChainReader {
     pub fn new(client: OrgRegistryClient, org_id: OrgId) -> Self {
-        Self { client, org_id, cached: Mutex::new(None) }
+        Self { client, org_id, cache: OrgStateCache::new(org_id) }
     }
 
     /// Read the state for `org_id` at the latest **finalised** block and cache
@@ -39,15 +79,12 @@ impl OnChainReader {
     /// this as REQ-ysyu9g. Call before invoking verify-against-chain.
     pub async fn refresh(&self) -> Result<(), String> {
         let admin = OrgAdmin(*self.org_id.as_bytes());
-        let state = self
+        let fetched = self
             .client
             .get_org_state(admin, None)
             .await
-            .map_err(|e| format!("{e:?}"))?
-            .map(map_state);
-        // Lock poisoning is unreachable here (no panics while held); map it to a string.
-        *self.cached.lock().map_err(|_| "cache lock poisoned".to_string())? = state;
-        Ok(())
+            .map_err(|e| format!("{e:?}"))?;
+        self.cache.store_fetched(fetched)
     }
 }
 
@@ -59,9 +96,6 @@ impl ChainReader for OnChainReader {
     /// AND when `refresh()` has not yet been called (initial state). This fails
     /// closed — callers MUST call `refresh().await` before relying on this.
     fn get_org_state(&self, requested: &OrgId) -> Result<Option<OrgState>, String> {
-        if requested != &self.org_id {
-            return Ok(None); // this reader is pinned to one org
-        }
-        Ok(*self.cached.lock().map_err(|_| "cache lock poisoned".to_string())?)
+        self.cache.get_org_state(requested)
     }
 }

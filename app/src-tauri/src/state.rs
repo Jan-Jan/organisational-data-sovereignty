@@ -35,7 +35,7 @@ use std::sync::Arc;
 use org_node::service::{ChainOps, OrgService};
 use org_node::store::PersonaStore;
 use org_node::transport::TransportMode;
-use org_node::OrgNodeError;
+use org_node::{ChainAccount, Epoch, OrgNodeError, OrgPublicKey, RootHash};
 use tokio::sync::Mutex;
 
 use crate::policy;
@@ -73,9 +73,9 @@ struct ChainNotConfigured;
 impl ChainOps for ChainNotConfigured {
     async fn submit_genesis(
         &self,
-        _genesis_root: [u8; 32],
-        _org_pub_key: [u8; 32],
-    ) -> Result<(org_node::OrgId, Option<[u8; 32]>), OrgNodeError> {
+        _genesis_root: RootHash,
+        _org_pub_key: OrgPublicKey,
+    ) -> Result<(org_node::OrgId, Option<ChainAccount>), OrgNodeError> {
         Err(OrgNodeError::Chain(
             "chain not configured: set ODS_CHAIN_WS, ODS_CONTRACT_H160, ODS_ADMIN_SEED"
                 .into(),
@@ -85,10 +85,10 @@ impl ChainOps for ChainNotConfigured {
     async fn submit_update(
         &self,
         _org_id: org_node::OrgId,
-        _new_root: [u8; 32],
-        _org_pub_key: [u8; 32],
-        _expected_epoch: u64,
-        _proxy_account: Option<[u8; 32]>,
+        _new_root: RootHash,
+        _org_pub_key: OrgPublicKey,
+        _expected_epoch: Epoch,
+        _proxy_account: Option<ChainAccount>,
     ) -> Result<(), OrgNodeError> {
         Err(OrgNodeError::Chain(
             "chain not configured: set ODS_CHAIN_WS, ODS_CONTRACT_H160, ODS_ADMIN_SEED"
@@ -265,7 +265,7 @@ fn build_chain_ops() -> Result<(Box<dyn ChainOps>, policy::ChainEndpoint), Strin
     admin_seed.copy_from_slice(&seed_bytes);
 
     // Optional co-signer pubkey (64 hex chars = 32 bytes).
-    let others: Vec<[u8; 32]> = match std::env::var("ODS_COSIGNER_PUB") {
+    let others: Vec<ChainAccount> = match std::env::var("ODS_COSIGNER_PUB") {
         Ok(s) => {
             let hex_str = s.trim_start_matches("0x");
             let bytes =
@@ -275,7 +275,7 @@ fn build_chain_ops() -> Result<(Box<dyn ChainOps>, policy::ChainEndpoint), Strin
             }
             let mut arr = [0u8; 32];
             arr.copy_from_slice(&bytes);
-            vec![arr]
+            vec![ChainAccount::new(arr)]
         }
         Err(_) => vec![],
     };
@@ -309,7 +309,7 @@ async fn connect_chain(
     ws_url: String,
     contract_h160: [u8; 20],
     admin_seed: [u8; 32],
-    others: Vec<[u8; 32]>,
+    others: Vec<ChainAccount>,
 ) -> Result<org_node::SubxtChainOps, String> {
     use subxt_signer::sr25519::Keypair;
 

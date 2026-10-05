@@ -686,3 +686,26 @@ fn locally_reachable_variants_are_classified_as_receiver_errors() {
         );
     }
 }
+
+// verifies: REQ-kn5rtx
+#[test]
+fn a_refused_key_or_field_is_classified_as_a_receiver_error() {
+    // Neither is a verdict on an update: an Organisation public key the chain
+    // holds that is not a curve point, or a received or stored record holding
+    // a value its type refuses. Before org-node parsed these they surfaced as
+    // `Chain(..)` or `Trie(..)`, both receiver errors; the class is unchanged.
+    let cases = [
+        OrgNodeError::InvalidKey,
+        OrgNodeError::InvalidField {
+            field: "member.handle",
+            reason: "invalid handle: handle must be lowercase".to_string(),
+        },
+    ];
+    for e in cases {
+        assert_eq!(
+            events::classify_receive_error(&e),
+            ReceiverOutcome::ReceiveError { message: e.to_string() },
+            "{e:?} must be a receiver error"
+        );
+    }
+}

@@ -73,10 +73,11 @@ Why: `../docs/adr/2026-10-04-parse-at-the-system-edge.md`.
   `P2pDeviceSlots`, keys from bytes): private field, `parse` + `TryFrom`
   delegating to it, `type Error = OrgMembersError`. `parse` may canonicalize
   (NFC). Exported. No unchecked constructor.
-  **Status (2026-10-04):** `P2pDeviceSlots` still constructs with `new`
-  (fallible, not yet `parse`), and the key types have no bytes constructor
-  yet (callers go through `VerifyingKey::from_bytes` then `new`). Both are
-  brought under the rule in the org-node type-safety follow-up change.
+  **Status (2026-10-04):** `P2pDeviceSlots::parse` and `P2pMemberKey::parse` /
+  `P2pDeviceKey::parse` (with `TryFrom`) bring the device set and the key
+  types under the rule (LLR-t3p9zk, LLR-k6dhz7). Key parse accepts exactly
+  what deserialisation accepts; refusing weak and non-canonical keys is
+  PR-b7khyw.
 - **Tag type** (any value is valid): public `MemberId`, `NodeHash`,
   `RootHash` have infallible `new` + `From<[u8; 32]>`. Crate-internal ones
   take no raw bytes: `HeldKey` only `From` a member/device key,

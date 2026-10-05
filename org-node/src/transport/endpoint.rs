@@ -74,7 +74,7 @@ impl OrgEndpoint {
         device: &SigningKeypair,
         mode: TransportMode,
     ) -> Result<Self, TransportError> {
-        let sk = iroh::SecretKey::from_bytes(&device.to_seed());
+        let sk = iroh::SecretKey::from_bytes(device.device_seed().expose_secret());
         let inner = match mode {
             // `clear_ip_transports()` then two explicit loopback binds, rather
             // than the builder's defaults. iroh pre-configures a wildcard
@@ -192,7 +192,7 @@ impl OrgEndpoint {
         relay_map: RelayMap,
         lookup: MemoryLookup,
     ) -> Result<Self, TransportError> {
-        let sk = iroh::SecretKey::from_bytes(&device.to_seed());
+        let sk = iroh::SecretKey::from_bytes(device.device_seed().expose_secret());
         let inner = iroh::Endpoint::builder(presets::Minimal)
             .relay_mode(RelayMode::Custom(relay_map))
             .address_lookup(lookup)

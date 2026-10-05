@@ -122,6 +122,12 @@ the bare values and false of the records that hold them. `PersonaRecord` and
 which arrived with the `24317e3` merge after this sentence was written. It
 does not change this LLR's assessment, because `OrgId` holds no secret, but
 the sentence must not be read as saying the secrets cannot reach a log.)*
+*(Re-checked 2026-10-05 by the org-node type-safety change, at its merge of
+this file. PR-hqwpg9 is resolved there: the records now hold the seeds and the
+secret in `MemberSeed`, `DeviceSeed` and `OrgSecret`, whose `Debug` renders
+only the redaction marker (LLR-sz4xhc), and no value holding a secret renders
+its bytes (LLR-bwb9pu); the controls are assessed in
+`2026-10-04-type-safety.md`. This LLR's assessment is unchanged.)*
 
 One adjacent note, recorded because it is the kind of thing this check exists
 to surface: `VerifiedUpdate` **does** derive `Debug`, and its doc comment warns
@@ -464,8 +470,10 @@ said the refusal "is strictly fail-closed and is the better of the two
 outcomes — a revocation that cannot be addressed is refused to the
 administrator's face rather than silently dropped". **That was wrong, and it
 was contradicted by a problem report this same change opened.** PR-b9wab3
-records that the `peer_addr` check sits at `service.rs:1215` while
-`submit_update` is at `:1170`: the call burns an on-chain epoch and then
+records that the `peer_addr` check sits at `service.rs:1174` while
+`submit_update` is at `:1129` *(read `:1215` and `:1170` before the org-node
+type-safety change's edits to `service.rs`; corrected by its review round 7)*:
+the call burns an on-chain epoch and then
 refuses. The shipped test pins it —
 `a_loopback_revocation_with_no_peer_address_is_refused_and_records_nothing`
 asserts `chain epoch == epoch_before + 1`. Writing an assessment from the
@@ -508,9 +516,11 @@ chain, never a value from the Wire message.
 
 **The hazard it bears on.** HAZ-tawvm2, a Change set accepted on its sender's
 word. The stored key is read by `admin_persona_for_org`
-(`org-node/src/service.rs:1473`), which decides whether this device
-administers the Organisation. `export_invite` reads it too (`:697`), but only
-after that lookup (`:682`), so on a member's device it refuses with "admin
+(`org-node/src/service.rs:1403`), which decides whether this device
+administers the Organisation. `export_invite` reads it too (`:682`), but only
+after that lookup (`:667`) *(read `:1473`, `:697` and `:682` before the
+org-node type-safety change's edits to `service.rs`; corrected by its review
+round 7)*, so on a member's device it refuses with "admin
 persona not found for org" and never hands an invite on. *Corrected
 2026-10-05 by review round 8, which measured that refusal: this said the key
 was read "when a member re-shares an invite".* A key taken from the Wire message would let a sender make a member believe it administers, or
@@ -576,6 +586,14 @@ it either way.
 **Assessment.** No new hazard and no new control. It was moved here from
 SDD-z85ux9 by review round 6, because it is pure and testable, and it is now
 pinned.
+
+*(Re-checked 2026-10-05 against LLR-rc74nq as amended by the org-node
+type-safety change: the function now takes a `RootHash`, an `OrgPublicKey` and
+an `Epoch`, and the calldata it wraps is the same bytes for the same values,
+pinned by `tests/encoding_golden.rs` and `tests/calldata_typed.rs`
+(LLR-ayrdr8). A swap of an epoch for another number or of a key for a root no
+longer compiles, which removes a route to a wrong publish rather than adding
+one. The assessment stands.)*
 
 ## Two derived low-level requirements — added 2026-10-04 by review round 7
 

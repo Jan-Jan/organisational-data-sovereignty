@@ -6,6 +6,7 @@
 use std::time::Duration;
 
 use org_node::chain::{MockChain, OrgState};
+use org_node::{DeviceSeed, MemberSeed, OrgSecret};
 use org_node::ids::OrgId;
 use org_node::keys::SigningKeypair;
 use org_node::sequence::SeqGuard;
@@ -13,7 +14,7 @@ use org_node::transport::endpoint::OrgEndpoint;
 use org_node::transport::TransportMode;
 use org_node::transport::wire::WireMessage;
 use org_node::verify::{VerifyContext, verify_envelope_against_chain};
-use org_node::SignedDeltaEnvelope;
+use org_node::{Epoch, OrgPublicKey, SequenceNumber, SignedDeltaEnvelope};
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
 use org_members::{Handle, MemberId, MemberLeaf, Name, Surname};
@@ -39,8 +40,8 @@ fn genesis_and_admit(
     .unwrap();
     let genesis = Trie::genesis(vec![admin_leaf]).unwrap();
 
-    let b_member = SigningKeypair::from_seed([2u8; 32]);
-    let b_device = SigningKeypair::from_seed([3u8; 32]);
+    let b_member = MemberSeed::from([2u8; 32]).signing_keypair();
+    let b_device = DeviceSeed::from([3u8; 32]).signing_keypair();
     let b_leaf = MemberLeaf::new(
         MemberId::new([2u8; 32]),
         Handle::parse("bob").unwrap(),
@@ -61,19 +62,19 @@ fn genesis_and_admit(
 #[tokio::test]
 async fn delivers_and_verifies_admit_over_iroh() {
     // Admin keypair: MEMBER key signs the envelope.
-    let admin = SigningKeypair::from_seed([1u8; 32]);
+    let admin = MemberSeed::from([1u8; 32]).signing_keypair();
     // A's iroh identity (device key = iroh EndpointId), enrolled in the trie
     // as the admin's device.
-    let a_device = SigningKeypair::from_seed([10u8; 32]);
+    let a_device = DeviceSeed::from([10u8; 32]).signing_keypair();
     // B's iroh identity.
-    let b_device = SigningKeypair::from_seed([11u8; 32]);
+    let b_device = DeviceSeed::from([11u8; 32]).signing_keypair();
     let org = OrgId::new([5u8; 20]);
 
     // Build genesis + admit-bob delta.
     let (genesis, new_trie, delta) = genesis_and_admit(&admin, &a_device);
     let new_root = new_trie.root_hash().unwrap();
-    let env = SignedDeltaEnvelope::build(org, 2, &delta, &admin).unwrap();
-    let msg = WireMessage { envelope: env.clone(), org_secret: Some([0xab; 32]), genesis_snapshot: None };
+    let env = SignedDeltaEnvelope::build(org, SequenceNumber::new(2), &delta, &admin).unwrap();
+    let msg = WireMessage { envelope: env.clone(), org_secret: Some(OrgSecret::from([0xab; 32])), genesis_snapshot: None };
 
     // Bind both endpoints (relay disabled, loopback only).
     let ep_a = OrgEndpoint::bind(&a_device).await.unwrap();
@@ -118,13 +119,13 @@ async fn delivers_and_verifies_admit_over_iroh() {
     // 3. B verifies the received envelope against a MockChain seeded with
     //    the new root at epoch 2 (simulating an independent on-chain read).
     let mut chain = MockChain::new();
-    chain.set(org, OrgState { root_hash: new_root, org_pub_key: [0u8; 32], epoch: 2 });
+    chain.set(org, OrgState { root_hash: new_root, org_pub_key: OrgPublicKey::parse(&[0u8; 32]).unwrap(), epoch: Epoch::new(2) });
     let ctx = VerifyContext {
         expected_org_id: org,
         // admin.member_key().as_bytes() == admin.verifying_key().as_bytes()
         author_member_key: &admin.verifying_key(),
-        seq_guard: SeqGuard::from_last_seen(1),
-        last_committed_epoch: 1,
+        seq_guard: SeqGuard::from_last_seen(SequenceNumber::new(1)),
+        last_committed_epoch: Epoch::new(1),
     };
     let out = verify_envelope_against_chain(&genesis, &got.envelope, &ctx, &chain)
         .expect("verify_envelope_against_chain must succeed");
@@ -134,7 +135,7 @@ async fn delivers_and_verifies_admit_over_iroh() {
         new_root,
         "committed root must equal the expected new root"
     );
-    assert_eq!(out.epoch, 2, "committed epoch must be 2");
+    assert_eq!(out.epoch, Epoch::new(2), "committed epoch must be 2");
 }
 
 /// Assert the whole of what Loopback mode claims, for one endpoint.
@@ -222,7 +223,7 @@ fn assert_confined_to_this_machine(ep: &OrgEndpoint, who: &str) {
 // verifies: REQ-db6s7q, LLR-wwunf4, LLR-wx77j5
 #[tokio::test]
 async fn loopback_mode_binds_and_advertises_loopback_only() {
-    let device = SigningKeypair::from_seed([42u8; 32]);
+    let device = DeviceSeed::from([42u8; 32]).signing_keypair();
     let ep = OrgEndpoint::bind(&device).await.unwrap();
     assert_confined_to_this_machine(&ep, "the endpoint");
 
@@ -262,7 +263,7 @@ async fn loopback_mode_holds_under_repeated_and_colliding_binds() {
         // The last two share one seed: same ed25519 key, so the same
         // EndpointId bound twice at once.
         let seed = if i >= COUNT - 2 { [99u8; 32] } else { [i; 32] };
-        let ep = OrgEndpoint::bind(&SigningKeypair::from_seed(seed))
+        let ep = OrgEndpoint::bind(&DeviceSeed::from(seed).signing_keypair())
             .await
             .expect("Loopback bind must succeed without depending on the host's network");
         endpoints.push(ep);
@@ -300,7 +301,7 @@ async fn loopback_mode_holds_under_repeated_and_colliding_binds() {
 // verifies: REQ-ztdza4, REQ-xa6smf, LLR-ygn78w
 #[tokio::test]
 async fn endpoint_id_equals_device_key() {
-    let device = SigningKeypair::from_seed([7u8; 32]);
+    let device = DeviceSeed::from([7u8; 32]).signing_keypair();
     let ep = OrgEndpoint::bind_with_mode(&device, TransportMode::Loopback)
         .await
         .expect("bind");
@@ -311,7 +312,7 @@ async fn endpoint_id_equals_device_key() {
     assert_eq!(ep.device_key().as_bytes(), device.device_key().as_bytes());
 
     // A different device yields a different endpoint identity.
-    let other = SigningKeypair::from_seed([8u8; 32]);
+    let other = DeviceSeed::from([8u8; 32]).signing_keypair();
     let ep2 = OrgEndpoint::bind_with_mode(&other, TransportMode::Loopback)
         .await
         .expect("bind");
@@ -328,8 +329,8 @@ async fn endpoint_id_equals_device_key() {
 async fn a_stream_longer_than_the_read_bound_is_refused_rather_than_buffered() {
     use org_node::transport::{ALPN, MAX_FRAME};
 
-    let receiver_kp = SigningKeypair::from_seed([0x71u8; 32]);
-    let sender_kp = SigningKeypair::from_seed([0x72u8; 32]);
+    let receiver_kp = DeviceSeed::from([0x71u8; 32]).signing_keypair();
+    let sender_kp = DeviceSeed::from([0x72u8; 32]).signing_keypair();
     let receiver = OrgEndpoint::bind_with_mode(&receiver_kp, TransportMode::Loopback)
         .await
         .expect("bind receiver");
@@ -386,17 +387,17 @@ async fn the_length_prefix_is_not_checked_against_the_body() {
     use org_node::transport::wire::{encode_frame, WireMessage};
     use org_node::transport::ALPN;
 
-    let receiver = OrgEndpoint::bind_with_mode(&SigningKeypair::from_seed([0x73u8; 32]), TransportMode::Loopback)
+    let receiver = OrgEndpoint::bind_with_mode(&DeviceSeed::from([0x73u8; 32]).signing_keypair(), TransportMode::Loopback)
         .await
         .expect("bind receiver");
-    let sender = OrgEndpoint::bind_with_mode(&SigningKeypair::from_seed([0x74u8; 32]), TransportMode::Loopback)
+    let sender = OrgEndpoint::bind_with_mode(&DeviceSeed::from([0x74u8; 32]).signing_keypair(), TransportMode::Loopback)
         .await
         .expect("bind sender");
     let receiver_addr = receiver.node_addr_for_dial();
 
-    let admin = SigningKeypair::from_seed([1u8; 32]);
+    let admin = MemberSeed::from([1u8; 32]).signing_keypair();
     let (delta, _) = admit_member_delta(&admin);
-    let env = org_node::SignedDeltaEnvelope::build(org_node::OrgId::new([5u8; 20]), 2, &delta, &admin).unwrap();
+    let env = org_node::SignedDeltaEnvelope::build(org_node::OrgId::new([5u8; 20]), SequenceNumber::new(2), &delta, &admin).unwrap();
     let msg = WireMessage { envelope: env, org_secret: None, genesis_snapshot: None };
     let mut framed = encode_frame(&msg).unwrap();
     framed[0..4].copy_from_slice(&0u32.to_le_bytes());

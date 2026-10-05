@@ -10,6 +10,7 @@ use crate::envelope::SignedDeltaEnvelope;
 use crate::error::OrgNodeError;
 use crate::ids::OrgId;
 use crate::sequence::SeqGuard;
+use crate::types::Epoch;
 
 pub type Trie = OrgTrie<Blake3Hasher>;
 
@@ -22,7 +23,7 @@ pub struct VerifyContext<'a> {
     /// Replay guard for this org.
     pub seq_guard: SeqGuard,
     /// The last on-chain epoch this receiver has already committed (0 if none).
-    pub last_committed_epoch: u64,
+    pub last_committed_epoch: Epoch,
 }
 
 /// The result of a successful verification: the new committed trie and the
@@ -35,7 +36,7 @@ pub struct VerifyContext<'a> {
 pub struct VerifiedUpdate {
     pub trie: Trie,
     pub seq_guard: SeqGuard,
-    pub epoch: u64,
+    pub epoch: Epoch,
 }
 
 /// Verify an envelope against the local trie and an independent chain oracle.
@@ -74,7 +75,7 @@ pub fn verify_envelope_against_chain<C: ChainReader>(
         .map_err(OrgNodeError::Chain)?
         .ok_or(OrgNodeError::OrgNotOnChain)?;
     if on_chain.epoch <= ctx.last_committed_epoch {
-        return Err(OrgNodeError::StaleEpoch { got: on_chain.epoch, last: ctx.last_committed_epoch });
+        return Err(OrgNodeError::StaleEpoch { got: on_chain.epoch.get(), last: ctx.last_committed_epoch.get() });
     }
     // 8. The decisive check: recomputed root must equal the on-chain root.
     let committed = candidate

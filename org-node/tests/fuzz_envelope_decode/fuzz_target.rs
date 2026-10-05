@@ -22,6 +22,7 @@
 use bolero::check;
 use org_node::envelope::SignedDeltaEnvelope;
 use org_node::ids::OrgId;
+use org_node::SequenceNumber;
 
 fn main() {
     check!().for_each(|bytes: &[u8]| {
@@ -42,7 +43,7 @@ fn main() {
         // return Ok or Err, never panic.
         let env = SignedDeltaEnvelope {
             org_id: OrgId::new([5u8; 20]),
-            parent_seq: 1,
+            parent_seq: SequenceNumber::new(1),
             delta_bytes: bytes.to_vec(),
             signature: [0u8; 64],
         };

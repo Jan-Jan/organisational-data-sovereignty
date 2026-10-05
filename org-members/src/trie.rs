@@ -367,7 +367,7 @@ impl<H: TrieHasher> OrgTrie<H> {
         // Checked against the record before the operation, so the removed
         // devices' keys count as held.
         self.refuse_held_key(HeldKey::from(&new_p2p_key))?;
-        let empty_slots = P2pDeviceSlots::new(Vec::new())?;
+        let empty_slots = P2pDeviceSlots::parse(Vec::new())?;
         let new_leaf = existing
             .with_p2p_device_slots(empty_slots)
             .with_p2p_key(new_p2p_key);

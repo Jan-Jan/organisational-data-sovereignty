@@ -179,7 +179,7 @@ its last commit for that Organisation, so that a chain state older than one
 already acted on is never the basis of a commit. mitigates: HAZ-tawvm2
 
 How the three sit in the code. `verify_envelope_against_chain`
-(`org-node/src/verify.rs:46-87`) checks Organisation binding, then the
+(`org-node/src/verify.rs:47-88`) checks Organisation binding, then the
 signature, then the sequence number, then decodes the Change set, then
 requires its declared base to be the local root, applies it, reads the
 Organisation state through the `ChainReader` it was handed, requires the epoch
@@ -212,7 +212,7 @@ org-node's to close alone.
 
 The Organisation state is only as trustworthy as the read that produced it.
 `SubxtChainOps::read_state` asks on-chain-client for the state with no block
-named (`org-node/src/service.rs:417-426`), which on-chain-client documents as
+named (`org-node/src/service.rs:408-418`), which on-chain-client documents as
 the latest Finalised block — a doc-comment, not a commitment, which is why
 REQ-ysyu9g exists. Until on-chain-client states it as an exported requirement,
 the decisive input to RC-6a2dke rests on a comment. The same read is what the
@@ -279,8 +279,8 @@ rejection, and never backwards. mitigates: HAZ-p4gfv9
 
 `SeqGuard::check` is step 3 of the verify order and does not mutate;
 `SeqGuard::advance` is called only after the root match and ignores a value
-not greater than the mark (`org-node/src/sequence.rs:27-46`,
-`org-node/src/verify.rs:61`, `:85`). The guard's own documentation states
+not greater than the mark (`org-node/src/sequence.rs:28-47`,
+`org-node/src/verify.rs:62`, `:86`). The guard's own documentation states
 why the placement matters: advancing on `check` rather than on commit would
 move the watermark for an envelope still to be rejected, which is a replay
 bypass. The mark persists as `OrgRecord.last_seq` and is reloaded on the next
@@ -326,7 +326,7 @@ and through the workspace lints it opts into (`Cargo.toml:22-25`,
 modules, which never compile into a build of the library, with one exception:
 `org-node/src/test_fixtures.rs:10` allows `unwrap` and `expect` for the whole
 module, and that module is compiled into the library under the `test-support`
-feature (`org-node/src/lib.rs:42-43`), not only under `cfg(test)`. The feature
+feature (`org-node/src/lib.rs:43-44`), not only under `cfg(test)`. The feature
 is never enabled in a production build, so no shipped binary contains it, and
 the lib the merge gate tests is therefore not quite the lib that ships.
 The larger shortfall is that **nothing checks any of this**: no
@@ -353,7 +353,7 @@ by `rejects_root_mismatch_when_chain_root_differs` and
 `verifies:` annotation, which this change adds. The bound in RC-gfn6kr is
 `MAX_FRAME` (`org-node/src/transport/mod.rs:47`), enforced on encode, on
 decode, and by the `read_to_end` limit of the receiving stream
-(`org-node/src/transport/wire.rs:26-28`, `:37-39`,
+(`org-node/src/transport/wire.rs:28-30`, `:39-41`,
 `org-node/src/transport/endpoint.rs:334`; *re-resolved 2026-10-04 by the
 org-node architecture change's review round 5 — it read `:300`*).
 
@@ -373,7 +373,7 @@ bolero's generative engine for one second each at the merge gate, which finds
 shallow crashes and nothing deep; libFuzzer runs are a separate manual
 invocation with an empty seed corpus. And the bound is on the frame only: the
 base64 blobs of the invite and join-request exchange have no size limit
-(`org-node/src/blobs.rs:32-45`), the envelope's own Change set bytes are
+(`org-node/src/blobs.rs:63-76`), the envelope's own Change set bytes are
 bounded only by the frame that carries them, and there is no rate limit,
 allowlist or read timeout at the accept boundary — an **unauthorised**
 stranger, one the record does not name, obtains a chain read, a record rebuild
@@ -462,7 +462,7 @@ peer identity from the Device key and so does bind it (the
 `TransportMode::Networked` arm). A join-request blob whose address was altered in transit hands
 the secret to whoever the altered address names, while the record admits the
 joiner's genuine keys. The blob is unsigned and unauthenticated by design
-(`org-node/src/blobs.rs:9-29`), so nothing upstream catches the alteration.
+(`org-node/src/blobs.rs:13-34`), so nothing upstream catches the alteration. *(Citations in this paragraph re-measured 2026-10-05 by the org-node type-safety change, review round 7, after that change's edits moved them.)*
 
 ### A device removed from the record that keeps acting as a member
 
@@ -535,15 +535,15 @@ organisation secret appears in the file in clear. mitigates: HAZ-45ucqx
 
 The store is XChaCha20-Poly1305 over the postcard-encoded data, under an
 Argon2-derived key, with a fresh random nonce per save
-(`org-node/src/store.rs:91-97`, `:103-125`, `:137-149`). The wrong passphrase
+(`org-node/src/store.rs:309-315`, `:332-355`, `:376-397`, `:408-413`). The wrong passphrase
 fails authentication and returns an error.
 
 Residual risk: **not acceptable**, and the shortfalls are the store's own.
 The key-derivation salt is a fixed application constant
-(`org-node/src/store.rs:103-105`, "PoC simplification S9"), so the same
+(`org-node/src/store.rs:332-333`, "PoC simplification S9"), so the same
 passphrase derives the same key on every installation and a precomputed
 table attacks every store at once. The file is written with the process's
-default mode, not restricted to the owner (`:149`). The decrypted data and the
+default mode, not restricted to the owner (`:412`). *(Citations in this paragraph re-measured 2026-10-05 by the org-node type-safety change, review round 7, after that change's edits moved them.)* The decrypted data and the
 derived key are not zeroised. And the passphrase's strength is the user's;
 the store imposes none. The write is also not atomic — a crash between
 truncation and completion leaves no readable copy — which is the storage-loss
@@ -599,7 +599,7 @@ register's count of distinct hazards is twelve rather than eleven.
   send frames the message through `encode_frame`, which is where the bound is
   enforced (`org-node/src/transport/endpoint.rs:292`, *re-resolved 2026-10-04,
 review round 5; it read `:258`*, the check at
-  `org-node/src/transport/wire.rs:26-28`); and the local record is updated only
+  `org-node/src/transport/wire.rs:28-30`); and the local record is updated only
   after the send has returned (the record update at the end of each
   function). So for an
   Organisation whose snapshot exceeds the frame, the error the administrator
@@ -617,7 +617,7 @@ review round 5; it read `:258`*, the check at
   and permanent — below its threshold it never bites, above it every admission
   and every revocation fails, at the send, after the chain write, until the
   code changes. The threshold is a member count, and it can be worked out. A
-  `MemberSnapshot` (`org-node/src/store.rs:56-63`) is a 32-byte id, a 32-byte
+  `MemberSnapshot` (`org-node/src/store.rs:172-179`) is a 32-byte id, a 32-byte
   member key, three strings and up to four 32-byte device keys; org-members
   caps each string at 128 bytes and the device slots at four
   (`org-members/src/types.rs`), so postcard encodes one member in at most about
@@ -711,13 +711,13 @@ review round 5; it read `:258`*, the check at
   admission. **The second**, which review round 7 found and this entry missed
   until then, is a link that is taken away again. A persona records a single
   Organisation — `PersonaRecord.org_id` is one `Option<OrgId>`
-  (`org-node/src/store.rs:18`) — and the same save overwrites it
+  (`org-node/src/store.rs:59`) — and the same save overwrites it
   unconditionally (where `receive_and_verify` marks the persona Active), so
   admitting a persona already active in one
   Organisation to a second one repoints it at the second and leaves the first
   Organisation's record in the store with nothing linked to it. Nothing in the
   code prevents that admission: "one per org" is a comment on the type
-  (`org-node/src/store.rs:14`), not a check. A later Change set for the first
+  (`org-node/src/store.rs:53`), not a check. A later Change set for the first
   Organisation then reaches `receive_and_self_delete_if_revoked`, finds no
   candidate at the presence filter (`my_still_present`), and deletes the
   record.
@@ -790,10 +790,10 @@ of this file put it under the ordering controls where it does not belong. Such
 an envelope passes RC-m4r75s's sequence check (its Sequence number is higher,
 not lower, than the mark). It then fails at step 5 of `verify.rs`, the
 requirement that the Change set's declared base be the local root
-(`org-node/src/verify.rs:66-68`) — org-members' rule, exported as REQ-4umsuz,
+(`org-node/src/verify.rs:67-69`) — org-members' rule, exported as REQ-4umsuz,
 and the correct answer for a Change set that cannot be applied to the record
 the node holds. RC-e5atck's epoch check is never reached: the chain is not read
-until step 7 (`:72-75`, the epoch comparison it feeds at `:76-78`), which is
+until step 7 (`:73-76`, the epoch comparison it feeds at `:77-79`), which is
 after the base-root comparison has already returned `DeltaBaseMismatch`.
 Neither ordering control rejects an out-of-order
 envelope — one passes it, the other is never consulted — and neither
@@ -828,7 +828,7 @@ Member-as-a-group key) plus one chain account, and the chain account acts
 through a threshold-1 multisig or directly: `build_dispatch_tx` submits the
 administrator's call alone when there are no co-signatories and as
 `as_multi_threshold_1` when there are, and the threshold-2-or-more outcome is
-dead code that errors if ever reached (`org-node/src/chain_write/multisig.rs:124-142`,
+dead code that errors if ever reached (`org-node/src/chain_write/multisig.rs:125-143`,
 `org-node/src/chain_write/mod.rs:43-69`). Whoever holds the administrator's
 store passphrase and the `ODS_ADMIN_SEED` the app supplies
 (`app/src-tauri/src/state.rs`) publishes any root and authors any Change set,
@@ -852,7 +852,7 @@ key.
 **A root the chain later discards.** The administrator's publish waits for
 the update extrinsic to be finalised before the local record moves
 (`dispatch_org_call` → `wait_for_finalized_success`,
-`org-node/src/chain_write/multisig.rs:89-118`), and the receiving node reads
+`org-node/src/chain_write/multisig.rs:90-119`), and the receiving node reads
 the Organisation state with no block named, which on-chain-client performs as
 a Finalised read. So a reorganisation that discards a published root should
 find no node that committed against it. Two qualifications. The receiver's
@@ -870,7 +870,7 @@ runs in CI (setup checklist).
 
 **The only copy of the keys lost on a crash.** `PersonaStore::save` writes the
 encrypted file in place with `std::fs::write` — no temporary file, no rename,
-no fsync (`org-node/src/store.rs:149`). A crash or power loss during the write
+no fsync (`org-node/src/store.rs:412`). A crash or power loss during the write
 leaves a truncated file that fails authentication on the next open, and with
 it every persona's keys and every Organisation's record on that device.
 Hazardous situation: the device loses power while committing a received
@@ -909,6 +909,16 @@ Per hazard, after controls:
 | HAZ-ep6uzs | S3/P2 | not acceptable | check skipped without an invite; revocation path unchecked; PR-2dmjzj |
 | HAZ-vxabf9 | S3/P2 | not acceptable | cooperative control; no fan-out; secret never rotated; REQ-q92yac open |
 | HAZ-45ucqx | S3/P2 | not acceptable | fixed salt, default file mode, no zeroise |
+| HAZ-uy8sxm | S3/P1 | not acceptable | formatting route closed (RC-8a4xjb); named accessor and no zeroise left to future work |
+| HAZ-vfjy32 | S3/P1 | not acceptable | P1 because no Persona store is deployed; no migration by owner ruling |
+
+(Amended 2026-10-05 after independent review round 6: the last two rows were
+added so that this table stays the unit's roll-call. Both hazards were
+identified on 2026-10-04 by the type-safety change and are defined, with their
+controls and residual reasoning, in `2026-10-04-type-safety.md`. The count and
+the overall conclusion below are this analysis's as of 2026-09-09; with these
+two the unit counts fourteen distinct hazards, neither of the two is
+acceptable, and the overall verdict, UNACCEPTABLE, is unchanged.)
 
 And the seven prose hazards: publish before persist **not acceptable**
 (S3/P2, PR-vt244s); stale view **not acceptable** (S3/P2); secret retained
@@ -1057,7 +1067,7 @@ given an RC identifier until it does.
     deleted — whether it never was linked, or was linked and then repointed by
     a later admission to a second Organisation, `PersonaRecord.org_id` holding
     one Organisation and being overwritten unconditionally
-    (`org-node/src/store.rs:18`; `receive_and_verify` in
+    (`org-node/src/store.rs:59`; `receive_and_verify` in
     `org-node/src/service.rs`, where it marks the persona Active). Decide
     presence from the Device keys the store holds against the Device keys the
     verified trie holds, without consulting a persona's `org_id`, so that a

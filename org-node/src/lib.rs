@@ -7,6 +7,7 @@ pub mod error;
 pub mod ids;
 pub mod keys;
 pub mod sequence;
+pub mod types;
 pub mod verify;
 
 #[cfg(feature = "transport")]
@@ -56,13 +57,14 @@ pub mod test_support {
     use subxt::transactions::StaticPayload;
 
     use crate::chain_write::WriteError;
+    use crate::types::ChainAccount;
 
     /// Wrapper over the crate-private `chain_write::multisig::build_dispatch_tx`,
     /// which carries LLR-f74xwb. A wrapper rather than a re-export because the
     /// function stays `pub(crate)`: the production surface is unchanged by this
     /// seam existing.
     pub fn build_dispatch_tx(
-        other_signatories: &[[u8; 32]],
+        other_signatories: &[ChainAccount],
         call: Value,
     ) -> Result<StaticPayload<Composite<()>>, WriteError> {
         crate::chain_write::multisig::build_dispatch_tx(other_signatories, call)
@@ -75,4 +77,9 @@ pub use error::OrgNodeError;
 pub use ids::OrgId;
 pub use keys::SigningKeypair;
 pub use sequence::SeqGuard;
+pub use types::{ChainAccount, DeviceSeed, Epoch, MemberSeed, OrgPublicKey, OrgSecret, PersonaId, SequenceNumber};
 pub use verify::{verify_envelope_against_chain, VerifyContext, VerifiedUpdate};
+
+// org-members types that appear in org-node's public interface and that the
+// app names, re-exported so the app depends on org-node alone for them.
+pub use org_members::{MemberId, RootHash};

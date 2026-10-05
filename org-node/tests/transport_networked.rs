@@ -11,7 +11,8 @@
 use std::time::Duration;
 
 use iroh::address_lookup::MemoryLookup;
-use org_node::SignedDeltaEnvelope;
+use org_node::{Epoch, OrgPublicKey, SequenceNumber, SignedDeltaEnvelope};
+use org_node::{DeviceSeed, MemberSeed, OrgSecret};
 use org_node::chain::{MockChain, OrgState};
 use org_node::ids::OrgId;
 use org_node::keys::SigningKeypair;
@@ -46,8 +47,8 @@ fn genesis_and_admit(
     .unwrap();
     let genesis = Trie::genesis(vec![admin_leaf]).unwrap();
 
-    let b_member = SigningKeypair::from_seed([2u8; 32]);
-    let b_device = SigningKeypair::from_seed([3u8; 32]);
+    let b_member = MemberSeed::from([2u8; 32]).signing_keypair();
+    let b_device = DeviceSeed::from([3u8; 32]).signing_keypair();
     let b_leaf = MemberLeaf::new(
         MemberId::new([2u8; 32]),
         Handle::parse("bob").unwrap(),
@@ -68,18 +69,18 @@ fn genesis_and_admit(
 #[tokio::test]
 async fn delivers_and_verifies_admit_over_relay_by_id() {
     // Admin MEMBER key signs the envelope.
-    let admin = SigningKeypair::from_seed([1u8; 32]);
+    let admin = MemberSeed::from([1u8; 32]).signing_keypair();
     // A's iroh identity, enrolled in the trie as the admin's device.
-    let a_device = SigningKeypair::from_seed([10u8; 32]);
-    let b_device = SigningKeypair::from_seed([11u8; 32]); // B's iroh identity
+    let a_device = DeviceSeed::from([10u8; 32]).signing_keypair();
+    let b_device = DeviceSeed::from([11u8; 32]).signing_keypair(); // B's iroh identity
     let org = OrgId::new([5u8; 20]);
 
     let (genesis, new_trie, delta) = genesis_and_admit(&admin, &a_device);
     let new_root = new_trie.root_hash().unwrap();
-    let env = SignedDeltaEnvelope::build(org, 2, &delta, &admin).unwrap();
+    let env = SignedDeltaEnvelope::build(org, SequenceNumber::new(2), &delta, &admin).unwrap();
     let msg = WireMessage {
         envelope: env.clone(),
-        org_secret: Some([0xab; 32]),
+        org_secret: Some(OrgSecret::from([0xab; 32])),
         genesis_snapshot: None,
     };
 
@@ -145,16 +146,16 @@ async fn delivers_and_verifies_admit_over_relay_by_id() {
     let mut chain = MockChain::new();
     chain.set(
         org,
-        OrgState { root_hash: new_root, org_pub_key: [0u8; 32], epoch: 2 },
+        OrgState { root_hash: new_root, org_pub_key: OrgPublicKey::parse(&[0u8; 32]).unwrap(), epoch: Epoch::new(2) },
     );
     let ctx = VerifyContext {
         expected_org_id: org,
         author_member_key: &admin.verifying_key(),
-        seq_guard: SeqGuard::from_last_seen(1),
-        last_committed_epoch: 1,
+        seq_guard: SeqGuard::from_last_seen(SequenceNumber::new(1)),
+        last_committed_epoch: Epoch::new(1),
     };
     let out = verify_envelope_against_chain(&genesis, &got.envelope, &ctx, &chain)
         .expect("verify_envelope_against_chain must succeed");
     assert_eq!(out.trie.root_hash().unwrap(), new_root, "committed root mismatch");
-    assert_eq!(out.epoch, 2, "committed epoch must be 2");
+    assert_eq!(out.epoch, Epoch::new(2), "committed epoch must be 2");
 }

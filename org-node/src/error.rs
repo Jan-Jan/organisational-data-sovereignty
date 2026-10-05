@@ -33,6 +33,16 @@ pub enum OrgNodeError {
 
     #[error("org-members error: {0}")]
     Trie(org_members::OrgMembersError),
+
+    /// 32 bytes offered as an Organisation public key that do not decompress
+    /// to an Edwards point. LLR-mmdu38.
+    #[error("invalid key: the bytes are not a point on the curve")]
+    InvalidKey,
+
+    /// A decoded Persona store, record snapshot or Join request holds a value
+    /// its type's parse refuses; `field` names it. LLR-8bum44.
+    #[error("invalid {field}: {reason}")]
+    InvalidField { field: &'static str, reason: String },
 }
 
 impl From<org_members::OrgMembersError> for OrgNodeError {

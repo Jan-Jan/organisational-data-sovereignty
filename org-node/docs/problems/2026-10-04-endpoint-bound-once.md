@@ -69,8 +69,9 @@ that reason.
 ## Widened by review round 8 — a second reader
 
 `export_invite` reads the same address for the Invite's
-`admin_node_addr` (`org-node/src/service.rs:688`), and an empty one when no
-endpoint is bound. LLR-qezw3n states it. The Invite's device key is the
+`admin_node_addr` (`org-node/src/service.rs:673`), and an empty one when no
+endpoint is bound. (Amended 2026-10-05 by the org-node type-safety change, review round 7: citation correction only — the line read `:688` before that
+change's edits to `service.rs`.) LLR-qezw3n states it. The Invite's device key is the
 administrator Persona's, so with the endpoint bound from another Persona the
 Invite names two devices, as the join request does. The joiner's sender check
 uses the key, not the address, so this costs the dial-back only. Same cure.

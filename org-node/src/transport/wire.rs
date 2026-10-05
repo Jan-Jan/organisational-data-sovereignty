@@ -2,6 +2,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::envelope::SignedDeltaEnvelope;
+use crate::types::OrgSecret;
 use crate::transport::{TransportError, MAX_FRAME};
 
 /// One message over the org-node channel: a signed delta, plus (on admission)
@@ -15,7 +16,8 @@ use crate::transport::{TransportError, MAX_FRAME};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WireMessage {
     pub envelope: SignedDeltaEnvelope,
-    pub org_secret: Option<[u8; 32]>,
+    /// The Organisation secret, redacted in `Debug`.
+    pub org_secret: Option<OrgSecret>,
     /// postcard(Vec<MemberSnapshot>) — genesis members; None for non-admission.
     pub genesis_snapshot: Option<Vec<u8>>,
 }

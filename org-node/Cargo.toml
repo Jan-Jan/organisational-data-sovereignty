@@ -160,6 +160,47 @@ name = "admission_sender"
 path = "tests/admission_sender.rs"
 required-features = ["app", "test-support"]
 
+# Golden bytes pinned before the org-node type-safety refactor (LLR-ayrdr8).
+# Store and blobs are `app`; `app` implies `chain` (calldata) and `transport`
+# (wire).
+[[test]]
+name = "encoding_golden"
+path = "tests/encoding_golden.rs"
+required-features = ["app"]
+
+# org-node's value types (SDD-swtd3w); uses the Display/Copy probe in
+# `test_fixtures`, hence `test-support`. Written as `tests/value_types.rs` by
+# the type-safety change; renamed `node_value_types` when master `05f6f04`
+# brought a `value_types` target of its own (SDD-swtd3w) — both run.
+[[test]]
+name = "node_value_types"
+path = "tests/node_value_types.rs"
+required-features = ["test-support"]
+
+# The chain read parses the Organisation state (LLR-mmdu38).
+[[test]]
+name = "chain_read_state"
+path = "tests/chain_read_state.rs"
+required-features = ["chain"]
+
+# The typed calldata paths produce the pinned calldata (LLR-ayrdr8).
+[[test]]
+name = "calldata_typed"
+path = "tests/calldata_typed.rs"
+required-features = ["chain"]
+
+# The Persona's records: parsed details and field-named refusal (SDD-af5vnt,
+# SDD-vee2fq).
+[[test]]
+name = "persona_records"
+path = "tests/persona_records.rs"
+required-features = ["app", "test-support"]
+
+# No secret reaches debug output (REQ-y7tsft, PR-hqwpg9).
+[[test]]
+name = "secret_redaction"
+path = "tests/secret_redaction.rs"
+required-features = ["app", "test-support"]
 # The six targets below were added 2026-10-03 by org-node's architecture tooth
 # (docs/plans/2026-10-03-org-node-architecture.md). Each holds unit tests
 # relocated out of a `#[cfg(test)]` module in `src` into `tests/`, where

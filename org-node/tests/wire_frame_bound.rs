@@ -6,17 +6,17 @@
 //! the two rejections are the abnormal-input cases.
 
 use org_node::ids::OrgId;
-use org_node::keys::SigningKeypair;
+use org_node::{MemberSeed, OrgSecret};
 use org_node::test_fixtures::admit_member_delta;
 use org_node::transport::wire::{decode_body, encode_frame, WireMessage};
 use org_node::transport::{TransportError, MAX_FRAME};
-use org_node::SignedDeltaEnvelope;
+use org_node::{SequenceNumber, SignedDeltaEnvelope};
 
 fn sample_msg() -> WireMessage {
-    let admin = SigningKeypair::from_seed([1u8; 32]);
+    let admin = MemberSeed::from([1u8; 32]).signing_keypair();
     let (delta, _) = admit_member_delta(&admin);
-    let env = SignedDeltaEnvelope::build(OrgId::new([5u8; 20]), 2, &delta, &admin).unwrap();
-    WireMessage { envelope: env, org_secret: Some([9u8; 32]), genesis_snapshot: None }
+    let env = SignedDeltaEnvelope::build(OrgId::new([5u8; 20]), SequenceNumber::new(2), &delta, &admin).unwrap();
+    WireMessage { envelope: env, org_secret: Some(OrgSecret::from([9u8; 32])), genesis_snapshot: None }
 }
 
 // verifies: REQ-eg5j8u, LLR-fa7jt8, LLR-er2x8n

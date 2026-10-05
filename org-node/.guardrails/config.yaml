@@ -116,6 +116,28 @@ test_paths:
 # the five together. These are checks of the system model only: org-node has
 # no conformance test, so a Rust change to org-node is not checked against
 # the model (decision 13's known gap).
+# 2026-10-03, T2 of docs/plans/2026-10-03-random-member-id.md: a third bolero
+# target, fuzz_first_admission_base (REQ-d9g6nt), asserts a first admission
+# without a record snapshot is refused and fuzzes the snapshot decode.
+# 2026-10-04/05, docs/plans/2026-10-04-org-node-type-safety.md: six targets
+# added by the org-node type-safety change, each the test file of one part of
+# its design ledger (org-node/docs/architecture/2026-10-04-type-safety.md), so
+# test_paths reads their `verifies:` annotations: encoding_golden (T1) pins
+# the stored, sent, blob and calldata bytes before the refactor and is never
+# edited (LLR-ayrdr8); value_types (T3, renamed node_value_types at the
+# 2026-10-05 merge below) the value types at their own interface; chain_read_state the chain read's parse of the Organisation
+# state and its cache (LLR-mmdu38, LLR-s7whrn); persona_records (T4a-T4c) the
+# Persona's records, parsed on create, open and import;
+# secret_redaction that no secret reaches debug output (REQ-y7tsft,
+# PR-hqwpg9); calldata_typed that the typed calldata paths build the pinned
+# bytes (LLR-ayrdr8), added after independent review because the pins cover
+# only the untyped builder. Measured 2026-10-05 (agent sandbox,
+# CARGO_HOME=/tmp/cargo_home_fuzz) on the line below: 100 passed, 0 failed —
+# lib 23, persona_records 18, verify_against_chain 13, value_types 9,
+# admission_sender 7, secret_redaction 6, encoding_golden 5, store_at_rest 4,
+# chain_read_state 3, service_stories 3, transport_handshake 3,
+# wire_frame_bound 3, calldata_typed 2, transport_networked 1; the three
+# bolero targets report no pass count.
 #
 # Merged 2026-10-03: `5850ed7` and this change both rewrote this key. The
 # cargo line is this change's (it names the six relocated-test targets the
@@ -131,8 +153,24 @@ test_paths:
 # relocated-test targets; both sides' targets run. Note the rule stated two
 # comments up — it applies between the key and its first item too, which is
 # how this second merge repeated the first one's mistake.
+#
+# Merged 2026-10-05: master `05f6f04` (ratchet tooth 4) into the org-node
+# type-safety change. Master's line is the base; the type-safety change's six
+# targets are appended. Both sides wrote a `tests/value_types.rs`: master's
+# (SDD-swtd3w, OrgId and the rejection vocabulary) keeps the name
+# `value_types`, and the type-safety change's (the secret, key and tag types)
+# is renamed `node_value_types`. Measured 2026-10-05 (agent sandbox,
+# CARGO_HOME=/tmp/cargo_home_fuzz) on the line below: 167 passed, 0 failed —
+# admission_sender 39, verify_against_chain 19, persona_records 18,
+# node_value_types 11, chain_write_pure 8, envelope_binding 8,
+# service_lifecycle 8, store_at_rest 7, key_custody 6, secret_redaction 6,
+# transport_handshake 6, value_types 6, blob_exchange 5, encoding_golden 5,
+# wire_frame_bound 5, chain_read_state 3, service_stories 3, calldata_typed 2,
+# lib 1, transport_networked 1 (master's 122 and the type-safety change's 45);
+# the three bolero targets report no pass count. (Re-measured 2026-10-05 after
+# review round 8 added two `node_value_types` Debug tests: 165 -> 167.)
 verify_commands:
-  - cargo test -p org-node --features app,test-support --lib --test service_stories --test transport_handshake --test transport_networked --test fuzz_envelope_decode --test fuzz_verify_against_chain --test fuzz_first_admission_base --test verify_against_chain --test wire_frame_bound --test store_at_rest --test admission_sender --test value_types --test key_custody --test envelope_binding --test blob_exchange --test chain_write_pure --test service_lifecycle
+  - cargo test -p org-node --features app,test-support --lib --test service_stories --test transport_handshake --test transport_networked --test fuzz_envelope_decode --test fuzz_verify_against_chain --test fuzz_first_admission_base --test verify_against_chain --test wire_frame_bound --test store_at_rest --test admission_sender --test value_types --test key_custody --test envelope_binding --test blob_exchange --test chain_write_pure --test service_lifecycle --test encoding_golden --test node_value_types --test chain_read_state --test persona_records --test secret_redaction --test calldata_typed
   - quint --version
   - quint typecheck org-node/quint/protocol.qnt
   - quint typecheck org-node/quint/ods_instances.qnt
@@ -143,7 +181,11 @@ verify_commands:
   - quint run org-node/quint/protocol.qnt --invariant=convergence --max-steps=16 --max-samples=5000
 
 problem_age_days: 30
-problem_open_max: 10
+# Raised 2026-10-05 by owner ruling: the org-node type-safety change opens four
+# deferred reports (PR-szkat6, PR-vkw22m, PR-4b2v6p, PR-k2xxaq) on top of the
+# nine other reports open after tooth 4 (13 open in all); each is genuine
+# deferred work, not a ruling not to fix.
+problem_open_max: 15
 
 # No coverage_command: org-node's coverage has never been measured. Under
 # class C statement AND decision coverage are required, so this is a gap

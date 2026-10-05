@@ -81,13 +81,19 @@ pub fn classify_receive_error(e: &OrgNodeError) -> ReceiverOutcome {
             message: e.to_string(),
         },
 
-        // Not a verdict: the chain could not be read, the transport failed, or
-        // the local store could not supply what the verification needed.
-        OrgNodeError::Chain(_) | OrgNodeError::OrgNotOnChain | OrgNodeError::Trie(_) => {
-            ReceiverOutcome::ReceiveError {
-                message: e.to_string(),
-            }
-        }
+        // Not a verdict: the chain could not be read, the transport failed, the
+        // local store could not supply what the verification needed, or a
+        // value read from the chain, the store or a received snapshot is not
+        // one its type admits (InvalidKey, InvalidField — before org-node
+        // parsed these they surfaced as Chain or Trie, so the class is
+        // unchanged).
+        OrgNodeError::Chain(_)
+        | OrgNodeError::OrgNotOnChain
+        | OrgNodeError::Trie(_)
+        | OrgNodeError::InvalidKey
+        | OrgNodeError::InvalidField { .. } => ReceiverOutcome::ReceiveError {
+            message: e.to_string(),
+        },
     }
 }
 

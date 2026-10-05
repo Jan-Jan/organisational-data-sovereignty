@@ -1,12 +1,30 @@
 //! ed25519 keypairs for members and devices. A device's verifying key is
 //! both its P2pDeviceKey (in the trie) and — in a later phase — its iroh
 //! NodeId. The member's verifying key is the P2pMemberKey used to sign deltas.
+//! A seed becomes a key pair only through `MemberSeed` or `DeviceSeed`
+//! (LLR-56hc77).
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use org_members::{P2pDeviceKey, P2pMemberKey};
+
+use crate::types::{DeviceSeed, MemberSeed};
 
 /// An ed25519 keypair held locally. Wraps a dalek SigningKey.
 #[derive(Clone, Debug)]
 pub struct SigningKeypair(SigningKey);
+
+impl MemberSeed {
+    /// The Member's signing key pair (LLR-56hc77).
+    pub fn signing_keypair(&self) -> SigningKeypair {
+        SigningKeypair(SigningKey::from_bytes(self.expose_secret()))
+    }
+}
+
+impl DeviceSeed {
+    /// The device's signing key pair (LLR-56hc77).
+    pub fn signing_keypair(&self) -> SigningKeypair {
+        SigningKeypair(SigningKey::from_bytes(self.expose_secret()))
+    }
+}
 
 impl SigningKeypair {
     /// Generate from a CSPRNG. (Tests use rand; production wires this to the OS RNG.)
@@ -14,14 +32,14 @@ impl SigningKeypair {
         Self(SigningKey::generate(rng))
     }
 
-    /// Reconstruct from the 32-byte secret seed (for persisted keys).
-    pub fn from_seed(seed: [u8; 32]) -> Self {
-        Self(SigningKey::from_bytes(&seed))
+    /// This key pair's seed, held as a Member seed (LLR-56hc77).
+    pub fn member_seed(&self) -> MemberSeed {
+        MemberSeed::from(self.0.to_bytes())
     }
 
-    /// The 32-byte secret seed, for at-rest persistence. Handle as a secret.
-    pub fn to_seed(&self) -> [u8; 32] {
-        self.0.to_bytes()
+    /// This key pair's seed, held as a device seed (LLR-56hc77).
+    pub fn device_seed(&self) -> DeviceSeed {
+        DeviceSeed::from(self.0.to_bytes())
     }
 
     pub fn verifying_key(&self) -> VerifyingKey {

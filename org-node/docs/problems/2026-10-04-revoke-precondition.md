@@ -20,7 +20,9 @@ was first written to assert that the refusal precedes the chain write. It failed
 the chain epoch was 3 where the test expected 2. The refusal is real and
 typed — `OrgNodeError::Chain("Loopback revoke requires the peer's
 EndpointAddr")` — but it sits in the `match mode` block at
-`org-node/src/service.rs:1212`, after `submit_update` at `:1170`.
+`org-node/src/service.rs:1171`, after `submit_update` at `:1129`.
+(Amended 2026-10-05 by the org-node type-safety change, review round 7: citation correction only — the lines read `:1212` and `:1170` before that change's edits
+to `service.rs`.)
 
 The test now pins the defect rather than the intent: it asserts
 `epoch_before + 1`, so moving the check earlier reddens it and this report is

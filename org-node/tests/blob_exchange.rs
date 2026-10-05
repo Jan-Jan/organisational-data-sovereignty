@@ -6,26 +6,39 @@
 //! `verifies:` annotations sit under `test_paths`.
 
 use base64::{engine::general_purpose::STANDARD, Engine};
-use org_node::blobs::{decode, encode, Invite, JoinRequest};
+use org_members::{Handle, Name, Surname};
+use org_node::blobs::{decode, decode_join_request, encode, Invite, JoinRequest};
 use org_node::ids::OrgId;
+use org_node::{DeviceSeed, MemberSeed, OrgPublicKey};
+
+// Ported 2026-10-05 to the typed blob fields of the org-node type-safety
+// change: each key is a real curve point from a seed, where the relocated test
+// used the plain arrays `[1u8; 32]`, `[2u8; 32]`, … the fields no longer hold.
+fn member_key(seed: u8) -> org_members::P2pMemberKey {
+    MemberSeed::from([seed; 32]).signing_keypair().member_key()
+}
+
+fn device_key(seed: u8) -> org_members::P2pDeviceKey {
+    DeviceSeed::from([seed; 32]).signing_keypair().device_key()
+}
 
 fn an_invite() -> Invite {
     Invite {
         org_id: OrgId::new([0xabu8; 20]),
-        org_pub_key: [1u8; 32],
-        admin_member_key: [2u8; 32],
-        admin_device_key: [3u8; 32],
+        org_pub_key: OrgPublicKey::from(&member_key(1)),
+        admin_member_key: member_key(2),
+        admin_device_key: device_key(3),
         admin_node_addr: vec![4, 5, 6],
     }
 }
 
 fn a_join_request() -> JoinRequest {
     JoinRequest {
-        handle: "bob".into(),
-        name: "Bob".into(),
-        surname: "Builder".into(),
-        member_key: [7u8; 32],
-        device_key: [8u8; 32],
+        handle: Handle::parse("bob").unwrap(),
+        name: Name::parse("Bob").unwrap(),
+        surname: Surname::parse("Builder").unwrap(),
+        member_key: member_key(7),
+        device_key: device_key(8),
         node_addr: vec![9, 10],
     }
 }
@@ -55,6 +68,8 @@ fn a_join_request_round_trips_carrying_every_field() {
     assert_eq!(back.member_key, original.member_key);
     assert_eq!(back.device_key, original.device_key);
     assert_eq!(back.node_addr, original.node_addr);
+    // The field-naming decode the service imports through yields the same.
+    assert_eq!(decode_join_request(&encode(&original).unwrap()).unwrap(), original);
 }
 
 // verifies: REQ-9g6as6, LLR-8qxwst

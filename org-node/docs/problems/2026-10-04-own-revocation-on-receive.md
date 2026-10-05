@@ -26,8 +26,9 @@ this tree before booking it.
 REQ-uxv2x2 says what a node does on committing a Change set that removes its
 own Device key, and it is **not scoped to a receive operation**. The ledger
 allocates it to SDD-72ddm6, the self-delete path, alone. `revoke_member`'s own
-doc comment (`org-node/src/service.rs:1123-1126`) expects the Member it removes
-to clean up "when they call `receive_and_verify`". RC-wqgm2p, the cooperative
+doc comment (`org-node/src/service.rs:1084-1087`) expects the Member it removes
+to clean up "when they call `receive_and_verify`". (Amended 2026-10-05 by the org-node type-safety change, review round 7: citation correction only — the
+range read `:1123-1126` before that change's edits to `service.rs`.) RC-wqgm2p, the cooperative
 self-delete control in `org-node/docs/risk/2026-09-09-org-node-hazards.md`,
 does not hold on this path.
 

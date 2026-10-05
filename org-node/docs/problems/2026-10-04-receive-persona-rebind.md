@@ -19,9 +19,11 @@ status: open
 ## What was observed
 
 The site is the `my_persona_id` selection in `receive_and_verify`
-(`org-node/src/service.rs:1040-1052`): `.find` over every Persona, filtered on
+(`org-node/src/service.rs:1001-1013`): `.find` over every Persona, filtered on
 device-key membership of the verified trie and on not being the administrator's Member-as-a-group key, **never on `p.org_id`**. The Persona it finds is then given
-`org_id = Some(org_id)` and the new member id (`:1100-1104`).
+`org_id = Some(org_id)` and the new member id (`:1061-1065`).
+(Amended 2026-10-05 by the org-node type-safety change, review round 7: citation correction only — the ranges read `:1040-1052` and `:1100-1104` before that
+change's edits to `service.rs`.)
 `PersonaRecord.org_id` holds one Organisation.
 
 `pr_mdv38y_the_receive_path_rebinds_another_organisations_persona`

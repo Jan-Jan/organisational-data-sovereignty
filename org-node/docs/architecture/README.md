@@ -72,11 +72,21 @@ written as `expects:` items in its own SRS — REQ-ysyu9g against
 not a file: seven of them live wholly or partly in `service.rs`, and one,
 SDD-z85ux9, spans seven whole files and parts of two more. They group into
 five layers. *Corrected 2026-10-05 by review round 8: this said "eight" and
-"parts of six modules", neither of which was counted.*
+"parts of six modules", neither of which was counted.* *Amended 2026-10-05 by
+the org-node type-safety change: SDD-z85ux9 now spans six whole files and
+parts of three, because `chain_read.rs`'s parse and cache moved to SDD-pa6p7w.
+That change's value types (`types.rs`) belong to SDD-swtd3w, and its ten
+low-level requirements sit under SDD-swtd3w, SDD-sxp8hb, SDD-pa6p7w,
+SDD-af5vnt and SDD-vee2fq in `2026-10-04-type-safety.md`; it adds no item.*
+*(Amended 2026-10-05 by the org-node type-safety change, review round 7: each
+of the ten now sits under the item owning most of what it constrains —
+SDD-swtd3w, SDD-sxp8hb and SDD-af5vnt — and every other item it constrains
+names it, in the decomposition file. LLR-mmdu38 moved from SDD-pa6p7w to
+SDD-swtd3w, and LLR-8bum44 from SDD-vee2fq to SDD-af5vnt.)*
 
 | Layer | Items | What it decides |
 |---|---|---|
-| **Values and custody** | SDD-swtd3w, SDD-sxp8hb | What an identifier is, what a refusal is called, and which key plays which role |
+| **Values and custody** | SDD-swtd3w, SDD-sxp8hb | What an identifier is, what a value org-node holds is typed as (secrets, keys, tags), what a refusal is called, and which key plays which role |
 | **The commit rule** | SDD-kk2y3e, SDD-d8ktxa, SDD-na9nc3, SDD-pa6p7w | What a change must prove before it is believed |
 | **Carriage and rest** | SDD-kwncn7, SDD-8uyg4s, SDD-af5vnt, SDD-vee2fq | How bytes reach the node, and where secrets sit when they are not moving |
 | **The five stories** | SDD-ueh4tm, SDD-89es4z, SDD-rx2yvy, SDD-8cpyfa, SDD-72ddm6, SDD-b8tuv3 | How the parts compose into what a Persona does |
@@ -106,9 +116,11 @@ only ever carries a substitute that succeeds is tested on one side.
 
 ### Where the gate can and cannot see
 
-This unit's gate reaches about seventy per cent of it. **SDD-z85ux9 — the
-chain-facing I/O shell, 1125 of 3768 source lines measured — carries no
-low-level requirements**, which is a deviation from what class C asks and is
+This unit's gate reaches about seventy per cent of it *(about seventy-five per
+cent since the org-node type-safety change)*. **SDD-z85ux9 — the
+chain-facing I/O shell, 1125 of 3768 source lines measured (1116 of 4391,
+re-measured 2026-10-05 after that change) — carries no low-level
+requirements**, which is a deviation from what class C asks and is
 argued in full in the dated decomposition file rather than here. The short
 form: that code *is* exercised, by `chain_genesis_e2e`, `finality_polling` and
 `preflight`, but those three targets are excluded from `verify_commands`

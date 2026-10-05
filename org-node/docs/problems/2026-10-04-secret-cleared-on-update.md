@@ -16,9 +16,10 @@ status: open
 
 ## What was observed
 
-`existing.org_secret = msg.org_secret` (`org-node/src/service.rs:1075`), and
+`existing.org_secret = msg.org_secret` (`org-node/src/service.rs:1035`), and
 `WireMessage { envelope, org_secret: None, … }` in `revoke_member`
-(`:1208`).
+(`:1167`). (Amended 2026-10-05 by the org-node type-safety change, review round 7: citation correction only — the lines read `:1075` and `:1208` before
+that change's edits to `service.rs`.)
 
 `pr_xwek5e_another_members_revocation_clears_the_receivers_secret`
 (`org-node/tests/admission_sender.rs`) admits B, admits C with the change

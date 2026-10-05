@@ -41,10 +41,9 @@ Rust has no overloading, and trait-based overloading was judged too opaque.
    hasher must be canonical field elements.
    *Amended 2026-10-04 after independent review: tag-type constructors
    corrected to match the code (`HeldKey` has no `new` or bytes `From`).*
-   *Status 2026-10-04: `P2pDeviceSlots` still constructs with a fallible
-   `new`, and the key types have no bytes constructor; both are brought under
-   this decision in the org-node type-safety follow-up change (as
-   `org-members/AGENTS.md` records).*
+   *Status 2026-10-04: `P2pDeviceSlots` and the key types are under this
+   decision (`parse` + `TryFrom`), and org-node follows it, by the org-node
+   type-safety change.*
 3. **Validated types are exported**, field private; `parse`/`TryFrom` is the
    only way in. The error type is the crate's own (`OrgMembersError` in
    org-members), not one enum per type.
@@ -62,3 +61,5 @@ Rust has no overloading, and trait-based overloading was judged too opaque.
   plain types they wrap, and `canonical_bytes` is unchanged.
 - org-node adopts the rule in a separate follow-up change (store, blobs,
   service, and a redacted secret type for PR-hqwpg9).
+  *Status 2026-10-04: done by the org-node type-safety change
+  (`docs/plans/2026-10-04-org-node-type-safety.md`); PR-hqwpg9 resolved.*

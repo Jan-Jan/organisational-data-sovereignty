@@ -11,7 +11,7 @@
 
 use std::time::Duration;
 
-use org_node::keys::SigningKeypair;
+use org_node::DeviceSeed;
 use org_node::preflight::{CheckResult, check_chain_live, check_contract, check_transport, render};
 use org_node::transport::TransportMode;
 
@@ -47,7 +47,7 @@ async fn main() -> std::process::ExitCode {
         }
         Err(_) => [0u8; 32],
     };
-    let device = SigningKeypair::from_seed(seed);
+    let device = DeviceSeed::from(seed).signing_keypair();
     results.push(check_transport(&device, mode, Duration::from_secs(15)).await);
 
     // Chain.

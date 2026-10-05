@@ -4,17 +4,19 @@
 #![cfg(feature = "chain")]
 use subxt::{OnlineClient, config::PolkadotConfig};
 use subxt_signer::sr25519::Keypair;
+use org_members::RootHash;
 
 use crate::chain_write::calldata::revive_update_runtime_call;
 use crate::chain_write::multisig::{dispatch_org_call, fund, FUND_AMOUNT};
-use crate::chain_write::proxy::{create_pure, map_account_call, proxied, BlockSink};
+use crate::chain_write::proxy::{create_pure, map_account_call, org_id_of, proxied, BlockSink};
 use crate::chain_write::WriteError;
 use crate::ids::OrgId;
+use crate::types::{ChainAccount, Epoch, OrgPublicKey};
 
 /// The on-chain identity produced by genesis.
 pub struct GenesisOutcome {
     /// Pure-proxy AccountId32.
-    pub p: [u8; 32],
+    pub p: ChainAccount,
     /// org_id = h160_of(P) — the contract slot key.
     pub org_id: OrgId,
 }
@@ -40,9 +42,9 @@ pub async fn genesis_ceremony(
     contract_h160: [u8; 20],
     funder: &Keypair,
     admin: &Keypair,
-    others: &[[u8; 32]],
-    genesis_root: [u8; 32],
-    org_pub_key: [u8; 32],
+    others: &[ChainAccount],
+    genesis_root: RootHash,
+    org_pub_key: OrgPublicKey,
 ) -> Result<GenesisOutcome, WriteError> {
     // Each step submits, drives the chain via `sink`, and waits for ITS extrinsic
     // to finalize successfully (ExtrinsicFailed surfaces as an error) — no longer
@@ -56,11 +58,11 @@ pub async fn genesis_ceremony(
         .await?
         .into_executed()?;
     // 4. Genesis update (expectedEpoch = 0).
-    let call = revive_update_runtime_call(contract_h160, genesis_root, org_pub_key, 0);
+    let call = revive_update_runtime_call(contract_h160, genesis_root, org_pub_key, Epoch::new(0));
     dispatch_org_call(sink, api, admin, others, proxied(p, call))
         .await?
         .into_executed()?;
 
-    let org_id = OrgId::new(on_chain_client::h160_of(p));
+    let org_id = org_id_of(p);
     Ok(GenesisOutcome { p, org_id })
 }

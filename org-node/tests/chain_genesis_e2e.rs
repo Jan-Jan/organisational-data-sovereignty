@@ -28,6 +28,7 @@ use org_members::{Handle, MemberId, MemberLeaf, Name, Surname};
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
 use org_node::chain_write::multisig::multi_account_id;
+use org_node::{DeviceSeed, MemberSeed};
 use org_node::chain_write::multisig::{dispatch_org_call, fund, FUND_AMOUNT};
 use org_node::chain_write::proxy::{proxied, BlockSink};
 use org_node::chain_write::calldata::revive_update_runtime_call;
@@ -35,6 +36,7 @@ use org_node::chain_write::WriteError;
 use org_node::ceremony::genesis_ceremony;
 use org_node::{ChainReader, OrgId, SeqGuard, SignedDeltaEnvelope, SigningKeypair, verify_envelope_against_chain, VerifyContext};
 use org_node::OnChainReader;
+use org_node::{ChainAccount, Epoch, OrgPublicKey, SequenceNumber};
 use subxt_signer::sr25519::dev;
 
 type Trie = OrgTrie<Blake3Hasher>;
@@ -180,12 +182,12 @@ async fn genesis_then_admit_verifies_against_chain() {
     //    multisig pseudo-account.
     // ------------------------------------------------------------------
     let alice = dev::alice();
-    let bob_pub: [u8; 32] = dev::bob().public_key().0;
+    let bob_pub = ChainAccount::new(dev::bob().public_key().0);
 
     // Derive the alice+bob 1-of-2 multisig pseudo-account.
-    let alice_pub: [u8; 32] = alice.public_key().0;
+    let alice_pub = ChainAccount::new(alice.public_key().0);
     let alice_bob_multi = multi_account_id(&[alice_pub, bob_pub], 1);
-    eprintln!("alice+bob multi: 0x{}", hex::encode(alice_bob_multi));
+    eprintln!("alice+bob multi: 0x{}", hex::encode(alice_bob_multi.as_bytes()));
 
     // Fund the alice+bob multisig account before the genesis ceremony. `fund`
     // now drives the chain via the sink (mining as needed) and waits for the
@@ -197,9 +199,9 @@ async fn genesis_then_admit_verifies_against_chain() {
     // ------------------------------------------------------------------
     // 3. Build the genesis trie with one admin member leaf
     // ------------------------------------------------------------------
-    let admin_kp = SigningKeypair::from_seed([0xA1u8; 32]);
-    let admin_device = SigningKeypair::from_seed([0xA2u8; 32]);
-    let org_pub_key: [u8; 32] = admin_kp.verifying_key().to_bytes();
+    let admin_kp = MemberSeed::from([0xA1u8; 32]).signing_keypair();
+    let admin_device = DeviceSeed::from([0xA2u8; 32]).signing_keypair();
+    let org_pub_key = OrgPublicKey::from(&admin_kp.member_key());
 
     let leaf_a = admin_leaf(&admin_kp, &admin_device);
     let genesis_trie = Trie::genesis(vec![leaf_a]).expect("genesis trie");
@@ -216,7 +218,7 @@ async fn genesis_then_admit_verifies_against_chain() {
         &alice,     // funder (alice has 10^18 pre-funded by chopsticks config)
         &alice,     // admin signer (threshold-1 multisig: alice signs)
         &[bob_pub], // others (1-of-2 multisig: bob is the co-signatory)
-        *genesis_root.as_bytes(),
+        genesis_root,
         org_pub_key,
     )
     .await
@@ -224,7 +226,7 @@ async fn genesis_then_admit_verifies_against_chain() {
 
     let p = outcome.p;
     let org_id: OrgId = outcome.org_id;
-    eprintln!("P = 0x{}", hex::encode(p));
+    eprintln!("P = 0x{}", hex::encode(p.as_bytes()));
     eprintln!("org_id (h160) = 0x{}", hex::encode(org_id.as_bytes()));
 
     // ------------------------------------------------------------------
@@ -241,7 +243,7 @@ async fn genesis_then_admit_verifies_against_chain() {
         .expect("get_org_state")
         .expect("org state should be Some after genesis");
     eprintln!("on-chain state after genesis: {:?}", state_after_genesis);
-    assert_eq!(state_after_genesis.epoch, 1, "epoch should be 1 after genesis");
+    assert_eq!(state_after_genesis.epoch, Epoch::new(1), "epoch should be 1 after genesis");
     assert_eq!(
         state_after_genesis.root_hash.as_bytes(),
         genesis_root.as_bytes(),
@@ -251,8 +253,8 @@ async fn genesis_then_admit_verifies_against_chain() {
     // ------------------------------------------------------------------
     // 6. ADMIT: add member B, submit update(new_root, org_pub_key, 1)
     // ------------------------------------------------------------------
-    let b_kp = SigningKeypair::from_seed([0xB1u8; 32]);
-    let b_device = SigningKeypair::from_seed([0xB2u8; 32]);
+    let b_kp = MemberSeed::from([0xB1u8; 32]).signing_keypair();
+    let b_device = DeviceSeed::from([0xB2u8; 32]).signing_keypair();
     let leaf_b = member_b_leaf(&b_kp, &b_device);
 
     let (new_trie, admit_delta) = genesis_trie
@@ -267,7 +269,7 @@ async fn genesis_then_admit_verifies_against_chain() {
     // the first admin-authored update is seq 2 so it is > last_seen=1).
     let env = SignedDeltaEnvelope::build(
         org_id,
-        2, // parent_seq: strictly greater than last_seen=1
+        SequenceNumber::new(2), // parent_seq: strictly greater than last_seen=1
         &admit_delta,
         &admin_kp,
     )
@@ -277,9 +279,9 @@ async fn genesis_then_admit_verifies_against_chain() {
     // the chain via the sink and waits for the extrinsic to finalize.
     let update_call = revive_update_runtime_call(
         contract,
-        *new_root.as_bytes(),
+        new_root,
         org_pub_key,
-        1, // expectedEpoch = current epoch = 1
+        Epoch::new(1), // expectedEpoch = current epoch = 1
     );
     dispatch_org_call(&sink, &api, &alice, &[bob_pub], proxied(p, update_call))
         .await
@@ -294,7 +296,7 @@ async fn genesis_then_admit_verifies_against_chain() {
         .expect("get_org_state after update")
         .expect("org state should be Some after update");
     eprintln!("on-chain state after update: {:?}", state_after_update);
-    assert_eq!(state_after_update.epoch, 2, "epoch should be 2 after update");
+    assert_eq!(state_after_update.epoch, Epoch::new(2), "epoch should be 2 after update");
     assert_eq!(
         state_after_update.root_hash.as_bytes(),
         new_root.as_bytes(),
@@ -312,8 +314,8 @@ async fn genesis_then_admit_verifies_against_chain() {
     let ctx = VerifyContext {
         expected_org_id: org_id,
         author_member_key: &admin_kp.verifying_key(),
-        seq_guard: SeqGuard::from_last_seen(1), // last committed seq was 1
-        last_committed_epoch: 1,                // last committed epoch was 1
+        seq_guard: SeqGuard::from_last_seen(SequenceNumber::new(1)), // last committed seq was 1
+        last_committed_epoch: Epoch::new(1),                // last committed epoch was 1
     };
 
     let verified = verify_envelope_against_chain(
@@ -324,11 +326,11 @@ async fn genesis_then_admit_verifies_against_chain() {
     )
     .expect("verify_envelope_against_chain must succeed");
 
-    eprintln!("verified epoch: {}", verified.epoch);
-    eprintln!("verified seq: {}", verified.seq_guard.last_seen());
+    eprintln!("verified epoch: {:?}", verified.epoch);
+    eprintln!("verified seq: {:?}", verified.seq_guard.last_seen());
 
-    assert_eq!(verified.epoch, 2, "verified epoch should be 2");
-    assert_eq!(verified.seq_guard.last_seen(), 2, "seq guard should advance to 2");
+    assert_eq!(verified.epoch, Epoch::new(2), "verified epoch should be 2");
+    assert_eq!(verified.seq_guard.last_seen(), SequenceNumber::new(2), "seq guard should advance to 2");
     assert_eq!(
         verified.trie.root_hash().expect("committed trie root"),
         new_root,
@@ -370,9 +372,9 @@ async fn single_admin_genesis_e2e() {
     // ------------------------------------------------------------------
     // 3. Build the genesis trie with one admin member leaf
     // ------------------------------------------------------------------
-    let admin_kp = SigningKeypair::from_seed([0xA1u8; 32]);
-    let admin_device = SigningKeypair::from_seed([0xA2u8; 32]);
-    let org_pub_key: [u8; 32] = admin_kp.verifying_key().to_bytes();
+    let admin_kp = MemberSeed::from([0xA1u8; 32]).signing_keypair();
+    let admin_device = DeviceSeed::from([0xA2u8; 32]).signing_keypair();
+    let org_pub_key = OrgPublicKey::from(&admin_kp.member_key());
 
     let leaf_a = admin_leaf(&admin_kp, &admin_device);
     let genesis_trie = Trie::genesis(vec![leaf_a]).expect("genesis trie");
@@ -391,7 +393,7 @@ async fn single_admin_genesis_e2e() {
         &alice, // funder (alice pre-funded by chopsticks config)
         &alice, // admin (signs directly — no multisig wrapper)
         &[],    // others: empty ⇒ single-admin / direct dispatch
-        *genesis_root.as_bytes(),
+        genesis_root,
         org_pub_key,
     )
     .await
@@ -399,7 +401,7 @@ async fn single_admin_genesis_e2e() {
 
     let p = outcome.p;
     let org_id: OrgId = outcome.org_id;
-    eprintln!("[single_admin] P = 0x{}", hex::encode(p));
+    eprintln!("[single_admin] P = 0x{}", hex::encode(p.as_bytes()));
     eprintln!("[single_admin] org_id (h160) = 0x{}", hex::encode(org_id.as_bytes()));
 
     // ------------------------------------------------------------------
@@ -416,7 +418,7 @@ async fn single_admin_genesis_e2e() {
         .expect("get_org_state")
         .expect("org state should be Some after genesis");
     eprintln!("[single_admin] on-chain state after genesis: {:?}", state_after_genesis);
-    assert_eq!(state_after_genesis.epoch, 1, "epoch should be 1 after genesis");
+    assert_eq!(state_after_genesis.epoch, Epoch::new(1), "epoch should be 1 after genesis");
     assert_eq!(
         state_after_genesis.root_hash.as_bytes(),
         genesis_root.as_bytes(),
@@ -427,8 +429,8 @@ async fn single_admin_genesis_e2e() {
     // 6. ADMIT: add member B, submit update(new_root, org_pub_key, 1)
     //    via dispatch_org_call with others = &[] (direct, no multisig)
     // ------------------------------------------------------------------
-    let b_kp = SigningKeypair::from_seed([0xB1u8; 32]);
-    let b_device = SigningKeypair::from_seed([0xB2u8; 32]);
+    let b_kp = MemberSeed::from([0xB1u8; 32]).signing_keypair();
+    let b_device = DeviceSeed::from([0xB2u8; 32]).signing_keypair();
     let leaf_b = member_b_leaf(&b_kp, &b_device);
 
     let (new_trie, admit_delta) = genesis_trie
@@ -441,7 +443,7 @@ async fn single_admin_genesis_e2e() {
 
     let env = SignedDeltaEnvelope::build(
         org_id,
-        2, // parent_seq: strictly greater than last_seen=1
+        SequenceNumber::new(2), // parent_seq: strictly greater than last_seen=1
         &admit_delta,
         &admin_kp,
     )
@@ -449,9 +451,9 @@ async fn single_admin_genesis_e2e() {
 
     let update_call = revive_update_runtime_call(
         contract,
-        *new_root.as_bytes(),
+        new_root,
         org_pub_key,
-        1, // expectedEpoch = current epoch = 1
+        Epoch::new(1), // expectedEpoch = current epoch = 1
     );
     // Single-admin: others = &[] — alice signs the proxied call directly.
     dispatch_org_call(&sink, &api, &alice, &[], proxied(p, update_call))
@@ -467,7 +469,7 @@ async fn single_admin_genesis_e2e() {
         .expect("get_org_state after update")
         .expect("org state should be Some after update");
     eprintln!("[single_admin] on-chain state after update: {:?}", state_after_update);
-    assert_eq!(state_after_update.epoch, 2, "epoch should be 2 after update");
+    assert_eq!(state_after_update.epoch, Epoch::new(2), "epoch should be 2 after update");
     assert_eq!(
         state_after_update.root_hash.as_bytes(),
         new_root.as_bytes(),
@@ -480,8 +482,8 @@ async fn single_admin_genesis_e2e() {
     let ctx = VerifyContext {
         expected_org_id: org_id,
         author_member_key: &admin_kp.verifying_key(),
-        seq_guard: SeqGuard::from_last_seen(1),
-        last_committed_epoch: 1,
+        seq_guard: SeqGuard::from_last_seen(SequenceNumber::new(1)),
+        last_committed_epoch: Epoch::new(1),
     };
 
     let verified = verify_envelope_against_chain(
@@ -492,11 +494,11 @@ async fn single_admin_genesis_e2e() {
     )
     .expect("verify_envelope_against_chain must succeed");
 
-    eprintln!("[single_admin] verified epoch: {}", verified.epoch);
-    eprintln!("[single_admin] verified seq: {}", verified.seq_guard.last_seen());
+    eprintln!("[single_admin] verified epoch: {:?}", verified.epoch);
+    eprintln!("[single_admin] verified seq: {:?}", verified.seq_guard.last_seen());
 
-    assert_eq!(verified.epoch, 2, "verified epoch should be 2");
-    assert_eq!(verified.seq_guard.last_seen(), 2, "seq guard should advance to 2");
+    assert_eq!(verified.epoch, Epoch::new(2), "verified epoch should be 2");
+    assert_eq!(verified.seq_guard.last_seen(), SequenceNumber::new(2), "seq guard should advance to 2");
     assert_eq!(
         verified.trie.root_hash().expect("committed trie root"),
         new_root,

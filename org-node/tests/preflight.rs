@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use org_node::keys::SigningKeypair;
+use org_node::{DeviceSeed};
 use org_node::preflight::{check_chain_live, check_transport};
 use org_node::transport::TransportMode;
 
@@ -19,7 +19,7 @@ use common::conn::legacy_client;
 
 #[tokio::test]
 async fn transport_loopback_check_passes() {
-    let device = SigningKeypair::from_seed([7u8; 32]);
+    let device = DeviceSeed::from([7u8; 32]).signing_keypair();
     let res = check_transport(&device, TransportMode::Loopback, Duration::from_secs(5)).await;
     assert!(res.ok, "loopback transport check should pass: {res:?}");
 }
@@ -30,7 +30,7 @@ async fn transport_networked_check_is_bounded() {
     // reachable is environment-dependent, so we assert only that the check is
     // BOUNDED — it returns within ~2x its own timeout rather than hanging.
     // Either ok or !ok is acceptable; hanging is not.
-    let device = SigningKeypair::from_seed([42u8; 32]);
+    let device = DeviceSeed::from([42u8; 32]).signing_keypair();
     let inner_timeout = Duration::from_secs(5);
     let res = tokio::time::timeout(
         inner_timeout * 2 + Duration::from_secs(5),

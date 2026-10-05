@@ -92,6 +92,16 @@ impl P2pMemberKey {
         Self(key)
     }
 
+    /// Parses 32 bytes as a member key. Accepts exactly the bytes that
+    /// decompress to an Edwards point — what `Deserialize`, which calls this,
+    /// accepts — and does not refuse small-order or non-canonical encodings
+    /// (owner ruling 2026-10-04; PR-b7khyw). LLR-k6dhz7.
+    pub fn parse(bytes: &[u8; 32]) -> Result<Self, OrgMembersError> {
+        VerifyingKey::from_bytes(bytes)
+            .map(Self)
+            .map_err(|_| OrgMembersError::InvalidKey)
+    }
+
     pub fn verifying_key(&self) -> &VerifyingKey {
         &self.0
     }
@@ -131,8 +141,15 @@ impl serde::Serialize for P2pMemberKey {
 impl<'de> serde::Deserialize<'de> for P2pMemberKey {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let bytes = <[u8; 32]>::deserialize(d)?;
-        let vk = VerifyingKey::from_bytes(&bytes).map_err(serde::de::Error::custom)?;
-        Ok(Self(vk))
+        Self::parse(&bytes).map_err(serde::de::Error::custom)
+    }
+}
+
+impl TryFrom<[u8; 32]> for P2pMemberKey {
+    type Error = OrgMembersError;
+
+    fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
+        Self::parse(&bytes)
     }
 }
 
@@ -144,6 +161,16 @@ pub struct P2pDeviceKey(VerifyingKey);
 impl P2pDeviceKey {
     pub fn new(key: VerifyingKey) -> Self {
         Self(key)
+    }
+
+    /// Parses 32 bytes as a device key. Accepts exactly the bytes that
+    /// decompress to an Edwards point — what `Deserialize`, which calls this,
+    /// accepts — and does not refuse small-order or non-canonical encodings
+    /// (owner ruling 2026-10-04; PR-b7khyw). LLR-k6dhz7.
+    pub fn parse(bytes: &[u8; 32]) -> Result<Self, OrgMembersError> {
+        VerifyingKey::from_bytes(bytes)
+            .map(Self)
+            .map_err(|_| OrgMembersError::InvalidKey)
     }
 
     pub fn verifying_key(&self) -> &VerifyingKey {
@@ -185,8 +212,15 @@ impl serde::Serialize for P2pDeviceKey {
 impl<'de> serde::Deserialize<'de> for P2pDeviceKey {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let bytes = <[u8; 32]>::deserialize(d)?;
-        let vk = VerifyingKey::from_bytes(&bytes).map_err(serde::de::Error::custom)?;
-        Ok(Self(vk))
+        Self::parse(&bytes).map_err(serde::de::Error::custom)
+    }
+}
+
+impl TryFrom<[u8; 32]> for P2pDeviceKey {
+    type Error = OrgMembersError;
+
+    fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
+        Self::parse(&bytes)
     }
 }
 
@@ -475,11 +509,12 @@ impl<'de> serde::Deserialize<'de> for P2pDeviceSlots {
 }
 
 impl P2pDeviceSlots {
-    /// Constructs a P2pDeviceSlots from a list of device keys.
-    /// Accepts 0..=MAX_DEVICES devices: an empty list is allowed because
-    /// `emergency_isolate_member` produces a member with zero devices. Normal
-    /// member creation (via `MemberLeaf::new`) requires ≥1 device.
-    pub fn new(mut devices: Vec<P2pDeviceKey>) -> Result<Self, OrgMembersError> {
+    /// Holds `devices` sorted. Accepts 0..=MAX_DEVICES keys: the empty list
+    /// is the isolated state `emergency_isolate_member` produces;
+    /// `MemberLeaf::new` requires ≥1 of its own. Refuses more than
+    /// `MAX_DEVICES` keys with `DeviceSlotsFull` and a repeated key with
+    /// `DuplicateDevice`. LLR-t3p9zk.
+    pub fn parse(mut devices: Vec<P2pDeviceKey>) -> Result<Self, OrgMembersError> {
         if devices.len() > MAX_DEVICES {
             return Err(OrgMembersError::DeviceSlotsFull);
         }
@@ -547,6 +582,14 @@ impl P2pDeviceSlots {
     }
 }
 
+impl TryFrom<Vec<P2pDeviceKey>> for P2pDeviceSlots {
+    type Error = OrgMembersError;
+
+    fn try_from(devices: Vec<P2pDeviceKey>) -> Result<Self, Self::Error> {
+        Self::parse(devices)
+    }
+}
+
 impl fmt::Debug for P2pDeviceSlots {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "P2pDeviceSlots({})", self.slots.len())
@@ -592,7 +635,7 @@ impl MemberLeaf {
         if p2p_devices.is_empty() {
             return Err(OrgMembersError::EmptyDeviceList);
         }
-        let p2p_devices = P2pDeviceSlots::new(p2p_devices)?;
+        let p2p_devices = P2pDeviceSlots::parse(p2p_devices)?;
         Ok(Self { id, handle, p2p_key, name, surname, p2p_devices })
     }
 

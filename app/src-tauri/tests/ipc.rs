@@ -366,3 +366,69 @@ fn list_personas_returns_an_empty_list_on_a_fresh_store() {
          the handler reads: {personas}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Persona details are parsed at this boundary. The requirement for parsed
+// Persona details is org-node's and is not exported to this unit; it is
+// verified there (org-node/tests/persona_records.rs); these are this
+// handler's robustness tests and carry no requirement of their own.
+// ---------------------------------------------------------------------------
+
+// robustness: the handler parses the handle, name and surname before
+// org-node sees them, and stores the parsed (NFC) form.
+#[test]
+fn create_persona_stores_the_parsed_details() {
+    let h = harness();
+    invoke(
+        &h,
+        "create_persona",
+        serde_json::json!({ "handle": "jose\u{0301}", "name": "Jose\u{0301}", "surname": "Smith" }),
+    )
+    .expect("create_persona");
+    let personas = invoke(&h, "list_personas", serde_json::json!({})).expect("list_personas");
+    assert_eq!(personas[0]["handle"], "jos\u{e9}");
+    assert_eq!(personas[0]["name"], "Jos\u{e9}");
+}
+
+// robustness: an invalid field is refused at the boundary, named, and
+// nothing is created.
+#[test]
+fn create_persona_refuses_an_invalid_field_naming_it_and_creates_nothing() {
+    let h = harness();
+    let long = "a".repeat(129);
+    let cases = [
+        ("Alice", "Alice", "Smith", "handle:"),
+        ("alice", long.as_str(), "Smith", "name:"),
+        ("alice", "Alice", long.as_str(), "surname:"),
+    ];
+    for (handle, name, surname, field) in cases {
+        let err = invoke_err(
+            &h,
+            "create_persona",
+            serde_json::json!({ "handle": handle, "name": name, "surname": surname }),
+        );
+        assert!(err.starts_with(field), "the refusal must name the field ({field}): {err}");
+    }
+    let personas = invoke(&h, "list_personas", serde_json::json!({})).expect("list_personas");
+    assert_eq!(personas.as_array().map(Vec::len), Some(0), "a refused persona is not created");
+}
+
+// robustness: the Organisation secret is parsed from hex at this boundary.
+#[test]
+fn admit_member_refuses_an_org_secret_that_is_not_32_bytes() {
+    let h = harness();
+    let pid = invoke(
+        &h,
+        "create_persona",
+        serde_json::json!({ "handle": "bob", "name": "Bob", "surname": "Jones" }),
+    )
+    .expect("create_persona");
+    let blob = invoke(&h, "export_join_request", serde_json::json!({ "personaId": pid }))
+        .expect("export_join_request");
+    let err = invoke_err(
+        &h,
+        "admit_member",
+        serde_json::json!({ "orgId": org_id_40(), "joinRequestBlob": blob, "orgSecretHex": "aa".repeat(31) }),
+    );
+    assert!(err.contains("org_secret must be 32 bytes"), "got {err}");
+}

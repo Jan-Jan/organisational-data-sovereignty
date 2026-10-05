@@ -15,6 +15,15 @@
 use org_node::chain_write::calldata::{build_update_calldata, UPDATE_SELECTOR};
 use org_node::chain_write::multisig::multi_account_id;
 use org_node::test_support::build_dispatch_tx;
+use org_node::ChainAccount;
+
+// Ported 2026-10-05 to the org-node type-safety change: the multisig
+// derivation and dispatch take `ChainAccount`s, and the runtime call a
+// `RootHash`, an `OrgPublicKey` and an `Epoch`. `build_update_calldata` is the
+// plain-bytes encoder at the edge and is unchanged.
+fn acct(b: u8) -> ChainAccount {
+    ChainAccount::new([b; 32])
+}
 
 // verifies: LLR-rv4vux
 #[test]
@@ -53,27 +62,27 @@ fn the_update_selector_is_the_declared_four_bytes() {
 // verifies: LLR-463d89
 #[test]
 fn the_derived_account_does_not_depend_on_signer_order() {
-    let a = [1u8; 32];
-    let b = [2u8; 32];
+    let a = acct(1);
+    let b = acct(2);
     assert_eq!(multi_account_id(&[a, b], 1), multi_account_id(&[b, a], 1));
 
     // Three signers, so the property is not an artefact of a two-element swap.
-    let c = [3u8; 32];
+    let c = acct(3);
     assert_eq!(multi_account_id(&[a, b, c], 1), multi_account_id(&[c, a, b], 1));
 }
 
 // verifies: LLR-8m3bwj
 #[test]
 fn the_derived_account_depends_on_the_threshold() {
-    let a = [1u8; 32];
-    let b = [2u8; 32];
+    let a = acct(1);
+    let b = acct(2);
     assert_ne!(multi_account_id(&[a, b], 1), multi_account_id(&[a, b], 2));
 }
 
 // verifies: LLR-463d89
 #[test]
 fn the_derived_account_depends_on_the_signers() {
-    assert_ne!(multi_account_id(&[[1u8; 32]], 1), multi_account_id(&[[2u8; 32]], 1));
+    assert_ne!(multi_account_id(&[acct(1)], 1), multi_account_id(&[acct(2)], 1));
 }
 
 // verifies: LLR-f74xwb
@@ -97,7 +106,7 @@ fn dispatch_is_direct_without_other_signatories_and_wrapped_with_them() {
     assert_eq!(direct.pallet_name(), "System");
     assert_eq!(direct.call_name(), "remark");
 
-    let multi = build_dispatch_tx(&[[9u8; 32]], call()).expect("multisig payload");
+    let multi = build_dispatch_tx(&[acct(9)], call()).expect("multisig payload");
     assert_eq!(multi.pallet_name(), "Multisig");
     assert_eq!(multi.call_name(), "as_multi_threshold_1");
 }
@@ -119,9 +128,9 @@ fn update_call_names_every_field_and_constant_the_runtime_matches() {
     // Distinct bytes, so the order of `dest` is observed too: a uniform
     // address could not tell it from its reverse (review round 7).
     let contract: [u8; 20] = core::array::from_fn(|i| i as u8 + 1);
-    let root = [0x11u8; 32];
-    let key = [0x22u8; 32];
-    let epoch = 7u128;
+    let root = org_node::RootHash::new([0x11u8; 32]);
+    let key = org_node::OrgPublicKey::from(&org_node::MemberSeed::from([0x22u8; 32]).signing_keypair().member_key());
+    let epoch = org_node::Epoch::new(7);
 
     let expected = Value::variant(
         "Revive",
@@ -141,7 +150,10 @@ fn update_call_names_every_field_and_constant_the_runtime_matches() {
                     ]),
                 ),
                 ("storage_deposit_limit".to_string(), Value::u128(10_000_000_000_000)),
-                ("data".to_string(), Value::from_bytes(build_update_calldata(root, key, epoch))),
+                (
+                    "data".to_string(),
+                    Value::from_bytes(build_update_calldata(*root.as_bytes(), *key.as_bytes(), 7u128)),
+                ),
             ]),
         )]),
     );

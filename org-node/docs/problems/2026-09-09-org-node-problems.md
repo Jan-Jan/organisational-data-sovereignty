@@ -169,7 +169,7 @@ Where: `org-node/src/service.rs`, the transport send in `admit_member`: the
 `TransportMode::Networked` branch, which derives the peer identity
 from `join_request.device_key` and so binds delivery to the key). The Join
 request is an unsigned, unauthenticated blob by design
-(`org-node/src/blobs.rs:9-29`), travelling out of band by copy and paste, so
+(`org-node/src/blobs.rs:13-34`, *re-measured 2026-10-05 by the org-node type-safety change, review round 7*), travelling out of band by copy and paste, so
 nothing upstream detects the alteration.
 
 Observable symptom: with a Join request carrying B's keys and C's address,
@@ -239,9 +239,10 @@ affects: RC-gfn6kr
 opened: 2026-09-10
 status: open
 
-Where: `org-node/src/transport/wire.rs:14` ("`None` for non-admission messages
-(e.g. revocations)") and the field's own comment at `:19` ("None for
-non-admission"), against `revoke_member` in `org-node/src/service.rs`,
+Where: `org-node/src/transport/wire.rs:15` ("`None` for non-admission messages
+(e.g. revocations)") and the field's own comment at `:21` ("None for
+non-admission") *(re-measured 2026-10-05 by the org-node type-safety change,
+review round 7; they read `:14` and `:19`)*, against `revoke_member` in `org-node/src/service.rs`,
 which encodes the pre-revoke snapshot and puts it in the `WireMessage` it sends. The admission
 path, `admit_member`, sets it where it builds the record snapshot for the
 `WireMessage`; there is no send path in the

@@ -7,8 +7,10 @@
 
 use std::path::PathBuf;
 
+use org_members::{Handle, Name, P2pMemberKey, RootHash, Surname};
 use org_node::ids::OrgId;
 use org_node::store::{OrgRecord, PersonaRecord, PersonaStatus, PersonaStore};
+use org_node::{DeviceSeed, Epoch, MemberSeed, OrgPublicKey, OrgSecret, PersonaId, SequenceNumber};
 use rand::rngs::OsRng;
 
 /// A fresh, per-test file path under the OS temp dir (any stale file removed).
@@ -22,13 +24,13 @@ fn tmp_path(suffix: &str) -> PathBuf {
 
 fn persona(member_seed: [u8; 32], device_seed: [u8; 32]) -> PersonaRecord {
     PersonaRecord {
-        persona_id: "p1".into(),
+        persona_id: PersonaId::new("p1".to_string()),
         org_id: None,
-        handle: "alice".into(),
-        name: "A".into(),
-        surname: "U".into(),
-        member_seed,
-        device_seed,
+        handle: Handle::parse("alice").unwrap(),
+        name: Name::parse("A").unwrap(),
+        surname: Surname::parse("U").unwrap(),
+        member_seed: MemberSeed::from(member_seed),
+        device_seed: DeviceSeed::from(device_seed),
         member_id: None,
         status: PersonaStatus::Proposed,
     }
@@ -38,12 +40,12 @@ fn persona(member_seed: [u8; 32], device_seed: [u8; 32]) -> PersonaRecord {
 fn org_record(org_secret: Option<[u8; 32]>) -> OrgRecord {
     OrgRecord {
         org_id: OrgId::new([5u8; 20]),
-        root_hash: [0x11u8; 32],
-        org_pub_key: [0x22u8; 32],
-        epoch: 3,
-        org_secret,
-        last_seq: 2,
-        admin_member_key: [0x33u8; 32],
+        root_hash: RootHash::new([0x11u8; 32]),
+        org_pub_key: OrgPublicKey::parse(&[0u8; 32]).unwrap(),
+        epoch: Epoch::new(3),
+        org_secret: org_secret.map(OrgSecret::from),
+        last_seq: SequenceNumber::new(2),
+        admin_member_key: P2pMemberKey::new(ed25519_dalek::SigningKey::from_bytes(&[0x33u8; 32]).verifying_key()),
         trie_members: Vec::new(),
         proxy_account: None,
     }
@@ -65,7 +67,7 @@ fn round_trips_encrypted_through_disk() {
     // Reopen with the correct passphrase.
     let s2 = PersonaStore::open(path.clone(), "hunter2").unwrap();
     assert_eq!(s2.data().personas.len(), 1);
-    assert_eq!(s2.data().personas[0].handle, "alice");
+    assert_eq!(s2.data().personas[0].handle.as_str(), "alice");
 
     // Wrong passphrase must fail.
     assert!(PersonaStore::open(path.clone(), "wrong").is_err());

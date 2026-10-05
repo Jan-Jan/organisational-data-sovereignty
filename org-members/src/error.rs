@@ -34,6 +34,11 @@ pub enum OrgMembersError {
     #[error("key already held in this organisation")]
     DuplicateKey,
 
+    /// 32 bytes offered as a member or device key that do not decompress to
+    /// an Edwards point. LLR-k6dhz7.
+    #[error("invalid key: the bytes are not a point on the curve")]
+    InvalidKey,
+
     #[error("device slots full (max 4)")]
     DeviceSlotsFull,
 

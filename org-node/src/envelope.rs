@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::OrgNodeError;
 use crate::ids::OrgId;
 use crate::keys::{verify, SigningKeypair};
+use crate::types::SequenceNumber;
 
 /// Serde helper: serialize/deserialize `[u8; 64]` as a fixed-length byte array.
 /// serde's derive does not implement these for arrays larger than 32 in all
@@ -48,17 +49,17 @@ mod sig_bytes {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignedDeltaEnvelope {
     pub org_id: OrgId,
-    pub parent_seq: u64,
+    pub parent_seq: SequenceNumber,
     pub delta_bytes: Vec<u8>, // postcard(Delta)
     #[serde(with = "sig_bytes")]
     pub signature: [u8; 64],
 }
 
 /// Build the exact byte transcript that gets signed/verified.
-fn transcript(org_id: &OrgId, parent_seq: u64, delta_bytes: &[u8]) -> Vec<u8> {
+fn transcript(org_id: &OrgId, parent_seq: SequenceNumber, delta_bytes: &[u8]) -> Vec<u8> {
     let mut buf = Vec::with_capacity(20 + 8 + delta_bytes.len());
     buf.extend_from_slice(org_id.as_bytes());
-    buf.extend_from_slice(&parent_seq.to_le_bytes());
+    buf.extend_from_slice(&parent_seq.get().to_le_bytes());
     buf.extend_from_slice(delta_bytes);
     buf
 }
@@ -67,7 +68,7 @@ impl SignedDeltaEnvelope {
     /// Author side: encode `delta`, bind it to (org, seq), and sign with `author`.
     pub fn build(
         org_id: OrgId,
-        parent_seq: u64,
+        parent_seq: SequenceNumber,
         delta: &Delta,
         author: &SigningKeypair,
     ) -> Result<Self, OrgNodeError> {

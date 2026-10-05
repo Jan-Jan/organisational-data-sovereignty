@@ -45,6 +45,7 @@ use org_node::ids::OrgId;
 use org_node::keys::SigningKeypair;
 use org_node::sequence::SeqGuard;
 use org_node::verify::{verify_envelope_against_chain, VerifyContext};
+use org_node::{DeviceSeed, Epoch, MemberSeed, OrgPublicKey, SequenceNumber};
 
 // The admin's device is a keypair of its own: org-members refuses a leaf whose
 // member key is also an enrolled device key (`DuplicateKey`).
@@ -63,19 +64,19 @@ fn fixed_trie(admin: &SigningKeypair, admin_device: &SigningKeypair) -> OrgTrie<
 
 /// The transcript `SignedDeltaEnvelope::build` signs: org_id ‖ seq (LE) ‖ delta.
 /// Rebuilt here because the crate's own `transcript` is private.
-fn transcript(org: OrgId, seq: u64, delta_bytes: &[u8]) -> Vec<u8> {
+fn transcript(org: OrgId, seq: SequenceNumber, delta_bytes: &[u8]) -> Vec<u8> {
     let mut buf = Vec::with_capacity(20 + 8 + delta_bytes.len());
     buf.extend_from_slice(org.as_bytes());
-    buf.extend_from_slice(&seq.to_le_bytes());
+    buf.extend_from_slice(&seq.get().to_le_bytes());
     buf.extend_from_slice(delta_bytes);
     buf
 }
 
 fn main() {
-    let admin = SigningKeypair::from_seed([1u8; 32]);
-    // Same seed as `test_fixtures::ADMIN_DEVICE_SEED`; this target builds
+    let admin = MemberSeed::from([1u8; 32]).signing_keypair();
+    // Same seed as `test_fixtures::admin_device`; this target builds
     // without `test-support`, so it cannot import it.
-    let admin_device = SigningKeypair::from_seed([4u8; 32]);
+    let admin_device = DeviceSeed::from([4u8; 32]).signing_keypair();
     let local = fixed_trie(&admin, &admin_device);
     let org = OrgId::new([5u8; 20]);
     let vk = admin.verifying_key();
@@ -87,8 +88,8 @@ fn main() {
     // Added 2026-10-04 after review round 3 measured that no input reached
     // check 5 — a `panic!()` immediately after the decode left this target
     // passing after 2 479 iterations.
-    let joiner = SigningKeypair::from_seed([7u8; 32]);
-    let joiner_device = SigningKeypair::from_seed([8u8; 32]);
+    let joiner = MemberSeed::from([7u8; 32]).signing_keypair();
+    let joiner_device = DeviceSeed::from([8u8; 32]).signing_keypair();
     let (honest_root, honest_bytes) = {
         let leaf = MemberLeaf::new(
             MemberId::new([2u8; 32]),
@@ -109,7 +110,14 @@ fn main() {
     // `assert_eq!` below runs; a perturbed one that still applies yields a
     // different root and must be refused at check 8.
     let mut chain = MockChain::new();
-    chain.set(org, OrgState { root_hash: honest_root, org_pub_key: [0u8; 32], epoch: 9 });
+    chain.set(
+        org,
+        OrgState {
+            root_hash: honest_root,
+            org_pub_key: OrgPublicKey::parse(&[0u8; 32]).unwrap(),
+            epoch: Epoch::new(9),
+        },
+    );
 
     // bolero wraps each iteration in `catch_unwind`, which requires the
     // closure's captures to be `RefUnwindSafe`. `OrgTrie` contains a
@@ -123,8 +131,8 @@ fn main() {
         let ctx = || VerifyContext {
             expected_org_id: org,
             author_member_key: &vk,
-            seq_guard: SeqGuard::from_last_seen(0),
-            last_committed_epoch: 0,
+            seq_guard: SeqGuard::from_last_seen(SequenceNumber::new(0)),
+            last_committed_epoch: Epoch::new(0),
         };
         let run = |env: &SignedDeltaEnvelope| {
             if let Ok(out) = verify_envelope_against_chain(&*local, env, &ctx(), &*chain) {
@@ -151,7 +159,7 @@ fn main() {
         // acceptable sequence number, and a genuine signature over those exact
         // bytes, so checks 1 to 3 always pass and the decode is always
         // reached.
-        let seq = 1u64;
+        let seq = SequenceNumber::new(1);
         let envelope_around = |delta: Vec<u8>| SignedDeltaEnvelope {
             org_id: org,
             parent_seq: seq,

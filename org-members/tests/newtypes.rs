@@ -126,7 +126,7 @@ fn decode_member_record_stores_nfc_fields() {
         p2p_key: P2pMemberKey::new(SigningKey::from_bytes(&[8; 32]).verifying_key()),
         name: "Jose\u{0301}",
         surname: "Smith",
-        p2p_devices: P2pDeviceSlots::new(vec![device]).unwrap(),
+        p2p_devices: P2pDeviceSlots::parse(vec![device]).unwrap(),
     };
     let decoded: MemberLeaf = postcard::from_bytes(&postcard::to_allocvec(&wire).unwrap()).unwrap();
 
@@ -302,5 +302,98 @@ fn length_bounds_apply_after_nfc() {
     assert_eq!(
         Surname::parse(&over),
         Err(OrgMembersError::FieldTooLong { field: "surname", max: MAX_SURNAME_LEN })
+    );
+}
+
+fn curve_key(seed: u8) -> [u8; 32] {
+    *ed25519_dalek::SigningKey::from_bytes(&[seed; 32]).verifying_key().as_bytes()
+}
+
+/// y = 0: a point of small order (a weak key). Decompresses.
+fn weak_key() -> [u8; 32] {
+    [0u8; 32]
+}
+
+/// y = p + 1 (≡ 1 mod p): a non-canonical encoding of the identity point.
+/// Decompresses.
+fn non_canonical_key() -> [u8; 32] {
+    let mut b = [0xffu8; 32];
+    b[0] = 0xee;
+    b[31] = 0x7f;
+    b
+}
+
+/// y = 2: no x satisfies the curve equation, so these bytes decompress to
+/// nothing.
+fn off_curve_key() -> [u8; 32] {
+    let mut b = [0u8; 32];
+    b[0] = 2;
+    b
+}
+
+/// verifies: LLR-k6dhz7
+#[test]
+fn key_parse_accepts_exactly_what_decoding_accepts() {
+    use org_members::types::{P2pDeviceKey, P2pMemberKey};
+    // A key from a signing key, a weak key and a non-canonical encoding all
+    // decompress, so all three are accepted, bytes unchanged (owner ruling
+    // 2026-10-04; refusing the last two is PR-b7khyw).
+    for bytes in [curve_key(7), weak_key(), non_canonical_key()] {
+        let encoded = postcard::to_allocvec(&bytes).unwrap();
+        let member = P2pMemberKey::parse(&bytes).unwrap();
+        assert_eq!(member.as_bytes(), &bytes, "parse keeps the bytes as given");
+        assert_eq!(P2pMemberKey::try_from(bytes).unwrap(), member);
+        assert_eq!(postcard::from_bytes::<P2pMemberKey>(&encoded).unwrap(), member);
+        let device = P2pDeviceKey::parse(&bytes).unwrap();
+        assert_eq!(device.as_bytes(), &bytes);
+        assert_eq!(P2pDeviceKey::try_from(bytes).unwrap(), device);
+        assert_eq!(postcard::from_bytes::<P2pDeviceKey>(&encoded).unwrap(), device);
+    }
+}
+
+/// verifies: LLR-k6dhz7
+#[test]
+fn key_parse_refuses_bytes_off_the_curve() {
+    use org_members::types::{P2pDeviceKey, P2pMemberKey};
+    let bytes = off_curve_key();
+    let encoded = postcard::to_allocvec(&bytes).unwrap();
+    assert_eq!(P2pMemberKey::parse(&bytes), Err(OrgMembersError::InvalidKey));
+    assert_eq!(P2pMemberKey::try_from(bytes), Err(OrgMembersError::InvalidKey));
+    assert!(postcard::from_bytes::<P2pMemberKey>(&encoded).is_err());
+    assert_eq!(P2pDeviceKey::parse(&bytes), Err(OrgMembersError::InvalidKey));
+    assert_eq!(P2pDeviceKey::try_from(bytes), Err(OrgMembersError::InvalidKey));
+    assert!(postcard::from_bytes::<P2pDeviceKey>(&encoded).is_err());
+}
+
+fn slot_device(seed: u8) -> org_members::types::P2pDeviceKey {
+    org_members::types::P2pDeviceKey::parse(&curve_key(seed)).unwrap()
+}
+
+/// verifies: LLR-t3p9zk
+#[test]
+fn device_slots_parse_holds_keys_sorted() {
+    use org_members::types::{P2pDeviceKey, P2pDeviceSlots, MAX_DEVICES};
+    let keys: Vec<P2pDeviceKey> = (1..=MAX_DEVICES as u8).map(slot_device).collect();
+    let mut sorted = keys.clone();
+    sorted.sort();
+    let mut reversed = keys;
+    reversed.reverse();
+    let slots = P2pDeviceSlots::parse(reversed.clone()).unwrap();
+    assert_eq!(slots.devices(), sorted.as_slice(), "held sorted, at the MAX_DEVICES bound");
+    assert_eq!(P2pDeviceSlots::try_from(reversed).unwrap(), slots);
+    let empty = P2pDeviceSlots::parse(Vec::new()).unwrap();
+    assert_eq!(empty.device_count(), 0, "the empty list is the isolated state");
+}
+
+/// verifies: LLR-t3p9zk
+#[test]
+fn device_slots_parse_refuses_too_many_and_repeated_keys() {
+    use org_members::types::{P2pDeviceKey, P2pDeviceSlots, MAX_DEVICES};
+    let over: Vec<P2pDeviceKey> = (1..=MAX_DEVICES as u8 + 1).map(slot_device).collect();
+    assert_eq!(P2pDeviceSlots::parse(over.clone()), Err(OrgMembersError::DeviceSlotsFull));
+    assert_eq!(P2pDeviceSlots::try_from(over), Err(OrgMembersError::DeviceSlotsFull));
+    assert_eq!(
+        P2pDeviceSlots::parse(vec![slot_device(1), slot_device(2), slot_device(1)]),
+        Err(OrgMembersError::DuplicateDevice)
     );
 }

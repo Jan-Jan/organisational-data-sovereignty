@@ -6,13 +6,14 @@ use std::collections::HashMap;
 use org_members::RootHash;
 
 use crate::ids::OrgId;
+use crate::types::{Epoch, OrgPublicKey};
 
 /// The on-chain state of one org, as stored in the OrgRegistry slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OrgState {
     pub root_hash: RootHash,
-    pub org_pub_key: [u8; 32],
-    pub epoch: u64,
+    pub org_pub_key: OrgPublicKey,
+    pub epoch: Epoch,
 }
 
 /// Read-only access to on-chain org state. The trusted-root oracle: the root
@@ -50,12 +51,13 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::unwrap_used)]
     fn mock_chain_returns_set_state() {
         let mut chain = MockChain::new();
         let org = OrgId::new([1u8; 20]);
         assert_eq!(chain.get_org_state(&org).unwrap(), None);
 
-        let state = OrgState { root_hash: RootHash::new([9u8; 32]), org_pub_key: [3u8; 32], epoch: 1 };
+        let state = OrgState { root_hash: RootHash::new([9u8; 32]), org_pub_key: OrgPublicKey::parse(&[0u8; 32]).unwrap(), epoch: Epoch::new(1) };
         chain.set(org, state);
         assert_eq!(chain.get_org_state(&org).unwrap(), Some(state));
     }

@@ -7,6 +7,10 @@
 use subxt::dynamic::Value;
 use subxt::ext::scale_value::Composite;
 
+use org_members::RootHash;
+
+use crate::types::{Epoch, OrgPublicKey};
+
 /// keccak256("update(bytes32,bytes32,uint256)")[..4]
 pub const UPDATE_SELECTOR: [u8; 4] = [0xf1, 0xbc, 0x53, 0x7b];
 
@@ -34,6 +38,17 @@ pub fn build_update_calldata(
     data
 }
 
+/// The `update` calldata for typed values: the one place the typed write paths
+/// (`revive_update_runtime_call`, `submit::submit_update`) unwrap the root, the
+/// key and the epoch into calldata (LLR-ayrdr8).
+pub fn update_calldata(new_root_hash: RootHash, new_org_pub_key: OrgPublicKey, expected_epoch: Epoch) -> Vec<u8> {
+    build_update_calldata(
+        *new_root_hash.as_bytes(),
+        *new_org_pub_key.as_bytes(),
+        u128::from(expected_epoch.get()),
+    )
+}
+
 /// Build the dynamic `Revive.call` runtime call that invokes the contract's
 /// update(). Mirror of on-chain-client/tests/common/submit.rs:91 — keep the
 /// field names (dest, value, weight_limit{ref_time,proof_size},
@@ -41,11 +56,11 @@ pub fn build_update_calldata(
 /// they are matched against runtime metadata.
 pub fn revive_update_runtime_call(
     contract_h160: [u8; 20],
-    new_root_hash: [u8; 32],
-    new_org_pub_key: [u8; 32],
-    expected_epoch: u128,
+    new_root_hash: RootHash,
+    new_org_pub_key: OrgPublicKey,
+    expected_epoch: Epoch,
 ) -> Value {
-    let calldata = build_update_calldata(new_root_hash, new_org_pub_key, expected_epoch);
+    let calldata = update_calldata(new_root_hash, new_org_pub_key, expected_epoch);
     let h160_bytes: Vec<Value> = contract_h160
         .iter()
         .map(|b| Value::u128(u128::from(*b)))
