@@ -17,7 +17,7 @@ fn endpoint() -> ChainEndpoint {
     }
 }
 
-// verifies: REQ-e4ah9h
+// verifies: LLR-9x6qrg, LLR-kze6ak (the contract address is reported verbatim)
 #[test]
 fn configured_chain_reports_its_endpoint_and_contract() {
     let ep = endpoint();
@@ -32,7 +32,7 @@ fn configured_chain_reports_its_endpoint_and_contract() {
     assert_eq!(s.data_dir, "/var/lib/ods");
 }
 
-// verifies: REQ-e4ah9h
+// verifies: LLR-9x6qrg
 #[test]
 fn unconfigured_chain_reports_neither() {
     // The verdict and the endpoint come from one Option, so there is no state
@@ -49,7 +49,7 @@ fn unconfigured_chain_reports_neither() {
     assert_eq!(s.contract_h160, None);
 }
 
-// verifies: REQ-bvx4nh
+// verifies: LLR-9x6qrg
 #[test]
 fn absent_chain_reports_false_and_no_endpoint_fields_whatever_the_ambient_env() {
     // The abnormal-input case for REQ-bvx4nh's FIRST clause: handed no built
@@ -79,7 +79,7 @@ fn absent_chain_reports_false_and_no_endpoint_fields_whatever_the_ambient_env() 
     assert_eq!(s.contract_h160, None);
 }
 
-// verifies: REQ-bvx4nh
+// verifies: LLR-kze6ak
 #[test]
 fn endpoint_comes_from_the_built_configuration() {
     // Two different built configurations must project two different endpoints:
@@ -107,7 +107,7 @@ fn endpoint_comes_from_the_built_configuration() {
     assert_ne!(sa.contract_h160, sb.contract_h160);
 }
 
-// verifies: REQ-bvx4nh
+// verifies: LLR-kze6ak
 #[test]
 fn data_dir_comes_from_the_built_configuration() {
     // REQ-bvx4nh's data-directory clause, normal case. The handler no longer
@@ -143,7 +143,7 @@ fn data_dir_comes_from_the_built_configuration() {
     assert_eq!(with_chain.data_dir, "/var/lib/ods");
 }
 
-// verifies: REQ-bvx4nh
+// verifies: LLR-kze6ak
 #[test]
 fn abnormal_data_dir_paths_are_reported_verbatim() {
     // REQ-bvx4nh's data-directory clause, abnormal input. A path that is
@@ -184,7 +184,7 @@ fn abnormal_data_dir_paths_are_reported_verbatim() {
     assert_ne!(empty.data_dir, policy::DEV_DATA_DIR);
 }
 
-// verifies: REQ-645jq9
+// verifies: LLR-j5pacp, LLR-8tzbzn
 #[test]
 fn networked_transport_is_reported() {
     assert_eq!(
@@ -199,7 +199,7 @@ fn networked_transport_is_reported() {
     assert_eq!(s.transport_mode, TransportModeName::Networked);
 }
 
-// verifies: REQ-645jq9
+// verifies: LLR-j5pacp, LLR-8tzbzn
 #[test]
 fn loopback_transport_is_reported() {
     assert_eq!(
@@ -214,7 +214,7 @@ fn loopback_transport_is_reported() {
     assert_eq!(s.transport_mode, TransportModeName::Loopback);
 }
 
-// verifies: REQ-645jq9
+// verifies: LLR-8tzbzn
 #[test]
 fn transport_mode_serialises_lowercase() {
     // The frontend types this field as 'networked' | 'loopback'; the wire form
@@ -236,7 +236,7 @@ fn transport_mode_serialises_lowercase() {
     assert_eq!(v["transport_mode"], serde_json::json!("networked"));
 }
 
-// verifies: REQ-645jq9
+// verifies: LLR-j5pacp
 #[test]
 fn unknown_transport_value_is_networked() {
     // Abnormal input: anything that is not the literal "loopback" is Networked,

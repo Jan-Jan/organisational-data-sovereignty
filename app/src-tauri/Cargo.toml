@@ -74,3 +74,11 @@ required-features = ["test-support"]
 [[test]]
 name = "ipc"
 required-features = ["test-support"]
+
+[[test]]
+name = "csp_policy"
+required-features = ["test-support"]
+
+[[test]]
+name = "state_assembly"
+required-features = ["test-support"]

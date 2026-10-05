@@ -35,6 +35,16 @@ The root lockfile carries **797 package entries**, which is the whole workspace
 — `org-members`, `on-chain-client`, `org-node` and `app`'s Rust side together —
 and is not a measurement of this unit.
 
+*Corrected 2026-10-05 by the app architecture change: the sentence above is
+wrong about two of the four. `app/src-tauri` and `on-chain-client` each open
+their manifest with an empty `[workspace]` table, so each is its own workspace
+root and cargo reads each one's own lock, `app/src-tauri/Cargo.lock` and
+`on-chain-client/Cargo.lock`. The root lock has no `ods-poc` entry. Its entries
+cover the root workspace's members, and on-chain-client only as org-node's path
+dependency, at the root lock's versions. The app's own inventory,
+`app/docs/architecture/soup.md`, records the app lock and the version skew
+against on-chain-client's lock.*
+
 This unit's own closure was measured with `cargo tree -p org-node --features
 app,test-support`, counting unique `name version` pairs:
 

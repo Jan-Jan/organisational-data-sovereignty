@@ -26,7 +26,7 @@ const ROOT = 'cc'.repeat(32);
 const empty: ReceiverView = { verifyLog: [], receiverErrors: [] };
 
 describe('applyReceiverEvent', () => {
-	// verifies: REQ-wu6z9p
+	// verifies: LLR-fb7jp5
 	it('produces no verification row for a receiver error', () => {
 		const next = applyReceiverEvent(
 			empty,
@@ -36,7 +36,7 @@ describe('applyReceiverEvent', () => {
 		expect(next.verifyLog).toEqual([]);
 	});
 
-	// verifies: REQ-wu6z9p
+	// verifies: LLR-fb7jp5
 	it('renders a receiver error outside the verification log', () => {
 		const next = applyReceiverEvent(
 			empty,
@@ -50,7 +50,7 @@ describe('applyReceiverEvent', () => {
 		expect(next.receiverErrors[0]).toContain('chain read failed: rpc timeout');
 	});
 
-	// verifies: REQ-wu6z9p
+	// verifies: LLR-fb7jp5
 	it('leaves an existing verification log untouched', () => {
 		const seeded = applyReceiverEvent(
 			empty,
@@ -68,7 +68,7 @@ describe('applyReceiverEvent', () => {
 		expect(after.verifyLog.every((r) => r.verified)).toBe(true);
 	});
 
-	// verifies: REQ-wu6z9p
+	// verifies: LLR-fb7jp5
 	it('assigns no verification outcome however many receiver errors arrive', () => {
 		// Abnormal inputs: an empty message, a message that reads like a verdict,
 		// and a repeat. None of them may create a row — in particular the second,
@@ -81,7 +81,7 @@ describe('applyReceiverEvent', () => {
 		expect(view.receiverErrors).toHaveLength(4);
 	});
 
-	// verifies: REQ-wu6z9p
+	// verifies: LLR-fb7jp5
 	it('does put a verification failure in the log and not in the receiver errors', () => {
 		// Contrast. If every announcement were dropped from the log, the four
 		// assertions above would hold and prove nothing about the separation.
@@ -96,7 +96,7 @@ describe('applyReceiverEvent', () => {
 		expect(next.receiverErrors).toEqual([]);
 	});
 
-	// verifies: REQ-wu6z9p
+	// verifies: LLR-fb7jp5
 	it('does not mutate the view it was given', () => {
 		// The component assigns the result back into its `$state`; a function that
 		// mutated in place would appear to work and would break the separation
@@ -104,5 +104,40 @@ describe('applyReceiverEvent', () => {
 		const before: ReceiverView = { verifyLog: [], receiverErrors: [] };
 		applyReceiverEvent(before, { kind: 'receiver-error', message: 'io' }, TS);
 		expect(before).toEqual({ verifyLog: [], receiverErrors: [] });
+	});
+
+	// verifies: LLR-rzx6ks, LLR-fb7jp5 (the `[<timestamp>] <message>` format)
+	it('files the newest announcement first in each list', () => {
+		let view = empty;
+		view = applyReceiverEvent(view, { kind: 'verified', org_id: ORG, epoch: 1, root: ROOT }, TS);
+		view = applyReceiverEvent(view, { kind: 'verified', org_id: ORG, epoch: 2, root: ROOT }, TS);
+		view = applyReceiverEvent(view, { kind: 'receiver-error', message: 'first' }, TS);
+		view = applyReceiverEvent(view, { kind: 'receiver-error', message: 'second' }, TS);
+		expect(view.verifyLog.map((row) => row.epoch)).toEqual([2, 1]);
+		expect(view.receiverErrors).toEqual([`[${TS}] second`, `[${TS}] first`]);
+	});
+
+	// verifies: LLR-rzx6ks
+	it('keeps at most 50 verification rows, dropping the oldest', () => {
+		// Boundary: the 51st row pushes out the first.
+		let view = empty;
+		for (let epoch = 0; epoch <= 50; epoch++) {
+			view = applyReceiverEvent(view, { kind: 'verified', org_id: ORG, epoch, root: ROOT }, TS);
+		}
+		expect(view.verifyLog).toHaveLength(50);
+		expect(view.verifyLog[0].epoch).toBe(50);
+		expect(view.verifyLog[49].epoch).toBe(1);
+	});
+
+	// verifies: LLR-rzx6ks, LLR-fb7jp5 (the `[<timestamp>] <message>` format)
+	it('keeps at most 20 receiver errors, dropping the oldest', () => {
+		// Boundary: the 21st error pushes out the first.
+		let view = empty;
+		for (let i = 0; i <= 20; i++) {
+			view = applyReceiverEvent(view, { kind: 'receiver-error', message: `e${i}` }, TS);
+		}
+		expect(view.receiverErrors).toHaveLength(20);
+		expect(view.receiverErrors[0]).toBe(`[${TS}] e20`);
+		expect(view.receiverErrors[19]).toBe(`[${TS}] e1`);
 	});
 });

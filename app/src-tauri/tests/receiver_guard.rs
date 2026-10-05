@@ -16,7 +16,7 @@ fn flag() -> Arc<AtomicBool> {
     Arc::new(AtomicBool::new(false))
 }
 
-// verifies: REQ-6hgm8r
+// verifies: LLR-5zd6j8
 #[test]
 fn first_claim_succeeds() {
     let flag = flag();
@@ -25,7 +25,7 @@ fn first_claim_succeeds() {
     assert!(flag.load(Ordering::Acquire), "the slot is marked as taken");
 }
 
-// verifies: REQ-6hgm8r
+// verifies: LLR-5zd6j8
 #[test]
 fn second_claim_while_held_fails() {
     let flag = flag();
@@ -36,7 +36,7 @@ fn second_claim_while_held_fails() {
     );
 }
 
-// verifies: REQ-3hfggn
+// verifies: LLR-z66f27
 #[test]
 fn claim_succeeds_again_after_the_guard_drops() {
     let flag = flag();
@@ -53,7 +53,7 @@ fn claim_succeeds_again_after_the_guard_drops() {
     );
 }
 
-// verifies: REQ-3hfggn
+// verifies: LLR-z66f27
 #[test]
 fn guard_releases_when_dropped_by_panic() {
     let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -68,7 +68,7 @@ fn guard_releases_when_dropped_by_panic() {
     );
 }
 
-// verifies: REQ-6hgm8r
+// verifies: LLR-5zd6j8
 #[test]
 fn concurrent_claims_yield_exactly_one_guard() {
     // The abnormal-input case for REQ-6hgm8r: sixteen callers racing on one
@@ -97,7 +97,7 @@ fn concurrent_claims_yield_exactly_one_guard() {
     );
 }
 
-// verifies: REQ-3hfggn
+// verifies: LLR-z66f27
 #[test]
 fn release_then_concurrent_claims_yield_exactly_one_guard() {
     // Release and re-claim must compose: after a loop ends, the next race is

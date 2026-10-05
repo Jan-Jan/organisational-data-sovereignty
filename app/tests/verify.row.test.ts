@@ -19,7 +19,7 @@ const ORG = 'aa'.repeat(20);
 const ROOT = 'cc'.repeat(32);
 
 describe('verifyResultFrom', () => {
-	// verifies: REQ-akt4p7
+	// verifies: LLR-53hayh
 	it('renders a verified event as verified', () => {
 		expect(verifyResultFrom({ kind: 'verified', org_id: ORG, epoch: 7, root: ROOT }, TS)).toEqual({
 			org_id: ORG,
@@ -31,7 +31,7 @@ describe('verifyResultFrom', () => {
 		});
 	});
 
-	// verifies: REQ-a83vqr
+	// verifies: LLR-a4xwvj
 	it('renders a failed event as not verified', () => {
 		// The test that would have caught HAZ-9fmhm4: the ✗ state must be
 		// reachable from an input, not merely present in the markup.
@@ -39,7 +39,7 @@ describe('verifyResultFrom', () => {
 		expect(row.verified).toBe(false);
 	});
 
-	// verifies: REQ-akt4p7
+	// verifies: LLR-a4xwvj
 	it('gives a failed event no epoch and no root', () => {
 		// null, not 0 and '': a failure knows neither, and 0 is genesis
 		// (HAZ-5ha5vv). The same rule as REQ-tw4cb5 on the Rust side.
@@ -48,7 +48,7 @@ describe('verifyResultFrom', () => {
 		expect(row.root).toBeNull();
 	});
 
-	// verifies: REQ-a83vqr
+	// verifies: LLR-mzae5q
 	it('renders a placeholder rather than "null" when the failure names no organisation', () => {
 		// REQ-affyf5's "where the failing update names one": the backend is
 		// permitted to send null, so the row must read as prose, not as a literal.
@@ -57,19 +57,26 @@ describe('verifyResultFrom', () => {
 		expect(row.org_id).not.toBe('null');
 	});
 
-	// verifies: REQ-a83vqr
+	// verifies: LLR-mzae5q
+	it('keeps the organisation a failed event names', () => {
+		// The placeholder stands in for an absent organisation only.
+		const row = verifyResultFrom({ kind: 'failed', org_id: ORG, message: 'root mismatch' }, TS);
+		expect(row.org_id).toBe(ORG);
+	});
+
+	// verifies: LLR-a4xwvj
 	it('carries the failure message as the row detail', () => {
 		const row = verifyResultFrom({ kind: 'failed', org_id: ORG, message: 'root mismatch' }, TS);
 		expect(row.detail).toBe('root mismatch');
 	});
 
-	// verifies: REQ-akt4p7
+	// verifies: LLR-53hayh
 	it('gives a verified event no detail', () => {
 		const row = verifyResultFrom({ kind: 'verified', org_id: ORG, epoch: 7, root: ROOT }, TS);
 		expect(row.detail).toBeNull();
 	});
 
-	// verifies: REQ-akt4p7
+	// verifies: LLR-53hayh
 	it('preserves epoch 0 on a verified event rather than coercing it to null', () => {
 		// Genesis is a real, reachable epoch. A row must be able to show 0 while a
 		// failure shows nothing at all — the two absences are different.
@@ -78,7 +85,7 @@ describe('verifyResultFrom', () => {
 		expect(row.epoch).not.toBeNull();
 	});
 
-	// verifies: REQ-akt4p7
+	// verifies: LLR-53hayh, LLR-a4xwvj
 	it('passes the timestamp through unmodified', () => {
 		const odd = '   not a timestamp   ';
 		expect(verifyResultFrom({ kind: 'verified', org_id: ORG, epoch: 1, root: ROOT }, odd).ts).toBe(

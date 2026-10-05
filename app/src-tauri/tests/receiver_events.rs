@@ -58,7 +58,10 @@ fn self_delete_epoch_offender(org_id: &str) -> Option<serde_json::Value> {
 // REQ-2k7ys4 — an update announces membership state only when it has some
 // ---------------------------------------------------------------------------
 
-// verifies: REQ-2k7ys4
+// verifies: LLR-p2nm5a, PR-bu6mau
+// PR-bu6mau: pins today's behaviour. `membership-updated` and
+// `incoming-verified` both carry the same verified update, and the frontend
+// files each as a verification row.
 #[test]
 fn updated_emits_membership_incoming_and_epoch() {
     let out = events::emissions_for(&ReceiverOutcome::Updated {
@@ -72,7 +75,7 @@ fn updated_emits_membership_incoming_and_epoch() {
     );
 }
 
-// verifies: REQ-2k7ys4
+// verifies: LLR-p2nm5a
 #[test]
 fn updated_payload_carries_the_measured_epoch_and_root() {
     let root = "ff".repeat(32);
@@ -89,7 +92,28 @@ fn updated_payload_carries_the_measured_epoch_and_root() {
     assert_eq!(membership.payload["root"], serde_json::json!(root));
 }
 
-// verifies: REQ-2k7ys4
+// verifies: LLR-p2nm5a
+#[test]
+fn updated_carries_boundary_epochs_and_roots_verbatim() {
+    // Abnormal inputs: genesis (0, a reachable and meaningful epoch), the
+    // largest epoch, and an empty root. Each is carried exactly as measured,
+    // in all three events, rather than dropped, clamped or replaced.
+    for (epoch, root) in [(0u64, String::new()), (u64::MAX, "00".repeat(32))] {
+        let out = events::emissions_for(&ReceiverOutcome::Updated {
+            org_id: org(),
+            epoch,
+            root: root.clone(),
+        });
+        assert_eq!(names(&out), MEMBERSHIP_EVENTS, "epoch {epoch}");
+        for e in &out {
+            assert_eq!(e.payload["epoch"], serde_json::json!(epoch), "{} at {epoch}", e.name);
+        }
+        assert_eq!(out[0].payload["root"], serde_json::json!(root), "epoch {epoch}");
+        assert_eq!(out[1].payload["root"], serde_json::json!(root), "epoch {epoch}");
+    }
+}
+
+// verifies: LLR-hgsdm8
 #[test]
 fn record_unreadable_emits_no_membership_event() {
     let out = events::emissions_for(&ReceiverOutcome::RecordUnreadable { org_id: org() });
@@ -99,7 +123,7 @@ fn record_unreadable_emits_no_membership_event() {
     }
 }
 
-// verifies: REQ-2k7ys4
+// verifies: LLR-hgsdm8
 #[test]
 fn record_unreadable_emits_no_epoch_event() {
     // The previous code substituted `(0, String::new())` for the unreadable
@@ -126,7 +150,7 @@ fn record_unreadable_emits_no_epoch_event() {
 // REQ-dp95pv — and it says so, naming the organisation
 // ---------------------------------------------------------------------------
 
-// verifies: REQ-dp95pv
+// verifies: LLR-hgsdm8
 #[test]
 fn record_unreadable_names_the_organisation() {
     let out = events::emissions_for(&ReceiverOutcome::RecordUnreadable { org_id: org() });
@@ -134,18 +158,42 @@ fn record_unreadable_names_the_organisation() {
     assert_eq!(out[0].payload["org_id"], serde_json::json!(org()));
 }
 
-// verifies: REQ-dp95pv
+// verifies: LLR-hgsdm8
 #[test]
 fn record_unreadable_emits_exactly_one_event() {
     let out = events::emissions_for(&ReceiverOutcome::RecordUnreadable { org_id: org() });
     assert_eq!(out.len(), 1, "{:?}", names(&out));
 }
 
+// verifies: LLR-hgsdm8
+#[test]
+fn record_unreadable_holds_for_any_organisation_id() {
+    // Abnormal inputs: an all-zero id, an all-ff id, an empty string, a
+    // non-hex string and an over-long one. Each produces exactly one
+    // `record-unreadable` naming that id verbatim, with no epoch and no root.
+    let all_zero = "00".repeat(20);
+    let all_ff = "ff".repeat(20);
+    let over_long = "ab".repeat(64);
+    for org_id in [
+        all_zero.as_str(),
+        all_ff.as_str(),
+        "",
+        "not-an-org-id",
+        over_long.as_str(),
+    ] {
+        let out = events::emissions_for(&ReceiverOutcome::RecordUnreadable {
+            org_id: org_id.to_string(),
+        });
+        assert_eq!(names(&out), vec!["record-unreadable"], "{org_id:?}");
+        assert_eq!(out[0].payload, serde_json::json!({ "org_id": org_id }), "{org_id:?}");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // REQ-tw4cb5 — a self-delete has no epoch to report
 // ---------------------------------------------------------------------------
 
-// verifies: REQ-tw4cb5
+// verifies: LLR-2vg79y
 #[test]
 fn self_delete_emits_no_epoch_event() {
     let out = events::emissions_for(&ReceiverOutcome::SelfDeleted { org_id: org() });
@@ -162,7 +210,7 @@ fn self_delete_emits_no_epoch_event() {
     }
 }
 
-// verifies: REQ-tw4cb5
+// verifies: LLR-2vg79y
 #[test]
 fn self_delete_emits_revoked_naming_the_organisation() {
     let out = events::emissions_for(&ReceiverOutcome::SelfDeleted { org_id: org() });
@@ -170,7 +218,7 @@ fn self_delete_emits_revoked_naming_the_organisation() {
     assert_eq!(out[0].payload["org_id"], serde_json::json!(org()));
 }
 
-// verifies: REQ-tw4cb5
+// verifies: LLR-2vg79y
 #[test]
 fn self_delete_payload_carries_no_epoch_key_at_any_depth() {
     // The two tests above assert on event NAMES only. Renaming `epoch-changed`
@@ -203,7 +251,7 @@ fn self_delete_payload_carries_no_epoch_key_at_any_depth() {
     }
 }
 
-// verifies: REQ-tw4cb5
+// verifies: LLR-2vg79y
 #[test]
 fn self_delete_carries_no_epoch_for_any_organisation_id() {
     // Abnormal inputs. The requirement is a property of the self-delete path,
@@ -239,7 +287,7 @@ fn self_delete_carries_no_epoch_for_any_organisation_id() {
     }
 }
 
-// verifies: REQ-tw4cb5
+// verifies: LLR-2vg79y
 #[test]
 fn the_epoch_probe_finds_an_epoch_on_updated_and_none_on_self_delete() {
     // Contrast. `Updated` legitimately carries an epoch, so if the probe used by
@@ -277,7 +325,7 @@ fn the_epoch_probe_finds_an_epoch_on_updated_and_none_on_self_delete() {
 // REQ-affyf5 — a verification failure is announced as a failure
 // ---------------------------------------------------------------------------
 
-// verifies: REQ-affyf5
+// verifies: LLR-p38be7
 #[test]
 fn verify_failure_carries_the_organisation_when_known() {
     let out = events::emissions_for(&ReceiverOutcome::VerifyFailed {
@@ -288,7 +336,7 @@ fn verify_failure_carries_the_organisation_when_known() {
     assert_eq!(out[0].payload["org_id"], serde_json::json!(org()));
 }
 
-// verifies: REQ-affyf5
+// verifies: LLR-p38be7
 #[test]
 fn verify_failure_carries_null_organisation_when_unknown() {
     // Abnormal input: the failure happened before an organisation was
@@ -306,7 +354,7 @@ fn verify_failure_carries_null_organisation_when_unknown() {
     );
 }
 
-// verifies: REQ-affyf5
+// verifies: LLR-p38be7
 #[test]
 fn verify_failure_carries_the_message() {
     let out = events::emissions_for(&ReceiverOutcome::VerifyFailed {
@@ -319,7 +367,7 @@ fn verify_failure_carries_the_message() {
     );
 }
 
-// verifies: REQ-affyf5
+// verifies: LLR-p38be7
 #[test]
 fn verify_failure_emits_no_membership_event() {
     // Nothing verified, so nothing may be announced as verified.
@@ -337,7 +385,7 @@ fn verify_failure_emits_no_membership_event() {
 // REQ-jfxah3 — the loop announces that it is stopping
 // ---------------------------------------------------------------------------
 
-// verifies: REQ-jfxah3
+// verifies: LLR-2zmhvs
 #[test]
 fn stopped_names_the_reason() {
     let out = events::emissions_for(&ReceiverOutcome::Stopped {
@@ -347,7 +395,7 @@ fn stopped_names_the_reason() {
     assert_eq!(out[0].payload["reason"], serde_json::json!("transport closed"));
 }
 
-// verifies: REQ-jfxah3
+// verifies: LLR-2zmhvs
 #[test]
 fn stopped_emits_exactly_one_event() {
     // Abnormal input: an empty reason is still a stop, and still exactly one
@@ -399,7 +447,7 @@ fn verification_verdicts() -> Vec<OrgNodeError> {
     ]
 }
 
-// verifies: REQ-kn5rtx
+// verifies: LLR-7bk6qh
 #[test]
 fn every_verification_verdict_is_classified_as_a_verification_failure() {
     for e in verification_verdicts() {
@@ -416,7 +464,7 @@ fn every_verification_verdict_is_classified_as_a_verification_failure() {
     }
 }
 
-// verifies: REQ-kn5rtx
+// verifies: LLR-7bk6qh
 #[test]
 fn a_verification_verdict_carries_its_own_message_and_no_invented_organisation() {
     for e in verification_verdicts() {
@@ -434,7 +482,7 @@ fn a_verification_verdict_carries_its_own_message_and_no_invented_organisation()
     }
 }
 
-// verifies: REQ-kn5rtx
+// verifies: LLR-7bk6qh
 #[test]
 fn a_chain_failure_is_classified_as_a_receiver_error() {
     // `Chain` is a chain read or transport failure. It is not a verdict on any
@@ -453,7 +501,7 @@ fn a_chain_failure_is_classified_as_a_receiver_error() {
     assert_eq!(out[0].payload["message"], serde_json::json!(e.to_string()));
 }
 
-// verifies: REQ-kn5rtx
+// verifies: LLR-7bk6qh, LLR-usxk57
 #[test]
 fn a_chain_failure_emits_no_verification_event_for_any_message() {
     // Abnormal inputs: an empty message, a terminal one the loop's substring
@@ -482,7 +530,7 @@ fn a_chain_failure_emits_no_verification_event_for_any_message() {
     }
 }
 
-// verifies: REQ-kn5rtx
+// verifies: LLR-usxk57
 #[test]
 fn the_receiver_error_payload_carries_a_message_and_no_verification_state() {
     // A receiver error has no organisation, no epoch, no root and no verdict.
@@ -506,7 +554,7 @@ fn the_receiver_error_payload_carries_a_message_and_no_verification_state() {
     }
 }
 
-// verifies: REQ-kn5rtx
+// verifies: LLR-7bk6qh
 #[test]
 fn the_two_classes_are_actually_distinguished() {
     // Contrast. If every error classified the same way, the assertions above
@@ -568,7 +616,7 @@ fn terminal_cases() -> Vec<(OrgNodeError, &'static str)> {
     ]
 }
 
-// verifies: REQ-jfxah3
+// verifies: LLR-a9rjtf
 #[test]
 fn every_real_terminal_message_stops_the_loop() {
     for (e, rendered) in terminal_cases() {
@@ -587,7 +635,7 @@ fn every_real_terminal_message_stops_the_loop() {
     }
 }
 
-// verifies: REQ-jfxah3
+// verifies: LLR-a9rjtf
 #[test]
 fn a_non_terminal_failure_does_not_stop_the_loop() {
     // Abnormal inputs: a transport hiccup, a chain timeout, a local startup
@@ -621,7 +669,7 @@ fn a_non_terminal_failure_does_not_stop_the_loop() {
     );
 }
 
-// verifies: REQ-jfxah3
+// verifies: LLR-a9rjtf
 #[test]
 fn the_stop_is_announced_after_the_failure_for_the_same_error() {
     // REQ-jfxah3 says the stop is announced "before that loop exits", and what a
@@ -654,7 +702,7 @@ fn the_stop_is_announced_after_the_failure_for_the_same_error() {
 // REQ-kn5rtx — a variant reachable from a local condition is not a verdict
 // ---------------------------------------------------------------------------
 
-// verifies: REQ-kn5rtx
+// verifies: LLR-7bk6qh
 #[test]
 fn locally_reachable_variants_are_classified_as_receiver_errors() {
     // `OrgNotOnChain` and `Trie(_)` sound like verdicts and are not always:
@@ -687,7 +735,7 @@ fn locally_reachable_variants_are_classified_as_receiver_errors() {
     }
 }
 
-// verifies: REQ-kn5rtx
+// verifies: LLR-7bk6qh
 #[test]
 fn a_refused_key_or_field_is_classified_as_a_receiver_error() {
     // Neither is a verdict on an update: an Organisation public key the chain

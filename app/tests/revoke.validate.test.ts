@@ -14,7 +14,7 @@ import { validateRevokeInput } from '../src/lib/revoke';
 const MEMBER_ID = 'bb'.repeat(32);
 
 describe('validateRevokeInput', () => {
-	// verifies: REQ-vgr7s2
+	// verifies: LLR-c9r5uf
 	it('accepts an empty peer address in networked transport', () => {
 		// This is HAZ-n97v5g. Before this change the form refused unconditionally,
 		// and a Networked join request never carries an address to supply — so
@@ -28,7 +28,7 @@ describe('validateRevokeInput', () => {
 		).toEqual({ ok: true });
 	});
 
-	// verifies: REQ-vgr7s2
+	// verifies: LLR-c9r5uf
 	it('accepts a supplied peer address in networked transport', () => {
 		expect(
 			validateRevokeInput({
@@ -39,7 +39,7 @@ describe('validateRevokeInput', () => {
 		).toEqual({ ok: true });
 	});
 
-	// verifies: REQ-vgr7s2
+	// verifies: LLR-c9r5uf
 	it('rejects an empty peer address in loopback transport', () => {
 		const result = validateRevokeInput({
 			transportMode: 'loopback',
@@ -50,7 +50,7 @@ describe('validateRevokeInput', () => {
 		expect(result.ok === false && result.message).toMatch(/loopback/i);
 	});
 
-	// verifies: REQ-vgr7s2
+	// verifies: LLR-c9r5uf
 	it('accepts a supplied peer address in loopback transport', () => {
 		expect(
 			validateRevokeInput({
@@ -61,7 +61,7 @@ describe('validateRevokeInput', () => {
 		).toEqual({ ok: true });
 	});
 
-	// verifies: REQ-he8ejb
+	// verifies: LLR-csbs5v
 	it('rejects a 63-character member id', () => {
 		const result = validateRevokeInput({
 			transportMode: 'networked',
@@ -72,7 +72,7 @@ describe('validateRevokeInput', () => {
 		expect(result.ok === false && result.message).toContain('63');
 	});
 
-	// verifies: REQ-he8ejb
+	// verifies: LLR-csbs5v
 	it('rejects a 65-character member id', () => {
 		const result = validateRevokeInput({
 			transportMode: 'networked',
@@ -83,7 +83,7 @@ describe('validateRevokeInput', () => {
 		expect(result.ok === false && result.message).toContain('65');
 	});
 
-	// verifies: REQ-he8ejb
+	// verifies: LLR-csbs5v
 	it('rejects an empty member id', () => {
 		const result = validateRevokeInput({
 			transportMode: 'networked',
@@ -94,7 +94,7 @@ describe('validateRevokeInput', () => {
 		expect(result.ok === false && result.message).toContain('0');
 	});
 
-	// verifies: REQ-he8ejb
+	// verifies: LLR-csbs5v
 	it('rejects a 64-character non-hexadecimal member id', () => {
 		// Right width, wrong alphabet: the width check alone would admit it.
 		const result = validateRevokeInput({
@@ -106,7 +106,7 @@ describe('validateRevokeInput', () => {
 		expect(result.ok === false && result.message).toMatch(/hexadecimal/i);
 	});
 
-	// verifies: REQ-he8ejb
+	// verifies: LLR-csbs5v
 	it('accepts a 0x-prefixed member id', () => {
 		// 66 characters on the wire, 64 after the prefix is stripped.
 		expect(
@@ -118,7 +118,20 @@ describe('validateRevokeInput', () => {
 		).toEqual({ ok: true });
 	});
 
-	// verifies: REQ-he8ejb
+	// verifies: LLR-csbs5v
+	it('rejects a doubled 0x prefix', () => {
+		// One optional prefix, not a run of them: the second `0x` stays and is
+		// counted, so the id is 66 characters long and refused.
+		const result = validateRevokeInput({
+			transportMode: 'networked',
+			memberIdHex: `0x0x${MEMBER_ID}`,
+			peerAddrBlob: ''
+		});
+		expect(result.ok).toBe(false);
+		expect(result.ok === false && result.message).toContain('66');
+	});
+
+	// verifies: LLR-csbs5v, LLR-c9r5uf
 	it('trims surrounding whitespace before measuring', () => {
 		expect(
 			validateRevokeInput({

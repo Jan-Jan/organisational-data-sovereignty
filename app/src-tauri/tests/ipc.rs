@@ -4,12 +4,14 @@
 //! `transport_mode` on the wire), REQ-sjkp8z (the org-id boundary check is
 //! reached by the real handler under the real argument name), REQ-vgr7s2 (an
 //! empty peer address is genuinely accepted — the backend half of HAZ-n97v5g).
+//! Since 2026-10-05 each test is annotated with the low-level requirements of
+//! `app/docs/architecture/` that refine these; the annotations name them.
 //!
 //! NOT REQ-he8ejb. That requirement is about a check made BEFORE ANY COMMAND IS
 //! INVOKED, and nothing in this file can observe one: every test here invokes a
-//! command. The two member-id tests below are robustness tests over the
-//! handler's own defence-in-depth checks and carry no requirement; REQ-he8ejb is
-//! verified in app/tests/revoke.validate.test.ts.
+//! command. The member-id tests below verify the handler's own
+//! defence-in-depth check (LLR-6pmrma, derived); REQ-he8ejb is verified in
+//! app/tests/revoke.validate.test.ts.
 //!
 //! Everything here uses `tauri::test::mock_builder`, the same
 //! `generate_handler!` list as `lib.rs`, and the same camelCase argument names
@@ -47,12 +49,24 @@ struct Harness {
 
 fn harness_with(transport: TransportModeName, chain: Option<ChainEndpoint>) -> Harness {
     let dir = tempfile::tempdir().expect("tempdir");
-    let state = AppState::for_test(dir.path().to_path_buf(), "ipc-suite-passphrase", chain, transport)
+    let data_dir = dir.path().to_path_buf();
+    harness_at(dir, data_dir, transport, chain)
+}
+
+/// A harness whose store is opened in `data_dir`, which may lie inside `dir`
+/// and need not exist yet.
+fn harness_at(
+    dir: tempfile::TempDir,
+    data_dir: std::path::PathBuf,
+    transport: TransportModeName,
+    chain: Option<ChainEndpoint>,
+) -> Harness {
+    let state = AppState::for_test(data_dir, "ipc-suite-passphrase", chain, transport)
         .expect("AppState::for_test");
 
-    // The SAME handler list as lib.rs. A command added there and not here makes
-    // this suite stop covering it, which is why the list is spelled out rather
-    // than shared through a helper that could silently drift.
+    // The SAME handler list as lib.rs, spelled out here because the macro needs
+    // the paths at compile time. `product_registers_the_same_commands_as_the_harness`
+    // fails if the two lists drift apart.
     let app = mock_builder()
         .manage(state)
         .invoke_handler(tauri::generate_handler![
@@ -132,11 +146,31 @@ fn org_id_40() -> String {
     "aa".repeat(20)
 }
 
+fn member_id_64() -> String {
+    "bb".repeat(32)
+}
+
+/// `revoke_member`'s arguments with a well-formed org id.
+fn revoke_args(member_id_hex: &str, peer_addr_blob: &str) -> serde_json::Value {
+    serde_json::json!({
+        "orgId": org_id_40(),
+        "memberIdHex": member_id_hex,
+        "peerAddrBlob": peer_addr_blob
+    })
+}
+
+/// The refusal a well-formed call on an Organisation ends in on this fresh
+/// store: `find_org` finds none. Taken from the error type, so an upstream
+/// rewording moves both sides together.
+fn refused_for_an_unknown_org() -> String {
+    OrgNodeError::OrgNotOnChain.to_string()
+}
+
 // ---------------------------------------------------------------------------
 // REQ-645jq9 — the transport mode crosses the boundary
 // ---------------------------------------------------------------------------
 
-// verifies: REQ-645jq9
+// verifies: LLR-8tzbzn
 #[test]
 fn connection_status_reports_transport_mode_over_ipc() {
     // Loopback, because Networked is what a hard-coded literal would return and
@@ -150,7 +184,7 @@ fn connection_status_reports_transport_mode_over_ipc() {
     );
 }
 
-// verifies: REQ-645jq9
+// verifies: LLR-8tzbzn, LLR-4wcyqy
 #[test]
 fn connection_status_is_registered_under_its_name() {
     let h = harness();
@@ -176,36 +210,107 @@ fn connection_status_is_registered_under_its_name() {
 // REQ-sjkp8z — the org-id boundary check is reached by the real handler
 // ---------------------------------------------------------------------------
 
-// verifies: REQ-sjkp8z
+// verifies: LLR-vzf8j2
 #[test]
 fn export_invite_rejects_a_short_org_id() {
     let h = harness();
     // 39 characters: one short of the required width.
-    let err = invoke_err(
-        &h,
-        "export_invite",
-        serde_json::json!({ "orgId": "a".repeat(39) }),
+    let bad = "a".repeat(39);
+    let err = invoke_err(&h, "export_invite", serde_json::json!({ "orgId": bad }));
+    assert_eq!(
+        err,
+        parser_refusal(&bad),
+        "a short org_id must be refused with the parser's message, by the real \
+         handler under the real `orgId` argument name"
     );
-    assert!(
-        err.contains("40 hex chars"),
-        "a short org_id must be refused for its WIDTH, by the real handler under \
-         the real `orgId` argument name, got: {err}"
-    );
+    assert!(err.contains("40 hex chars"), "refused for its WIDTH, got: {err}");
 }
 
-// verifies: REQ-sjkp8z
+// verifies: LLR-vzf8j2
 #[test]
 fn export_invite_rejects_a_non_hex_org_id() {
     let h = harness();
-    let err = invoke_err(
-        &h,
-        "export_invite",
-        serde_json::json!({ "orgId": "zz".repeat(20) }),
+    let bad = "zz".repeat(20);
+    let err = invoke_err(&h, "export_invite", serde_json::json!({ "orgId": bad }));
+    assert_eq!(
+        err,
+        parser_refusal(&bad),
+        "a 40-character non-hex org_id must be refused with the parser's message"
     );
-    assert!(
-        err.contains("hex"),
-        "a 40-character non-hex org_id must be refused for its ALPHABET, got: {err}"
-    );
+    assert!(err.contains("hex"), "refused for its ALPHABET, got: {err}");
+}
+
+/// Malformed org ids: under width, over width, and the right width but not hex.
+fn malformed_org_ids() -> [String; 3] {
+    ["a".repeat(39), "a".repeat(42), "zz".repeat(20)]
+}
+
+/// The parser's own refusal of `org_id`, so the tests below require the
+/// handler's refusal to be the parser's and no other.
+fn parser_refusal(org_id: &str) -> String {
+    ods_poc_lib::parsing::parse_org_id(org_id).expect_err("a malformed org id is refused")
+}
+
+// verifies: LLR-vzf8j2
+#[test]
+fn admit_member_refuses_a_malformed_org_id_with_the_parsers_message() {
+    // The join request is well-formed and the secret absent, so if the org id
+    // were not refused the call would end in the unknown-org refusal instead.
+    let h = harness();
+    let blob = join_request_with_node_addr(&h, vec![]);
+    for bad in malformed_org_ids() {
+        let err = invoke_err(
+            &h,
+            "admit_member",
+            serde_json::json!({ "orgId": bad, "joinRequestBlob": blob, "orgSecretHex": null }),
+        );
+        assert_eq!(err, parser_refusal(&bad), "{bad}");
+    }
+}
+
+// verifies: LLR-vzf8j2
+#[test]
+fn admit_member_does_not_refuse_a_well_formed_org_id() {
+    let h = harness();
+    let blob = join_request_with_node_addr(&h, vec![]);
+    for org_id in [org_id_40(), format!("0x{}", org_id_40())] {
+        let err = invoke_err(
+            &h,
+            "admit_member",
+            serde_json::json!({ "orgId": org_id, "joinRequestBlob": blob, "orgSecretHex": null }),
+        );
+        assert_eq!(err, refused_for_an_unknown_org(), "{org_id}");
+    }
+}
+
+// verifies: LLR-vzf8j2
+#[test]
+fn revoke_member_refuses_a_malformed_org_id_with_the_parsers_message() {
+    // The member id is well-formed and the peer address absent, so if the org
+    // id were not refused the call would end in the unknown-org refusal.
+    let h = harness();
+    for bad in malformed_org_ids() {
+        let err = invoke_err(
+            &h,
+            "revoke_member",
+            serde_json::json!({ "orgId": bad, "memberIdHex": member_id_64(), "peerAddrBlob": "" }),
+        );
+        assert_eq!(err, parser_refusal(&bad), "{bad}");
+    }
+}
+
+// verifies: LLR-vzf8j2
+#[test]
+fn revoke_member_does_not_refuse_a_well_formed_org_id() {
+    let h = harness();
+    for org_id in [org_id_40(), format!("0x{}", org_id_40())] {
+        let err = invoke_err(
+            &h,
+            "revoke_member",
+            serde_json::json!({ "orgId": org_id, "memberIdHex": member_id_64(), "peerAddrBlob": "" }),
+        );
+        assert_eq!(err, refused_for_an_unknown_org(), "{org_id}");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -220,33 +325,26 @@ fn export_invite_rejects_a_non_hex_org_id() {
 // where the pre-invocation decision lives.
 //
 // The tests stay: the handler's own width and prefix checks are worth keeping
-// and worth gating. They simply carry no requirement of their own.
+// and worth gating. Since 2026-10-05 they verify LLR-6pmrma, a derived
+// low-level requirement of the handler itself, not REQ-he8ejb.
 // ---------------------------------------------------------------------------
 
-// robustness: no requirement of its own — REQ-he8ejb is a pre-invocation
-// requirement and this asserts on the handler, which runs after invocation.
+// verifies: LLR-6pmrma
 #[test]
 fn revoke_member_rejects_a_short_member_id() {
     let h = harness();
-    let err = invoke_err(
-        &h,
-        "revoke_member",
-        serde_json::json!({
-            "orgId": org_id_40(),
-            "memberIdHex": "bb".repeat(31),
-            "peerAddrBlob": ""
-        }),
-    );
-    assert!(
-        err.contains("32 bytes") || err.contains("64 hex"),
+    let err = invoke_err(&h, "revoke_member", revoke_args(&"bb".repeat(31), ""));
+    assert_eq!(
+        err, "member_id must be 32 bytes (64 hex chars)",
         "the backend must refuse an under-width member id on its own account, \
-         not rely on the form having checked: {err}"
+         not rely on the form having checked"
     );
 }
 
-// robustness: no requirement of its own — same reason as the test above. The
-// doubled-prefix defect it guards is real and the handler's refusal is worth
-// keeping; it is not, however, the pre-invocation check REQ-he8ejb requires.
+// verifies: LLR-6pmrma
+// The doubled-prefix defect it guards is real and the handler's refusal is
+// worth keeping; it is not, however, the pre-invocation check REQ-he8ejb
+// requires.
 #[test]
 fn revoke_member_rejects_a_doubled_zero_x_prefix_on_the_member_id() {
     let h = harness();
@@ -259,11 +357,7 @@ fn revoke_member_rejects_a_doubled_zero_x_prefix_on_the_member_id() {
     let err = invoke_err(
         &h,
         "revoke_member",
-        serde_json::json!({
-            "orgId": org_id_40(),
-            "memberIdHex": format!("0x0x{}", "bb".repeat(32)),
-            "peerAddrBlob": ""
-        }),
+        revoke_args(&format!("0x0x{}", member_id_64()), ""),
     );
     assert!(
         err.contains("member_id hex"),
@@ -277,19 +371,11 @@ fn revoke_member_rejects_a_doubled_zero_x_prefix_on_the_member_id() {
 // REQ-vgr7s2 — an empty peer address is not a ground for refusal (HAZ-n97v5g)
 // ---------------------------------------------------------------------------
 
-// verifies: REQ-vgr7s2
+// verifies: LLR-6pmrma, LLR-ty85xv
 #[test]
 fn revoke_member_is_not_refused_for_an_empty_peer_addr() {
     let h = harness_with(TransportModeName::Networked, None);
-    let err = invoke_err(
-        &h,
-        "revoke_member",
-        serde_json::json!({
-            "orgId": org_id_40(),
-            "memberIdHex": "bb".repeat(32),
-            "peerAddrBlob": ""
-        }),
-    );
+    let err = invoke_err(&h, "revoke_member", revoke_args(&member_id_64(), ""));
     // What this test establishes: the empty peer address is not the reason the
     // command fails. It CANNOT establish that the revocation succeeds, and the
     // name must not claim it does — `invoke_err` panics if the command returns
@@ -320,12 +406,10 @@ fn revoke_member_is_not_refused_for_an_empty_peer_addr() {
     // organisation under `org_id_40()` and `OrgService::revoke_member`'s first
     // act — `find_org` — reports `OrgNotOnChain`. Reaching it proves the call
     // got past org-id parsing, past member-id parsing and past address
-    // handling, into the service. The expected text is taken from the ERROR
-    // TYPE rather than written out, so an upstream rewording moves both sides
-    // together and only a behavioural change can fail this.
+    // handling, into the service.
     assert_eq!(
         err,
-        OrgNodeError::OrgNotOnChain.to_string(),
+        refused_for_an_unknown_org(),
         "an empty peer address must not be the ground of refusal in Networked \
          transport: the call must reach the service and fail there, because the \
          harness store holds no such organisation, got: {err}"
@@ -336,10 +420,10 @@ fn revoke_member_is_not_refused_for_an_empty_peer_addr() {
 // Robustness
 // ---------------------------------------------------------------------------
 
-// robustness: no requirement of its own — the plan's table records this test as
-// carrying none. It holds the precondition every REQ above depends on: that the
-// handler list is CLOSED, so a command renamed in lib.rs but not in api.ts is an
-// error the frontend can see rather than a silent undefined.
+// verifies: LLR-8tzbzn, LLR-4wcyqy
+// It holds the precondition every REQ above depends on: that the handler list
+// is CLOSED, so a command renamed in lib.rs but not in api.ts is an error the
+// frontend can see rather than a silent undefined.
 #[test]
 fn unknown_command_is_rejected() {
     let h = harness();
@@ -351,10 +435,54 @@ fn unknown_command_is_rejected() {
     );
 }
 
-// robustness: no requirement of its own — the plan's table records this test as
-// carrying none. It holds the other precondition: that the managed state is
-// reachable from a handler at all, so a failure above is a failure of the
-// behaviour under test and not of this suite's wiring.
+/// The command paths in the first `generate_handler![...]` list of `source`.
+fn handler_list(source: &str) -> std::collections::BTreeSet<String> {
+    let start = source.find("generate_handler![").expect("a generate_handler! list") + "generate_handler![".len();
+    let end = start + source[start..].find(']').expect("the list is closed");
+    source[start..end]
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect()
+}
+
+/// `source` with every `//` comment cut off its line. It does not parse block
+/// comments or string literals; lib.rs has neither around its handler.
+fn without_line_comments(source: &str) -> String {
+    source
+        .lines()
+        .map(|line| line.split("//").next().unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+// verifies: LLR-4wcyqy
+// The harness registers its own copy of the handler list; this test gates the
+// product's copy against it. It reads both files as text and edits neither.
+#[test]
+fn product_registers_the_same_commands_as_the_harness() {
+    let read = |rel: &str| {
+        std::fs::read_to_string(format!("{}/{rel}", env!("CARGO_MANIFEST_DIR")))
+            .unwrap_or_else(|e| panic!("read {rel}: {e}"))
+    };
+    let lib = read("src/lib.rs");
+    // `Builder::invoke_handler` replaces any earlier handler, so a second call
+    // would silently narrow what the product registers. Exactly one list, in
+    // exactly one call, keeps the comparison below about the list that wins.
+    let code = without_line_comments(&lib);
+    assert_eq!(code.matches("generate_handler!").count(), 1, "lib.rs must have exactly one generate_handler!");
+    assert_eq!(code.matches(".invoke_handler(").count(), 1, "lib.rs must call invoke_handler exactly once");
+    let product = handler_list(&lib);
+    let harness = handler_list(&read("tests/ipc.rs"));
+    assert_eq!(harness.len(), 12, "the harness registers twelve commands: {harness:?}");
+    assert_eq!(product, harness, "lib.rs and the ipc harness register different commands");
+}
+
+// verifies: LLR-4wcyqy
+// It holds the other precondition: that the managed state is reachable from a
+// handler at all, so a failure above is a failure of the behaviour under test
+// and not of this suite's wiring.
 #[test]
 fn list_personas_returns_an_empty_list_on_a_fresh_store() {
     let h = harness();
@@ -370,12 +498,13 @@ fn list_personas_returns_an_empty_list_on_a_fresh_store() {
 // ---------------------------------------------------------------------------
 // Persona details are parsed at this boundary. The requirement for parsed
 // Persona details is org-node's and is not exported to this unit; it is
-// verified there (org-node/tests/persona_records.rs); these are this
-// handler's robustness tests and carry no requirement of their own.
+// verified there (org-node/tests/persona_records.rs). These tests verify
+// LLR-p7dfxb, this handler's own derived low-level requirement.
 // ---------------------------------------------------------------------------
 
-// robustness: the handler parses the handle, name and surname before
-// org-node sees them, and stores the parsed (NFC) form.
+// verifies: LLR-p7dfxb
+// The handler parses the handle, name and surname before org-node sees them,
+// and stores the parsed (NFC) form.
 #[test]
 fn create_persona_stores_the_parsed_details() {
     let h = harness();
@@ -390,8 +519,8 @@ fn create_persona_stores_the_parsed_details() {
     assert_eq!(personas[0]["name"], "Jos\u{e9}");
 }
 
-// robustness: an invalid field is refused at the boundary, named, and
-// nothing is created.
+// verifies: LLR-p7dfxb
+// An invalid field is refused at the boundary, named, and nothing is created.
 #[test]
 fn create_persona_refuses_an_invalid_field_naming_it_and_creates_nothing() {
     let h = harness();
@@ -413,7 +542,8 @@ fn create_persona_refuses_an_invalid_field_naming_it_and_creates_nothing() {
     assert_eq!(personas.as_array().map(Vec::len), Some(0), "a refused persona is not created");
 }
 
-// robustness: the Organisation secret is parsed from hex at this boundary.
+// verifies: LLR-8krgzj
+// The Organisation secret is parsed from hex at this boundary.
 #[test]
 fn admit_member_refuses_an_org_secret_that_is_not_32_bytes() {
     let h = harness();
@@ -431,4 +561,282 @@ fn admit_member_refuses_an_org_secret_that_is_not_32_bytes() {
         serde_json::json!({ "orgId": org_id_40(), "joinRequestBlob": blob, "orgSecretHex": "aa".repeat(31) }),
     );
     assert!(err.contains("org_secret must be 32 bytes"), "got {err}");
+}
+
+// ---------------------------------------------------------------------------
+// Added 2026-10-05 by the app architecture change (T3), so that each low-level
+// requirement of the command surface has a normal and an abnormal case.
+//
+// The store is fresh, so `export_invite`, `admit_member` and `revoke_member`
+// fail on any well-formed input: `OrgService`'s first act is `find_org`, which
+// reports `OrgNotOnChain` before the parsed arguments are used. A normal-case
+// test of their argument parsing therefore observes one thing only: that the
+// handler did NOT refuse the argument, because the call ended in that refusal
+// and no other. It cannot observe what the handler passed on.
+// ---------------------------------------------------------------------------
+
+/// A valid iroh `EndpointId`: the compressed Ed25519 base point.
+fn endpoint_id() -> iroh::EndpointId {
+    let mut bytes = [0x66u8; 32];
+    bytes[0] = 0x58;
+    iroh::EndpointId::from_bytes(&bytes).expect("the base point is a valid key")
+}
+
+/// The postcard bytes of an id-only `EndpointAddr`, the form the app decodes.
+fn encoded_endpoint_addr() -> Vec<u8> {
+    let addr: iroh::EndpointAddr = endpoint_id().into();
+    postcard::to_allocvec(&addr).expect("an EndpointAddr encodes")
+}
+
+/// A new persona's join request, exported over IPC, with `node_addr` replaced.
+fn join_request_with_node_addr(h: &Harness, node_addr: Vec<u8>) -> String {
+    let pid = invoke(
+        h,
+        "create_persona",
+        serde_json::json!({ "handle": "carol", "name": "Carol", "surname": "Smith" }),
+    )
+    .expect("create_persona");
+    let blob = invoke(h, "export_join_request", serde_json::json!({ "personaId": pid }))
+        .expect("export_join_request");
+    let mut jr = org_node::blobs::decode_join_request(blob.as_str().expect("blob is a string"))
+        .expect("an exported join request decodes");
+    jr.node_addr = node_addr;
+    org_node::blobs::encode(&jr).expect("a join request encodes")
+}
+
+/// `admit_member`'s arguments with a well-formed org id.
+fn admit_args(blob: &str, org_secret_hex: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "orgId": org_id_40(),
+        "joinRequestBlob": blob,
+        "orgSecretHex": org_secret_hex
+    })
+}
+
+// verifies: LLR-vqkr5t
+#[test]
+fn connection_status_reports_the_directory_the_store_was_opened_in() {
+    let h = harness();
+    let status = invoke(&h, "connection_status", serde_json::json!({})).expect("connection_status");
+    assert_eq!(
+        status["data_dir"],
+        serde_json::json!(h._dir.path().display().to_string()),
+        "the reported directory is the one the store was opened in: {status}"
+    );
+}
+
+// verifies: LLR-85zque, LLR-vqkr5t
+#[test]
+fn connection_status_reports_a_data_dir_it_had_to_create_verbatim() {
+    // Abnormal input: a directory that does not exist yet, two levels deep,
+    // with spaces and non-ASCII characters in its name. It is created, the
+    // store is opened in it, and it is reported exactly as given.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_dir = dir.path().join("odd dir Ωμέγα").join("nested");
+    assert!(!data_dir.exists());
+    let h = harness_at(dir, data_dir.clone(), TransportModeName::Networked, None);
+    assert!(data_dir.is_dir(), "the data directory is created");
+    let status = invoke(&h, "connection_status", serde_json::json!({})).expect("connection_status");
+    assert_eq!(status["data_dir"], serde_json::json!(data_dir.display().to_string()));
+}
+
+// verifies: LLR-vzf8j2
+#[test]
+fn export_invite_does_not_refuse_a_well_formed_org_id() {
+    // Normal case for the boundary: a well-formed identifier is not refused
+    // there, and the call fails only where the store holds no such org.
+    let h = harness();
+    for org_id in [org_id_40(), format!("0x{}", org_id_40())] {
+        let err = invoke_err(&h, "export_invite", serde_json::json!({ "orgId": org_id }));
+        assert_eq!(err, refused_for_an_unknown_org(), "{org_id}");
+    }
+}
+
+// verifies: LLR-6pmrma
+#[test]
+fn revoke_member_accepts_a_zero_x_prefixed_member_id() {
+    let h = harness();
+    let member = format!("0x{}", member_id_64());
+    let err = invoke_err(&h, "revoke_member", revoke_args(&member, ""));
+    assert_eq!(err, refused_for_an_unknown_org(), "one `0x` prefix is accepted");
+}
+
+// verifies: LLR-ty85xv
+#[test]
+fn revoke_member_treats_a_whitespace_only_peer_addr_as_absent() {
+    // Abnormal input: whitespace, which a form field easily carries. It is an
+    // absent address, not a malformed one.
+    let h = harness();
+    for blank in ["   ", "\n", "\t \r\n"] {
+        let err = invoke_err(&h, "revoke_member", revoke_args(&member_id_64(), blank));
+        assert_eq!(err, refused_for_an_unknown_org(), "{blank:?}");
+    }
+}
+
+// verifies: LLR-n6twt7
+#[test]
+fn revoke_member_does_not_refuse_an_encoded_endpoint_addr() {
+    let h = harness();
+    let addr = hex::encode(encoded_endpoint_addr());
+    let err = invoke_err(&h, "revoke_member", revoke_args(&member_id_64(), &addr));
+    assert_eq!(err, refused_for_an_unknown_org(), "a decodable address is accepted");
+}
+
+// verifies: LLR-n6twt7
+#[test]
+fn revoke_member_refuses_a_peer_addr_that_is_not_hex() {
+    let h = harness();
+    for bad in ["zz", "abc", "not hex at all"] {
+        let err = invoke_err(&h, "revoke_member", revoke_args(&member_id_64(), bad));
+        assert!(err.starts_with("peer_addr_blob hex:"), "{bad:?}: {err}");
+    }
+}
+
+// verifies: LLR-n6twt7
+#[test]
+fn revoke_member_refuses_a_peer_addr_that_is_not_an_endpoint_addr() {
+    // Abnormal input: well-formed hex whose bytes are not an EndpointAddr.
+    // Dropping the address instead of refusing would revoke over discovery
+    // when the operator supplied a dial address.
+    let h = harness();
+    for bad in ["00", "ff", "deadbeef"] {
+        let err = invoke_err(&h, "revoke_member", revoke_args(&member_id_64(), bad));
+        assert!(err.starts_with("peer_addr decode:"), "{bad:?}: {err}");
+    }
+}
+
+// verifies: LLR-8krgzj, LLR-ctrfz4
+#[test]
+fn admit_member_does_not_refuse_a_32_byte_or_absent_org_secret() {
+    // The join request carries no node address, so this is also the id-only
+    // address branch.
+    let h = harness();
+    let blob = join_request_with_node_addr(&h, vec![]);
+    for secret in [
+        serde_json::json!("aa".repeat(32)),
+        serde_json::json!(format!("0x{}", "aa".repeat(32))),
+        serde_json::Value::Null,
+    ] {
+        let err = invoke_err(&h, "admit_member", admit_args(&blob, secret.clone()));
+        assert_eq!(err, refused_for_an_unknown_org(), "{secret}");
+    }
+}
+
+// verifies: LLR-8krgzj
+#[test]
+fn admit_member_refuses_an_org_secret_that_is_not_hex() {
+    let h = harness();
+    let blob = join_request_with_node_addr(&h, vec![]);
+    for bad in ["zz".repeat(32), "a".repeat(63)] {
+        let err = invoke_err(&h, "admit_member", admit_args(&blob, serde_json::json!(bad)));
+        assert!(err.starts_with("org_secret hex:"), "{bad}: {err}");
+    }
+}
+
+// verifies: LLR-ctrfz4
+#[test]
+fn admit_member_does_not_refuse_a_decodable_node_addr() {
+    let h = harness();
+    let blob = join_request_with_node_addr(&h, encoded_endpoint_addr());
+    let err = invoke_err(&h, "admit_member", admit_args(&blob, serde_json::Value::Null));
+    assert_eq!(err, refused_for_an_unknown_org());
+}
+
+// verifies: LLR-ctrfz4
+#[test]
+fn admit_member_refuses_a_node_addr_that_is_not_an_endpoint_addr() {
+    let h = harness();
+    for bad in [vec![0xffu8], vec![0x00, 0x01, 0x02]] {
+        let blob = join_request_with_node_addr(&h, bad.clone());
+        let err = invoke_err(&h, "admit_member", admit_args(&blob, serde_json::Value::Null));
+        assert!(err.starts_with("node_addr decode:"), "{bad:?}: {err}");
+    }
+}
+
+// verifies: LLR-pguhw5
+#[test]
+fn list_personas_reports_exactly_the_persona_fields() {
+    // No field beyond these six crosses IPC: in particular no seed.
+    let h = harness();
+    invoke(
+        &h,
+        "create_persona",
+        serde_json::json!({ "handle": "dave", "name": "Dave", "surname": "Jones" }),
+    )
+    .expect("create_persona");
+    let personas = invoke(&h, "list_personas", serde_json::json!({})).expect("list_personas");
+    let mut keys: Vec<&str> = personas[0]
+        .as_object()
+        .expect("a persona is an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["handle", "name", "org_id", "persona_id", "status", "surname"]);
+}
+
+// verifies: LLR-pguhw5
+#[test]
+fn a_persona_in_no_organisation_reports_a_null_org_id() {
+    // Boundary value: the persona belongs to no organisation. The field is
+    // present and null, not an empty string or a placeholder identifier.
+    let h = harness();
+    invoke(
+        &h,
+        "create_persona",
+        serde_json::json!({ "handle": "erin", "name": "Erin", "surname": "Jones" }),
+    )
+    .expect("create_persona");
+    let personas = invoke(&h, "list_personas", serde_json::json!({})).expect("list_personas");
+    assert!(personas[0].get("org_id").is_some(), "{personas}");
+    assert_eq!(personas[0]["org_id"], serde_json::Value::Null, "{personas}");
+}
+
+// verifies: LLR-pmus9f
+#[test]
+fn import_join_request_reports_the_request_it_decodes() {
+    let h = harness();
+    let blob = join_request_with_node_addr(&h, vec![]);
+    let jr = org_node::blobs::decode_join_request(&blob).expect("decodes");
+    let dto = invoke(&h, "import_join_request", serde_json::json!({ "blob": blob }))
+        .expect("import_join_request");
+    assert_eq!(dto["handle"], "carol");
+    assert_eq!(dto["name"], "Carol");
+    assert_eq!(dto["surname"], "Smith");
+    assert_eq!(dto["member_key"], serde_json::json!(hex::encode(jr.member_key.as_bytes())));
+    assert_eq!(dto["device_key"], serde_json::json!(hex::encode(jr.device_key.as_bytes())));
+    assert_eq!(dto["has_node_addr"], serde_json::json!(false));
+    assert_eq!(dto["node_addr_blob"], serde_json::json!(""));
+
+    // With an address: reported as present, and passed back as hex.
+    let addr = encoded_endpoint_addr();
+    let blob = join_request_with_node_addr(&h, addr.clone());
+    let dto = invoke(&h, "import_join_request", serde_json::json!({ "blob": blob }))
+        .expect("import_join_request");
+    assert_eq!(dto["has_node_addr"], serde_json::json!(true));
+    assert_eq!(dto["node_addr_blob"], serde_json::json!(hex::encode(addr)));
+
+    // Decoding persists nothing: the two personas are the two the helper made.
+    let personas = invoke(&h, "list_personas", serde_json::json!({})).expect("list_personas");
+    assert_eq!(personas.as_array().map(Vec::len), Some(2));
+}
+
+// verifies: LLR-pmus9f
+#[test]
+fn import_join_request_refuses_a_malformed_blob() {
+    let h = harness();
+    // "/xMT" is base64 for the bytes ff 13 13: decodable, and not a request.
+    for bad in ["", "not base64 !", "/xMT"] {
+        let err = invoke_err(&h, "import_join_request", serde_json::json!({ "blob": bad }));
+        // org-node's own message for this input, passed through unchanged.
+        let decoder = org_node::service::OrgService::import_join_request(bad)
+            .expect_err("org-node refuses the blob")
+            .to_string();
+        assert_eq!(err, decoder, "{bad:?}");
+        // LLR-pmus9f's own clause: the message names the blob. The equality
+        // above cannot hold this, because it moves with org-node's wording.
+        assert!(err.contains("blob"), "the refusal must name the blob, got {err:?} for {bad:?}");
+    }
+    let personas = invoke(&h, "list_personas", serde_json::json!({})).expect("list_personas");
+    assert_eq!(personas, serde_json::json!([]), "a refused blob creates nothing");
 }

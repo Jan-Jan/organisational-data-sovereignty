@@ -52,8 +52,9 @@ strict_paths:
   - app/src-tauri/src
   - app/src
 
-# Both test trees, added 2026-09-14 with the unit's first tests: six cargo
-# integration targets under app/src-tauri/tests (declared in Cargo.toml with
+# Both test trees, added 2026-09-14 with the unit's first tests: cargo
+# integration targets under app/src-tauri/tests (six then, eight since
+# 2026-10-05; each declared in Cargo.toml with
 # `required-features = ["test-support"]`) and four vitest files under
 # app/tests. The placeholder file that used to hold app/src-tauri/tests open
 # is deleted — the directory now holds real test targets.
@@ -63,16 +64,12 @@ test_paths:
 
 # Measured 2026-09-14 at the end of the app risk analysis change.
 #
-# The cargo entry names all six targets explicitly because each is declared
+# The cargo entry names all eight targets explicitly because each is declared
 # `required-features = ["test-support"]`: naming a target with the feature off
 # is a cargo ERROR rather than a silent skip, which is what makes this entry
 # fail loudly if the feature or a target is ever dropped. Measured:
 #   startup_policy 12 + connection_status 10 + org_id_parsing 14
 #   + receiver_events 27 + receiver_guard 6 + ipc 9 = 78 tests (2026-09-14).
-# Measured again 2026-10-05 (agent sandbox, CARGO_HOME=/tmp/cargo_home_fuzz),
-# after later changes and the org-node type-safety change added tests:
-#   startup_policy 12 + connection_status 10 + org_id_parsing 14
-#   + receiver_events 28 + receiver_guard 6 + ipc 12 = 82 tests.
 # Four of the six rose during the change, each from a gate or review finding:
 # receiver_events 14 -> 27 (REQ-tw4cb5 was verified on one fixture rather than
 # as a property; six more for REQ-kn5rtx; four more when the terminal-error
@@ -80,6 +77,24 @@ test_paths:
 # ipc 8 -> 9 (a doubled `0x` prefix was silently normalised at two boundary
 # parsers), and connection_status 8 -> 10 (REQ-bvx4nh's data-directory clause
 # was gated by no test annotated to it).
+# Measured again 2026-10-05 (agent sandbox, CARGO_HOME=/tmp/cargo_home_fuzz),
+# after later changes and the org-node type-safety change added tests:
+#   startup_policy 12 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 28 + receiver_guard 6 + ipc 12 = 82 tests.
+# A seventh target, csp_policy (17 tests), was added 2026-10-05 with the
+# Content-Security-Policy fix (REQ-cj5jmx, owner ruling 4 of
+# docs/plans/2026-10-05-app-architecture.md): 82 + 17 = 99 tests, measured.
+# An eighth target, state_assembly (3 tests), was added 2026-10-05 by task T3
+# of the same plan, with the unit's first low-level requirements; T3 also
+# added tests to four existing targets (startup_policy, receiver_events, ipc,
+# csp_policy). Measured after T3:
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 30 + receiver_guard 6 + ipc 28 + csp_policy 18
+#   + state_assembly 3 = 122 tests.
+# Review round 1 of the same plan (task R1) added tests to two targets:
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 30 + receiver_guard 6 + ipc 33 + csp_policy 24
+#   + state_assembly 3 = 133 tests.
 #
 # `npm run check` is `svelte-kit sync && svelte-check`; it type-checks app/src
 # AND app/tests (measured 2026-09-14 — the generated .svelte-kit/tsconfig.json
@@ -87,22 +102,30 @@ test_paths:
 #
 # `npm run test` is `svelte-kit sync && vitest run`; the sync is part of the
 # script rather than assumed from the entry above, so the entry does not
-# depend on its neighbour's side effects. 30 tests across four files.
+# depend on its neighbour's side effects. 30 tests across four files; 35 after
+# task T3 of docs/plans/2026-10-05-app-architecture.md and 36 after its task
+# T4 (2026-10-05, measured).
 #
 # Both npm entries need app/node_modules, which is gitignored: the merging
 # machine must run `npm --prefix app ci` first. A fresh worktree does not have
 # it.
 verify_commands:
-  - cargo test --manifest-path app/src-tauri/Cargo.toml --features test-support --test startup_policy --test connection_status --test org_id_parsing --test receiver_events --test receiver_guard --test ipc
+  - cargo test --manifest-path app/src-tauri/Cargo.toml --features test-support --test startup_policy --test connection_status --test org_id_parsing --test receiver_events --test receiver_guard --test ipc --test csp_policy --test state_assembly
   - npm --prefix app run check
   - npm --prefix app run test
 
 problem_age_days: 30
-problem_open_max: 10
+# Raised from 10 to 15 on 2026-10-05 by owner ruling 2 of
+# docs/plans/2026-10-05-app-architecture.md: the architecture change books five
+# new reports (PR-8vh53d, PR-cu2h2g, PR-uxj7bg, PR-bu6mau, PR-7zz76t) on top of
+# the five still open from 2026-09-14, 10 open in all. Each is deferred work,
+# not a ruling not to fix. The same limit org-node was given on the same date.
+problem_open_max: 15
 
 # No coverage_command. The first half of this note used to read "nothing to
 # measure until the crate has tests" and is no longer true: as of 2026-09-14 the
-# unit has 78 cargo tests (82 as measured 2026-10-05) and 30 vitest tests. What remains true is the second
+# unit has 78 cargo tests (122 as measured 2026-10-05, after the architecture
+# change) and 30 vitest tests (36 after it). What remains true is the second
 # half — under class C the absence is a gap against a mandatory requirement, and
 # it is recorded in docs/plans/2026-09-05-ratchet-setup.md.
 #

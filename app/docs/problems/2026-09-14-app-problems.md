@@ -72,6 +72,37 @@ than a control on an existing one.
 Until then the badge means "this component has called `start_receiver` at least
 once since it mounted", which is not what it says.
 
+**PR-h6xpnh addendum, 2026-10-05: two more symptoms of the same root cause.**
+Found while decomposing the unit (`docs/plans/2026-10-05-app-architecture.md`,
+owner ruling 2). They are booked here rather than as new reports because the
+cause is the same: the receiver's state lives in the component, not in the
+receiver.
+
+- **The start race.** `doStartReceiver` (`Membership.svelte:165-166`) sets
+  `receiverStarted = true` after `await startReceiver()` resolves.
+  `start_receiver` spawns the loop and returns. If the loop exits and its
+  `receiver-stopped` event reaches the component before the command's reply
+  does, the handler sets `receiverStarted = false` and records the reason, and
+  then the resumed `doStartReceiver` sets it back to `true`. The badge then
+  reads "Receiver running" for a loop that has stopped, and the stop reason is
+  hidden, because it renders only while `receiverStarted` is false. This is
+  HAZ-cfp4jb's situation, which RC-8abufw's announcement was meant to close.
+  Tauri does not order an event against a command's reply, so the window is
+  real, though narrow.
+- **Events lost on a tab switch.** `+page.svelte:51-63` mounts exactly one
+  panel at a time, so `Membership` is destroyed whenever another tab is shown,
+  and its listeners go with it (REQ-rq8g2v, by design). Every receiver event
+  emitted while another tab is open, whether a ✓ row, a ✗ row, a receiver
+  error or `receiver-stopped`, reaches no listener and is never shown. The log
+  and error lists are component state too, so returning to the tab also clears
+  what was shown before. A failed verification that happens while the operator
+  is on the Revoke tab leaves no trace in the interface (HAZ-9fmhm4).
+
+Neither has a pin. Both live in Svelte components and the route, which no
+gated test mounts (SDD-6g3wnh in the 2026-10-05 decomposition). The remedy is
+the one this report already names, receiver state owned outside the
+component, extended to the event history the panel displays.
+
 ---
 
 **PR-eecx3y**: `chain_ready` is computed once during `AppState::init` and never

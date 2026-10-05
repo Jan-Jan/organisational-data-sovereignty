@@ -13,7 +13,7 @@ import type { Subscribe } from '../src/lib/receiver';
 const noop = () => {};
 
 describe('subscribeAll', () => {
-	// verifies: REQ-rq8g2v
+	// verifies: LLR-z4ky6f
 	it('registers every subscription it is given', async () => {
 		const registered: string[] = [];
 		const make = (name: string): Subscribe => async () => {
@@ -28,7 +28,7 @@ describe('subscribeAll', () => {
 		expect(registered.sort()).toEqual(['a', 'b', 'c']);
 	});
 
-	// verifies: REQ-rq8g2v, PR-u34uqm
+	// verifies: LLR-z4ky6f, PR-u34uqm
 	it('unsubscribes exactly the listeners it registered, including those whose listen call resolved late', async () => {
 		const cancelled: string[] = [];
 		const fast: Subscribe = async () => () => cancelled.push('fast');
@@ -46,7 +46,7 @@ describe('subscribeAll', () => {
 		expect(cancelled.sort()).toEqual(['fast', 'slow']);
 	});
 
-	// verifies: REQ-rq8g2v
+	// verifies: LLR-z4ky6f
 	it('resolves only after every subscription has registered', async () => {
 		let registered = false;
 		const slow: Subscribe = async () => {
@@ -60,7 +60,7 @@ describe('subscribeAll', () => {
 		expect(registered).toBe(true);
 	});
 
-	// verifies: REQ-rq8g2v
+	// verifies: LLR-z4ky6f
 	it('is idempotent — calling the cleanup twice unsubscribes once', async () => {
 		let cancels = 0;
 		const one: Subscribe = async () => () => {
@@ -73,7 +73,7 @@ describe('subscribeAll', () => {
 		expect(cancels).toBe(1);
 	});
 
-	// verifies: REQ-rq8g2v
+	// verifies: LLR-z4ky6f
 	it('propagates a subscription failure rather than resolving a partial cleanup', async () => {
 		const ok: Subscribe = async () => () => {};
 		const broken: Subscribe = async () => {
@@ -89,7 +89,28 @@ describe('subscribeAll', () => {
 		).rejects.toThrow('listen refused');
 	});
 
-	// verifies: REQ-rq8g2v
+	// verifies: PR-cu2h2g
+	// Pins TODAY's defective behaviour, which the fix of PR-cu2h2g must change:
+	// when one registration rejects, a listener that had already registered is
+	// never cancelled, and no cleanup is returned that could cancel it.
+	it('leaves a registered listener attached when another registration fails (PR-cu2h2g)', async () => {
+		const cancelled: string[] = [];
+		const ok: Subscribe = async () => () => cancelled.push('ok');
+		const broken: Subscribe = async () => {
+			await new Promise((r) => setTimeout(r, 5));
+			throw new Error('listen refused');
+		};
+		await expect(
+			subscribeAll([
+				[ok, noop],
+				[broken, noop]
+			])
+		).rejects.toThrow('listen refused');
+		await new Promise((r) => setTimeout(r, 20));
+		expect(cancelled).toEqual([]);
+	});
+
+	// verifies: LLR-z4ky6f
 	it('registers nothing and cleans up cleanly when given no subscriptions', async () => {
 		const cleanup = await subscribeAll([]);
 		expect(() => cleanup()).not.toThrow();

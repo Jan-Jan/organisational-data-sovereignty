@@ -17,7 +17,7 @@ use ods_poc_lib::policy::{self, StartupError};
 // REQ-7g3k9a — the passphrase
 // ---------------------------------------------------------------------------
 
-// verifies: REQ-7g3k9a
+// verifies: LLR-tpkmh3
 #[test]
 fn configured_passphrase_is_used() {
     assert_eq!(
@@ -26,7 +26,7 @@ fn configured_passphrase_is_used() {
     );
 }
 
-// verifies: REQ-7g3k9a
+// verifies: LLR-tpkmh3
 #[test]
 fn absent_passphrase_is_refused() {
     assert_eq!(
@@ -35,7 +35,7 @@ fn absent_passphrase_is_refused() {
     );
 }
 
-// verifies: REQ-7g3k9a
+// verifies: LLR-tpkmh3
 #[test]
 fn empty_passphrase_is_refused_not_honoured() {
     // A variable set to "" is a scripting accident, not a passphrase. Honouring
@@ -46,7 +46,7 @@ fn empty_passphrase_is_refused_not_honoured() {
     );
 }
 
-// verifies: REQ-7g3k9a
+// verifies: LLR-tpkmh3
 #[test]
 fn absent_passphrase_with_opt_in_uses_dev_default() {
     assert_eq!(
@@ -55,7 +55,7 @@ fn absent_passphrase_with_opt_in_uses_dev_default() {
     );
 }
 
-// verifies: REQ-7g3k9a
+// verifies: LLR-tpkmh3
 #[test]
 fn configured_passphrase_wins_over_opt_in() {
     let got = policy::resolve_passphrase(Some("operator supplied"), true)
@@ -68,7 +68,7 @@ fn configured_passphrase_wins_over_opt_in() {
 // REQ-rxc8sp — the data directory
 // ---------------------------------------------------------------------------
 
-// verifies: REQ-rxc8sp
+// verifies: LLR-kfmng5
 #[test]
 fn override_data_dir_is_used() {
     assert_eq!(
@@ -81,7 +81,7 @@ fn override_data_dir_is_used() {
     );
 }
 
-// verifies: REQ-rxc8sp
+// verifies: LLR-kfmng5
 #[test]
 fn resolved_data_dir_is_used_when_no_override() {
     assert_eq!(
@@ -90,7 +90,7 @@ fn resolved_data_dir_is_used_when_no_override() {
     );
 }
 
-// verifies: REQ-rxc8sp
+// verifies: LLR-kfmng5
 #[test]
 fn unresolvable_data_dir_is_refused() {
     assert_eq!(
@@ -99,7 +99,7 @@ fn unresolvable_data_dir_is_refused() {
     );
 }
 
-// verifies: REQ-rxc8sp
+// verifies: LLR-kfmng5
 #[test]
 fn unresolvable_data_dir_with_opt_in_uses_temp() {
     assert_eq!(
@@ -108,7 +108,7 @@ fn unresolvable_data_dir_with_opt_in_uses_temp() {
     );
 }
 
-// verifies: REQ-rxc8sp
+// verifies: LLR-kfmng5
 #[test]
 fn empty_override_is_ignored_not_used_as_path() {
     // An empty ODS_DATA_DIR must not become the relative path "", which would
@@ -127,23 +127,40 @@ fn empty_override_is_ignored_not_used_as_path() {
 // REQ-bmk2z2 — the refusals
 // ---------------------------------------------------------------------------
 
-// verifies: REQ-bmk2z2
+/// Assert that `msg` names `supplier`, the variable that would supply the
+/// value, before `ODS_ALLOW_DEV_DEFAULTS`, the variable that would waive it.
+///
+/// Order matters: an operator who reads the waiver first sets the waiver,
+/// which recreates HAZ-8ghmhn. REQ-bmk2z2 is satisfied by naming both; this
+/// assertion is the register's reasoning made executable.
+fn assert_names_supplier_before_waiver(msg: &str, supplier: &str) {
+    let supplier_at = msg.find(supplier).expect("names the supplying variable");
+    let waiver_at = msg.find("ODS_ALLOW_DEV_DEFAULTS").expect("names the waiver");
+    assert!(supplier_at < waiver_at, "the supplying variable must be named first: {msg}");
+}
+
+// verifies: LLR-97rww8
 #[test]
 fn passphrase_refusal_names_both_variables_supplier_first() {
     let msg = policy::resolve_passphrase(None, false).unwrap_err().to_string();
-    let supplier = msg.find("ODS_PASSPHRASE").expect("names the supplying variable");
-    let waiver = msg.find("ODS_ALLOW_DEV_DEFAULTS").expect("names the waiver");
-    // Order matters: an operator who reads the waiver first sets the waiver,
-    // which recreates HAZ-8ghmhn. REQ-bmk2z2 is satisfied by naming both; this
-    // assertion is the register's reasoning made executable.
-    assert!(supplier < waiver, "the supplying variable must be named first: {msg}");
+    assert_names_supplier_before_waiver(&msg, "ODS_PASSPHRASE");
 }
 
-// verifies: REQ-bmk2z2
+// verifies: LLR-97rww8
 #[test]
 fn data_dir_refusal_names_both_variables_supplier_first() {
     let msg = policy::resolve_data_dir(None, None, false).unwrap_err().to_string();
-    let supplier = msg.find("ODS_DATA_DIR").expect("names the supplying variable");
-    let waiver = msg.find("ODS_ALLOW_DEV_DEFAULTS").expect("names the waiver");
-    assert!(supplier < waiver, "the supplying variable must be named first: {msg}");
+    assert_names_supplier_before_waiver(&msg, "ODS_DATA_DIR");
+}
+
+// verifies: LLR-97rww8
+#[test]
+fn refusals_for_empty_values_name_both_variables_supplier_first() {
+    // Abnormal input: the variable is set, to the empty string. The value is
+    // treated as absent, and the operator must be told the same thing, in the
+    // same order, as when it is unset.
+    let msg = policy::resolve_passphrase(Some(""), false).unwrap_err().to_string();
+    assert_names_supplier_before_waiver(&msg, "ODS_PASSPHRASE");
+    let msg = policy::resolve_data_dir(Some(""), None, false).unwrap_err().to_string();
+    assert_names_supplier_before_waiver(&msg, "ODS_DATA_DIR");
 }
