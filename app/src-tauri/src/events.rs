@@ -91,12 +91,23 @@ pub fn classify_receive_error(e: &OrgNodeError) -> ReceiverOutcome {
         // store could not supply what the verification needed, or a value
         // read from the store or a received snapshot is not one its type
         // admits (`InvalidField` — before org-node parsed these they surfaced
-        // as Chain or Trie, so the class is unchanged).
+        // as Chain or Trie, so the class is unchanged). An unexpected first
+        // admission is refused before anything is verified
+        // (`AdmissionNotExpected`), one that lists none of this node's
+        // Personas on a rule about this node (`AdmissionNotOurs`), and the
+        // provisional-update refusals never arise on receive. A Persona
+        // already bound to an Organisation (`PersonaAlreadyBound`) is a
+        // refusal about this node's own store, before anything is verified.
         OrgNodeError::Chain(_)
         | OrgNodeError::OrgNotOnChain
         | OrgNodeError::Trie(_)
         | OrgNodeError::InvalidOrgPublicKey
-        | OrgNodeError::InvalidField { .. } => ReceiverOutcome::ReceiveError {
+        | OrgNodeError::InvalidField { .. }
+        | OrgNodeError::AdmissionNotExpected { .. }
+        | OrgNodeError::AdmissionNotOurs { .. }
+        | OrgNodeError::ProvisionalLimit { .. }
+        | OrgNodeError::NoProvisionalUpdate
+        | OrgNodeError::PersonaAlreadyBound { .. } => ReceiverOutcome::ReceiveError {
             message: e.to_string(),
         },
     }

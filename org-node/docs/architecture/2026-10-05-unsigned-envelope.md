@@ -111,14 +111,20 @@ derived in the same round.)*
 
 ## Under SDD-8cpyfa (`org-node/src/service.rs`, `receive_and_verify`)
 
-**LLR-rys5nx**: on first admission the new Organisation record holds two keys
-from two sources. Its Organisation public key is the one in the Organisation
-state read from the chain in the same operation. Its `admin_member_key` is the
-administrator's Member-as-a-group key of the Invite imported for that
-Organisation when one was imported, and otherwise that same Organisation public
-key, as a `PersonPublicKey` (LLR-xq9nrq). Neither is a value carried in the
-Wire message.
+**LLR-rys5nx**: on first admission the new Organisation record's
+Organisation public key is the one in the Organisation state read from the
+chain in the same operation, never a value carried in the Wire message, and
+the record holds no other key of the Organisation: no administrator key, from
+an Invite or from anywhere else.
 satisfies: derived
+
+*Amended 2026-10-06 (owner ruling of 2026-10-05, change
+`worktree-org-node-chain-authority`).* This said the record also holds an
+`admin_member_key`, taken from an imported Invite when there was one and
+otherwise from the chain's key. The owner ruled that org-node has no
+administrator field and that Invites leave org-node; this item now states
+what remains, which LLR-xq9nrq states too. It keeps its ID because retiring an
+item is not expressible in the trace gate.
 
 *Amended 2026-10-05 (owner answer Q1 of that day to
 docs/plans/2026-10-05-switch-trim.md).* This item took `admin_member_key` from
@@ -143,21 +149,35 @@ owns its code, and that item traces REQ-ech45n.
 ### Under SDD-89es4z (`org-node/src/service.rs`, `create_organisation`)
 
 **LLR-sj7cd5**: `create_organisation` refuses with
-`Trie(OrgMembersError::DuplicateKey)`, before the chain is written and with
-nothing recorded, an Organisation public key equal to any Member-as-a-group
-key or any DevicePublicKey of the genesis record. The comparison is
-`OrgPublicKey::ensure_distinct_from` over the record's members.
+`Trie(OrgMembersError::DuplicateKey)`, before any provisional update is kept
+and with nothing stored or written, an Organisation public key equal to any
+Member-as-a-group key or any DevicePublicKey of the genesis record. The
+comparison is `OrgPublicKey::ensure_distinct_from` over the record's members.
 satisfies: REQ-ech45n
 
 `ensure_distinct_from` is defined in `types.rs` (SDD-swtd3w).
 
+*Amended 2026-10-06 (change `worktree-org-node-chain-authority`, after the
+merge of master `5f7c177`).* This said "before the chain is written and with
+nothing recorded". `create_organisation` no longer writes the chain or
+creates a record; it keeps a genesis provisional update
+(`2026-10-06-chain-authority.md`, LLR-s6qnht), so
+the refusal comes before that update is kept.
+
 ### Under SDD-af5vnt (`org-node/src/store.rs`, `OrgRecord`)
 
 **LLR-3fwykc**: the Organisation private key is held only in
-`OrgRecord.org_private_key` of the creating node's record, which reaches the
-disk only through the encrypted Persona store. Every other node's record holds
-`None` there.
+`OrgRecord.org_private_key` of the creating node's record and, until
+`commit_genesis` creates that record, in the genesis provisional update
+(LLR-qjz3q4); both reach the disk only through the encrypted Persona store.
+Every other node's record holds `None` there.
 satisfies: REQ-ech45n
+
+*Amended 2026-10-06 (change `worktree-org-node-chain-authority`, after the
+merge of master `5f7c177`).* "and, until `commit_genesis` creates that
+record, in the genesis provisional update" is added: creation keeps a
+provisional update and the record is created only once the genesis verifies
+against the chain.
 
 **LLR-2dvhz8**: `OrgRecord`'s `Debug` names the `org_private_key` field and
 prints only whether it is set, never the key's bytes.
@@ -178,11 +198,15 @@ Each item has a normal and an abnormal case:
 | LLR-98ufry | `x25519_seed_round_trip_preserves_key` | `x25519_debug_does_not_print_the_secret`; `an_x25519_key_pair_declares_zeroize_on_drop_and_zeroize_clears_its_secret`; `an_x25519_key_pair_cannot_be_cloned`, with the compile-time assertion beside it. The `Drop` call itself is verified by inspection only. |
 | LLR-9f5hmr | `happy_path_commits_when_root_matches_chain` | `a_sequence_number_other_than_the_chain_epoch_is_refused` |
 | LLR-322xfu | `the_organisation_private_key_is_a_secret_type_and_the_only_way_to_its_key_pair` | the same test's 31-byte decode and boundary secrets; `the_organisation_private_key_and_its_key_pair_never_render_its_bytes` |
-| LLR-rys5nx | `a_first_admission_records_the_invites_administrator_the_chains_key_the_secret_and_the_member` (an Invite was imported) | `a_first_admission_whose_invite_names_another_organisation_key_is_committed`: the record holds the chain's Organisation public key, not the Invite's; the first admission without an imported Invite, whose record holds the chain's key (LLR-xq9nrq) |
+| LLR-rys5nx | `a_first_admission_records_the_chains_key_the_secret_and_the_member` | `a_first_admission_records_the_chains_organisation_public_key`: the record holds the chain's Organisation public key and no other key (LLR-xq9nrq); `org_node_has_no_administrator_key`: no record has a field for one |
 | LLR-sj7cd5 | a created Organisation's fresh key | its collisions with a genesis key |
-| LLR-3fwykc | `the_organisation_private_key_is_kept_only_in_the_encrypted_store`; `a_created_organisation_publishes_a_fresh_key_no_genesis_key_equals` | the same at-rest test's wrong passphrase, which opens nothing; `a_first_admission_records_the_invites_administrator_the_chains_key_the_secret_and_the_member`: a member's record holds `None` |
+| LLR-3fwykc | `the_organisation_private_key_is_kept_only_in_the_encrypted_store`; `a_created_organisation_publishes_a_fresh_key_no_genesis_key_equals` | the same at-rest test's wrong passphrase, which opens nothing; `a_first_admission_records_the_chains_key_the_secret_and_the_member`: a member's record holds `None` |
 | LLR-2dvhz8 | `the_organisation_private_key_is_not_in_the_record_debug_output` | `records_and_wire_messages_never_render_secret_bytes` (sentinel bytes, the `{:#?}` form, the record inside `StoreData`); `a_record_debug_says_whether_the_organisation_private_key_is_set` (the unset key of a member's record) |
 
 *Rows for LLR-3fwykc and LLR-2dvhz8 added, and the LLR-98ufry and LLR-rys5nx
 rows amended, 2026-10-05 by review round 4 (finding-2, finding-3 and the gate
 notes).*
+
+*The LLR-rys5nx and LLR-3fwykc rows amended 2026-10-06 (change
+`worktree-org-node-chain-authority`): the tests they named were renamed with
+the Invite's removal, and the Invite-key case was deleted with it (T7, T8).*

@@ -16,9 +16,11 @@
 //!   literal.
 //! - Chain mode: if `ODS_CHAIN_WS` + `ODS_CONTRACT_H160` + `ODS_ADMIN_SEED`
 //!   are all set, `build_chain_ops` is called EAGERLY here via `block_on`. On
-//!   success it returns the ops AND the `ChainEndpoint` they were built from,
-//!   which is recorded in `chain_endpoint`. On failure the service falls back
-//!   to `ChainNotConfigured` and `chain_endpoint` is `None`.
+//!   success it returns the read ops, the chain writer (`crate::submit`) AND
+//!   the `ChainEndpoint` they were built from, which is recorded in
+//!   `chain_endpoint`. On failure the service falls back to
+//!   `ChainNotConfigured`, the writer to `WriterNotConfigured`, and
+//!   `chain_endpoint` is `None`.
 //!
 //! `chain_endpoint` replaces the former `chain_ready: bool` + environment
 //! re-read. The verdict and the endpoint are now ONE `Option`, so there is no
@@ -35,10 +37,13 @@ use std::sync::Arc;
 use org_node::service::{ChainOps, OrgService};
 use org_node::store::PersonaStore;
 use org_node::transport::TransportMode;
-use org_node::{ChainAccount, Epoch, OrgNodeError, OrgPublicKey, RootHash};
+use on_chain_client::write::AccountId;
+use org_node::OrgNodeError;
 use tokio::sync::Mutex;
 
+use crate::invitation::OutstandingInvites;
 use crate::policy;
+use crate::submit::{ChainWriter, OnChainWriter, WriterNotConfigured};
 
 /// Re-exported from `crate::policy`, where the projection now lives, so that no
 /// caller of `state::ConnectionStatus` had to change when it moved.
@@ -48,6 +53,12 @@ pub use crate::policy::{connection_status_from_state, ConnectionStatus};
 /// command handlers extract it via `State<'_, AppState>`.
 pub struct AppState {
     pub service: Mutex<OrgService>,
+    /// REQ-nfr3n2: the chain write, made by the app through on-chain-client
+    /// before org-node is asked to commit (`crate::submit`).
+    pub writer: Box<dyn ChainWriter>,
+    /// LLR-f35pda: the Invites this device issued and has not seen acted on,
+    /// kept in `outstanding_invites.json` in the data directory.
+    pub outstanding: Mutex<OutstandingInvites>,
     /// The directory the store was actually opened in. Recorded here so that
     /// `connection_status` reports the directory in use rather than re-deriving
     /// one from the environment and possibly disagreeing with `init`.
@@ -64,38 +75,14 @@ pub struct AppState {
     pub receiver_started: Arc<AtomicBool>,
 }
 
-/// A `ChainOps` implementation that rejects every call with a clear message
+/// A `ChainOps` implementation that rejects every read with a clear message
 /// indicating that the chain env vars are not configured.  Used when the app
 /// starts without `ODS_CHAIN_WS` / `ODS_CONTRACT_H160` / `ODS_ADMIN_SEED`.
+/// Its write half is `crate::submit::WriterNotConfigured`.
 struct ChainNotConfigured;
 
 #[async_trait::async_trait]
 impl ChainOps for ChainNotConfigured {
-    async fn submit_genesis(
-        &self,
-        _genesis_root: RootHash,
-        _org_pub_key: OrgPublicKey,
-    ) -> Result<(org_node::OrgId, Option<ChainAccount>), OrgNodeError> {
-        Err(OrgNodeError::Chain(
-            "chain not configured: set ODS_CHAIN_WS, ODS_CONTRACT_H160, ODS_ADMIN_SEED"
-                .into(),
-        ))
-    }
-
-    async fn submit_update(
-        &self,
-        _org_id: org_node::OrgId,
-        _new_root: RootHash,
-        _org_pub_key: OrgPublicKey,
-        _expected_epoch: Epoch,
-        _proxy_account: Option<ChainAccount>,
-    ) -> Result<(), OrgNodeError> {
-        Err(OrgNodeError::Chain(
-            "chain not configured: set ODS_CHAIN_WS, ODS_CONTRACT_H160, ODS_ADMIN_SEED"
-                .into(),
-        ))
-    }
-
     async fn read_state(
         &self,
         _org_id: org_node::OrgId,
@@ -144,18 +131,19 @@ impl AppState {
         )
         .map_err(|e| e.to_string())?;
 
-        // Chain ops: try to build SubxtChainOps from env; fall back to
-        // ChainNotConfigured. The endpoint comes back WITH the ops, so what is
-        // reported is what was built and cannot drift from it (REQ-bvx4nh).
-        let (chain, chain_endpoint): (Box<dyn ChainOps>, Option<policy::ChainEndpoint>) =
+        // Chain read and write: try to build them from env; fall back to
+        // ChainNotConfigured and WriterNotConfigured. The endpoint comes back
+        // WITH them, so what is reported is what was built and cannot drift
+        // from it (REQ-bvx4nh).
+        let (chain, writer, chain_endpoint): (Box<dyn ChainOps>, Box<dyn ChainWriter>, _) =
             match build_chain_ops() {
-                Ok((ops, endpoint)) => (ops, Some(endpoint)),
+                Ok((ops, writer, endpoint)) => (ops, writer, Some(endpoint)),
                 Err(e) => {
                     // Surface WHY chain mode didn't come up (missing/malformed env var
                     // or a failed connect) instead of silently degrading — otherwise the
                     // UI just shows "Chain NOT configured" with no diagnosable reason.
                     eprintln!("[ods] chain config failed; running ChainNotConfigured: {e}");
-                    (Box::new(ChainNotConfigured), None)
+                    (Box::new(ChainNotConfigured), Box::new(WriterNotConfigured), None)
                 }
             };
 
@@ -166,7 +154,7 @@ impl AppState {
         let transport_mode =
             policy::transport_mode_from(std::env::var("ODS_TRANSPORT").ok().as_deref());
 
-        Self::assemble(data_dir, &passphrase, chain, chain_endpoint, transport_mode)
+        Self::assemble(data_dir, &passphrase, chain, writer, chain_endpoint, transport_mode)
     }
 
     /// Open the store under `data_dir` and wire the service. Shared by `init`
@@ -175,6 +163,7 @@ impl AppState {
         data_dir: PathBuf,
         passphrase: &str,
         chain: Box<dyn ChainOps>,
+        writer: Box<dyn ChainWriter>,
         chain_endpoint: Option<policy::ChainEndpoint>,
         transport_mode: policy::TransportModeName,
     ) -> Result<Self, String> {
@@ -185,9 +174,12 @@ impl AppState {
 
         let mut service = OrgService::new(store, chain);
         service.set_transport_mode(transport_mode_for(transport_mode));
+        let outstanding = OutstandingInvites::open(data_dir.join("outstanding_invites.json"))?;
 
         Ok(Self {
             service: Mutex::new(service),
+            writer,
+            outstanding: Mutex::new(outstanding),
             data_dir,
             chain_endpoint,
             transport_mode,
@@ -212,26 +204,33 @@ impl AppState {
             data_dir,
             passphrase,
             Box::new(ChainNotConfigured),
+            Box::new(WriterNotConfigured),
             chain_endpoint,
             transport_mode,
         )
     }
 }
 
-/// Attempt to build a `SubxtChainOps` from `ODS_CHAIN_WS`, `ODS_CONTRACT_H160`,
+/// What a configured chain gives the app: the read, the write, and the
+/// endpoint both were built from.
+type ChainWiring = (Box<dyn ChainOps>, Box<dyn ChainWriter>, policy::ChainEndpoint);
+
+/// Attempt to build the chain read (`SubxtChainOps`) and the chain write
+/// (`crate::submit::OnChainWriter`) from `ODS_CHAIN_WS`, `ODS_CONTRACT_H160`,
 /// and `ODS_ADMIN_SEED`.  Returns `Err` (without allocating a connection) if any
 /// required var is absent or if the async connect fails.
 ///
 /// This function is NOT async — Tauri's `setup` hook is synchronous in Tauri 2.
 /// The async connection (OnlineClient::from_url + OrgRegistryClient::from_client)
 /// is driven EAGERLY at startup via a `block_on` call here, inside `AppState::init`.
-/// There is no lazy / deferred connection path; the `SubxtChainOps` (or the
-/// `ChainNotConfigured` fallback) is fully determined before `init` returns.
+/// There is no lazy / deferred connection path; the ops and the writer (or the
+/// `ChainNotConfigured` / `WriterNotConfigured` fallbacks) are fully determined
+/// before `init` returns.
 ///
 /// REQ-bvx4nh: the `ChainEndpoint` comes back ALONGSIDE the ops, from the same
 /// values the ops were built from. Reporting it is then a read of what exists
 /// rather than a second read of the environment that could disagree with it.
-fn build_chain_ops() -> Result<(Box<dyn ChainOps>, policy::ChainEndpoint), String> {
+fn build_chain_ops() -> Result<ChainWiring, String> {
     let ws_url = std::env::var("ODS_CHAIN_WS").map_err(|_| "ODS_CHAIN_WS not set")?;
     let h160_hex =
         std::env::var("ODS_CONTRACT_H160").map_err(|_| "ODS_CONTRACT_H160 not set")?;
@@ -265,7 +264,7 @@ fn build_chain_ops() -> Result<(Box<dyn ChainOps>, policy::ChainEndpoint), Strin
     admin_seed.copy_from_slice(&seed_bytes);
 
     // Optional co-signer pubkey (64 hex chars = 32 bytes).
-    let others: Vec<ChainAccount> = match std::env::var("ODS_COSIGNER_PUB") {
+    let co_signatories: Vec<AccountId> = match std::env::var("ODS_COSIGNER_PUB") {
         Ok(s) => {
             let hex_str = s.trim_start_matches("0x");
             let bytes =
@@ -275,12 +274,12 @@ fn build_chain_ops() -> Result<(Box<dyn ChainOps>, policy::ChainEndpoint), Strin
             }
             let mut arr = [0u8; 32];
             arr.copy_from_slice(&bytes);
-            vec![ChainAccount::new(arr)]
+            vec![AccountId(arr)]
         }
         Err(_) => vec![],
     };
 
-    // Build SubxtChainOps by connecting to the chain on Tauri's PERSISTENT async
+    // Build the read and the write by connecting to the chain on Tauri's PERSISTENT async
     // runtime. This must NOT use a temporary `tokio::runtime::Runtime` created
     // here: the RPC client (reconnecting or not) spawns a background task for the
     // WS connection, and if that task is spawned on a throwaway runtime that is
@@ -294,23 +293,25 @@ fn build_chain_ops() -> Result<(Box<dyn ChainOps>, policy::ChainEndpoint), Strin
         ws_url: ws_url.clone(),
         contract_h160: h160_hex.clone(),
     };
-    let chain = tauri::async_runtime::block_on(connect_chain(
+    let (chain, writer) = tauri::async_runtime::block_on(connect_chain(
         ws_url,
         contract_h160,
         admin_seed,
-        others,
+        co_signatories,
     ))?;
-    Ok((Box::new(chain), endpoint))
+    Ok((Box::new(chain), Box::new(writer), endpoint))
 }
 
-/// Async: connect to the chain and build `SubxtChainOps`.
+/// Async: connect to the chain and build the read (`SubxtChainOps`) and the
+/// write (`OnChainWriter`, on-chain-client's writer over subxt) over one client.
 /// Runtime-unverified without a live chain or chopsticks fork.
 async fn connect_chain(
     ws_url: String,
     contract_h160: [u8; 20],
     admin_seed: [u8; 32],
-    others: Vec<ChainAccount>,
-) -> Result<org_node::SubxtChainOps, String> {
+    co_signatories: Vec<AccountId>,
+) -> Result<(org_node::SubxtChainOps, OnChainWriter), String> {
+    use on_chain_client::write::subxt_ops::{FinalitySink, SubxtWriteOps};
     use subxt_signer::sr25519::Keypair;
 
     // Build the subxt client + registry reader via org-node's shared helper,
@@ -324,16 +325,17 @@ async fn connect_chain(
             .await
             .map_err(|e| format!("connect_chain {ws_url}: {e}"))?;
 
-    // Build the admin SR25519 keypair from the raw 32-byte mini-secret seed.
+    // Build the signatory's SR25519 keypair (`ODS_ADMIN_SEED`) from the raw
+    // 32-byte mini-secret seed.
     // subxt_signer::sr25519::SecretKeyBytes = [u8; 32].
-    let admin = Keypair::from_secret_key(admin_seed)
+    let signatory = Keypair::from_secret_key(admin_seed)
         .map_err(|e| format!("admin Keypair: {e}"))?;
 
-    Ok(org_node::SubxtChainOps::new(
-        api,
-        registry_client,
-        contract_h160,
-        admin,
-        others,
-    ))
+    let writer = OnChainWriter {
+        ops: SubxtWriteOps::new(api, FinalitySink),
+        signatory,
+        co_signatories,
+        contract: contract_h160,
+    };
+    Ok((org_node::SubxtChainOps::new(registry_client), writer))
 }

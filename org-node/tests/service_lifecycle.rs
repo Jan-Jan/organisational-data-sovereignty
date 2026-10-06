@@ -12,19 +12,11 @@ use org_node::ids::OrgId;
 use org_node::store::{PersonaStatus, PersonaStore};
 use org_node::transport::TransportMode;
 use org_node::{MockChainOps, OrgService};
-use org_members::{Handle, Name, RootHash, Surname};
-use org_node::{Epoch, OrgPublicKey};
+use org_node::{Epoch, OrgPublicKey, RootHash};
 use rand::rngs::OsRng;
 
-fn h(s: &str) -> Handle {
-    Handle::parse(s).unwrap()
-}
-fn nm(s: &str) -> Name {
-    Name::parse(s).unwrap()
-}
-fn sn(s: &str) -> Surname {
-    Surname::parse(s).unwrap()
-}
+mod support;
+use support::{h, nm, sn};
 
 /// A valid Organisation public key: `OrgPublicKey` is built only through
 /// `parse` (REQ-8jb4ny). Was the bytes `[2u8; 32]` before the merge of
@@ -83,43 +75,35 @@ fn a_new_persona_is_proposed_with_an_id_derived_from_its_member_key() {
     assert_eq!(svc2.list_personas()[0].handle.as_str(), "alice");
 }
 
-// verifies: LLR-68yd3j, LLR-q3aj8z
-#[tokio::test]
-async fn creating_an_organisation_advances_the_chain_and_activates_the_persona() {
+// Rewritten 2026-10-06 (T9 of docs/plans/2026-10-05-chain-authority.md):
+// creation no longer writes the chain, records or activates anything; it
+// keeps a genesis provisional update. The record, the activation and
+// LLR-q3aj8z moved to `commit_paths`'s
+// `commit_genesis_creates_the_record_once_the_chain_carries_the_root`.
+// verifies: LLR-68yd3j, REQ-xs4ab8
+#[test]
+fn creating_an_organisation_writes_only_a_genesis_update() {
     let (store, path) = store_at("org");
     let chain = MockChainOps::new();
     let chain_view = chain.clone();
     let mut svc = OrgService::new(store, Box::new(chain));
 
     let pid = svc.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    let org_id = svc.create_organisation(&mut OsRng, &pid).await.unwrap();
+    let update = svc.create_organisation(&mut OsRng, &pid).unwrap();
 
-    let state = chain_view.get(&org_id).unwrap();
-    assert_eq!(state.epoch, Epoch::new(1));
-    assert_eq!(svc.list_orgs().len(), 1);
-    assert_eq!(svc.list_personas()[0].status, PersonaStatus::Active);
-    // LLR-q3aj8z: founding leaves the Persona's member id as it was, which on
-    // a fresh Persona is none. The administrator's MemberId is in the record's
-    // member snapshots. Added 2026-10-05 by review round 8.
+    assert!(svc.list_orgs().is_empty(), "no record");
+    assert_eq!(svc.list_personas()[0].status, PersonaStatus::Proposed);
     assert_eq!(svc.list_personas()[0].member_id, None);
+    // No slot: the id the mock's genesis would derive from this root is empty.
+    let mut would_be = [0u8; 20];
+    would_be.copy_from_slice(&update.resulting_root.as_bytes()[..20]);
+    assert!(chain_view.get(&OrgId::new(would_be)).is_none(), "the chain is unchanged");
 
-    // "…and the store is written before it returns." Added 2026-10-04 after
-    // review round 1, which found deleting `self.store.save(rng)?` from
-    // `create_organisation` left the whole gate green. Read back from DISK, so
-    // a record that only ever existed in memory fails here.
+    // "…and the store is written before it returns." Read back from DISK, so
+    // an update that only ever existed in memory fails here.
     let reloaded = PersonaStore::open(path, "pw").unwrap();
-    assert_eq!(reloaded.data().orgs.len(), 1, "the new org must reach the disk");
-    assert_eq!(reloaded.data().orgs[0].org_id, org_id);
-    assert_eq!(reloaded.data().orgs[0].epoch, Epoch::new(1));
-    // The record holds the genesis root it published. Added 2026-10-04 by
-    // review round 7: zeroing it was green, and the app displays it.
-    assert_eq!(svc.list_orgs()[0].root_hash, state.root_hash);
-    assert_eq!(reloaded.data().orgs[0].root_hash, state.root_hash);
-    assert_eq!(
-        reloaded.data().personas[0].status,
-        PersonaStatus::Active,
-        "the persona's activation must be persisted too"
-    );
+    assert!(reloaded.data().orgs.is_empty(), "no record reaches the disk");
+    assert_eq!(reloaded.data().provisional_updates.len(), 1, "the genesis update must reach the disk");
 }
 
 // verifies: LLR-hg3xzf
@@ -141,39 +125,62 @@ fn clones_of_the_mock_chain_share_one_state() {
 
 // The mock refuses an update whose expected epoch is not the slot's current
 // one, and leaves the slot as it was, as the contract's compare-and-swap does.
-// Disabling the check was green: every story submits at the right epoch.
+// Disabling the check was green: every story writes the mock chain at the
+// right epoch.
 // Added 2026-10-05 by review round 8.
 // verifies: LLR-ryzr8m
-#[tokio::test]
-async fn the_mock_chain_refuses_an_update_at_the_wrong_epoch() {
-    use org_node::ChainOps;
+#[test]
+fn the_mock_chain_refuses_an_update_at_the_wrong_epoch() {
     let chain = MockChainOps::new();
     let org = OrgId::new([6u8; 20]);
     let at_three = OrgState { root_hash: RootHash::new([1u8; 32]), org_pub_key: org_key(), epoch: Epoch::new(3) };
     chain.set(org, at_three);
     for wrong in [Epoch::new(2), Epoch::new(4)] {
-        let err = chain.submit_update(org, RootHash::new([9u8; 32]), org_key(), wrong, None).await.unwrap_err();
+        let err = chain.apply_update(org, RootHash::new([9u8; 32]), org_key(), wrong).unwrap_err();
         assert!(
             matches!(&err, org_node::OrgNodeError::Chain(m) if m.contains("epoch mismatch")),
             "expected epoch {wrong:?} must be refused, got {err:?}"
         );
         assert_eq!(chain.get(&org).unwrap(), at_three, "a refused update leaves the slot");
     }
-    chain.submit_update(org, RootHash::new([9u8; 32]), org_key(), Epoch::new(3), None).await.unwrap();
+    chain.apply_update(org, RootHash::new([9u8; 32]), org_key(), Epoch::new(3)).unwrap();
     assert_eq!(chain.get(&org).unwrap().epoch, Epoch::new(4), "the right epoch is accepted and advances");
 }
 
+// The seam presents reading and nothing else: a substitute that implements
+// only `read_state` is a complete `ChainOps` and drives the service.
 // verifies: LLR-65py3d
 #[tokio::test]
 async fn the_seam_is_a_trait_object_a_substitute_can_stand_in_for() {
-    // `OrgService::new` takes `Box<dyn ChainOps>`, so this compiles only while
-    // the seam stays object-safe and substitutable — which is the property
-    // SDD-ueh4tm exists for.
+    struct ReadOnly(MockChainOps);
+    #[async_trait::async_trait]
+    impl org_node::ChainOps for ReadOnly {
+        async fn read_state(&self, org: OrgId) -> Result<Option<OrgState>, org_node::OrgNodeError> {
+            self.0.read_state(org).await
+        }
+    }
     let (store, _) = store_at("seam");
-    let boxed: Box<dyn org_node::ChainOps> = Box::new(MockChainOps::new());
-    let mut svc = OrgService::new(store, boxed);
+    let chain = MockChainOps::new();
+    let mut svc = OrgService::new(store, Box::new(ReadOnly(chain.clone())));
     let pid = svc.create_persona(&mut OsRng, h("s"), nm("S"), sn("T")).unwrap();
-    assert!(svc.create_organisation(&mut OsRng, &pid).await.is_ok());
+    let update = svc.create_organisation(&mut OsRng, &pid).unwrap();
+    let org = chain.apply_genesis(update.resulting_root, update.org_pub_key);
+    svc.commit_genesis(&mut OsRng, &pid, org, org_node::ChainAccount::new([1; 32])).await.unwrap();
+}
+
+// Normal: the stand-in for the genesis write makes a slot at epoch one and
+// returns its id; abnormal: a second genesis with the same root gets its own
+// slot and leaves the first as it was.
+// verifies: LLR-ryzr8m
+#[test]
+fn the_mock_genesis_makes_a_slot_at_epoch_one() {
+    let chain = MockChainOps::new();
+    let root = RootHash::new([3u8; 32]);
+    let first = chain.apply_genesis(root, org_key());
+    assert_eq!(chain.get(&first).unwrap(), OrgState { root_hash: root, org_pub_key: org_key(), epoch: Epoch::new(1) });
+    let second = chain.apply_genesis(root, org_key());
+    assert_ne!(first, second);
+    assert_eq!(chain.get(&first).unwrap().epoch, Epoch::new(1));
 }
 
 // Rewritten 2026-10-04 after review round 2. The previous body compared the

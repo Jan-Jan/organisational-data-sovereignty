@@ -71,6 +71,18 @@ text.
 | SDD-4z3k2u | whether a decoded log belongs to the organisation this reader watches | `src/client.rs` (`internals::log_is_ours`, `event_admin`) |
 | SDD-m59zrg | the best lane's per-notification decision: seen before, reorganised, and which heights to read | `src/client.rs` (`internals::scan_step`, `internals::ScanStep`) |
 | SDD-3b8zef | the subxt-backed transport shell — **no LLRs; recorded deviation** | `src/client.rs` (remainder) |
+| SDD-yg7n55 | the chain writer, behind the `write` feature: the genesis ceremony and update submission through the Organisation's proxy, composed over the `WriteOps` seam (its subxt implementation carries no LLRs, as SDD-3b8zef) | `src/write/` |
+
+*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
+This unit is no longer only a reader. The owner moved the chain write out of
+org-node into this unit, and the app calls it: SDD-yg7n55, defined in
+`2026-10-06-chain-write.md`, refines REQ-6jefu2
+and REQ-aat4yt. The first paragraph of this Overview ("It writes nothing to any
+chain") and the count "Nine items" describe the unit without the `write`
+feature, which is how it still compiles by default; with it there are ten. The
+writer holds no key and stores nothing, takes this unit's own value types, and
+depends on neither org-node nor org-members. It is class C like the rest and
+has no segregation boundary of its own.
 
 **Source cells corrected 2026-09-28 by this change's review sweep.**
 SDD-4z3k2u read `` `src/client.rs` (`internals`) ``, but the item is

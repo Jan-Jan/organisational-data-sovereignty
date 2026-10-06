@@ -11,12 +11,23 @@ address advances the on-chain epoch and then refuses, leaving the published
 root without the member while the administrator's own record still holds them.
 affects: SDD-72ddm6, LLR-pw369n, LLR-6dc598, LLR-qg9utu
 opened: 2026-10-04
-status: open
+status: resolved
+resolution: root cause — `revoke_member` wrote the chain before checking the
+Loopback address it would need to send. Change
+worktree-org-node-chain-authority (docs/plans/2026-10-05-chain-authority.md,
+T11) removed the chain write from org-node: `revoke_member` builds a
+provisional update and touches neither the chain nor the record, and the
+address check moved to `send_update`, which runs after a commit the chain
+already agrees with, so a missing address can no longer burn an epoch.
+Reproduced by inverting the pin in
+`a_loopback_revocation_without_an_address_burns_no_epoch`
+(org-node/tests/admission_sender.rs): red before (the chain at epoch 3),
+green after.
 
 ## What was observed
 
-`a_loopback_revocation_with_no_peer_address_is_refused_and_records_nothing`
-was first written to assert that the refusal precedes the chain write. It failed:
+The test now named `a_loopback_revocation_without_an_address_burns_no_epoch`
+(renamed 2026-10-06 with the resolution above) was first written to assert that the refusal precedes the chain write. It failed:
 the chain epoch was 3 where the test expected 2. The refusal is real and
 typed — `OrgNodeError::Chain("Loopback revoke requires the peer's
 EndpointAddr")` — but it sits in the `match mode` block at
@@ -31,8 +42,10 @@ closed deliberately rather than drifting shut.
 ## Why it is a problem and not a documented order
 
 The project has already ruled that **a failed push leaves the chain
-advanced** — `a_failed_push_leaves_the_administrators_record_where_it_was`
-records that for `admit_member`, and it is unavoidable there: whether the peer
+advanced** — the test now named
+`a_failed_send_leaves_the_committed_record_in_place` (renamed and re-asserted
+2026-10-06, when the commit moved ahead of the send) recorded that for
+`admit_member`, and it is unavoidable there: whether the peer
 is reachable cannot be known until the send is attempted.
 
 **This is not that case.** `peer_addr.is_none()` is knowable at the function's

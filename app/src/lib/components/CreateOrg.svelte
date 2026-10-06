@@ -2,6 +2,8 @@
 	/**
 	 * Story 1: create persona + create organisation.
 	 * Persona form → create_persona → create_organisation; shows org_id + epoch.
+	 * It offers no choice of Persona: it founds with the one it has just
+	 * created, which is bound to no Organisation (LLR-rt8gdz).
 	 */
 	import { createPersona, createOrganisation } from '$lib/api';
 

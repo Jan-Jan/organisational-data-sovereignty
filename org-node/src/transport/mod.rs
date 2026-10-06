@@ -9,7 +9,7 @@ use thiserror::Error;
 /// Selects how `OrgEndpoint` is bound and how peers are dialled.
 ///
 /// - `Loopback`: relay disabled, binds on `127.0.0.1`, dials the full
-///   `EndpointAddr` embedded in the blob.  Used by offline tests and
+///   `EndpointAddr` the caller holds for the peer.  Used by offline tests and
 ///   same-machine demo runs.
 /// - `Networked`: uses iroh's `presets::N0` (n0 relay servers + DNS/Pkarr
 ///   discovery), binds on all interfaces, and dials purely by `EndpointId`

@@ -18,8 +18,9 @@ use org_node::MemberSeed;
 use org_node::ids::OrgId;
 use org_node::sequence::SeqGuard;
 use org_node::test_fixtures::{admin_device, admit_member_delta, genesis_trie, org_public_key, Trie};
-use org_node::verify::{verify_envelope_against_chain, VerifyContext};
+use org_node::verify::{check_chain_free, verify_envelope_against_chain, VerifyContext};
 use org_node::{DeviceSeed, Envelope, Epoch, OrgNodeError, SequenceNumber};
+use std::cell::Cell;
 
 fn setup() -> (OrgId, Trie, Envelope, RootHash) {
     let admin = MemberSeed::from([1u8; 32]).x25519_keypair();
@@ -409,4 +410,54 @@ fn the_sequence_number_is_checked_after_the_stale_epoch_and_before_the_root_matc
     let wrong_root = chain_at(org, RootHash::new([0xde; 32]), Epoch::new(3));
     let both = verify_envelope_against_chain(&local, &env, &ctx, &wrong_root).unwrap_err();
     assert_eq!(both, OrgNodeError::SeqNotEpoch { seq: 2, epoch: 3 });
+}
+
+// ---- the chain-free half (T5 of docs/plans/2026-10-05-chain-authority.md) ---
+
+/// A chain reader that counts its reads.
+struct Counting {
+    inner: MockChain,
+    reads: Cell<usize>,
+}
+impl org_node::chain::ChainReader for Counting {
+    fn get_org_state(&self, org: &OrgId) -> Result<Option<OrgState>, String> {
+        self.reads.set(self.reads.get() + 1);
+        self.inner.get_org_state(org)
+    }
+}
+
+// Normal: an honest envelope passes the four chain-free checks.
+// verifies: REQ-f2k4tr, LLR-fuq379
+#[test]
+fn check_chain_free_passes_an_honest_envelope() {
+    let (org, local, env, _) = setup();
+    assert_eq!(check_chain_free(&local, &env, &ctx(org)), Ok(()));
+}
+
+// Abnormal: each chain-free check refuses with its own error, in order.
+// verifies: REQ-f2k4tr, LLR-fuq379
+#[test]
+fn check_chain_free_refuses_each_check_in_order() {
+    let (org, local, _env, _) = setup();
+    assert_eq!(check_chain_free(&local, &garbage(org, 2), &ctx(OrgId::new([0xee; 20]))), Err(OrgNodeError::OrgIdMismatch));
+    assert_eq!(check_chain_free(&local, &garbage(org, 1), &ctx(org)), Err(OrgNodeError::StaleSeq { got: 1, last_seen: 1 }));
+    assert_eq!(check_chain_free(&local, &garbage(org, 2), &ctx(org)), Err(OrgNodeError::MalformedDelta));
+    let stranger = MemberSeed::from([0x5a; 32]).x25519_keypair();
+    let (other_base, _) = admit_member_delta(&stranger);
+    let wrong_base = Envelope::build(org, SequenceNumber::new(2), &other_base).unwrap();
+    assert_eq!(check_chain_free(&local, &wrong_base, &ctx(org)), Err(OrgNodeError::DeltaBaseMismatch));
+}
+
+// Abnormal and normal: verify reads the chain only after the chain-free
+// checks pass, and then exactly once.
+// verifies: REQ-f2k4tr, LLR-fuq379
+#[test]
+fn verify_reads_the_chain_once_and_only_after_the_chain_free_checks() {
+    let (org, local, env, new_root) = setup();
+    let chain = Counting { inner: chain_at(org, new_root, Epoch::new(2)), reads: Cell::new(0) };
+    let stale = Envelope { parent_seq: SequenceNumber::new(1), ..env.clone() };
+    assert!(verify_envelope_against_chain(&local, &stale, &ctx(org), &chain).is_err());
+    assert_eq!(chain.reads.get(), 0, "a chain-free refusal reads no chain");
+    verify_envelope_against_chain(&local, &env, &ctx(org), &chain).unwrap();
+    assert_eq!(chain.reads.get(), 1, "a passing envelope reads the chain once");
 }

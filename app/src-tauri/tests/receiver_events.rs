@@ -736,10 +736,20 @@ fn locally_reachable_variants_are_classified_as_receiver_errors() {
     // fails to reconstruct. Neither says anything about
     // whether an update verified, so neither may be rendered as a ✗ MISMATCH row
     // under "Verified Updates (chain root match)" — the defect RC-3rddh7 exists
-    // to remove.
+    // to remove. Of the four refusals org-node gained with provisional
+    // operations, an unexpected first admission is refused before anything is
+    // verified, one that lists none of this node's Personas on a rule about
+    // this node, and the other two never arise on receive. A Persona already
+    // bound to an Organisation is a refusal about this node's own store,
+    // raised before anything is verified.
     for e in [
         OrgNodeError::OrgNotOnChain,
         OrgNodeError::Trie(OrgMembersError::IdNotFound),
+        OrgNodeError::AdmissionNotExpected { org_id: org_node::OrgId::new([1; 20]) },
+        OrgNodeError::AdmissionNotOurs { org_id: org_node::OrgId::new([1; 20]) },
+        OrgNodeError::ProvisionalLimit { limit: 1 },
+        OrgNodeError::NoProvisionalUpdate,
+        OrgNodeError::PersonaAlreadyBound { persona_id: org_node::PersonaId::new("p".into()) },
     ] {
         let outcome = events::classify_receive_error(&e);
         assert_eq!(

@@ -245,7 +245,7 @@ impl OrgEndpoint {
     /// send one framed [`WireMessage`].
     ///
     /// Used in [`TransportMode::Loopback`]: the `EndpointAddr` carries explicit
-    /// socket addresses (from the out-of-band blob exchange) so iroh can connect
+    /// socket addresses (the caller's, for the peer) so iroh can connect
     /// without discovery.
     ///
     /// Waits for the send stream to be fully flushed before returning.  The

@@ -26,6 +26,8 @@ pub mod h160;
 pub mod state;
 pub mod types;
 pub mod verify;
+#[cfg(feature = "write")]
+pub mod write;
 
 pub use crate::h160::h160_of;
 pub use crate::state::{BlockHash, BlockRef, Event, OrgState, SubscribedEvent};

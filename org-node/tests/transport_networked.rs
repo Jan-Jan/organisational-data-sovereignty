@@ -81,6 +81,7 @@ async fn delivers_and_verifies_admit_over_relay_by_id() {
         envelope: env.clone(),
         org_secret: Some(OrgSecret::from([0xab; 32])),
         genesis_snapshot: None,
+        invite_id: None,
     };
 
     // In-process relay + shared in-memory address lookup. The Server is held

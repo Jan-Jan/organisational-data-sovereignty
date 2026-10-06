@@ -57,14 +57,17 @@ its parse refuses is refused when it is loaded, imported or decoded, with no
 migration (no store has been deployed).
 
 **REQ-qn2erx**: The software shall refuse to create a Persona, open a Persona
-store, import a Join request, import an Invite, or decode the record snapshot
-a first admission extends, whose handle, name or surname the member-record
-rules would refuse or one of whose keys is not a curve point, reporting the
-field that failed (an
-Invite's refusal reports that the Invite failed to decode, without the
-field's name), and shall create, store, import or extend nothing in that case.
+store, or decode the record snapshot a first admission extends, whose handle,
+name or surname the member-record rules would refuse or one of whose keys is
+not a curve point, reporting the field that failed, and shall create, store or
+extend nothing in that case.
 (implements: RC-zutc67)
 satisfies: derived
+
+*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`):*
+the Join request and Invite imports are removed from this item, because the
+invitation exchange leaves org-node for the app, which parses both at its own
+edge (`app/docs/requirements/`, the invitation exchange). The Invite's parenthesis went with them.
 
 (Amended 2026-10-05 after independent review round 3: by owner ruling the
 requirement covers keys as well as the handle, name and surname — a store, Join

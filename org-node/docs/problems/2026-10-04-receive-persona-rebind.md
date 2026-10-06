@@ -14,7 +14,8 @@ Persona's device key, after which ordinary updates and revocations are judged
 against the wrong Organisation.
 affects: SDD-8cpyfa, SDD-72ddm6, LLR-y2v8v2, LLR-jwhzh3, LLR-jsx922, LLR-e5c9ud, LLR-w3fhhg, LLR-q3aj8z
 opened: 2026-10-04
-status: open
+status: resolved
+resolution: root cause was `PersonaRecord.org_id` holding one Organisation while `commit_genesis` and both branches of `receive_and_verify` overwrote it; by owner ruling 2026-10-06 (REQ-yp75u9) no path rebinds a bound Persona: `create_organisation` and `commit_genesis` refuse it with `PersonaAlreadyBound` (LLR-6z5xya, LLR-eyc4ud), and `receive_and_verify` binds only an unbound Persona on a first admission, refusing one that lists only Personas bound elsewhere (LLR-eyc4ud); reproduced by `pr_mdv38y_an_update_enrolling_another_organisations_persona_does_not_rebind_it`, `pr_mdv38y_a_member_persona_cannot_found_another_organisation` and `a_first_admission_listing_only_a_persona_bound_elsewhere_is_refused` (org-node/tests/admission_sender.rs).
 
 ## What was observed
 
@@ -29,6 +30,12 @@ change's edits to `service.rs`.)
 `pr_mdv38y_the_receive_path_rebinds_another_organisations_persona`
 (`org-node/tests/admission_sender.rs`) pins the sequence. The device B holds
 org 1 through Persona b1 and org 2 through Persona b2.
+
+*Note 2026-10-06 (change `worktree-org-node-chain-authority`, independent
+review round 3, finding-1).* That pin no longer exists: it was rewritten as
+`pr_mdv38y_an_update_enrolling_another_organisations_persona_does_not_rebind_it`,
+which asserts the opposite now that REQ-yp75u9 forbids rebinding. The
+sequence below is the defect as it was found.
 
 1. Org 2's administrator admits b1's join request. B receives it on
    `receive_and_verify`. **b1 is rebound to org 2** and its member id replaced.
@@ -100,6 +107,15 @@ Persona's member id from the Organisation it was bound to before
 (LLR-q3aj8z), so after it the Persona names a member id that is not in the
 Organisation it is bound to. `pr_mdv38y_founding_an_organisation_rebinds_a_member_persona`
 asserts it.
+
+*Annotated 2026-10-06 (independent review round 2, finding-3).* The two
+paragraphs above describe the second writer as it was on 2026-10-05; their
+present tense is history. R1a of change `worktree-org-node-chain-authority`
+closed that path (REQ-yp75u9) and rewrote
+`pr_mdv38y_founding_an_organisation_rebinds_a_member_persona` as
+`pr_mdv38y_a_member_persona_cannot_found_another_organisation`
+(`org-node/tests/admission_sender.rs`), which asserts that a member Persona's
+founding is refused and its binding and member id are left as they were.
 
 *Annotated 2026-10-05 by review round 1 of `worktree-worktree-person-shared-types`
 (finding-6); reworded the same day by docs/plans/2026-10-05-switch-trim.md.* The

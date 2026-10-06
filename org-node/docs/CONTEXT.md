@@ -1,9 +1,11 @@
 # Context
 
 org-node is the node that carries an Organisation's membership between the
-chain and its devices: it receives Change sets from peers and decides whether
-to commit them, publishes new Membership roots to the chain, and keeps the
-device's keys and record at rest. It exists so that a device can hold a
+chain and its devices: it builds provisional updates, sends and receives
+Change sets, decides whether to commit them by reading the chain, and keeps the
+device's keys and record at rest. It does not write to the chain, and it has no
+concept of an administrator: the right to change an Organisation lies in its
+on-chain multisig proxy. It exists so that a device can hold a
 membership record it verified itself, against the chain, rather than one it
 was told.
 
@@ -23,15 +25,24 @@ chain's root at a newer epoch decides, and nothing about the sender is
 checked.
 _Avoid_: message, packet, delta envelope
 
+**Provisional update**:
+A Change set and the Membership root it produces, built by the node for
+creating an Organisation, admitting a Member or revoking one, that no record
+holds yet. It becomes the Membership record only once the chain carries its
+root and it has verified against the chain, on the node that built it as on
+every other.
+_Avoid_: pending update, draft, proposal
+
 **Wire message**:
 What one device sends another in one Receive operation: an Envelope, a
-snapshot of the membership as it stood before the Change set, and, on
-admission only, the Organisation secret. Wider than the Envelope, because
-neither the secret nor the snapshot is part of it.
-The snapshot is set on both paths the node sends on — admission and
-revocation — but only an admission's receiver reads it, to rebuild the record
-it is being admitted to; the receiver of a revocation rebuilds from its own
-store and ignores the snapshot it was sent.
+snapshot of the membership as it stood before the Change set, the
+Organisation secret when the sender passes one, and the invite identifier of
+the admission it carries, if any. Wider than the Envelope, because none of
+these is part of it.
+The snapshot is sent with every update, but only a first admission's receiver
+reads it, to rebuild the record it is being admitted to; every other receiver
+rebuilds from its own store. The invite identifier is what a node waiting to
+be admitted matches against the admission it declared it expects.
 _Avoid_: message, packet, payload
 
 **Sequence number**:
@@ -76,14 +87,28 @@ _Avoid_: account, profile, user
 
 **Persona store**:
 The encrypted file in which a device keeps its Personas, the records of the
-Organisations they belong to, and the Invites it has imported.
+Organisations they belong to, the provisional updates it has built and not
+yet committed or discarded, and the admissions it has declared it expects.
 _Avoid_: keystore, wallet, database
 
+**Expected admission**:
+An Organisation identifier and invite identifier the app has declared, when
+its user confirms the reply to an Invite, that this device expects a first
+admission for. A
+first admission that matches none is refused before the chain is read.
+_Avoid_: pending invite, invitation
+
 **Organisation secret**:
-An opaque value the administrator hands to a Member at admission, shared by
-every current Member. What it protects is the next capability's concern. The
-design intends it as the secret half of the Organisation key pair; the node
-does not yet relate it to the Organisation public key (PR-szkat6).
+An opaque value shared by every current Member. A sender may pass it in the
+Wire message of any update it sends, not only an admission, and a receiver
+that commits an update replaces the secret it holds with the one the message
+carries, or with none (LLR-ckk5nz; PR-xwek5e, unruled). What it protects is the next capability's
+concern. The design intends it as the secret half of the Organisation key
+pair; the node does not yet relate it to the Organisation public key
+(PR-szkat6), and nothing authenticates it until it does (PR-ve9zw8).
+*Amended 2026-10-06 (independent review round 2, finding-10):* it said the
+Member who admits another passes it on "with the admission"; `send_update`
+carries an optional secret on any update.
 _Avoid_: org key, group secret, shared key
 
 **Secret**:
@@ -93,19 +118,9 @@ store is encrypted under.
 Never shown in diagnostic output; given up only where it is deliberately used.
 _Avoid_: key material, private key (ambiguous with the public half)
 
-**Invite**:
-What an administrator gives a prospective Member out of band before
-admission: the Organisation, its Organisation public key, the administrator's
-Member-as-a-group key and the administrator's DevicePublicKey. None of it is
-checked against the admission when it arrives; the joiner records the
-administrator's Member-as-a-group key from it.
-_Avoid_: invitation code, link, ticket
-
-**Join request**:
-What a prospective Member's device gives the administrator out of band so that
-the administrator can admit it: the Member's name and Handle, their
-Member-as-a-group key and DevicePublicKey, and where the device can be reached.
-_Avoid_: application, enrolment request, JoinRequest (the type name)
+*Invite* and *Join request* were defined here until 2026-10-05, when the
+invitation exchange left org-node for the app; the app's glossary
+(`app/docs/CONTEXT.md`) defines *Invite* and *Invite reply*.
 
 **Receive operation**:
 One acceptance of one Wire message by the node, from opening the connection to

@@ -3,8 +3,8 @@
 //!
 //! Stories exercised:
 //!   1. A creates a persona and an organisation → epoch 1 in MockChain.
-//!   2. B creates a persona; exports a JoinRequest; A imports it.
-//!      A exports an Invite; B imports it (persists the administrator's keys).
+//!   2. B creates a persona and declares it expects the admission; A reads
+//!      the joiner it admits B as (B's details and two public keys).
 //!   3. A admits B (trie add → epoch 2 in MockChain; envelope pushed to B over iroh).
 //!   4. B receives and verifies the envelope → B's persona Active, OrgRecord stored.
 //!   5. A revokes B (trie remove → epoch 3); B self-deletes its OrgRecord.
@@ -14,28 +14,18 @@
 #![cfg(feature = "app")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod support;
+use support::{
+    admit, device_kp, found, h, joiner_of, nm, open_store, org_secret, prepare_to_join, reopen_store, revoke, sn,
+    spawn_receive, spawn_self_delete,
+};
+
 use std::time::Duration;
 
-use org_node::keys::SigningKeypair;
 use org_node::service::{MockChainOps, OrgService, SelfDeleteOutcome};
-use org_node::store::{PersonaStatus, PersonaStore};
+use org_node::store::PersonaStatus;
 use org_node::transport::endpoint::OrgEndpoint;
-use org_node::{DeviceSeed, Epoch, OrgSecret, PersonaId, SequenceNumber};
-
-/// The Organisation secret every admission in this file hands over.
-fn org_secret() -> Option<OrgSecret> {
-    Some(OrgSecret::from([0xffu8; 32]))
-}
-
-fn h(s: &str) -> org_members::Handle {
-    org_members::Handle::parse(s).unwrap()
-}
-fn nm(s: &str) -> org_members::Name {
-    org_members::Name::parse(s).unwrap()
-}
-fn sn(s: &str) -> org_members::Surname {
-    org_members::Surname::parse(s).unwrap()
-}
+use org_node::{DeviceSeed, Epoch, SequenceNumber};
 
 // The proper end-to-end test that runs all 5 stories in one function.
 // `five_stories_headless` (stories 1-4 only, no invite) was
@@ -51,8 +41,9 @@ fn sn(s: &str) -> org_members::Surname {
 // (Merged with master 05f6f04: LLR-ghja3x and LLR-37cj3n, which state that
 // the envelope is signed and verified under a signing key, are not carried —
 // the Envelope has no signature on this branch. *Amended 2026-10-05:*
-// LLR-rb8r65 is amended in place and carried here as amended.)
-// verifies: REQ-nhe2zu, REQ-txvtm9, REQ-xa6smf, REQ-uxv2x2, LLR-rb8r65, LLR-bg3vsw, LLR-t4znbk, LLR-q8emds, LLR-68yd3j, LLR-6zjzn2, LLR-cns6q6, LLR-6p4pj2
+// LLR-rb8r65 is amended in place. *T10 of the chain-authority change:*
+// LLR-rb8r65 and LLR-t4znbk are verified in commit_paths.rs.)
+// verifies: REQ-nhe2zu, REQ-txvtm9, REQ-xa6smf, REQ-uxv2x2, LLR-bg3vsw, LLR-q8emds, LLR-6zjzn2, LLR-cns6q6, LLR-6p4pj2
 #[tokio::test(flavor = "multi_thread")]
 async fn five_stories_full_e2e() {
     use rand::rngs::OsRng;
@@ -70,64 +61,43 @@ async fn five_stories_full_e2e() {
     let ep_b_admit = OrgEndpoint::bind(&b_device_kp).await.unwrap();
     let b_addr_admit = ep_b_admit.inner().addr();
 
-    // ---- Stores ----
-    let store_path = |party: &str| {
-        let dir = std::env::temp_dir().join(format!("ods-e2e-{party}-{}", std::process::id()));
-        // Cleared first, as the other helpers in this file do: a reused pid
-        // would open a store an earlier run left (review round 6).
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir.join("store.bin")
-    };
-    let store_a_path = store_path("a");
-    let store_b_path = store_path("b");
-
-    let store_a = PersonaStore::open(store_a_path.clone(), "pw_a").unwrap();
-    let store_b = PersonaStore::open(store_b_path.clone(), "pw_b").unwrap();
-
+    // ---- Stores (cleared first: a reused pid would open a store an earlier
+    // run left, review round 6) ----
     // svc_a starts without an endpoint; we bind it below once we know A's device seed.
-    let mut svc_a = OrgService::new(store_a, Box::new(chain_a));
-    let mut svc_b = OrgService::new(store_b, Box::new(chain_b_admit));
+    let mut svc_a = OrgService::new(open_store("e2e", "a", "pw_a"), Box::new(chain_a));
+    let mut svc_b = OrgService::new(open_store("e2e", "b", "pw_b"), Box::new(chain_b_admit));
 
     // ---- Story 1: A creates persona + org ----
     let pid_a = svc_a.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    let org_id = svc_a.create_organisation(&mut OsRng, &pid_a).await.unwrap();
+    let org_id = found(&mut svc_a, &chain, &pid_a).await;
 
     assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(1));
     assert_eq!(svc_a.list_personas()[0].status, PersonaStatus::Active);
 
     // Bind A's endpoint from the SAME device seed that `create_persona` generated.
-    // The QUIC-authenticated sender identity on B's side then equals the
-    // `admin_device_key` that `export_invite` will encode; nothing checks it.
-    let a_device_kp = svc_a.list_personas()
-        .iter()
-        .find(|p| p.persona_id == pid_a)
-        .map(|p| p.device_seed.signing_keypair())
-        .expect("persona not found after create");
+    // The QUIC-authenticated sender identity on B's side then equals A's
+    // persona device key; nothing checks it.
+    let a_device_kp = device_kp(&svc_a, &pid_a);
     let ep_a_admit = OrgEndpoint::bind(&a_device_kp).await.unwrap();
-    let svc_a = svc_a.with_endpoint(ep_a_admit);
-    let mut svc_a = svc_a;
+    let mut svc_a = svc_a.with_endpoint(ep_a_admit);
 
-    // ---- Story 2: B creates persona; A exports Invite; B imports it ----
+    // ---- Story 2: B creates persona; B declares it expects the admission ----
     let pid_b = svc_b.create_persona(&mut OsRng, h("bob"), nm("Bob"), sn("Builder")).unwrap();
 
-    // A exports the invite (admin_device_key = A's persona device key).
-    let invite_blob = svc_a.export_invite(org_id).unwrap();
-    // B imports and persists the invite.
-    let invite = svc_b.import_invite(&mut OsRng, &invite_blob).unwrap();
-    assert_eq!(invite.org_id, org_id);
+    // B declares it expects the admission, and persists the expectation.
+    prepare_to_join(&mut svc_b, org_id);
+    assert_eq!(svc_b.expected_admissions()[0].org_id, org_id);
 
-    // B exports a JoinRequest (includes B's iroh addr so A can dial back if needed).
+    // A reads the joiner it admits B as.
     let ep_b_for_jr = OrgEndpoint::bind(&b_device_kp).await.unwrap();
     let b_addr_jr = ep_b_for_jr.inner().addr();
     let svc_b = svc_b.with_endpoint(ep_b_for_jr);
 
-    let jr_blob = svc_b.export_join_request(&pid_b).unwrap();
-    let join_request = OrgService::import_join_request(&jr_blob).unwrap();
-    assert_eq!(join_request.handle.as_str(), "bob");
+    let joiner_b = joiner_of(&svc_b, &pid_b);
+    assert_eq!(joiner_b.handle.as_str(), "bob");
 
     // Rebuild svc_b with ep_b_admit so B can receive A's push.
-    let store_b2 = PersonaStore::open(store_b_path.clone(), "pw_b").unwrap();
+    let store_b2 = reopen_store("e2e", "b", "pw_b");
     let mut svc_b2 = OrgService::new(store_b2, Box::new(chain_b_revoke.clone()))
         .with_endpoint(ep_b_admit);
 
@@ -146,13 +116,9 @@ async fn five_stories_full_e2e() {
 
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    let b_member_id = tokio::time::timeout(
-        Duration::from_secs(30),
-        svc_a.admit_member(&mut OsRng, org_id, &join_request, b_addr_admit, org_secret()),
-    )
-    .await
-    .expect("admit_member timed out")
-    .expect("admit_member failed");
+    let b_member_id = admit(&mut svc_a, &chain, org_id, &joiner_b, b_addr_admit, org_secret())
+        .await
+        .expect("admit_member failed");
 
     // MockChain: epoch 2.
     assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(2), "admit must bump to epoch 2");
@@ -178,6 +144,7 @@ async fn five_stories_full_e2e() {
     assert_eq!(svc_b3.list_orgs().len(), 1, "B must have exactly 1 OrgRecord");
     assert_eq!(svc_b3.list_orgs()[0].epoch, Epoch::new(2));
     assert_eq!(svc_b3.list_orgs()[0].org_secret, org_secret());
+    assert!(svc_b3.expected_admissions().is_empty(), "the expectation is cleared on commit");
 
     // ---- Story 5: A revokes B; B self-deletes ----
 
@@ -207,13 +174,9 @@ async fn five_stories_full_e2e() {
     let ep_a_revoke = OrgEndpoint::bind(&a_device_kp).await.unwrap();
     let mut svc_a = svc_a.with_endpoint(ep_a_revoke);
 
-    tokio::time::timeout(
-        Duration::from_secs(30),
-        svc_a.revoke_member(&mut OsRng, org_id, b_member_id, Some(b_addr_revoke)),
-    )
-    .await
-    .expect("revoke_member timed out")
-    .expect("revoke_member failed");
+    revoke(&mut svc_a, &chain, org_id, b_member_id, Some(b_addr_revoke))
+        .await
+        .expect("revoke_member failed");
 
     // MockChain: epoch 3.
     assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(3), "revoke must bump to epoch 3");
@@ -244,10 +207,10 @@ async fn five_stories_full_e2e() {
         "B's persona must be Revoked after self-delete"
     );
 
-    // A still has the org at epoch 3 with only the admin in the trie.
+    // A still has the org at epoch 3 with only its founding member in the trie.
     assert_eq!(svc_a.list_orgs().len(), 1);
     assert_eq!(svc_a.list_orgs()[0].epoch, Epoch::new(3));
-    assert_eq!(svc_a.list_orgs()[0].trie_members.len(), 1, "only admin should remain");
+    assert_eq!(svc_a.list_orgs()[0].trie_members.len(), 1, "only A should remain");
 
     let _ = (pid_b, b_addr_jr, chain_b_revoke); // suppress unused warnings
 }
@@ -261,137 +224,66 @@ async fn five_stories_full_e2e() {
 async fn revocation_of_another_member_is_committed_not_self_deleted() {
     use rand::rngs::OsRng;
 
-    const NET: Duration = Duration::from_secs(30);
-
-    /// Fresh encrypted store under `temp_dir()`, unique per party and process.
-    fn store_path(party: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir()
-            .join(format!("ods-revoke-other-{party}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir.join("store.bin")
-    }
-
-    /// The device keypair of a persona, from its persisted `device_seed`.
-    fn device_kp(svc: &OrgService, persona_id: &PersonaId) -> SigningKeypair {
-        svc.list_personas()
-            .iter()
-            .find(|p| &p.persona_id == persona_id)
-            .map(|p| p.device_seed.signing_keypair())
-            .expect("persona not found")
-    }
-
     // ---- Shared chain and two services ----
     let chain = MockChainOps::new();
-    let mut svc_a = OrgService::new(
-        PersonaStore::open(store_path("a"), "pw_a").unwrap(),
-        Box::new(chain.clone()),
-    );
-    let mut svc_b = OrgService::new(
-        PersonaStore::open(store_path("b"), "pw_b").unwrap(),
-        Box::new(chain.clone()),
-    );
+    let mut svc_a = OrgService::new(open_store("revoke-other", "a", "pw_a"), Box::new(chain.clone()));
+    let mut svc_b = OrgService::new(open_store("revoke-other", "b", "pw_b"), Box::new(chain.clone()));
 
-    // ---- Stories 1-2: A creates persona + org; B imports A's invite ----
+    // ---- Stories 1-2: A creates persona + org; B declares it expects the admission ----
     let pid_a = svc_a.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    let org_id = svc_a.create_organisation(&mut OsRng, &pid_a).await.unwrap();
+    let org_id = found(&mut svc_a, &chain, &pid_a).await;
     assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(1));
 
     // A's endpoint is bound from A's persona device seed, so the authenticated
-    // QUIC sender on B's side equals the invite's `admin_device_key`.
+    // QUIC sender on B's side equals A's persona device key.
     let a_device_kp = device_kp(&svc_a, &pid_a);
     let mut svc_a = svc_a.with_endpoint(OrgEndpoint::bind(&a_device_kp).await.unwrap());
 
     let pid_b = svc_b.create_persona(&mut OsRng, h("bob"), nm("Bob"), sn("Builder")).unwrap();
-    let invite_blob = svc_a.export_invite(org_id).unwrap();
-    let invite = svc_b.import_invite(&mut OsRng, &invite_blob).unwrap();
-    assert_eq!(invite.org_id, org_id);
+    prepare_to_join(&mut svc_b, org_id);
+    assert_eq!(svc_b.expected_admissions()[0].org_id, org_id);
 
-    let jr_b_blob = svc_b.export_join_request(&pid_b).unwrap();
-    let jr_b = OrgService::import_join_request(&jr_b_blob).unwrap();
+    let jr_b = joiner_of(&svc_b, &pid_b);
     let b_device_kp = device_kp(&svc_b, &pid_b);
 
     // ---- Stories 3-4: A admits B; B receives and commits epoch 2 ----
-    let ep_b = OrgEndpoint::bind(&b_device_kp).await.unwrap();
-    let b_addr = ep_b.inner().addr();
-    let mut svc_b_admit = svc_b.with_endpoint(ep_b);
-    let b_task = tokio::spawn(async move {
-        let r = tokio::time::timeout(NET, svc_b_admit.receive_and_verify(&mut OsRng))
-            .await
-            .expect("B receive_and_verify(B admission) timed out");
-        (svc_b_admit, r)
-    });
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    let (b_addr, b_task) = spawn_receive(svc_b, &b_device_kp).await;
 
-    tokio::time::timeout(
-        NET,
-        svc_a.admit_member(&mut OsRng, org_id, &jr_b, b_addr, org_secret()),
-    )
-    .await
-    .expect("admit_member(B) timed out")
-    .expect("admit_member(B) failed");
+    admit(&mut svc_a, &chain, org_id, &jr_b, b_addr, org_secret())
+        .await
+        .expect("admit_member(B) failed");
     assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(2), "admitting B must bump to epoch 2");
 
     let (svc_b, r) = b_task.await.unwrap();
     let outcome = r.expect("B's direct admission from A must verify");
     assert_eq!(outcome.epoch, Epoch::new(2));
-    assert_eq!(svc_b.list_orgs()[0].trie_members.len(), 2, "admin + B");
+    assert_eq!(svc_b.list_orgs()[0].trie_members.len(), 2, "A + B");
 
     // ---- A creates persona C and admits it, pushing the update to B ----
-    // C lives in A's store; `admin_persona_for_org` matches by member key, so A
-    // stays the org's admin.
+    // C lives in A's store; A's endpoint stays bound from A's Persona, so B
+    // sees C's admission arrive from A's device.
     let pid_c = svc_a.create_persona(&mut OsRng, h("carol"), nm("Carol"), sn("Coder")).unwrap();
-    let jr_c_blob = svc_a.export_join_request(&pid_c).unwrap();
-    let jr_c = OrgService::import_join_request(&jr_c_blob).unwrap();
+    let jr_c = joiner_of(&svc_a, &pid_c);
     assert_eq!(jr_c.handle.as_str(), "carol");
 
-    let ep_b = OrgEndpoint::bind(&b_device_kp).await.unwrap();
-    let b_addr = ep_b.inner().addr();
-    let mut svc_b_update = svc_b.with_endpoint(ep_b);
-    let b_task = tokio::spawn(async move {
-        let r = tokio::time::timeout(NET, svc_b_update.receive_and_verify(&mut OsRng))
-            .await
-            .expect("B receive_and_verify(C admission) timed out");
-        (svc_b_update, r)
-    });
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    let (b_addr, b_task) = spawn_receive(svc_b, &b_device_kp).await;
 
-    let c_member_id = tokio::time::timeout(
-        NET,
-        svc_a.admit_member(&mut OsRng, org_id, &jr_c, b_addr, org_secret()),
-    )
-    .await
-    .expect("admit_member(C) timed out")
-    .expect("admit_member(C) failed");
+    let c_member_id = admit(&mut svc_a, &chain, org_id, &jr_c, b_addr, org_secret())
+        .await
+        .expect("admit_member(C) failed");
     assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(3), "admitting C must bump to epoch 3");
 
     let (svc_b, r) = b_task.await.unwrap();
-    let outcome = r.expect("B must accept C's admission pushed by the admin's own device");
+    let outcome = r.expect("B must accept C's admission pushed by A's own device");
     assert_eq!(outcome.epoch, Epoch::new(3), "B must commit epoch 3");
-    assert_eq!(svc_b.list_orgs()[0].trie_members.len(), 3, "admin + B + C");
+    assert_eq!(svc_b.list_orgs()[0].trie_members.len(), 3, "A + B + C");
 
     // ---- A revokes C; B receives the revocation ----
-    let ep_b = OrgEndpoint::bind(&b_device_kp).await.unwrap();
-    let b_addr = ep_b.inner().addr();
-    let mut svc_b_revoke = svc_b.with_endpoint(ep_b);
-    let b_task = tokio::spawn(async move {
-        let r = tokio::time::timeout(
-            NET,
-            svc_b_revoke.receive_and_self_delete_if_revoked(&mut OsRng),
-        )
-        .await
-        .expect("B receive_and_self_delete_if_revoked timed out");
-        (svc_b_revoke, r)
-    });
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    let (b_addr, b_task) = spawn_self_delete(svc_b, &b_device_kp).await;
 
-    tokio::time::timeout(
-        NET,
-        svc_a.revoke_member(&mut OsRng, org_id, c_member_id, Some(b_addr)),
-    )
-    .await
-    .expect("revoke_member(C) timed out")
-    .expect("revoke_member(C) failed");
+    revoke(&mut svc_a, &chain, org_id, c_member_id, Some(b_addr))
+        .await
+        .expect("revoke_member(C) failed");
     assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(4), "revoking C must bump to epoch 4");
 
     let (svc_b_final, r) = b_task.await.unwrap();
@@ -422,7 +314,7 @@ async fn revocation_of_another_member_is_committed_not_self_deleted() {
         chain.get(&org_id).unwrap().root_hash,
         "B's committed root must match the on-chain root"
     );
-    assert_eq!(rec_b.trie_members.len(), 2, "admin + B only");
+    assert_eq!(rec_b.trie_members.len(), 2, "A + B only");
     assert!(
         !rec_b.trie_members.iter().any(|m| m.id == c_member_id),
         "C must be gone from B's trie snapshot"
@@ -459,21 +351,11 @@ async fn revocation_from_an_unknown_device_leaves_the_record_in_place() {
     use org_node::envelope::Envelope;
     use org_node::error::OrgNodeError;
     use org_node::store::MemberSnapshot;
-    use org_node::keys::X25519Keypair;
+    use org_node::keys::{SigningKeypair, X25519Keypair};
     use org_node::transport::wire::WireMessage;
+    use org_node::PersonaId;
 
     type Trie = OrgTrie<Blake3Hasher>;
-
-    const NET: Duration = Duration::from_secs(30);
-
-    /// Fresh encrypted store under `temp_dir()`, unique per party and process.
-    fn store_path(party: &str) -> std::path::PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("ods-unknown-sender-{party}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir.join("store.bin")
-    }
 
     /// The member and device keypairs of a persona, from its persisted seeds.
     fn keys_of(svc: &OrgService, persona_id: &PersonaId) -> (X25519Keypair, SigningKeypair) {
@@ -490,50 +372,29 @@ async fn revocation_from_an_unknown_device_leaves_the_record_in_place() {
 
     // ---- Two services over one shared mock chain ----
     let chain = MockChainOps::new();
-    let mut svc_a = OrgService::new(
-        PersonaStore::open(store_path("a"), "pw_a").unwrap(),
-        Box::new(chain.clone()),
-    );
-    let mut svc_b = OrgService::new(
-        PersonaStore::open(store_path("b"), "pw_b").unwrap(),
-        Box::new(chain.clone()),
-    );
+    let mut svc_a = OrgService::new(open_store("unknown-sender", "a", "pw_a"), Box::new(chain.clone()));
+    let mut svc_b = OrgService::new(open_store("unknown-sender", "b", "pw_b"), Box::new(chain.clone()));
 
-    // ---- A creates persona + org; B imports A's invite ----
+    // ---- A creates persona + org; B declares it expects the admission ----
     let pid_a = svc_a.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    let org_id = svc_a.create_organisation(&mut OsRng, &pid_a).await.unwrap();
+    let org_id = found(&mut svc_a, &chain, &pid_a).await;
     assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(1));
 
     let (a_member_kp, a_device_kp) = keys_of(&svc_a, &pid_a);
     let mut svc_a = svc_a.with_endpoint(OrgEndpoint::bind(&a_device_kp).await.unwrap());
 
     let pid_b = svc_b.create_persona(&mut OsRng, h("bob"), nm("Bob"), sn("Builder")).unwrap();
-    let invite_blob = svc_a.export_invite(org_id).unwrap();
-    svc_b.import_invite(&mut OsRng, &invite_blob).unwrap();
+    prepare_to_join(&mut svc_b, org_id);
 
-    let jr_b_blob = svc_b.export_join_request(&pid_b).unwrap();
-    let jr_b = OrgService::import_join_request(&jr_b_blob).unwrap();
+    let jr_b = joiner_of(&svc_b, &pid_b);
     let (b_member_kp, b_device_kp) = keys_of(&svc_b, &pid_b);
 
     // ---- A admits B; B receives and commits epoch 2 ----
-    let ep_b = OrgEndpoint::bind(&b_device_kp).await.unwrap();
-    let b_addr = ep_b.inner().addr();
-    let mut svc_b_admit = svc_b.with_endpoint(ep_b);
-    let b_task = tokio::spawn(async move {
-        let r = tokio::time::timeout(NET, svc_b_admit.receive_and_verify(&mut OsRng))
-            .await
-            .expect("B receive_and_verify(B admission) timed out");
-        (svc_b_admit, r)
-    });
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    let (b_addr, b_task) = spawn_receive(svc_b, &b_device_kp).await;
 
-    let b_member_id = tokio::time::timeout(
-        NET,
-        svc_a.admit_member(&mut OsRng, org_id, &jr_b, b_addr, org_secret()),
-    )
-    .await
-    .expect("admit_member(B) timed out")
-    .expect("admit_member(B) failed");
+    let b_member_id = admit(&mut svc_a, &chain, org_id, &jr_b, b_addr, org_secret())
+        .await
+        .expect("admit_member(B) failed");
     assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(2), "admitting B must bump to epoch 2");
 
     let (svc_b, r) = b_task.await.unwrap();
@@ -596,25 +457,13 @@ async fn revocation_from_an_unknown_device_leaves_the_record_in_place() {
         "the forging device must not be in B's record"
     );
     let envelope = Envelope::build(org_id, SequenceNumber::new(seq_before.get() + 1), &delta).unwrap();
-    let msg = WireMessage { envelope, org_secret: None, genesis_snapshot: None };
+    let msg = WireMessage { envelope, org_secret: None, genesis_snapshot: None, invite_id: None };
 
     // ---- B receives the forged revocation ----
-    let ep_b = OrgEndpoint::bind(&b_device_kp).await.unwrap();
-    let b_addr = ep_b.inner().addr();
-    let mut svc_b_recv = svc_b.with_endpoint(ep_b);
-    let b_task = tokio::spawn(async move {
-        let r = tokio::time::timeout(
-            NET,
-            svc_b_recv.receive_and_self_delete_if_revoked(&mut OsRng),
-        )
-        .await
-        .expect("B receive_and_self_delete_if_revoked timed out");
-        (svc_b_recv, r)
-    });
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    let (b_addr, b_task) = spawn_self_delete(svc_b, &b_device_kp).await;
 
     let ep_forger = OrgEndpoint::bind(&forger_device).await.unwrap();
-    tokio::time::timeout(NET, ep_forger.send(b_addr, &msg))
+    tokio::time::timeout(support::NET, ep_forger.send(b_addr, &msg))
         .await
         .expect("forged send timed out")
         .expect("forged send failed");

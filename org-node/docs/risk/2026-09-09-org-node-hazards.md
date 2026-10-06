@@ -158,6 +158,12 @@ P2: any device that can reach the node can deliver an envelope, the transport
 authenticates a device key and nothing more (`org-node/src/transport/endpoint.rs:5`),
 and the envelope is hostile input by construction.
 
+*Amended 2026-10-05 (change `worktree-org-node-chain-authority`):* "a
+signature not checked or checked against a key the sender chose" no longer
+names a check the node makes; the envelope carries no signature and the chain
+is the sole authority (RC-pm9kmx as amended). The hazard is otherwise
+unchanged.
+
 **RC-6a2dke**: the node commits a Change set only when the Membership root
 recomputed by applying it to the node's own record equals the Membership root
 of the Organisation state the node itself read from the chain in the same
@@ -168,9 +174,9 @@ an Organisation the chain does not know is rejected. mitigates: HAZ-tawvm2
 **RC-pm9kmx**: before a received Change set is decoded, the node requires the
 Envelope to name the Organisation the node expected, and rejects one that
 does not with a typed error and without decoding the Change set; it checks
-no signature and no key of the sender, and leaves authority over the Change
-set to the Membership root and epoch it reads from the chain (RC-6a2dke,
-RC-e5atck). mitigates: HAZ-tawvm2
+no signature and no key of the sender or of any Member or device, and
+leaves authority over the Change set to the Membership root and epoch it
+reads from the chain (RC-6a2dke, RC-e5atck). mitigates: HAZ-tawvm2
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`;
 text written by change `worktree-person-shared-types`, which merges first).*
@@ -179,6 +185,14 @@ identifier, the Sequence number and the Change set bytes by the published
 signing key. The right to change an Organisation's data lies in its on-chain
 multisig proxy, so the Envelope carries no signature and the chain is the
 sole authority.
+
+*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
+This control first also required a valid signature by the Published signing
+key. The right to change an Organisation lies in its on-chain multisig proxy,
+org-node has no administrator, and the signing key was one Member's, so the
+signature added nothing RC-6a2dke, RC-e5atck and RC-m4r75s do not. The
+assessment is in
+`org-node/docs/risk/2026-10-06-chain-authority.md`.
 
 **RC-e5atck**: the node commits a Change set only when the epoch of the
 Organisation state it verified against is strictly greater than the epoch of
@@ -438,6 +452,13 @@ S3. Probability: P2.
 P2: relaying is what a network does, and the receiving device on first
 admission has no record yet to check the sender against.
 
+*Amended 2026-10-05 (change `worktree-org-node-chain-authority`):* the
+envelope no longer carries a signature, and no sender is checked, so a peer
+other than the one that built an admission can substitute the secret on any
+admission. The hazard text above is unchanged; its residual is **not
+acceptable** until the key-pair change checks a received key against the
+chain (owner-accepted window, 2026-10-05).
+
 **RC-b6mydy**: the node commits a received Wire message only through the
 checks of RC-pm9kmx, RC-6a2dke, RC-e5atck, RC-m4r75s and RC-95dgg8, and
 checks nothing about the Device key the connection authenticated: not on a
@@ -468,6 +489,19 @@ earlier ruling that the secret is replaced by CGKA keys a member verifies
 against the Organisation public key is recorded beside it, unranked: whether
 change 2's receipt check supersedes it was not ruled (Q2 of
 docs/plans/2026-10-05-switch-trim.md).
+
+*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
+This control first required a first admission's sender to be the
+administrator's DevicePublicKey named by an imported Invite, and a later sender to
+be in the verified Membership record. The owner ruled that nothing about the
+sender is checked and that org-node has no administrator. What the control now
+states mitigates only the part of each hazard the root match already
+mitigates: HAZ-ep6uzs's substituted secret is unmitigated until the key-pair
+change checks a received key against the chain (owner-accepted window), and
+HAZ-vxabf9's non-cooperative half rested on refusing messages the root match
+also refuses. The prose below describes the control before this amendment.
+The assessment is in
+`org-node/docs/risk/2026-10-06-chain-authority.md`.
 
 *Before 2026-10-05:*
 

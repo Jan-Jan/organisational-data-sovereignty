@@ -5,9 +5,11 @@
 
 pub mod commands;
 pub mod events;
+pub mod invitation;
 pub mod parsing;
 pub mod policy;
 pub mod state;
+pub mod submit;
 
 use tauri::Manager;
 
@@ -34,8 +36,8 @@ pub fn run() {
             commands::create_organisation,
             commands::export_invite,
             commands::import_invite,
-            commands::export_join_request,
-            commands::import_join_request,
+            commands::produce_invite_reply,
+            commands::import_invite_reply,
             commands::admit_member,
             commands::revoke_member,
             commands::list_personas,

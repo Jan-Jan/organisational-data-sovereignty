@@ -201,7 +201,15 @@ Abnormal: `unknown_command_is_rejected` (ipc): the near-miss name
 
 **SDD-2pa6h6**: refusal of malformed operator-supplied identifiers and values
 at the IPC edge, before they address a service call.
-traces: REQ-sjkp8z, REQ-vgr7s2
+traces: REQ-sjkp8z, REQ-vgr7s2, REQ-yazum3
+
+*Amended 2026-10-06 (change `worktree-org-node-chain-authority`).* The
+invitation exchange left org-node for this unit, so the Invite and the Invite
+reply are parsed here, at this unit's edge: `Invite::parse` and
+`InviteReply::parse` in `app/src-tauri/src/invitation.rs` (LLR-b7wgpf, in
+`2026-10-06-invitation.md`), and the item traces
+REQ-yazum3. `admit_member` takes a reply Blob and a peer address in place of
+the join-request Blob (LLR-ctrfz4, amended below).
 
 **LLR-ecaw34**: `parse_org_id` strips at most one leading `0x`. It then accepts
 exactly forty hexadecimal characters, in either case, as twenty bytes of the
@@ -251,6 +259,14 @@ command now reddens that command's test. Review round 2 (finding-1) did the
 same for `export_invite`: its two abnormal tests checked only that the message
 contained `40 hex chars` or `hex`, so a fixed message in their place left them
 green. They now require the parser's exact message too.
+
+*Note 2026-10-06 (change `worktree-org-node-chain-authority`):* the three
+commands keep this requirement with new arguments — `export_invite` takes the
+Organisation name and the invitee's name, `admit_member` an Invite reply Blob
+and a peer address — and on `AppState::for_test` they now fail after the
+parse at the first step that needs a stored Organisation or an outstanding
+invite, not at `find_org`; the abnormal tests are unchanged in what they
+assert.
 
 Narrowed by the deslop review. The text read "on success it hands the
 parsed identifier on". On `AppState::for_test`, all three commands fail at
@@ -321,15 +337,24 @@ the service before the secret is used. Handing a fixed secret when none was
 supplied, or in place of the decoded one, reddened nothing (runs T5-A96,
 T5-A100).
 
-**LLR-ctrfz4**: when the join request carries no node address, `admit_member`
-does not decode one and does not refuse the request. Otherwise it decodes the
-node address as a postcard-encoded `EndpointAddr`, and refuses bytes that are
-not one with a message beginning `node_addr decode:`.
+**LLR-ctrfz4**: `admit_member` treats a peer address that is empty or only
+whitespace as absent, and does not decode it or refuse the request. It decodes
+a non-blank one from hexadecimal and then as a postcard-encoded
+`EndpointAddr`, and does not refuse one that decodes. Text that is not
+hexadecimal is refused with a message beginning `peer_addr_blob hex:`, and
+bytes that are not an `EndpointAddr` with one beginning `peer_addr decode:`.
 satisfies: derived
 
 Normal: `admit_member_does_not_refuse_a_32_byte_or_absent_org_secret`,
-`admit_member_does_not_refuse_a_decodable_node_addr` (ipc).
-Abnormal: `admit_member_refuses_a_node_addr_that_is_not_an_endpoint_addr` (ipc).
+`admit_member_does_not_refuse_a_blank_or_decodable_peer_addr` (ipc).
+Abnormal: `admit_member_refuses_a_peer_addr_that_is_not_hex`,
+`admit_member_refuses_a_peer_addr_that_is_not_an_endpoint_addr` (ipc).
+
+*Amended 2026-10-06 (change `worktree-org-node-chain-authority`).* This
+stated how `admit_member` read the node address a join request carried. The
+join request left org-node, and the Invite reply carries no address
+(REQ-tcutr6), so the caller passes the joiner's address as `revoke_member`'s
+caller does (LLR-ty85xv, LLR-n6twt7), needed in Loopback transport only.
 
 Cut by the sweep: which address reaches the service. That the id-only address
 is built from the device key, and that a decoded address is the one handed
@@ -362,7 +387,20 @@ here (LLR-4wcyqy).
 service, calls `OrgService`, maps its error to a string and returns a DTO
 that carries no secret key material. The commands named in SDD-6g3wnh carry
 no low-level requirement.
-traces: REQ-vgr7s2, REQ-sjkp8z, REQ-645jq9
+traces: REQ-vgr7s2, REQ-sjkp8z, REQ-645jq9, REQ-prjja8, REQ-tcutr6, REQ-65xqp8, REQ-ab2mfz, REQ-nfr3n2
+
+*Amended 2026-10-06 (change `worktree-org-node-chain-authority`).* The
+invitation exchange and the chain write moved into this unit, behind the
+commands. The item's code gains `app/src-tauri/src/invitation.rs`
+(`issue_invite`, `OutstandingInvites`, `produce_reply`, `check_reply`,
+`admit_reply`) and `app/src-tauri/src/submit.rs` (`ChainWriter`,
+`WriterNotConfigured`, `found_organisation`, `submit_commit_send`), and loses
+`JoinRequestDto` and `import_join_request`, whose place `InviteReplyDto` and
+`import_invite_reply` take. The surface is still twelve commands:
+`export_join_request` and `import_join_request` leave, `produce_invite_reply`
+and `import_invite_reply` arrive. Its low-level requirements for the new
+behaviour (LLR-9sraks, LLR-f35pda, LLR-w4mhd4, LLR-gha5f6, LLR-qhjp6g,
+LLR-be3zv9) are in `2026-10-06-invitation.md`.
 
 **LLR-4wcyqy**: the IPC suite's handler list registers the twelve commands
 under their snake_case names, and an invocation of any other name is refused
@@ -400,15 +438,29 @@ satisfies: derived
 Normal: `list_personas_reports_exactly_the_persona_fields` (ipc).
 Abnormal: `a_persona_in_no_organisation_reports_a_null_org_id` (ipc).
 
-**LLR-pmus9f**: `import_join_request` decodes a join-request blob and stores
-nothing. It returns the handle, name and surname, the member and device keys as
-hexadecimal, `has_node_addr` true exactly when the request carries a node
-address, and that address as hexadecimal. A blob that does not decode is
-refused with org-node's message, which names the blob.
+**LLR-pmus9f**: `import_invite_reply` parses an Invite reply Blob (LLR-b7wgpf)
+and stores nothing. It returns the Organisation identifier, the handle, name
+and surname, and the member and device keys as hexadecimal. A Blob that does
+not parse is refused with the parse's message, which names the field, and a
+reply whose invite identifier this device does not hold as outstanding for the
+Organisation the reply names (LLR-gha5f6's `check_reply`) is refused with a
+message saying so.
 satisfies: derived
 
-Normal: `import_join_request_reports_the_request_it_decodes` (ipc).
-Abnormal: `import_join_request_refuses_a_malformed_blob` (ipc).
+Normal: `import_invite_reply_reports_the_reply_it_parses` (ipc).
+Abnormal: `import_invite_reply_refuses_a_malformed_blob_or_an_unknown_invite`
+(ipc).
+
+*Amended 2026-10-06 (independent review round 2, finding-1).* "Outstanding"
+now means outstanding for the reply's Organisation: the abnormal test also
+presents the outstanding invite identifier under another Organisation.
+
+*Amended 2026-10-06 (change `worktree-org-node-chain-authority`).* This
+described `import_join_request`, which decoded org-node's join-request blob.
+The join request left org-node; the Invite reply the app parses takes its
+place in the onboarding flow, and the command that shows it to the inviter
+before admission is `import_invite_reply`. The notes below describe the
+earlier command's tests and are kept as its history.
 
 Since review round 1 (finding-5), the abnormal test requires the message
 that `OrgService::import_join_request` itself returns for each input. It used
@@ -468,9 +520,20 @@ messages org-node formats.
 (`OrgIdMismatch`, `StaleSeq`, `MalformedDelta`, `DeltaBaseMismatch`,
 `RootMismatch`, `StaleEpoch`, `SeqNotEpoch`) as `VerifyFailed`, carrying
 the error's message and no organisation. It classifies every other variant
-(`Chain`, `OrgNotOnChain`, `Trie`, `InvalidOrgPublicKey`, `InvalidField`) as
-`ReceiveError`, carrying the error's message.
+(`Chain`, `OrgNotOnChain`, `Trie`, `InvalidOrgPublicKey`, `InvalidField`,
+`AdmissionNotExpected`, `AdmissionNotOurs`, `ProvisionalLimit`,
+`NoProvisionalUpdate`) as `ReceiveError`, carrying the error's message.
 satisfies: REQ-kn5rtx
+
+*Amended 2026-10-06 (change `worktree-org-node-chain-authority`).* org-node
+gains four refusals: a first admission no expectation matches, a first
+admission that lists none of the node's Personas, the bound on provisional
+updates, and a commit no provisional update matches. None is a verdict on a
+delivered change verified against the chain — the first is refused before
+anything is verified, the second after verification but on a rule about this
+node, and the other two never arise on receive — so each is a receiver error.
+The classification rule and the tests above are unchanged; the abnormal test
+`locally_reachable_variants_are_classified_as_receiver_errors` lists the four.
 
 *Amended 2026-10-06 (merge of master `d8b9f9b` into
 `worktree-worktree-person-shared-types`):* this item was written against
@@ -662,7 +725,17 @@ This requirement does not claim it.
 **SDD-jx363y**: the decision, made before any command is invoked, whether a
 revocation may be submitted, from the transport mode and the operator's
 inputs.
-traces: REQ-vgr7s2, REQ-he8ejb
+traces: REQ-vgr7s2, REQ-he8ejb, REQ-ab2mfz
+
+*Amended 2026-10-06 (change `worktree-org-node-chain-authority`).* The item
+also makes the webview's other pre-command decision this change adds: whether
+an Invite reply may be produced, and what the user is told first
+(`app/src/lib/invite.ts`: `REPLY_WARNING`, `replyGate`; LLR-n2u4uf, in
+`2026-10-06-invitation.md`). It is the same kind
+of decision — pure, made from the operator's inputs, tested under vitest — so
+it sits here rather than in a new item, and the item traces REQ-ab2mfz. The
+backend refuses an unconfirmed reply as well (LLR-w4mhd4), as SDD-2pa6h6
+re-checks what this item checks.
 
 **LLR-csbs5v**: `validateRevokeInput` trims the member identifier and strips at
 most one leading `0x`. It refuses a remainder that is not exactly 64
@@ -824,7 +897,21 @@ entry point and the startup wiring that reads the environment, chain-connection
 setup, the receiver loop, the commands whose success needs a chain, the
 frontend IPC client, and every Svelte component and route. It carries **no
 low-level requirements**.
-traces: REQ-7g3k9a, REQ-rxc8sp, REQ-bmk2z2, REQ-645jq9, REQ-e4ah9h, REQ-bvx4nh, REQ-6hgm8r, REQ-3hfggn, REQ-jfxah3, REQ-2k7ys4, REQ-dp95pv, REQ-tw4cb5, REQ-a83vqr, REQ-wu6z9p, REQ-rq8g2v, REQ-vgr7s2, REQ-he8ejb
+traces: REQ-7g3k9a, REQ-rxc8sp, REQ-bmk2z2, REQ-645jq9, REQ-e4ah9h, REQ-bvx4nh, REQ-6hgm8r, REQ-3hfggn, REQ-jfxah3, REQ-2k7ys4, REQ-dp95pv, REQ-tw4cb5, REQ-a83vqr, REQ-wu6z9p, REQ-rq8g2v, REQ-vgr7s2, REQ-he8ejb, REQ-prjja8, REQ-tcutr6, REQ-ab2mfz, REQ-nfr3n2
+
+*Amended 2026-10-06 (change `worktree-org-node-chain-authority`).* The code
+list below changes with the invitation exchange and the chain write moving
+into this unit. Chain-connection setup gains the production chain writer —
+`OnChainWriter` in `app/src-tauri/src/submit.rs`, over on-chain-client's
+`write` feature, holding the signatory key `build_chain_ops` parses — and
+`ChainNotConfigured` keeps only its read refusal. The commands whose success
+needs a chain are now `create_organisation`, the success paths of
+`export_invite`, `produce_invite_reply`, `import_invite_reply` and
+`admit_member`, `revoke_member`'s call into the service, `list_orgs` and
+`OrgDto`; `export_join_request` and `import_join_request` are gone. The
+onboarding panels `Invite.svelte` and `Admit.svelte` render the reply warning
+and the admission from a reply. So the item traces the four new requirements
+those call sites realise.
 
 Its code:
 

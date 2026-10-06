@@ -58,6 +58,18 @@ change to an Organisation's membership is one it will commit, and performs the
 chain and peer-to-peer I/O through which access is granted or withdrawn. It is
 IEC 62304 **class C** throughout, with no per-item override.
 
+*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
+Its chain I/O is reading only: org-node does not write to the chain. It builds
+provisional updates for creating an Organisation, admitting and revoking a
+Member, persists them, and commits one — its own as any received one — only
+once it verifies against the Organisation state on the chain. The app submits
+each update through on-chain-client's chain writer and then asks org-node to
+commit and send it. org-node has no concept of an administrator, checks no
+signature and nothing about a sender, and holds no Invite: the invitation
+exchange is the app's. The design is in
+`2026-10-06-chain-authority.md` and in the items
+it amends.
+
 It consumes two units and is consumed by one: `org-members` supplies the
 membership trie and the delta algebra, `on-chain-client` supplies the chain
 reading, and `app` drives it. Both providers are class C, so no
@@ -92,13 +104,25 @@ SDD-swtd3w, and LLR-8bum44 from SDD-vee2fq to SDD-af5vnt.)*
 | **The five stories** | SDD-ueh4tm, SDD-89es4z, SDD-rx2yvy, SDD-8cpyfa, SDD-72ddm6, SDD-b8tuv3 | How the parts compose into what a Persona does |
 | **The supplier edge** | SDD-msb6xh, SDD-rq6nv4, SDD-z85ux9 | What is said to the chain |
 
+*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
+The supplier edge now only reads: SDD-msb6xh and SDD-rq6nv4 state that
+org-node holds no calldata and no multisig, which moved with the chain write to
+on-chain-client, and SDD-z85ux9 reads Organisation state and runs the
+preflight checks. SDD-kk2y3e's Envelope carries no signature and SDD-sxp8hb's
+keys sign nothing. SDD-vee2fq states that org-node holds no out-of-band blob.
+The nineteen items stand; none is deleted.
+
 **The decisive property is one function.** `verify_envelope_against_chain`
-performs eight checks in a security-critical order, and ten low-level
-requirements refine that one ordering (SDD-na9nc3). A received change is
-committed only if applying it to the local record reproduces a root that
-independently matches the root the chain reports at an epoch newer than the
-last committed one. Everything else in this unit either feeds that function or
-acts on its verdict.
+performs seven checks in a security-critical order, and eleven low-level
+requirements refine that one ordering (SDD-na9nc3). A received change — and,
+since 2026-10-05, the node's own provisional update — is committed only if
+applying it to the local record reproduces a root that independently matches
+the root the chain reports at an epoch newer than the last committed one.
+Everything else in this unit either feeds that function or acts on its
+verdict. *Amended 2026-10-05 (owner ruling, change
+`worktree-org-node-chain-authority`): this said eight checks and ten
+requirements. The signature check is removed, and LLR-fuq379 adds that the
+four chain-free checks run before the chain is read.*
 
 **Two seams exist so that rule can be tested.** `ChainOps` (SDD-ueh4tm) makes
 the chain substitutable, and `ChainReader` (SDD-pa6p7w) makes the trusted-root
@@ -138,7 +162,9 @@ in the verification record's Gaps:
 - REQ-2wzfzv's bind failures, which no gated test can produce.
 - The Networked arm of `admit_member` and `revoke_member`, and
   `ensure_endpoint`'s use of the transport mode. Both need an injected-relay
-  constructor this unit does not have.
+  constructor this unit does not have. *(Amended 2026-10-05, owner ruling,
+  change `worktree-org-node-chain-authority`: the dial moves to
+  `send_update`, whose Networked arm is the one now unseen.)*
 - Which Persona a receive operation binds its endpoint from. Every receive
   test injects its endpoint.
 
@@ -155,6 +181,14 @@ decomposition file lists them, each with its reason:
   unnecessary rather than unverified;
 - the administrator-key exclusion in LLR-e5c9ud, which sits inside PR-mdv38y's
   defect.
+
+*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
+The last two exceptions go with the behaviour they described: LLR-u6rq4s now
+states that no sender is checked, and LLR-e5c9ud has no administrator-key
+exclusion. The compile-enforced requirements grow: besides the four, the
+requirements that now state an absence — LLR-na7p4w, LLR-g9vmbx, LLR-8qxwst,
+LLR-zj88e6, LLR-qezw3n and those of SDD-msb6xh and SDD-rq6nv4 — are enforced
+by the compiler, since what they forbid does not exist to call.
 
 The attestations are in the verification record for the change that wrote
 them.
@@ -175,6 +209,25 @@ Organisation and one endpoint per store, and nothing enforces that. PR-322qst,
 PR-xwek5e and PR-u4c2vp do not. Each reproduces on a store holding one Persona and one
 Organisation, and each has a cause of its own. *Corrected 2026-10-04 by review
 round 7, which measured that this sentence said "the last four".*
+
+*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
+The design of this change removes the behaviour three of these pins assert, so
+each pin is expected to redden when it is implemented: PR-u4c2vp (an update
+relayed by a non-member committed on the self-delete path) becomes the
+required behaviour on every path (LLR-3q63zv); PR-322qst (an own revocation
+committed as an update) is replaced by deletion on every commit path
+(LLR-b27jr6); and PR-b9wab3 (a Loopback revocation with no address burning an
+epoch) loses its mechanism, because org-node no longer submits to the chain
+(LLR-pw369n). PR-vt244s is narrowed — the sender's record no longer runs ahead
+of the chain, and a failed send no longer leaves it an epoch behind — and stays
+open by owner ruling. PR-mdv38y, PR-8qsnhx (its sending side) and PR-xwek5e
+are unchanged. Whether the three are resolved by this change is for its plan.
+
+*Note 2026-10-06 (independent review round 3, finding-1).* That change
+resolved PR-b9wab3, PR-322qst and, by the owner's ruling of one Persona per
+Organisation (REQ-yp75u9), PR-mdv38y; PR-u4c2vp was already resolved on master.
+Of the seven pinned defects named above, PR-vt244s, PR-8qsnhx and PR-xwek5e
+remain open and pinned.
 
 `test_paths` reads `verifies:` annotations only from `org-node/tests`, so a
 test in a `#[cfg(test)]` module under `src` cannot carry one. Twenty-two such

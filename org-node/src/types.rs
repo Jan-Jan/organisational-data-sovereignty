@@ -125,7 +125,7 @@ impl Serialize for OrgPublicKey {
     }
 }
 
-/// Decoding (the store, an Invite) goes through `parse` too.
+/// Decoding goes through `parse` too.
 impl<'de> Deserialize<'de> for OrgPublicKey {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let bytes = <[u8; 32]>::deserialize(d)?;
@@ -134,8 +134,8 @@ impl<'de> Deserialize<'de> for OrgPublicKey {
 }
 
 /// A chain account (`AccountId32`): an Organisation's pure proxy or a
-/// co-signatory. Tag type; converted to subxt's account type or raw bytes only
-/// inside `chain_write`.
+/// co-signatory. Opaque tag type: org-node holds and stores it, and hands its
+/// raw bytes to the app; it never converts it to subxt's account type.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ChainAccount([u8; 32]);
@@ -184,6 +184,22 @@ impl PersonaId {
 impl From<String> for PersonaId {
     fn from(id: String) -> Self {
         Self(id)
+    }
+}
+
+/// The identifier an Invite carries and its reply echoes (REQ-8amu2a): 32
+/// bytes the inviting app drew at random. Not secret.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct InviteId([u8; 32]);
+
+impl InviteId {
+    pub fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
     }
 }
 

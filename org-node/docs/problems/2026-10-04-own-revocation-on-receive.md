@@ -10,12 +10,21 @@ node keeps its record of the Organisation it was removed from, and its
 Persona stays Active.
 affects: REQ-uxv2x2, SDD-8cpyfa, SDD-72ddm6, LLR-cja9zv
 opened: 2026-10-04
-status: open
+status: resolved
+resolution: root cause — the own-removal rule (REQ-uxv2x2) was implemented
+on the self-delete path only. Change worktree-org-node-chain-authority
+(docs/plans/2026-10-05-chain-authority.md, T12) applies it on every commit
+of an Organisation already held (LLR-b27jr6): `receive_and_verify`,
+`commit_update` and the self-delete path share one rule. Reproduced by
+inverting the pin in `an_own_revocation_on_the_ordinary_path_deletes_the_record`
+(org-node/tests/admission_sender.rs): red before (B kept its record, committed
+at epoch 3, and stayed Active), green after.
 
 ## What was observed
 
-`pr_322qst_an_own_revocation_on_the_ordinary_path_is_committed_not_self_deleted`
-(`org-node/tests/admission_sender.rs`): B is admitted, then A revokes B and
+The PR-322qst pin (`org-node/tests/admission_sender.rs`, rewritten 2026-10-06
+as `an_own_revocation_on_the_ordinary_path_deletes_the_record`, see the
+resolution): B is admitted, then A revokes B and
 pushes the change to B's `receive_and_verify`. B returns `Ok` at epoch 3, holds
 a record whose trie no longer contains its device, and its Persona is still
 Active, in memory and on disk. The author reproduced the reviewer's probe on

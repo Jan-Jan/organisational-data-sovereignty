@@ -121,6 +121,16 @@ affects: RC-wqgm2p, LLR-t4znbk, LLR-qg9utu
 opened: 2026-09-09
 status: open
 
+*Annotated 2026-10-05 by change `worktree-org-node-chain-authority`.* That
+change moves the chain write out of org-node: `admit_member` and
+`revoke_member` build a provisional update, the app submits it, and the node
+commits its own update only after it verifies against the chain. The shape
+described below no longer exists, but the hazard does in a narrower form: a
+crash between the app's submission and the node's commit loses the
+provisional update while the chain has moved. By owner ruling (2026-10-05)
+this report stays open and is resolved in a later change; the citations below
+describe the code before that change.
+
 Where: `org-node/src/service.rs` — in `admit_member`, the chain write
 (`submit_update`) and the record update at the end of the function, with the
 transport send between them returning early on error; the same shape in

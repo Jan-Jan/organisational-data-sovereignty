@@ -1,17 +1,25 @@
 <script lang="ts">
 	/**
 	 * Story 2: Invite flow (two sides).
-	 * A (Org Admin): export_invite → show/copy blob.
-	 * B (Joiner):   paste invite blob → import_invite → create persona form → export_join_request → show/copy blob.
+	 * A (Member):  export_invite (REQ-prjja8) → show/copy the Invite Blob.
+	 * B (Invitee): paste an Invite → import_invite (REQ-yazum3) → choose a
+	 *              Persona → read REPLY_WARNING and confirm (REQ-ab2mfz,
+	 *              RC-wzb48r) → produce_invite_reply (REQ-tcutr6) → copy.
+	 *              Only Personas bound to no Organisation are offered
+	 *              (LLR-rt8gdz).
 	 */
 	import {
 		listOrgs,
+		listPersonas,
 		exportInvite,
 		importInvite,
 		createPersona,
-		exportJoinRequest,
-		type OrgDto
+		produceInviteReply,
+		type OrgDto,
+		type PersonaDto,
+		type InviteDto
 	} from '$lib/api';
+	import { REPLY_WARNING, replyGate, unboundPersonas } from '$lib/invite';
 
 	interface Props {
 		notifyReload?: () => void;
@@ -21,6 +29,8 @@
 	// --- Side A: export invite ---
 	let orgs = $state<OrgDto[]>([]);
 	let selectedOrgId = $state('');
+	let orgName = $state('');
+	let inviteeName = $state('');
 	let inviteBlob = $state('');
 	let exportBusy = $state(false);
 	let exportErr = $state('');
@@ -41,7 +51,7 @@
 		exportBusy = true;
 		exportErr = '';
 		try {
-			inviteBlob = await exportInvite(selectedOrgId);
+			inviteBlob = await exportInvite(selectedOrgId, orgName.trim(), inviteeName.trim());
 		} catch (e) {
 			exportErr = String(e);
 		} finally {
@@ -49,58 +59,85 @@
 		}
 	}
 
-	function copyInvite() {
-		navigator.clipboard.writeText(inviteBlob);
-	}
-
-	// --- Side B: import invite → create persona → export join request ---
+	// --- Side B: import invite → choose Persona → confirm → produce reply ---
 	let pastedInvite = $state('');
-	let importedOrgId = $state('');
+	let imported = $state<InviteDto | null>(null);
 	let importBusy = $state(false);
 	let importErr = $state('');
 
-	// Persona form (for the joiner)
-	let jHandle = $state('');
-	let jName = $state('');
-	let jSurname = $state('');
-	let jPersonaId = $state('');
-	let joinRequestBlob = $state('');
-	let jrBusy = $state(false);
-	let jrErr = $state('');
+	let personas = $state<PersonaDto[]>([]);
+	let personaId = $state('');
+	let confirmed = $state(false);
+	let replyBlob = $state('');
+	let replyBusy = $state(false);
+	let replyErr = $state('');
+
+	let gate = $derived(replyGate({ personaId, confirmed }));
+
+	// Persona form (create one to reply as)
+	let newHandle = $state('');
+	let newName = $state('');
+	let newSurname = $state('');
+	let createBusy = $state(false);
+	let createErr = $state('');
+
+	async function loadPersonas() {
+		try {
+			// LLR-rt8gdz: a Persona bound to an Organisation is not offered.
+			personas = unboundPersonas(await listPersonas());
+		} catch (e) {
+			replyErr = String(e);
+		}
+	}
 
 	async function doImportInvite() {
-		if (!pastedInvite.trim()) { importErr = 'Paste invite blob first.'; return; }
+		if (!pastedInvite.trim()) { importErr = 'Paste an Invite first.'; return; }
 		importBusy = true;
 		importErr = '';
+		imported = null;
+		confirmed = false;
+		replyBlob = '';
+		replyErr = '';
 		try {
-			importedOrgId = await importInvite(pastedInvite.trim());
-			importErr = '';
+			imported = await importInvite(pastedInvite.trim());
+			await loadPersonas();
 		} catch (e) {
 			importErr = String(e);
-			importedOrgId = '';
 		} finally {
 			importBusy = false;
 		}
 	}
 
-	async function doCreatePersonaAndJoinRequest() {
-		if (!jHandle.trim() || !jName.trim()) { jrErr = 'Handle and name required.'; return; }
-		if (!importedOrgId) { jrErr = 'Import invite first.'; return; }
-		jrBusy = true;
-		jrErr = '';
+	async function doCreatePersona() {
+		if (!newHandle.trim() || !newName.trim()) { createErr = 'Handle and name required.'; return; }
+		createBusy = true;
+		createErr = '';
 		try {
-			jPersonaId = await createPersona(jHandle.trim(), jName.trim(), jSurname.trim());
-			joinRequestBlob = await exportJoinRequest(jPersonaId);
+			personaId = await createPersona(newHandle.trim(), newName.trim(), newSurname.trim());
+			await loadPersonas();
 			notifyReload?.();
 		} catch (e) {
-			jrErr = String(e);
+			createErr = String(e);
 		} finally {
-			jrBusy = false;
+			createBusy = false;
 		}
 	}
 
-	function copyJoinRequest() {
-		navigator.clipboard.writeText(joinRequestBlob);
+	async function doProduceReply() {
+		if (!gate.ok) { replyErr = gate.message; return; }
+		replyBusy = true;
+		replyErr = '';
+		try {
+			replyBlob = await produceInviteReply(pastedInvite.trim(), personaId, confirmed);
+		} catch (e) {
+			replyErr = String(e);
+		} finally {
+			replyBusy = false;
+		}
+	}
+
+	function copy(text: string) {
+		navigator.clipboard.writeText(text);
 	}
 </script>
 
@@ -108,9 +145,9 @@
 	<h2>Story 2: Invite Flow</h2>
 
 	<div class="two-col">
-		<!-- Side A: org admin exports invite -->
+		<!-- Side A: a Member exports an Invite -->
 		<div class="side">
-			<h3>A — Export Invite (Org Admin)</h3>
+			<h3>A — Export Invite (Member)</h3>
 			{#if orgs.length === 0}
 				<p class="muted">No orgs yet (create one in Story 1).</p>
 			{:else}
@@ -122,47 +159,84 @@
 						{/each}
 					</select>
 				</label>
+				<label>
+					Organisation name (as you want the invitee to see it)
+					<input type="text" bind:value={orgName} placeholder="Acme Co-op" disabled={exportBusy} />
+				</label>
+				<label>
+					Invitee's full name (your guess)
+					<input type="text" bind:value={inviteeName} placeholder="Bob Builder" disabled={exportBusy} />
+				</label>
 				<button onclick={doExportInvite} disabled={exportBusy}>
 					{exportBusy ? 'Exporting…' : 'Export Invite'}
 				</button>
 				{#if exportErr}<p class="err">{exportErr}</p>{/if}
 				{#if inviteBlob}
 					<label>
-						Invite blob (copy to joiner)
+						Invite (copy to the invitee)
 						<textarea readonly rows="4" value={inviteBlob}></textarea>
 					</label>
-					<button onclick={copyInvite}>Copy</button>
+					<button onclick={() => copy(inviteBlob)}>Copy</button>
 				{/if}
 			{/if}
 		</div>
 
-		<!-- Side B: joiner imports invite + creates join request -->
+		<!-- Side B: the invitee imports the Invite and replies -->
 		<div class="side">
-			<h3>B — Import Invite + Create Join Request (Joiner)</h3>
+			<h3>B — Import Invite + Reply (Invitee)</h3>
 			<label>
-				Paste invite blob
-				<textarea rows="4" bind:value={pastedInvite} placeholder="Paste blob here…"></textarea>
+				Paste Invite
+				<textarea rows="4" bind:value={pastedInvite} placeholder="Paste the Invite here…"></textarea>
 			</label>
 			<button onclick={doImportInvite} disabled={importBusy}>
 				{importBusy ? 'Importing…' : 'Import Invite'}
 			</button>
 			{#if importErr}<p class="err">{importErr}</p>{/if}
-			{#if importedOrgId}
-				<p class="ok">Invite imported for org …{importedOrgId.slice(-12)}</p>
-				<h4>Joiner persona</h4>
-				<label>Handle <input type="text" bind:value={jHandle} placeholder="bob" disabled={jrBusy} /></label>
-				<label>Name <input type="text" bind:value={jName} placeholder="Bob" disabled={jrBusy} /></label>
-				<label>Surname <input type="text" bind:value={jSurname} placeholder="Jones" disabled={jrBusy} /></label>
-				<button onclick={doCreatePersonaAndJoinRequest} disabled={jrBusy}>
-					{jrBusy ? 'Working…' : 'Create Persona + Export Join Request'}
+			{#if imported}
+				<dl>
+					<dt>Organisation name</dt>
+					<dd>{imported.org_name} <span class="warn">(stated by the sender, unverified)</span></dd>
+					<dt>Org id</dt><dd class="mono">{imported.org_id}</dd>
+					<dt>Invitee name</dt><dd>{imported.invitee_name}</dd>
+				</dl>
+
+				<label>
+					Reply as Persona
+					<select bind:value={personaId} disabled={replyBusy}>
+						<option value="">— choose a Persona —</option>
+						{#each personas as p (p.persona_id)}
+							<option value={p.persona_id}>{p.handle} ({p.name} {p.surname})</option>
+						{/each}
+					</select>
+				</label>
+
+				<h4>Or create a Persona</h4>
+				<label>Handle <input type="text" bind:value={newHandle} placeholder="bob" disabled={createBusy} /></label>
+				<label>Name <input type="text" bind:value={newName} placeholder="Bob" disabled={createBusy} /></label>
+				<label>Surname <input type="text" bind:value={newSurname} placeholder="Builder" disabled={createBusy} /></label>
+				<button onclick={doCreatePersona} disabled={createBusy}>
+					{createBusy ? 'Creating…' : 'Create Persona'}
 				</button>
-				{#if jrErr}<p class="err">{jrErr}</p>{/if}
-				{#if joinRequestBlob}
-					<label>
-						Join-request blob (send to org admin)
-						<textarea readonly rows="4" value={joinRequestBlob}></textarea>
+				{#if createErr}<p class="err">{createErr}</p>{/if}
+
+				<div class="warning-box" role="alert">
+					<p>{REPLY_WARNING}</p>
+					<label class="confirm">
+						<input type="checkbox" bind:checked={confirmed} disabled={replyBusy} />
+						I understand
 					</label>
-					<button onclick={copyJoinRequest}>Copy</button>
+				</div>
+				<button onclick={doProduceReply} disabled={replyBusy || !gate.ok}>
+					{replyBusy ? 'Producing…' : 'Produce reply'}
+				</button>
+				{#if !gate.ok}<p class="muted">{gate.message}</p>{/if}
+				{#if replyErr}<p class="err">{replyErr}</p>{/if}
+				{#if replyBlob}
+					<label>
+						Invite reply (send to the Invite's sender)
+						<textarea readonly rows="4" value={replyBlob}></textarea>
+					</label>
+					<button onclick={() => copy(replyBlob)}>Copy</button>
 				{/if}
 			{/if}
 		</div>
@@ -178,12 +252,19 @@
 	@media (max-width: 700px) { .two-col { grid-template-columns: 1fr; } }
 	.side { display: flex; flex-direction: column; gap: 0.4rem; }
 	label { display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.82rem; color: #888; }
+	label.confirm { flex-direction: row; align-items: center; gap: 0.4rem; color: #ddd; }
 	input, select, textarea { background: #1a1a1a; border: 1px solid #333; color: #eee; padding: 0.3rem 0.5rem; border-radius: 3px; font-size: 0.82rem; font-family: monospace; resize: vertical; }
 	input:disabled { opacity: 0.5; }
 	button { cursor: pointer; background: #1a3a5c; color: #7ec8e3; border: 1px solid #2a5f8c; border-radius: 3px; padding: 0.3rem 0.75rem; font-size: 0.82rem; align-self: flex-start; }
 	button:disabled { opacity: 0.5; cursor: default; }
 	button:not(:disabled):hover { background: #204d7a; }
+	dl { display: grid; grid-template-columns: 8rem 1fr; gap: 0.2rem 0.5rem; font-size: 0.82rem; margin: 0; }
+	dt { color: #666; }
+	dd { color: #ccc; margin: 0; word-break: break-all; }
+	.mono { font-family: monospace; }
+	.warning-box { background: #2a1f00; border: 1px solid #ff9800; border-radius: 4px; padding: 0.6rem; margin-top: 0.5rem; }
+	.warning-box p { margin: 0 0 0.4rem; font-size: 0.82rem; color: #ffcc80; }
 	.err { color: #f44336; font-size: 0.8rem; }
-	.ok { color: #4caf50; font-size: 0.8rem; }
+	.warn { color: #ff9800; font-size: 0.78rem; }
 	.muted { color: #555; font-size: 0.82rem; }
 </style>

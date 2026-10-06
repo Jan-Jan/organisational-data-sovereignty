@@ -45,7 +45,6 @@ fn org_record(org_secret: Option<[u8; 32]>) -> OrgRecord {
         epoch: Epoch::new(3),
         org_secret: org_secret.map(OrgSecret::from),
         last_seq: SequenceNumber::new(2),
-        admin_member_key: MemberSeed::from([0x33u8; 32]).x25519_keypair().member_key().unwrap(),
         trie_members: Vec::new(),
         proxy_account: None,
         org_private_key: None,

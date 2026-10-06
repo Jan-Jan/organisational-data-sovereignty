@@ -4,18 +4,18 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
 license = "GPL-3.0-only"
-description = "ODS Phase 2 node logic: signing, envelopes, and verify-against-chain over the org-members trie"
+description = "ODS Phase 2 node logic: envelopes and verify-against-chain over the org-members trie"
 publish = false
 
 [features]
 default = []
-# On-chain reads (via on-chain-client) + writes (via subxt). Pulls a large
-# async stack; the Phase 2.1 core builds and tests without it.
-chain = ["dep:subxt", "dep:subxt-signer", "dep:tokio", "dep:on-chain-client", "dep:blake2", "dep:parity-scale-codec", "dep:async-trait", "dep:hex"]
+# On-chain reads via on-chain-client; org-node writes nothing to the chain.
+# Pulls a large async stack; the Phase 2.1 core builds and tests without it.
+chain = ["dep:subxt", "dep:tokio", "dep:on-chain-client", "dep:async-trait", "dep:hex"]
 # Device-to-device transport over iroh QUIC (EndpointId = DevicePublicKey).
 transport = ["dep:iroh", "dep:tokio"]
-# Full node-app integration: chain + transport + encrypted persistence + out-of-band blobs.
-app = ["chain", "transport", "dep:chacha20poly1305", "dep:argon2", "dep:base64"]
+# Full node-app integration: chain + transport + encrypted persistence.
+app = ["chain", "transport", "dep:chacha20poly1305", "dep:argon2"]
 # Test-only seams (e.g. binding an iroh endpoint against an in-process relay).
 # Never enabled in production builds; gated constructors live behind this.
 # Pulls iroh's `test-utils` so `run_relay_server()` and the self-signed-relay
@@ -43,27 +43,21 @@ thiserror = { version = "2", default-features = false }
 rand_core = "0.6"
 # Features mirror on-chain-client's pins so the subxt types unify across crates.
 subxt = { version = "0.50", default-features = false, features = ["native", "jsonrpsee", "reconnecting-rpc-client"], optional = true }
-subxt-signer = { version = "0.50", default-features = false, features = ["sr25519", "subxt"], optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
 on-chain-client = { path = "../on-chain-client", default-features = false, features = ["dev-rpc"], optional = true }
-blake2 = { version = "0.10", optional = true }
-parity-scale-codec = { version = "3", default-features = false, features = ["derive"], optional = true }
 async-trait = { version = "0.1", optional = true }
 hex = { version = "0.4", optional = true }
 iroh = { version = "0.98", optional = true }
 chacha20poly1305 = { version = "0.10", optional = true }
 argon2 = { version = "0.5", optional = true }
-base64 = { version = "0.22", optional = true }
 
 [dev-dependencies]
 rand = "0.8"
 # Normal [dependencies] too, re-declared for the same reason org-members is
 # below: an integration test crate cannot see the library's normal deps, and
-# the relocated unit tests in tests/value_types.rs and tests/blob_exchange.rs
-# name them directly.
+# the relocated unit tests in tests/value_types.rs name them directly.
 postcard = { version = "1", features = ["alloc", "use-std"] }
-base64 = "0.22"
-# The e2e test needs tokio's macros even when running `--features chain`.
+# The async tests need tokio's macros and timers whatever features are on.
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 # bolero 0.13 matches the version used in on-chain-client (the repo's other fuzz targets).
 bolero = "0.13"
@@ -73,14 +67,13 @@ iroh = { version = "0.98", features = ["test-utils"] }
 # see the library's normal deps directly — re-declared here so fuzz_verify_against_chain
 # can name org_members::trie::OrgTrie, org_members::MemberLeaf, etc.
 org-members = { path = "../org-members", features = ["std", "serde"] }
-# Chain e2e test harness (chain_genesis_e2e): chopsticks spawn + subxt client.
-# These mirror on-chain-client's dev-dependencies for the same helpers.
+# Chopsticks test harness (tests/common, used by preflight): chopsticks spawn +
+# subxt client. These mirror on-chain-client's dev-dependencies for the same
+# helpers.
 jsonrpsee = { version = "0.26", default-features = false, features = ["ws-client", "http-client"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 libc = "0.2"
-hex = "0.4"
 async-trait = "0.1"
-subxt-signer = { version = "0.50", default-features = false, features = ["sr25519", "subxt"] }
 on-chain-client = { path = "../on-chain-client", default-features = false, features = ["dev-rpc"] }
 subxt = { version = "0.50", default-features = false, features = ["native", "jsonrpsee"] }
 
@@ -112,11 +105,6 @@ harness = false
 required-features = ["app"]
 
 [[test]]
-name = "chain_genesis_e2e"
-path = "tests/chain_genesis_e2e.rs"
-required-features = ["chain"]
-
-[[test]]
 name = "transport_handshake"
 path = "tests/transport_handshake.rs"
 required-features = ["transport"]
@@ -135,14 +123,6 @@ required-features = ["app"]
 name = "transport_networked"
 path = "tests/transport_networked.rs"
 required-features = ["transport", "test-support"]
-
-[[test]]
-name = "finality_polling"
-path = "tests/finality_polling.rs"
-# FinalitySink is exported from the `app`-gated `service` module, so the test
-# is #![cfg(feature = "app")]. Requiring `app` here keeps cargo from building
-# it under bare `chain` (where it would compile to nothing and pass vacuously).
-required-features = ["app"]
 
 # The four targets below were added 2026-09-09 by org-node's risk analysis
 # (docs/plans/2026-09-09-org-node-risk-analysis.md). They carry the
@@ -172,8 +152,7 @@ path = "tests/admission_sender.rs"
 required-features = ["app", "test-support"]
 
 # Golden bytes pinned before the org-node type-safety refactor (LLR-ayrdr8).
-# Store and blobs are `app`; `app` implies `chain` (calldata) and `transport`
-# (wire).
+# The store is `app`; `app` implies `transport` (wire).
 [[test]]
 name = "encoding_golden"
 path = "tests/encoding_golden.rs"
@@ -192,12 +171,6 @@ required-features = ["test-support"]
 [[test]]
 name = "chain_read_state"
 path = "tests/chain_read_state.rs"
-required-features = ["chain"]
-
-# The typed calldata paths produce the pinned calldata (LLR-ayrdr8).
-[[test]]
-name = "calldata_typed"
-path = "tests/calldata_typed.rs"
 required-features = ["chain"]
 
 # The Persona's records: parsed details and field-named refusal (SDD-af5vnt,
@@ -234,16 +207,6 @@ path = "tests/envelope_binding.rs"
 required-features = ["test-support"]
 
 [[test]]
-name = "blob_exchange"
-path = "tests/blob_exchange.rs"
-required-features = ["app"]
-
-[[test]]
-name = "chain_write_pure"
-path = "tests/chain_write_pure.rs"
-required-features = ["chain", "test-support"]
-
-[[test]]
 name = "service_lifecycle"
 path = "tests/service_lifecycle.rs"
 required-features = ["app"]
@@ -253,4 +216,41 @@ required-features = ["app"]
 [[test]]
 name = "organisation_key"
 path = "tests/organisation_key.rs"
+required-features = ["app", "test-support"]
+
+# The receive paths read the chain only after the chain-free checks
+# (LLR-9ew26y), change worktree-org-node-chain-authority.
+[[test]]
+name = "receive_chain_reads"
+path = "tests/receive_chain_reads.rs"
+required-features = ["app", "test-support"]
+
+# A first admission is read against the chain only when the app expects it
+# under its invite identifier, and committed only when it lists one of this
+# node's Personas (REQ-8amu2a, REQ-kt877x), change
+# worktree-org-node-chain-authority.
+[[test]]
+name = "expected_admission"
+path = "tests/expected_admission.rs"
+required-features = ["app", "test-support"]
+
+# What org-node must not contain after the chain-authority change
+# (2026-10-06): reads org-node's own source and manifest.
+[[test]]
+name = "absences"
+path = "tests/absences.rs"
+
+# The provisional-update store: identity, persistence and the 1 MiB bound
+# (2026-10-06, T8 of docs/plans/2026-10-05-chain-authority.md).
+[[test]]
+name = "provisional_store"
+path = "tests/provisional_store.rs"
+required-features = ["app", "test-support"]
+
+# The node's own provisional updates and their commit: genesis built and kept,
+# `commit_genesis` once the chain carries it (2026-10-06, T9 of
+# docs/plans/2026-10-05-chain-authority.md).
+[[test]]
+name = "commit_paths"
+path = "tests/commit_paths.rs"
 required-features = ["app", "test-support"]

@@ -80,7 +80,14 @@ PR-mdv38y has rewritten the Persona binding this path consults. In that case a
 genuine update that leaves the node in the record makes it self-delete, and
 `pr_mdv38y_the_receive_path_rebinds_another_organisations_persona` pins
 exactly that. *The exception was added 2026-10-05 by review round 8, which
-found this sentence contradicted by a pinned report it did not name.* What is **not**
+found this sentence contradicted by a pinned report it did not name.*
+*Note 2026-10-06 (change `worktree-org-node-chain-authority`, independent
+review round 3, finding-1): the exception no longer holds. REQ-yp75u9 binds
+each Persona to one Organisation and no commit path rebinds one, PR-mdv38y is
+resolved, and the pin named above was rewritten as
+`pr_mdv38y_an_update_enrolling_another_organisations_persona_does_not_rebind_it`;
+the reassessment is in `org-node/docs/risk/2026-10-06-chain-authority.md`
+(REQ-yp75u9).* What is **not**
 defended is *who told the node*: any peer that can reach the endpoint and relay
 a genuine, chain-anchored revocation envelope will cause the node to act on it.
 That is a denial-of-timing rather than a forgery — the removal is real and the
@@ -208,8 +215,12 @@ hazard register calls it the publish-before-persist hazard, S3/P2
 control is "persist before push". A failed send leaves the chain one epoch
 ahead of the administrator's record, and the next submission from that record
 is refused by the contract's compare-and-swap. LLR-t4znbk and LLR-qg9utu state
-the order and name PR-vt244s, and
-`a_failed_push_leaves_the_administrators_record_where_it_was` pins it.
+the order and name PR-vt244s, and a failed-push test in
+`org-node/tests/admission_sender.rs` pinned it. *(Note 2026-10-06, change
+`worktree-org-node-chain-authority`: the commit now precedes the send
+(LLR-t4znbk amended), so a failed send leaves the record committed with the
+chain; that test is rewritten as
+`a_failed_send_leaves_the_committed_record_in_place`.)*
 *Corrected 2026-10-05 by review round 8. This paragraph said that keeping the
 record behind the chain "is the right direction of error: it under-claims
 rather than over-claims", which endorsed the order PR-vt244s books as a
@@ -538,9 +549,10 @@ records that the `peer_addr` check sits at `service.rs:1174` while
 `submit_update` is at `:1129` *(read `:1215` and `:1170` before the org-node
 type-safety change's edits to `service.rs`; corrected by its review round 7)*:
 the call burns an on-chain epoch and then
-refuses. The shipped test pins it —
-`a_loopback_revocation_with_no_peer_address_is_refused_and_records_nothing`
-asserts `chain epoch == epoch_before + 1`. Writing an assessment from the
+refuses. The shipped test pinned it, asserting
+`chain epoch == epoch_before + 1`; since 2026-10-06 (PR-b9wab3 resolved) it is
+`a_loopback_revocation_without_an_address_burns_no_epoch` and asserts the
+opposite. Writing an assessment from the
 requirement's wording instead of from the measurement, in a file whose
 neighbouring section already described this exact divergence as harmful, is
 the same defect this change keeps finding in its own tests, committed in prose
@@ -600,7 +612,13 @@ and `a_first_admission_records_the_signing_key_the_secret_and_the_member`
 reddens it now. *(Note 2026-10-05, review round 3, finding-15: that test is
 now `a_first_admission_records_the_invites_administrator_the_chains_key_the_secret_and_the_member`
 (`org-node/tests/admission_sender.rs`), renamed by review round 2 when the
-key stopped being a signing key.)*
+key stopped being a signing key.)* *(Note 2026-10-06, change
+`worktree-org-node-chain-authority`; restored to this form by independent
+review round 2, finding-11: the test named in the note above is now
+`a_first_admission_records_the_chains_key_the_secret_and_the_member`
+(`org-node/tests/admission_sender.rs`), and
+`a_first_admission_records_the_chains_organisation_public_key` carries
+LLR-xq9nrq as amended.)*
 
 *Amended 2026-10-05. The chain's key is now the Organisation public key, an
 X25519 key that is not the administrator's member key (REQ-ech45n). By the
@@ -666,7 +684,12 @@ pinned in an Organisation it was removed from, or delete one it is still in.
 that is recorded here rather than in a new control. RC-wqgm2p already carries
 residual risk "not acceptable" in the hazard analysis, and PR-mdv38y is a
 further way it fails. The remedy is the fix PR-mdv38y describes, after the
-owner decides the Persona-to-Organisation model. Probability is not
+owner decides the Persona-to-Organisation model. *Note 2026-10-06 (change
+`worktree-org-node-chain-authority`, independent review round 3, finding-1):
+the owner decided — one Persona, one Organisation (REQ-yp75u9) — and that
+change carries the fix; PR-mdv38y is resolved, so this further failure of
+RC-wqgm2p is closed. Reassessed in
+`org-node/docs/risk/2026-10-06-chain-authority.md`.* Probability is not
 re-estimated here. The precondition is an administrator enrolling a device key
 the member uses in another Organisation, or the member founding one, and that
 estimate belongs with the fix.

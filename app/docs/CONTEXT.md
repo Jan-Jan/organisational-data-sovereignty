@@ -80,9 +80,26 @@ _Avoid_: node addr, endpoint addr, peer blob
 
 **Blob**:
 An opaque encoded string an operator moves between two installations by hand —
-an invite, or a join request. A Blob carries no proof of who produced it; what
+an Invite, or an Invite reply. A Blob carries no proof of who produced it; what
 it decodes to is what its author chose.
 _Avoid_: payload, token, code, invite string
+
+**Invite**:
+What a Member sends a prospective Member over a channel of their choosing: the
+Organisation's name as the inviter typed it, the Organisation identifier, the
+inviter's guess of the invitee's full name, the inviter's DevicePublicKeys and an
+invite identifier the inviter keeps, paired with that Organisation, until a
+reply naming both has been acted on; a refused reply, or one whose chain write
+fails, leaves it outstanding. The name is for display and is verified by
+nothing.
+_Avoid_: invitation code, link, ticket
+
+**Invite reply**:
+What the invitee sends back so that the inviter can admit them: the
+Organisation identifier and invite identifier from the Invite, and the chosen
+Persona's Member-as-a-group key,
+DevicePublicKey, handle, name and surname.
+_Avoid_: join request, application, enrolment request
 
 **Connection status**:
 The report the backend returns describing how this installation is configured:

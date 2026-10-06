@@ -30,6 +30,11 @@ dev-rpc = ["client"]
 # client (per the 2026-06-04 amendment, this replaced the hand-rolled
 # SmoldotRpc).
 smoldot = ["client", "subxt/light-client"]
+# The chain writer (SDD-yg7n55): genesis ceremony and update submission,
+# moved from org-node (change worktree-org-node-chain-authority). Never in
+# `default`: a build without it compiles no code that can sign or submit
+# (LLR-rxs5ec).
+write = ["client", "dep:subxt-signer", "dep:blake2"]
 # Exposes crate internals to the annotated integration tests in
 # on-chain-client/tests, which is where this unit's gate reads its evidence
 # (test_paths in on-chain-client/.guardrails/config.yaml). Not part of the
@@ -67,6 +72,10 @@ futures-util = { version = "0.3", default-features = false, features = ["std"], 
 # to surface as a re-assess trigger, not work around. The NATIVE smoldot
 # lane (`--features smoldot`, the live smoke test) is unaffected and works.
 subxt = { version = "0.50", default-features = false, features = ["native", "jsonrpsee"], optional = true }
+# Behind `write` only (LLR-rxs5ec). Versions as the dev-dependencies below,
+# which this lockfile already resolves (subxt-signer 0.50.1, blake2 0.10.6).
+subxt-signer = { version = "0.50", default-features = false, features = ["sr25519", "subxt"], optional = true }
+blake2 = { version = "0.10", optional = true }
 
 [dev-dependencies]
 # Test-only deps. Integration tests are all `#![cfg(feature = "dev-rpc")]`
@@ -171,3 +180,29 @@ required-features = ["test-support"]
 [[test]]
 name = "type_widths"
 required-features = ["test-support"]
+
+# The chain writer's gated targets (SDD-yg7n55), run by their own
+# verify_commands line with `--features test-support,write`, so the reader's
+# targets above keep building without `write`.
+[[test]]
+name = "write_manifest"
+required-features = ["test-support", "write"]
+
+[[test]]
+name = "write_pure"
+required-features = ["test-support", "write"]
+
+[[test]]
+name = "write_compose"
+required-features = ["test-support", "write"]
+
+[[test]]
+name = "write_events"
+required-features = ["test-support", "write"]
+
+# Chopsticks: outside every gate, like this unit's other chopsticks targets.
+# Run: cargo test --manifest-path on-chain-client/Cargo.toml --features write
+#      --test write_genesis_e2e -- --test-threads=1
+[[test]]
+name = "write_genesis_e2e"
+required-features = ["write"]

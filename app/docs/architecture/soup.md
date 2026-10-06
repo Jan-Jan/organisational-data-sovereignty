@@ -90,17 +90,26 @@ Requirements are from `app/docs/requirements/`.
 | `serde_json` | normal | 1.0.151 | `serde_json::Value` event payloads emitted to the webview. `events.rs` | REQ-affyf5, REQ-dp95pv, REQ-tw4cb5, REQ-kn5rtx, REQ-jfxah3 | `events.rs:180` `.expect`s `to_value`; it relies on every payload being a plain struct of owned scalars. |
 | `tokio` | normal | 1.53.1 | `tokio::sync::Mutex` around `OrgService` (`state.rs`); `tokio::spawn` of the receiver loop (`commands.rs:420`) | REQ-3hfggn, REQ-6hgm8r, REQ-jfxah3 | `sync`, `rt-multi-thread`, `macros`. The mutex serialises every command's access to the service. |
 | `hex` | normal | 0.4.3 | Hex encoding and decoding of keys, ids and addresses crossing IPC. `commands.rs`, `parsing.rs`, `state.rs` | REQ-sjkp8z, REQ-vgr7s2 | Unlike org-node, the app **parses** hex from untrusted input: `parsing.rs` and the revoke and admit handlers decode strings from the webview, and `state.rs` decodes `ODS_*` environment values. |
+| `base64` | normal | 0.22.1 | Standard-alphabet armour around the postcard bytes of the Invite and Invite-reply Blobs. `invitation.rs` | REQ-yazum3 (and REQ-prjja8, REQ-65xqp8 through the same Blobs) | *Added 2026-10-06 (change `worktree-org-node-chain-authority`).* **Decodes untrusted text** pasted into the webview: a decode failure is a named refusal (`"<Blob>: not a Blob: …"`), never a panic. Was org-node's (`blobs.rs`) until the invitation exchange moved to the app; org-node no longer depends on it. |
 | `async-trait` | normal | 0.1.92 | Implements org-node's `ChainOps` seam for `ChainNotConfigured`. `state.rs:72` | — (startup wiring) | Proc-macro shim; boxes every call's future. |
 | `rand` | normal | 0.8.8 | `rand::rngs::OsRng`, passed into org-node's key generation and store nonces. `commands.rs:19` and every handler that creates keys or saves the store | REQ-vgr7s2 (revoke), plus the onboarding commands | **Used in production here**; in org-node `rand` is dev-only. This is the one place the shipped product supplies the `CryptoRng` that org-node's `rand_core` row says the compiler cannot vouch for. |
-| `postcard` | normal | 1.1.3 | `postcard::from_bytes` of `iroh::EndpointAddr` bytes from a join request (`commands.rs:219`) and from the revoke handler's `peer_addr` (`commands.rs:283`) | REQ-vgr7s2 | **Decodes untrusted bytes** that arrive hex-encoded over IPC from the webview or inside a join-request blob. A decode failure is mapped to an error string, not a panic. No fuzz target in this unit reaches these two calls. |
+| `postcard` | normal | 1.1.3 | `postcard::from_bytes` of `iroh::EndpointAddr` bytes from a join request (`commands.rs:219`) and from the revoke handler's `peer_addr` (`commands.rs:283`) | REQ-vgr7s2 | **Decodes untrusted bytes** that arrive hex-encoded over IPC from the webview or inside a join-request blob. A decode failure is mapped to an error string, not a panic. No fuzz target in this unit reaches these two calls. *Amended 2026-10-06 (change `worktree-org-node-chain-authority`): the Join request is gone; the peer address is decoded once, by `commands.rs:253` for both the admit and the revoke handlers, and postcard now also encodes and decodes the Invite and Invite-reply Blobs inside their Base64 armour (`invitation.rs`, REQ-yazum3).* |
 | `iroh` | normal | 0.98.2 | `EndpointAddr` and `EndpointId::from_bytes` for the peer to dial. `commands.rs:204,215,263` | REQ-vgr7s2 | Types only; the endpoint itself is org-node's. Pinned 0.98 with org-node. |
 | `subxt` | normal | 0.50.3 | **No code reference in `app/src-tauri/src`.** Declared only to unify features with org-node and on-chain-client; the client is built by `org_node::service::connect_chain_client` | — (chain setup) | The manifest comment says it is "needed by state.rs connect_chain", which overstates it. Removing it would change feature unification, not code. |
 | `subxt-signer` | normal | 0.50.3 | Builds the admin sr25519 keypair from the 32-byte `ODS_ADMIN_SEED`. `state.rs:314` | — (chain setup) | The seed comes from the process environment, hex-decoded in `state.rs`. This path runs only when `ODS_CHAIN_WS` is set and no gated test reaches it. |
 | `tauri` (`test`) | dev | 2.11.5 | `tauri::test::mock_builder`, `mock_context`, `get_ipc_response` in `tests/ipc.rs` | — | Feature unification means a dev build of the lib also sees `test`. |
 | `tempfile` | dev | 3.27.0 | Temporary data directories in `tests/ipc.rs` and `tests/state_assembly.rs` | — | Test-only. |
 
-`on-chain-client` (normal, path) is also declared only to unify features: it
-selects `dev-rpc` and has no code reference in `app/src-tauri/src`.
+`on-chain-client` (normal, path) selects `dev-rpc` and `write`. *Amended
+2026-10-06 (change `worktree-org-node-chain-authority`): this said it was
+declared only to unify features, with no code reference in
+`app/src-tauri/src`. The app now enables on-chain-client's `write` feature and
+is the one build that does — it submits every genesis and update through on-chain-client's chain writer
+(`submit.rs`, `state.rs`; REQ-nfr3n2) — and it holds the sr25519 signatory key
+(`subxt-signer`, from `ODS_ADMIN_SEED`) that it passes to the writer on each
+call. The writer stores no key. The `write` feature's two dependencies,
+`subxt-signer` and `blake2`, are recorded in on-chain-client's inventory at
+the app lock's versions (0.50.3, 0.10.6).*
 `on-chain-client`, `org-node` (normal, path) and `org-members` (dev, path) are
 units of this repository with their own ledgers, not SOUP.
 
@@ -134,8 +143,11 @@ These app direct crates are also in org-node's inventory at the same versions:
 `async-trait` 0.1.92, `hex` 0.4.3, `subxt` 0.50.3, `subxt-signer` 0.50.3 and
 `rand` 0.8.8. The crates the app reaches only through org-node
 (`ed25519-dalek` 2.2.0 and 3.0.0-pre.6, `chacha20poly1305` 0.10.1, `argon2`
-0.5.3, `base64` 0.22.1, `thiserror` 2.0.20, `rand_core` 0.6.4,
-`parity-scale-codec` 3.7.5, `blake2` 0.10.6) are also at org-node's versions.
+0.5.3, `thiserror` 2.0.20, `rand_core` 0.6.4) are also at org-node's versions.
+*(Amended 2026-10-06, change `worktree-org-node-chain-authority`: `base64` is
+now a direct dependency of the app (row above), and `parity-scale-codec`
+3.7.5 and `blake2` 0.10.6 are reached through on-chain-client's `write`
+feature, not org-node; org-node no longer depends on any of the three.)*
 Their roles and anomalies are in `org-node/docs/architecture/soup.md` and are not
 repeated here. The rows above record only what differs in the app's use.
 
@@ -156,7 +168,8 @@ the versions the app ships.
   `window`, `webview`, `app`, `image`, `resources`, `menu` and `tray`.
 - **The 12 app commands are ungated by any ACL.** `generate_handler!` exposes
   `create_persona`, `create_organisation`, `export_invite`, `import_invite`,
-  `export_join_request`, `import_join_request`, `admit_member`,
+  `produce_invite_reply`, `import_invite_reply` (these two replaced the Join
+  request commands, 2026-10-06), `admit_member`,
   `revoke_member`, `list_personas`, `list_orgs`, `connection_status` and
   `start_receiver`. `build.rs` calls `tauri_build::build()` with no app
   manifest, so no capability permission gates them. Any script running in the

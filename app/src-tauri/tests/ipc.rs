@@ -21,7 +21,7 @@
 //!
 //! `mock_context` installs an empty ACL (`Resolved::default()`). In Tauri 2 the
 //! capability system gates PLUGIN commands, not app commands registered through
-//! `generate_handler!`, so this suite reaches all twelve handlers without a
+//! `generate_handler!`, so this suite reaches every handler without a
 //! fixture `tauri.conf.json`.
 //!
 //! No test here sets an environment variable: `AppState::for_test` takes every
@@ -36,6 +36,9 @@ use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INV
 use tauri::test::MockRuntime;
 use tauri::webview::InvokeRequest;
 use tauri::WebviewWindow;
+
+mod support;
+use support::reply_keys;
 
 /// A live mock application with a real `AppState` over a fresh store.
 ///
@@ -74,8 +77,8 @@ fn harness_at(
             commands::create_organisation,
             commands::export_invite,
             commands::import_invite,
-            commands::export_join_request,
-            commands::import_join_request,
+            commands::produce_invite_reply,
+            commands::import_invite_reply,
             commands::admit_member,
             commands::revoke_member,
             commands::list_personas,
@@ -160,7 +163,7 @@ fn revoke_args(member_id_hex: &str, peer_addr_blob: &str) -> serde_json::Value {
 }
 
 /// The refusal a well-formed call on an Organisation ends in on this fresh
-/// store: `find_org` finds none. Taken from the error type, so an upstream
+/// store: no record of it is found. Taken from the error type, so an upstream
 /// rewording moves both sides together.
 fn refused_for_an_unknown_org() -> String {
     OrgNodeError::OrgNotOnChain.to_string()
@@ -210,36 +213,6 @@ fn connection_status_is_registered_under_its_name() {
 // REQ-sjkp8z — the org-id boundary check is reached by the real handler
 // ---------------------------------------------------------------------------
 
-// verifies: LLR-vzf8j2
-#[test]
-fn export_invite_rejects_a_short_org_id() {
-    let h = harness();
-    // 39 characters: one short of the required width.
-    let bad = "a".repeat(39);
-    let err = invoke_err(&h, "export_invite", serde_json::json!({ "orgId": bad }));
-    assert_eq!(
-        err,
-        parser_refusal(&bad),
-        "a short org_id must be refused with the parser's message, by the real \
-         handler under the real `orgId` argument name"
-    );
-    assert!(err.contains("40 hex chars"), "refused for its WIDTH, got: {err}");
-}
-
-// verifies: LLR-vzf8j2
-#[test]
-fn export_invite_rejects_a_non_hex_org_id() {
-    let h = harness();
-    let bad = "zz".repeat(20);
-    let err = invoke_err(&h, "export_invite", serde_json::json!({ "orgId": bad }));
-    assert_eq!(
-        err,
-        parser_refusal(&bad),
-        "a 40-character non-hex org_id must be refused with the parser's message"
-    );
-    assert!(err.contains("hex"), "refused for its ALPHABET, got: {err}");
-}
-
 /// Malformed org ids: under width, over width, and the right width but not hex.
 fn malformed_org_ids() -> [String; 3] {
     ["a".repeat(39), "a".repeat(42), "zz".repeat(20)]
@@ -249,38 +222,6 @@ fn malformed_org_ids() -> [String; 3] {
 /// handler's refusal to be the parser's and no other.
 fn parser_refusal(org_id: &str) -> String {
     ods_poc_lib::parsing::parse_org_id(org_id).expect_err("a malformed org id is refused")
-}
-
-// verifies: LLR-vzf8j2
-#[test]
-fn admit_member_refuses_a_malformed_org_id_with_the_parsers_message() {
-    // The join request is well-formed and the secret absent, so if the org id
-    // were not refused the call would end in the unknown-org refusal instead.
-    let h = harness();
-    let blob = join_request_with_node_addr(&h, vec![]);
-    for bad in malformed_org_ids() {
-        let err = invoke_err(
-            &h,
-            "admit_member",
-            serde_json::json!({ "orgId": bad, "joinRequestBlob": blob, "orgSecretHex": null }),
-        );
-        assert_eq!(err, parser_refusal(&bad), "{bad}");
-    }
-}
-
-// verifies: LLR-vzf8j2
-#[test]
-fn admit_member_does_not_refuse_a_well_formed_org_id() {
-    let h = harness();
-    let blob = join_request_with_node_addr(&h, vec![]);
-    for org_id in [org_id_40(), format!("0x{}", org_id_40())] {
-        let err = invoke_err(
-            &h,
-            "admit_member",
-            serde_json::json!({ "orgId": org_id, "joinRequestBlob": blob, "orgSecretHex": null }),
-        );
-        assert_eq!(err, refused_for_an_unknown_org(), "{org_id}");
-    }
 }
 
 // verifies: LLR-vzf8j2
@@ -542,34 +483,13 @@ fn create_persona_refuses_an_invalid_field_naming_it_and_creates_nothing() {
     assert_eq!(personas.as_array().map(Vec::len), Some(0), "a refused persona is not created");
 }
 
-// verifies: LLR-8krgzj
-// The Organisation secret is parsed from hex at this boundary.
-#[test]
-fn admit_member_refuses_an_org_secret_that_is_not_32_bytes() {
-    let h = harness();
-    let pid = invoke(
-        &h,
-        "create_persona",
-        serde_json::json!({ "handle": "bob", "name": "Bob", "surname": "Jones" }),
-    )
-    .expect("create_persona");
-    let blob = invoke(&h, "export_join_request", serde_json::json!({ "personaId": pid }))
-        .expect("export_join_request");
-    let err = invoke_err(
-        &h,
-        "admit_member",
-        serde_json::json!({ "orgId": org_id_40(), "joinRequestBlob": blob, "orgSecretHex": "aa".repeat(31) }),
-    );
-    assert!(err.contains("org_secret must be 32 bytes"), "got {err}");
-}
-
 // ---------------------------------------------------------------------------
 // Added 2026-10-05 by the app architecture change (T3), so that each low-level
 // requirement of the command surface has a normal and an abnormal case.
 //
-// The store is fresh, so `export_invite`, `admit_member` and `revoke_member`
-// fail on any well-formed input: `OrgService`'s first act is `find_org`, which
-// reports `OrgNotOnChain` before the parsed arguments are used. A normal-case
+// The store is fresh, so `revoke_member` fails on any well-formed input: the
+// handler's first act after parsing is to look the Organisation's record up,
+// and it reports `OrgNotOnChain` before the parsed arguments are used. A normal-case
 // test of their argument parsing therefore observes one thing only: that the
 // handler did NOT refuse the argument, because the call ended in that refusal
 // and no other. It cannot observe what the handler passed on.
@@ -586,31 +506,6 @@ fn endpoint_id() -> iroh::EndpointId {
 fn encoded_endpoint_addr() -> Vec<u8> {
     let addr: iroh::EndpointAddr = endpoint_id().into();
     postcard::to_allocvec(&addr).expect("an EndpointAddr encodes")
-}
-
-/// A new persona's join request, exported over IPC, with `node_addr` replaced.
-fn join_request_with_node_addr(h: &Harness, node_addr: Vec<u8>) -> String {
-    let pid = invoke(
-        h,
-        "create_persona",
-        serde_json::json!({ "handle": "carol", "name": "Carol", "surname": "Smith" }),
-    )
-    .expect("create_persona");
-    let blob = invoke(h, "export_join_request", serde_json::json!({ "personaId": pid }))
-        .expect("export_join_request");
-    let mut jr = org_node::blobs::decode_join_request(blob.as_str().expect("blob is a string"))
-        .expect("an exported join request decodes");
-    jr.node_addr = node_addr;
-    org_node::blobs::encode(&jr).expect("a join request encodes")
-}
-
-/// `admit_member`'s arguments with a well-formed org id.
-fn admit_args(blob: &str, org_secret_hex: serde_json::Value) -> serde_json::Value {
-    serde_json::json!({
-        "orgId": org_id_40(),
-        "joinRequestBlob": blob,
-        "orgSecretHex": org_secret_hex
-    })
 }
 
 // verifies: LLR-vqkr5t
@@ -638,18 +533,6 @@ fn connection_status_reports_a_data_dir_it_had_to_create_verbatim() {
     assert!(data_dir.is_dir(), "the data directory is created");
     let status = invoke(&h, "connection_status", serde_json::json!({})).expect("connection_status");
     assert_eq!(status["data_dir"], serde_json::json!(data_dir.display().to_string()));
-}
-
-// verifies: LLR-vzf8j2
-#[test]
-fn export_invite_does_not_refuse_a_well_formed_org_id() {
-    // Normal case for the boundary: a well-formed identifier is not refused
-    // there, and the call fails only where the store holds no such org.
-    let h = harness();
-    for org_id in [org_id_40(), format!("0x{}", org_id_40())] {
-        let err = invoke_err(&h, "export_invite", serde_json::json!({ "orgId": org_id }));
-        assert_eq!(err, refused_for_an_unknown_org(), "{org_id}");
-    }
 }
 
 // verifies: LLR-6pmrma
@@ -705,54 +588,6 @@ fn revoke_member_refuses_a_peer_addr_that_is_not_an_endpoint_addr() {
     }
 }
 
-// verifies: LLR-8krgzj, LLR-ctrfz4
-#[test]
-fn admit_member_does_not_refuse_a_32_byte_or_absent_org_secret() {
-    // The join request carries no node address, so this is also the id-only
-    // address branch.
-    let h = harness();
-    let blob = join_request_with_node_addr(&h, vec![]);
-    for secret in [
-        serde_json::json!("aa".repeat(32)),
-        serde_json::json!(format!("0x{}", "aa".repeat(32))),
-        serde_json::Value::Null,
-    ] {
-        let err = invoke_err(&h, "admit_member", admit_args(&blob, secret.clone()));
-        assert_eq!(err, refused_for_an_unknown_org(), "{secret}");
-    }
-}
-
-// verifies: LLR-8krgzj
-#[test]
-fn admit_member_refuses_an_org_secret_that_is_not_hex() {
-    let h = harness();
-    let blob = join_request_with_node_addr(&h, vec![]);
-    for bad in ["zz".repeat(32), "a".repeat(63)] {
-        let err = invoke_err(&h, "admit_member", admit_args(&blob, serde_json::json!(bad)));
-        assert!(err.starts_with("org_secret hex:"), "{bad}: {err}");
-    }
-}
-
-// verifies: LLR-ctrfz4
-#[test]
-fn admit_member_does_not_refuse_a_decodable_node_addr() {
-    let h = harness();
-    let blob = join_request_with_node_addr(&h, encoded_endpoint_addr());
-    let err = invoke_err(&h, "admit_member", admit_args(&blob, serde_json::Value::Null));
-    assert_eq!(err, refused_for_an_unknown_org());
-}
-
-// verifies: LLR-ctrfz4
-#[test]
-fn admit_member_refuses_a_node_addr_that_is_not_an_endpoint_addr() {
-    let h = harness();
-    for bad in [vec![0xffu8], vec![0x00, 0x01, 0x02]] {
-        let blob = join_request_with_node_addr(&h, bad.clone());
-        let err = invoke_err(&h, "admit_member", admit_args(&blob, serde_json::Value::Null));
-        assert!(err.starts_with("node_addr decode:"), "{bad:?}: {err}");
-    }
-}
-
 // verifies: LLR-pguhw5
 #[test]
 fn list_personas_reports_exactly_the_persona_fields() {
@@ -792,51 +627,228 @@ fn a_persona_in_no_organisation_reports_a_null_org_id() {
     assert_eq!(personas[0]["org_id"], serde_json::Value::Null, "{personas}");
 }
 
-// verifies: LLR-pmus9f
-#[test]
-fn import_join_request_reports_the_request_it_decodes() {
-    let h = harness();
-    let blob = join_request_with_node_addr(&h, vec![]);
-    let jr = org_node::blobs::decode_join_request(&blob).expect("decodes");
-    let dto = invoke(&h, "import_join_request", serde_json::json!({ "blob": blob }))
-        .expect("import_join_request");
-    assert_eq!(dto["handle"], "carol");
-    assert_eq!(dto["name"], "Carol");
-    assert_eq!(dto["surname"], "Smith");
-    assert_eq!(dto["member_key"], serde_json::json!(hex::encode(jr.member_key.as_bytes())));
-    assert_eq!(dto["device_key"], serde_json::json!(hex::encode(jr.device_key.as_bytes())));
-    assert_eq!(dto["has_node_addr"], serde_json::json!(false));
-    assert_eq!(dto["node_addr_blob"], serde_json::json!(""));
+// ---------------------------------------------------------------------------
+// The invitation commands (T15 of docs/plans/2026-10-05-chain-authority.md):
+// the Invite and its reply are the app's, parsed in `crate::invitation`.
+//
+// `admit_member` parses the org id, then the Organisation secret, then the
+// peer address, and only then the reply. Its normal-case tests hand it the
+// reply `"x"`, which is not a Blob, so a call that got past every argument
+// ends in the reply parser's refusal and no other.
+// ---------------------------------------------------------------------------
 
-    // With an address: reported as present, and passed back as hex.
-    let addr = encoded_endpoint_addr();
-    let blob = join_request_with_node_addr(&h, addr.clone());
-    let dto = invoke(&h, "import_join_request", serde_json::json!({ "blob": blob }))
-        .expect("import_join_request");
-    assert_eq!(dto["has_node_addr"], serde_json::json!(true));
-    assert_eq!(dto["node_addr_blob"], serde_json::json!(hex::encode(addr)));
-
-    // Decoding persists nothing: the two personas are the two the helper made.
-    let personas = invoke(&h, "list_personas", serde_json::json!({})).expect("list_personas");
-    assert_eq!(personas.as_array().map(Vec::len), Some(2));
+/// `export_invite`'s arguments.
+fn export_args(org_id: &str) -> serde_json::Value {
+    serde_json::json!({ "orgId": org_id, "orgName": "Acme", "inviteeName": "Bob" })
 }
 
-// verifies: LLR-pmus9f
+/// `admit_member`'s arguments, with the reply `"x"`.
+fn admit_args(org_id: &str, peer_addr_blob: &str, org_secret_hex: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "orgId": org_id,
+        "replyBlob": "x",
+        "peerAddrBlob": peer_addr_blob,
+        "orgSecretHex": org_secret_hex
+    })
+}
+
+/// The refusal `admit_member` ends in once every argument before the reply
+/// was accepted: the reply parser's own message for `"x"`.
+fn refused_for_the_reply() -> String {
+    ods_poc_lib::invitation::InviteReply::parse("x").expect_err("\"x\" is not a reply")
+}
+
+// verifies: LLR-vzf8j2
 #[test]
-fn import_join_request_refuses_a_malformed_blob() {
+fn export_invite_rejects_a_short_org_id() {
     let h = harness();
-    // "/xMT" is base64 for the bytes ff 13 13: decodable, and not a request.
-    for bad in ["", "not base64 !", "/xMT"] {
-        let err = invoke_err(&h, "import_join_request", serde_json::json!({ "blob": bad }));
-        // org-node's own message for this input, passed through unchanged.
-        let decoder = org_node::service::OrgService::import_join_request(bad)
-            .expect_err("org-node refuses the blob")
-            .to_string();
-        assert_eq!(err, decoder, "{bad:?}");
-        // LLR-pmus9f's own clause: the message names the blob. The equality
-        // above cannot hold this, because it moves with org-node's wording.
-        assert!(err.contains("blob"), "the refusal must name the blob, got {err:?} for {bad:?}");
+    // 39 characters: one short of the required width.
+    let bad = "a".repeat(39);
+    let err = invoke_err(&h, "export_invite", export_args(&bad));
+    assert_eq!(err, parser_refusal(&bad), "refused by the real handler under `orgId`");
+    assert!(err.contains("40 hex chars"), "refused for its WIDTH, got: {err}");
+}
+
+// verifies: LLR-vzf8j2
+#[test]
+fn export_invite_rejects_a_non_hex_org_id() {
+    let h = harness();
+    let bad = "zz".repeat(20);
+    let err = invoke_err(&h, "export_invite", export_args(&bad));
+    assert_eq!(err, parser_refusal(&bad));
+    assert!(err.contains("hex"), "refused for its ALPHABET, got: {err}");
+}
+
+// verifies: LLR-vzf8j2
+#[test]
+fn export_invite_does_not_refuse_a_well_formed_org_id() {
+    // The fresh store holds no Persona bound to it, so the call is refused
+    // there, after the parser.
+    let h = harness();
+    for org_id in [org_id_40(), format!("0x{}", org_id_40())] {
+        let err = invoke_err(&h, "export_invite", export_args(&org_id));
+        assert_eq!(err, "no Persona of this device belongs to that Organisation", "{org_id}");
     }
-    let personas = invoke(&h, "list_personas", serde_json::json!({})).expect("list_personas");
-    assert_eq!(personas, serde_json::json!([]), "a refused blob creates nothing");
 }
+
+// verifies: LLR-vzf8j2
+#[test]
+fn admit_member_refuses_a_malformed_org_id_with_the_parsers_message() {
+    let h = harness();
+    for bad in malformed_org_ids() {
+        let err = invoke_err(&h, "admit_member", admit_args(&bad, "", serde_json::Value::Null));
+        assert_eq!(err, parser_refusal(&bad), "{bad}");
+    }
+}
+
+// verifies: LLR-vzf8j2
+#[test]
+fn admit_member_does_not_refuse_a_well_formed_org_id() {
+    let h = harness();
+    for org_id in [org_id_40(), format!("0x{}", org_id_40())] {
+        let err = invoke_err(&h, "admit_member", admit_args(&org_id, "", serde_json::Value::Null));
+        assert_eq!(err, refused_for_the_reply(), "{org_id}");
+    }
+}
+
+// verifies: LLR-8krgzj
+#[test]
+fn admit_member_refuses_an_org_secret_that_is_not_32_bytes() {
+    let h = harness();
+    for bad in ["aa".repeat(31), "aa".repeat(33), String::new()] {
+        let err = invoke_err(&h, "admit_member", admit_args(&org_id_40(), "", serde_json::json!(bad)));
+        assert_eq!(err, "org_secret must be 32 bytes", "{bad}");
+    }
+}
+
+// verifies: LLR-8krgzj
+#[test]
+fn admit_member_refuses_an_org_secret_that_is_not_hex() {
+    let h = harness();
+    for bad in ["zz".repeat(32), "a".repeat(63)] {
+        let err = invoke_err(&h, "admit_member", admit_args(&org_id_40(), "", serde_json::json!(bad)));
+        assert!(err.starts_with("org_secret hex:"), "{bad}: {err}");
+    }
+}
+
+// verifies: LLR-8krgzj, LLR-ctrfz4
+#[test]
+fn admit_member_does_not_refuse_a_32_byte_or_absent_org_secret() {
+    // The peer address is blank, so this is also the absent-address branch.
+    let h = harness();
+    for secret in [
+        serde_json::json!("aa".repeat(32)),
+        serde_json::json!(format!("0x{}", "aa".repeat(32))),
+        serde_json::Value::Null,
+    ] {
+        let err = invoke_err(&h, "admit_member", admit_args(&org_id_40(), "", secret.clone()));
+        assert_eq!(err, refused_for_the_reply(), "{secret}");
+    }
+}
+
+// verifies: LLR-ctrfz4
+#[test]
+fn admit_member_does_not_refuse_a_blank_or_decodable_peer_addr() {
+    let h = harness();
+    let addr = hex::encode(encoded_endpoint_addr());
+    for peer in ["", "   ", "\n", addr.as_str()] {
+        let err = invoke_err(&h, "admit_member", admit_args(&org_id_40(), peer, serde_json::Value::Null));
+        assert_eq!(err, refused_for_the_reply(), "{peer:?}");
+    }
+}
+
+// verifies: LLR-ctrfz4
+#[test]
+fn admit_member_refuses_a_peer_addr_that_is_not_hex() {
+    let h = harness();
+    for bad in ["zz", "abc", "not hex at all"] {
+        let err = invoke_err(&h, "admit_member", admit_args(&org_id_40(), bad, serde_json::Value::Null));
+        assert!(err.starts_with("peer_addr_blob hex:"), "{bad:?}: {err}");
+    }
+}
+
+// verifies: LLR-ctrfz4
+#[test]
+fn admit_member_refuses_a_peer_addr_that_is_not_an_endpoint_addr() {
+    let h = harness();
+    for bad in ["00", "ff", "deadbeef"] {
+        let err = invoke_err(&h, "admit_member", admit_args(&org_id_40(), bad, serde_json::Value::Null));
+        assert!(err.starts_with("peer_addr decode:"), "{bad:?}: {err}");
+    }
+}
+
+/// A harness whose data directory holds `outstanding_invites.json` with the
+/// one invite id `03…03`, issued for the Organisation `01…01`.
+fn harness_with_outstanding_invite() -> Harness {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_dir = dir.path().to_path_buf();
+    std::fs::write(
+        data_dir.join("outstanding_invites.json"),
+        serde_json::json!([{ "org_id": hex::encode([1u8; 20]), "invite_id": hex::encode([3u8; 32]) }]).to_string(),
+    )
+    .expect("write outstanding_invites.json");
+    harness_at(dir, data_dir, TransportModeName::Networked, None)
+}
+
+// verifies: LLR-pmus9f
+#[test]
+fn import_invite_reply_reports_the_reply_it_parses() {
+    let h = harness_with_outstanding_invite();
+    let (mk, dk) = reply_keys();
+    let blob = ods_poc_lib::invitation::InviteReply::wire_for_test(&[1; 20], &[3; 32], &mk, &dk, "bob", "Bob", "Builder");
+    let dto = invoke(&h, "import_invite_reply", serde_json::json!({ "blob": blob })).expect("import_invite_reply");
+    assert_eq!(
+        dto,
+        serde_json::json!({
+            "org_id": hex::encode([1u8; 20]),
+            "handle": "bob",
+            "name": "Bob",
+            "surname": "Builder",
+            "member_key": hex::encode(mk),
+            "device_key": hex::encode(dk),
+        })
+    );
+    // It stores nothing: still no Persona, no Organisation, and the same reply
+    // parses again (its invite is still outstanding).
+    assert_eq!(invoke(&h, "list_personas", serde_json::json!({})).expect("list_personas"), serde_json::json!([]));
+    assert_eq!(invoke(&h, "list_orgs", serde_json::json!({})).expect("list_orgs"), serde_json::json!([]));
+    invoke(&h, "import_invite_reply", serde_json::json!({ "blob": blob })).expect("still outstanding");
+}
+
+// verifies: LLR-pmus9f
+#[test]
+fn import_invite_reply_refuses_a_malformed_blob_or_an_unknown_invite() {
+    let h = harness_with_outstanding_invite();
+    let (mk, dk) = reply_keys();
+    let malformed = [
+        "not base64 !".to_string(),
+        ods_poc_lib::invitation::InviteReply::wire_for_test(&[1; 20], &[3; 32], &mk, &dk, "Bob", "Bob", "Builder"),
+    ];
+    for bad in malformed {
+        let err = invoke_err(&h, "import_invite_reply", serde_json::json!({ "blob": bad }));
+        let parser = ods_poc_lib::invitation::InviteReply::parse(&bad).expect_err("refused by the parser");
+        assert_eq!(err, parser, "the parse's own message");
+        assert!(err.starts_with("reply"), "names the field: {err}");
+    }
+    let unknown = ods_poc_lib::invitation::InviteReply::wire_for_test(&[1; 20], &[4; 32], &mk, &dk, "bob", "Bob", "Builder");
+    let err = invoke_err(&h, "import_invite_reply", serde_json::json!({ "blob": unknown }));
+    assert_eq!(err, "this reply names no Invite this device has outstanding");
+    // The outstanding invite id, under an Organisation it was not issued for
+    // (review round 2, finding-1).
+    let elsewhere = ods_poc_lib::invitation::InviteReply::wire_for_test(&[2; 20], &[3; 32], &mk, &dk, "bob", "Bob", "Builder");
+    let err = invoke_err(&h, "import_invite_reply", serde_json::json!({ "blob": elsewhere }));
+    assert_eq!(err, "this reply names no Invite this device has outstanding");
+}
+
+// verifies: LLR-w4mhd4
+#[test]
+fn produce_invite_reply_refuses_without_confirmation_over_ipc() {
+    let h = harness();
+    let err = invoke_err(
+        &h,
+        "produce_invite_reply",
+        serde_json::json!({ "inviteBlob": "x", "personaId": "p", "confirmed": false }),
+    );
+    assert!(err.starts_with("confirm first"), "{err}");
+}
+

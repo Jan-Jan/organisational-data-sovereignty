@@ -38,7 +38,9 @@ pub fn member(fix: &NodeFixture, handle: &str) -> MemberLeaf {
     .unwrap()
 }
 
-/// A genesis trie containing a single admin member (id = [1u8;32]).
+/// A genesis trie containing a single founding member (id = [1u8;32]). These
+/// fixtures call it "admin" (its handle and the names below); it holds no role
+/// beyond being the first member — org-node has no administrator.
 pub fn genesis_trie(admin: &X25519Keypair, admin_device: &SigningKeypair) -> Trie {
     let admin_fix = NodeFixture {
         member: admin.member_seed().x25519_keypair(),

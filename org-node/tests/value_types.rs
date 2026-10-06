@@ -53,7 +53,7 @@ fn org_id_debug_is_the_twenty_bytes_in_order_as_forty_lowercase_hex_digits() {
     assert!(inner.ends_with("b3"), "last byte must come last: {inner}");
 }
 
-// verifies: REQ-9g6as6, REQ-bcxz96, LLR-z8fubr
+// verifies: REQ-9g6as6, REQ-bcxz96, LLR-z8fubr, LLR-mxskg9
 #[test]
 fn every_rejection_variant_is_distinct_from_every_other() {
     let all = [
@@ -70,6 +70,13 @@ fn every_rejection_variant_is_distinct_from_every_other() {
         OrgNodeError::Trie(org_members::OrgMembersError::DuplicateHandle),
         // The Sequence number that is not the chain's epoch (REQ-txvtm9).
         OrgNodeError::SeqNotEpoch { seq: 1, epoch: 2 },
+        // The two first-admission refusals (REQ-8amu2a, REQ-kt877x).
+        OrgNodeError::AdmissionNotExpected { org_id: OrgId::new([1; 20]) },
+        OrgNodeError::AdmissionNotOurs { org_id: OrgId::new([1; 20]) },
+        // The bound on one Organisation's provisional updates (REQ-fwfku9).
+        OrgNodeError::ProvisionalLimit { limit: 1 },
+        // No provisional update produces the chain's state (LLR-mxskg9).
+        OrgNodeError::NoProvisionalUpdate,
     ];
     for (i, a) in all.iter().enumerate() {
         for (j, b) in all.iter().enumerate() {
@@ -78,6 +85,30 @@ fn every_rejection_variant_is_distinct_from_every_other() {
             }
         }
     }
+}
+
+// Normal: each first-admission refusal names its Organisation; abnormal: two
+// Organisations' refusals, and the two refusals of one, are not the same error.
+// verifies: LLR-mxskg9, REQ-8amu2a, REQ-kt877x
+#[test]
+fn the_first_admission_refusals_name_their_organisation() {
+    let org = OrgId::new([0xa0; 20]);
+    let unexpected = OrgNodeError::AdmissionNotExpected { org_id: org };
+    let not_ours = OrgNodeError::AdmissionNotOurs { org_id: org };
+    for err in [&unexpected, &not_ours] {
+        assert!(format!("{err}").contains(&format!("{org:?}")), "{err}");
+    }
+    assert_ne!(unexpected, OrgNodeError::AdmissionNotExpected { org_id: OrgId::new([0xa1; 20]) });
+    assert_ne!(unexpected, not_ours);
+}
+
+// Normal: the refusal names the limit in bytes; abnormal: two limits differ.
+// verifies: LLR-mxskg9, REQ-fwfku9
+#[test]
+fn the_provisional_limit_refusal_names_the_limit() {
+    let err = OrgNodeError::ProvisionalLimit { limit: 1_048_576 };
+    assert_eq!(err.to_string(), "provisional updates for one Organisation would exceed 1048576 bytes");
+    assert_ne!(err, OrgNodeError::ProvisionalLimit { limit: 1 });
 }
 
 // verifies: REQ-9g6as6, REQ-bcxz96, LLR-z8fubr

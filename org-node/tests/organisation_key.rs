@@ -8,42 +8,29 @@
 //! The gate: `cargo test -p org-node --features app,test-support --test organisation_key`
 
 use std::path::PathBuf;
-use std::time::Duration;
 
-use org_members::{Handle, Name, OrgMembersError, PersonPublicKey, RootHash, Surname};
+use org_members::OrgMembersError;
 use org_node::chain::OrgState;
 use org_node::error::OrgNodeError;
 use org_node::ids::OrgId;
-use org_node::keys::SigningKeypair;
 use org_node::service::{ChainOps, MockChainOps, OrgService};
-use org_node::transport::endpoint::OrgEndpoint;
-use org_node::{ChainAccount, DeviceSeed, Epoch, MemberSeed, OrgPrivateKey, OrgPublicKey, OrgSecret, PersonaId};
 use org_node::store::{OrgRecord, PersonaStatus, PersonaStore};
+use org_node::transport::endpoint::OrgEndpoint;
+use org_node::{DeviceSeed, Epoch, MemberSeed, OrgPrivateKey, OrgPublicKey, PersonPublicKey};
 use rand::rngs::OsRng;
 use rand::{CryptoRng, RngCore};
 
+mod support;
+use support::{
+    admit, device_kp, found, h, joiner_of, nm, org_secret, prepare_to_join, private_key_of, sn, spawn_receive,
+    store_dir, test_proxy,
+};
+
 const PASSWORD: &str = "pw_org_key";
 
-fn h(s: &str) -> Handle {
-    Handle::parse(s).unwrap()
-}
-fn nm(s: &str) -> Name {
-    Name::parse(s).unwrap()
-}
-fn sn(s: &str) -> Surname {
-    Surname::parse(s).unwrap()
-}
-
-/// Fresh encrypted store under `temp_dir()`, unique per test and party.
+/// A fresh encrypted store, unique per test and party, and its file.
 fn open_store(tag: &str, party: &str) -> (PersonaStore, PathBuf) {
-    let dir = std::env::temp_dir().join(format!(
-        "ods-organisation-key-{tag}-{party}-{}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("store.bin");
-    (PersonaStore::open(path.clone(), PASSWORD).unwrap(), path)
+    (support::open_store(tag, party, PASSWORD), store_dir(tag, party).join("store.bin"))
 }
 
 /// The Organisation public key the chain holds for `org_id`, as bytes.
@@ -92,12 +79,20 @@ async fn a_created_organisation_publishes_a_fresh_key_no_genesis_key_equals() {
     let (store, _) = open_store("fresh", "a");
     let mut svc = OrgService::new(store, Box::new(chain.clone()));
     let pid = svc.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    let org_id = svc.create_organisation(&mut OsRng, &pid).await.unwrap();
+    let update = svc.create_organisation(&mut OsRng, &pid).unwrap();
+    let published = *update.org_pub_key.as_bytes();
+    assert!(PersonPublicKey::parse(&published).is_ok(), "a valid X25519 public key");
+    assert_eq!(
+        private_key_of(&update).x25519_keypair().public_bytes(),
+        published,
+        "the update's key is the public key of the private key it holds"
+    );
 
-    let published = published_key(&chain, &org_id);
+    let org_id = chain.apply_genesis(update.resulting_root, update.org_pub_key);
+    svc.commit_genesis(&mut OsRng, &pid, org_id, test_proxy()).await.unwrap();
+    assert_eq!(published_key(&chain, &org_id), published, "the chain carries the update's key");
     let rec = svc.list_orgs()[0].clone();
     assert_eq!(record_key(&rec), published, "the record holds the key it published");
-    assert!(PersonPublicKey::parse(&published).is_ok(), "a valid X25519 public key");
 
     let secret = rec.org_private_key.expect("the creator holds the Organisation private key");
     assert_eq!(
@@ -119,29 +114,37 @@ async fn a_created_organisation_publishes_a_fresh_key_no_genesis_key_equals() {
 // Freshness: one persona founding two Organisations publishes two keys. A
 // key derived from the persona's own secrets would be the same twice.
 // verifies: REQ-ech45n
-#[tokio::test(flavor = "multi_thread")]
-async fn two_organisations_of_one_persona_publish_two_keys() {
-    let chain = MockChainOps::new();
+#[test]
+fn two_organisations_of_one_persona_publish_two_keys() {
     let (store, _) = open_store("two-orgs", "a");
-    let mut svc = OrgService::new(store, Box::new(chain.clone()));
+    let mut svc = OrgService::new(store, Box::new(MockChainOps::new()));
     let pid = svc.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    let org_1 = svc.create_organisation(&mut OsRng, &pid).await.unwrap();
-    let org_2 = svc.create_organisation(&mut OsRng, &pid).await.unwrap();
-    assert_ne!(published_key(&chain, &org_1), published_key(&chain, &org_2));
+    let first = svc.create_organisation(&mut OsRng, &pid).unwrap();
+    let second = svc.create_organisation(&mut OsRng, &pid).unwrap();
+    assert_ne!(first.org_pub_key, second.org_pub_key);
 }
 
 // The Organisation private key is in the store, under the passphrase, and
 // never in the store file in clear. (Renamed 2026-10-05 by review round 1:
 // "Organisation secret" is org-node's term for `org_secret`, not this key.)
-// verifies: REQ-ech45n, LLR-3fwykc
+// verifies: REQ-ech45n, LLR-3fwykc, LLR-qjz3q4
 #[tokio::test(flavor = "multi_thread")]
 async fn the_organisation_private_key_is_kept_only_in_the_encrypted_store() {
     let chain = MockChainOps::new();
     let (store, path) = open_store("at-rest", "a");
     let mut svc = OrgService::new(store, Box::new(chain.clone()));
     let pid = svc.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    let org_id = svc.create_organisation(&mut OsRng, &pid).await.unwrap();
-    let secret = svc.list_orgs()[0].org_private_key.clone().unwrap();
+    let update = svc.create_organisation(&mut OsRng, &pid).unwrap();
+    let secret = private_key_of(&update);
+
+    let reopened = PersonaStore::open(path.clone(), PASSWORD).unwrap();
+    assert_eq!(reopened.data().provisional_updates, vec![update.clone()], "the update holds the key");
+    let bytes = std::fs::read(&path).unwrap();
+    assert!(!contains(&bytes, secret.expose_secret()), "the key waiting in the update is in the file in clear");
+
+    let org_id = chain.apply_genesis(update.resulting_root, update.org_pub_key);
+    svc.commit_genesis(&mut OsRng, &pid, org_id, test_proxy()).await.unwrap();
+    assert_eq!(svc.list_orgs()[0].org_private_key, Some(secret.clone()));
 
     let reopened = PersonaStore::open(path.clone(), PASSWORD).unwrap();
     let rec = reopened.data().orgs.iter().find(|o| o.org_id == org_id).unwrap();
@@ -167,7 +170,7 @@ async fn the_organisation_private_key_is_not_in_the_record_debug_output() {
     let (store, _) = open_store("debug", "a");
     let mut svc = OrgService::new(store, Box::new(chain.clone()));
     let pid = svc.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    svc.create_organisation(&mut OsRng, &pid).await.unwrap();
+    found(&mut svc, &chain, &pid).await;
     let rec = &svc.list_orgs()[0];
     let secret = rec.org_private_key.clone().unwrap();
 
@@ -179,76 +182,29 @@ async fn the_organisation_private_key_is_not_in_the_record_debug_output() {
     assert!(!printed.contains(&hex), "the Organisation private key is printed in hex");
 }
 
-/// A chain that counts the genesis submissions it is handed and otherwise
-/// behaves as `MockChainOps`.
-#[derive(Clone)]
-struct GenesisCountingChain {
-    inner: MockChainOps,
-    geneses: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-}
-
-impl GenesisCountingChain {
-    fn new() -> Self {
-        Self { inner: MockChainOps::new(), geneses: Default::default() }
-    }
-
-    fn geneses(&self) -> usize {
-        self.geneses.load(std::sync::atomic::Ordering::SeqCst)
-    }
-}
-
-#[async_trait::async_trait]
-impl ChainOps for GenesisCountingChain {
-    async fn submit_genesis(
-        &self,
-        genesis_root: RootHash,
-        org_pub_key: OrgPublicKey,
-    ) -> Result<(OrgId, Option<ChainAccount>), OrgNodeError> {
-        self.geneses.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.inner.submit_genesis(genesis_root, org_pub_key).await
-    }
-
-    async fn submit_update(
-        &self,
-        org_id: OrgId,
-        new_root: RootHash,
-        org_pub_key: OrgPublicKey,
-        expected_epoch: Epoch,
-        proxy_account: Option<ChainAccount>,
-    ) -> Result<(), OrgNodeError> {
-        self.inner.submit_update(org_id, new_root, org_pub_key, expected_epoch, proxy_account).await
-    }
-
-    async fn read_state(&self, org_id: OrgId) -> Result<Option<OrgState>, OrgNodeError> {
-        self.inner.read_state(org_id).await
-    }
-}
-
 // Abnormal case: a random source that repeats itself makes the Organisation
 // private key equal to the member seed, so the published key would be the
-// admin's Member-as-a-group key. Creation is refused before the chain is
-// written: no genesis reaches the chain (review round 2, finding-5). Nothing
-// is recorded. The same chain does receive the genesis of a creation that
-// is not refused.
+// founder's Member-as-a-group key. Creation is refused before any genesis
+// update is kept (review round 2, finding-5): nothing is kept, recorded or
+// written. The same Persona's creation that is not refused keeps one update.
 // verifies: REQ-ech45n, LLR-sj7cd5
-#[tokio::test(flavor = "multi_thread")]
-async fn an_organisation_key_equal_to_a_genesis_key_is_refused() {
-    let chain = GenesisCountingChain::new();
-    let (store, _) = open_store("collision", "a");
-    let mut svc = OrgService::new(store, Box::new(chain.clone()));
+#[test]
+fn an_organisation_key_equal_to_a_genesis_key_is_refused() {
+    let (store, path) = open_store("collision", "a");
+    let mut svc = OrgService::new(store, Box::new(MockChainOps::new()));
     let mut rng = ConstRng(0x5c);
     let pid = svc.create_persona(&mut rng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    let err = svc.create_organisation(&mut rng, &pid).await.unwrap_err();
+    let before = std::fs::read(&path).unwrap();
+    let err = svc.create_organisation(&mut rng, &pid).unwrap_err();
     assert_eq!(err, OrgNodeError::Trie(OrgMembersError::DuplicateKey));
-    assert_eq!(chain.geneses(), 0, "the chain must not be written");
+    assert!(svc.genesis_provisional_updates(&pid).is_empty(), "no genesis update kept");
+    assert_eq!(std::fs::read(&path).unwrap(), before, "nothing written");
     assert!(svc.list_orgs().is_empty(), "no Organisation recorded");
     assert_eq!(svc.list_personas()[0].status, PersonaStatus::Proposed);
 
-    svc.create_organisation(&mut OsRng, &pid).await.expect("a fresh key is accepted");
-    assert_eq!(chain.geneses(), 1, "the accepted creation is written");
+    svc.create_organisation(&mut OsRng, &pid).expect("a fresh key is accepted");
+    assert_eq!(svc.genesis_provisional_updates(&pid).len(), 1, "the accepted creation is kept");
 }
-
-const NET: Duration = Duration::from_secs(30);
 
 /// A chain whose reads carry an Organisation public key that is not a
 /// valid X25519 key: the bytes a corrupted or hostile chain answer would
@@ -257,42 +213,12 @@ struct InvalidKeyChain(MockChainOps);
 
 #[async_trait::async_trait]
 impl ChainOps for InvalidKeyChain {
-    async fn submit_genesis(
-        &self,
-        genesis_root: RootHash,
-        org_pub_key: OrgPublicKey,
-    ) -> Result<(OrgId, Option<ChainAccount>), OrgNodeError> {
-        self.0.submit_genesis(genesis_root, org_pub_key).await
-    }
-
-    async fn submit_update(
-        &self,
-        org_id: OrgId,
-        new_root: RootHash,
-        org_pub_key: OrgPublicKey,
-        expected_epoch: Epoch,
-        proxy_account: Option<ChainAccount>,
-    ) -> Result<(), OrgNodeError> {
-        self.0.submit_update(org_id, new_root, org_pub_key, expected_epoch, proxy_account).await
-    }
-
     async fn read_state(&self, org_id: OrgId) -> Result<Option<OrgState>, OrgNodeError> {
         match self.0.read_state(org_id).await? {
             Some(s) => OrgState::from_chain(*s.root_hash.as_bytes(), [0u8; 32], s.epoch.get()).map(Some),
             None => Ok(None),
         }
     }
-}
-
-/// The device keypair of a persona, from its persisted `device_seed`.
-fn device_kp(svc: &OrgService, persona_id: &PersonaId) -> SigningKeypair {
-    let seed = svc
-        .list_personas()
-        .iter()
-        .find(|p| &p.persona_id == persona_id)
-        .map(|p| p.device_seed.clone())
-        .expect("persona not found");
-    seed.signing_keypair()
 }
 
 // The parse: canonical, non-small-order X25519 keys only, by person's rule.
@@ -337,8 +263,8 @@ fn an_organisation_state_read_with_an_invalid_key_is_refused() {
 
 // "Shall act on no Envelope verified against it": B, whose chain answers
 // with an invalid Organisation public key, receives A's genuine admission
-// from A's own device, the invite's administrator. The receive fails with
-// the typed error and B commits nothing.
+// from A's own device. The receive fails with the typed error and B commits
+// nothing.
 // verifies: REQ-8jb4ny
 #[tokio::test(flavor = "multi_thread")]
 async fn a_receive_against_a_state_with_an_invalid_key_commits_nothing() {
@@ -349,32 +275,19 @@ async fn a_receive_against_a_state_with_an_invalid_key_commits_nothing() {
     let mut svc_b = OrgService::new(store_b, Box::new(InvalidKeyChain(chain.clone())));
 
     let pid_a = svc_a.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    let org_id = svc_a.create_organisation(&mut OsRng, &pid_a).await.unwrap();
+    let org_id = found(&mut svc_a, &chain, &pid_a).await;
     let a_device = device_kp(&svc_a, &pid_a);
     let mut svc_a = svc_a.with_endpoint(OrgEndpoint::bind(&a_device).await.unwrap());
 
     let pid_b = svc_b.create_persona(&mut OsRng, h("bob"), nm("Bob"), sn("Builder")).unwrap();
-    svc_b.import_invite(&mut OsRng, &svc_a.export_invite(org_id).unwrap()).unwrap();
-    let jr = OrgService::import_join_request(&svc_b.export_join_request(&pid_b).unwrap()).unwrap();
+    let joiner = joiner_of(&svc_b, &pid_b);
+    prepare_to_join(&mut svc_b, org_id);
+    let b_device = device_kp(&svc_b, &pid_b);
+    let (b_addr, b_task) = spawn_receive(svc_b, &b_device).await;
 
-    let ep_b = OrgEndpoint::bind(&device_kp(&svc_b, &pid_b)).await.unwrap();
-    let b_addr = ep_b.inner().addr();
-    let mut svc_b = svc_b.with_endpoint(ep_b);
-    let b_task = tokio::spawn(async move {
-        let r = tokio::time::timeout(NET, svc_b.receive_and_verify(&mut OsRng))
-            .await
-            .expect("B receive_and_verify timed out");
-        (svc_b, r)
-    });
-    tokio::time::sleep(Duration::from_millis(50)).await;
-
-    tokio::time::timeout(
-        NET,
-        svc_a.admit_member(&mut OsRng, org_id, &jr, b_addr, Some(OrgSecret::from([0xffu8; 32]))),
-    )
-    .await
-    .expect("admit_member(B) timed out")
-    .expect("admit_member(B) failed");
+    // A builds the admission, the chain carries it (the mock stands in for
+    // the app's write), A commits it and sends it to B.
+    admit(&mut svc_a, &chain, org_id, &joiner, b_addr, org_secret()).await.expect("admit B");
 
     let (svc_b, r) = b_task.await.unwrap();
     assert_eq!(r.unwrap_err(), OrgNodeError::InvalidOrgPublicKey);

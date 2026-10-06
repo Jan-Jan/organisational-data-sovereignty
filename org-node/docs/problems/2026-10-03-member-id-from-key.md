@@ -15,10 +15,11 @@ deleted, and a first admission without a record snapshot is refused explicitly
 instead of being attempted against a record rebuilt with a key-derived id
 (an attempt that never succeeded). Verified by
 `member_ids_are_not_derived_from_keys`,
-`readmission_with_same_keys_gets_a_fresh_member_id`,
-`same_persona_founding_two_organisations_gets_two_admin_ids` and
+`readmission_with_same_keys_gets_a_fresh_member_id` and
 `first_admission_without_a_record_snapshot_is_refused` in
-`org-node/tests/admission_sender.rs`, and by the fuzz target
+`org-node/tests/admission_sender.rs`, by
+`the_founding_member_id_and_the_organisation_key_are_drawn_not_derived` in
+`org-node/tests/commit_paths.rs`, and by the fuzz target
 `org-node/tests/fuzz_first_admission_base/fuzz_target.rs`. The second half of
 the report — the member returns with the keys the removed devices held — is
 resolved by owner ruling (2026-10-03): a re-admitted person is a new member
@@ -26,6 +27,16 @@ under a fresh `MemberId` and may bring the keys their previous membership held
 when it was deleted — the one exception; nothing granted to the old id carries
 over. If a removed device was compromised, fresh keys are the joiner's choice,
 not a software check. This is residual risk accepted by the owner.
+
+*Amended 2026-10-06 (independent review round 2, finding-3).* The resolution
+named `same_persona_founding_two_organisations_gets_two_member_ids` (named
+`…_gets_two_admin_ids` until earlier on 2026-10-06) in
+`org-node/tests/admission_sender.rs`. R1a of change
+`worktree-org-node-chain-authority` deleted it, because a Persona bound to one
+Organisation can no longer found another
+(`a_persona_bound_to_an_organisation_cannot_found_another`); the drawn
+founding `MemberId` is verified by
+`the_founding_member_id_and_the_organisation_key_are_drawn_not_derived`.
 
 Found by the independent review of the change that made org-members hold every
 key once (branch `worktree-rotate-same-key`), not by a failing test. Where:

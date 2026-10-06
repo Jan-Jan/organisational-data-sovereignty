@@ -14,7 +14,23 @@ use org_node::{Envelope, MemberSeed, OrgSecret, SequenceNumber};
 fn sample_msg() -> WireMessage {
     let (delta, _) = admit_member_delta(&MemberSeed::from([1u8; 32]).x25519_keypair());
     let env = Envelope::build(OrgId::new([5u8; 20]), SequenceNumber::new(2), &delta).unwrap();
-    WireMessage { envelope: env, org_secret: Some(OrgSecret::from([9u8; 32])), genesis_snapshot: None }
+    WireMessage { envelope: env, org_secret: Some(OrgSecret::from([9u8; 32])), genesis_snapshot: None, invite_id: None }
+}
+
+// Normal: a frame carries its invite identifier, or its absence, unchanged.
+// Abnormal: a body whose invite identifier is cut short does not decode.
+// verifies: LLR-ms8njy, REQ-8amu2a
+#[test]
+fn a_wire_message_carries_its_invite_id_and_refuses_a_short_one() {
+    for invite_id in [Some(org_node::InviteId::new([0x5c; 32])), None] {
+        let msg = WireMessage { invite_id, ..sample_msg() };
+        let framed = encode_frame(&msg).unwrap();
+        assert_eq!(decode_body(&framed[4..]).unwrap(), msg);
+    }
+    let with_id = WireMessage { invite_id: Some(org_node::InviteId::new([0x5c; 32])), ..sample_msg() };
+    let framed = encode_frame(&with_id).unwrap();
+    let cut = &framed[4..framed.len() - 1];
+    assert!(matches!(decode_body(cut), Err(TransportError::Malformed)));
 }
 
 // verifies: REQ-eg5j8u, LLR-fa7jt8, LLR-er2x8n

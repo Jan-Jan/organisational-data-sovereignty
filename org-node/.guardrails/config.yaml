@@ -45,9 +45,8 @@ strict_paths:
 test_paths:
   - org-node/tests
 
-# The three chopsticks-dependent targets (chain_genesis_e2e, finality_polling,
-# preflight) are excluded: they spawn a chopsticks fork and need
-# on-chain/scripts/node_modules. The remaining targets are named explicitly so
+# The chopsticks-dependent target `preflight` is excluded: it spawns a
+# chopsticks fork and needs on-chain/scripts/node_modules. The remaining targets are named explicitly so
 # that a future chopsticks target added to the crate is not silently pulled
 # in — and so the two fuzz targets cannot silently drop out.
 # `--features app,test-support` is REQUIRED: the named targets carry
@@ -222,8 +221,22 @@ test_paths:
 # /tmp/cargo_home_fuzz, whose extracted sources were found emptied; quint
 # 0.33.0): 186 passed, 0 failed — admission_sender 46, key_custody 9,
 # secret_redaction 8, every other target as above.
+# 2026-10-06, T5 of docs/plans/2026-10-05-chain-authority.md:
+# `receive_chain_reads` counts the receive paths' chain reads.
+# 2026-10-06, T6 of docs/plans/2026-10-05-chain-authority.md:
+# `expected_admission` covers expected first admissions and the own-Persona rule.
+# 2026-10-06, T7 of docs/plans/2026-10-05-chain-authority.md: the invitation
+# exchange left org-node; blob_exchange deleted; `absences` reads org-node's
+# source for what it must not contain.
+# 2026-10-06, T8 of docs/plans/2026-10-05-chain-authority.md:
+# `provisional_store` covers the provisional-update store and its bound.
+# 2026-10-06, T13 of docs/plans/2026-10-05-chain-authority.md:
+# chain_genesis_e2e and finality_polling deleted with the chain write, which
+# moved to on-chain-client; chain_write_pure and calldata_typed deleted and
+# dropped from the line below (their evidence is on-chain-client's
+# write_pure and org-node's absences).
 verify_commands:
-  - cargo test -p org-node --features app,test-support --lib --test service_stories --test transport_handshake --test transport_networked --test fuzz_envelope_decode --test fuzz_verify_against_chain --test fuzz_first_admission_base --test verify_against_chain --test wire_frame_bound --test store_at_rest --test admission_sender --test value_types --test key_custody --test envelope_binding --test blob_exchange --test chain_write_pure --test service_lifecycle --test encoding_golden --test node_value_types --test chain_read_state --test persona_records --test secret_redaction --test calldata_typed --test organisation_key
+  - cargo test -p org-node --features app,test-support --lib --test service_stories --test transport_handshake --test transport_networked --test fuzz_envelope_decode --test fuzz_verify_against_chain --test fuzz_first_admission_base --test verify_against_chain --test wire_frame_bound --test store_at_rest --test admission_sender --test value_types --test key_custody --test envelope_binding --test service_lifecycle --test encoding_golden --test node_value_types --test chain_read_state --test persona_records --test secret_redaction --test organisation_key --test receive_chain_reads --test expected_admission --test absences --test provisional_store --test commit_paths
   - quint --version
   - quint typecheck org-node/quint/protocol.qnt
   - quint typecheck org-node/quint/ods_instances.qnt
@@ -233,7 +246,11 @@ verify_commands:
   - quint run org-node/quint/protocol.qnt --invariant=tauWindow --max-steps=16 --max-samples=5000
   - quint run org-node/quint/protocol.qnt --invariant=convergence --max-steps=16 --max-samples=5000
 
-problem_age_days: 30
+# Raised from 30 to 45 on 2026-10-05 by owner ruling, during the chain-authority
+# change: PR-vt244s, PR-2dmjzj, PR-u4c2vp and PR-w88sr9 reach 30 days around
+# 2026-10-09 while the four-change chain-authority sequence that reworks their
+# code is under way.
+problem_age_days: 45
 # Raised 2026-10-05 by owner ruling: the org-node type-safety change opens four
 # deferred reports (PR-szkat6, PR-vkw22m, PR-4b2v6p, PR-k2xxaq) on top of the
 # nine other reports open after tooth 4 (13 open in all); each is genuine

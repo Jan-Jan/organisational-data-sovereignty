@@ -100,6 +100,21 @@ fn member_key_is_the_x25519_public_key_and_always_valid() {
     }
 }
 
+// Abnormal: degenerate seeds — every byte zero, every byte one — still give a
+// valid Member-as-a-group key (the clamp keeps the scalar non-zero, so the
+// key is never the identity) and a DevicePublicKey wrapping the verifying key.
+// verifies: LLR-ctzkv7
+#[test]
+fn degenerate_seeds_still_give_valid_keys() {
+    for b in [0x00u8, 0xff] {
+        let member = MemberSeed::from([b; 32]).x25519_keypair();
+        let key = member.member_key().expect("a degenerate seed still gives a valid PersonPublicKey");
+        assert_eq!(key.as_bytes(), &member.public_bytes());
+        let device = DeviceSeed::from([b; 32]).signing_keypair();
+        assert_eq!(device.device_key().unwrap().as_bytes(), device.verifying_key().as_bytes());
+    }
+}
+
 // Relocated from `src/keys.rs`.
 // *Annotated 2026-10-05 by review round 4 (gate notes).* It is LLR-98ufry's
 // normal case: a key pair that cannot be cloned still hands its secret back as

@@ -64,7 +64,7 @@ test_paths:
 
 # Measured 2026-09-14 at the end of the app risk analysis change.
 #
-# The cargo entry names all eight targets explicitly because each is declared
+# The cargo entry names all ten targets explicitly because each is declared
 # `required-features = ["test-support"]`: naming a target with the feature off
 # is a cargo ERROR rather than a silent skip, which is what makes this entry
 # fail loudly if the feature or a target is ever dropped. Measured:
@@ -102,6 +102,30 @@ test_paths:
 #   startup_policy 13 + connection_status 10 + org_id_parsing 14
 #   + receiver_events 32 + receiver_guard 6 + ipc 33 + csp_policy 24
 #   + state_assembly 3 = 135 tests; vitest 36.
+# 2026-10-06, T14 of docs/plans/2026-10-05-chain-authority.md: a ninth
+# target, submit_flow (5 tests, REQ-nfr3n2), and ipc 33 -> 21 (the twelve
+# tests of the invitation commands are deleted until T15 re-writes them):
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 32 + receiver_guard 6 + ipc 21 + csp_policy 24
+#   + state_assembly 3 + submit_flow 5 = 128 tests; vitest 36.
+# 2026-10-06, T15 of the same plan: a tenth target, invitation (12 tests),
+# and ipc 21 -> 35 (the invitation commands' tests re-written against the
+# app-owned exchange, plus produce_invite_reply's refusal):
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 32 + receiver_guard 6 + ipc 35 + csp_policy 24
+#   + state_assembly 3 + submit_flow 5 + invitation 12 = 154 tests; vitest 36.
+# 2026-10-06, R1c of the same plan (review round 1): invitation 12 -> 16
+# (LLR-rt8gdz's three, and LLR-gha5f6's send-failure clause), vitest 40 -> 43
+# (invite.personas):
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 32 + receiver_guard 6 + ipc 35 + csp_policy 24
+#   + state_assembly 3 + submit_flow 5 + invitation 16 = 158 tests; vitest 43.
+# 2026-10-06, R2a of the same plan (review round 2, finding-1): invitation
+# 16 -> 17 (a reply naming another held Organisation under an outstanding
+# invite id):
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 32 + receiver_guard 6 + ipc 35 + csp_policy 24
+#   + state_assembly 3 + submit_flow 5 + invitation 17 = 159 tests; vitest 43.
 #
 # `npm run check` is `svelte-kit sync && svelte-check`; it type-checks app/src
 # AND app/tests (measured 2026-09-14 — the generated .svelte-kit/tsconfig.json
@@ -117,7 +141,7 @@ test_paths:
 # machine must run `npm --prefix app ci` first. A fresh worktree does not have
 # it.
 verify_commands:
-  - cargo test --manifest-path app/src-tauri/Cargo.toml --features test-support --test startup_policy --test connection_status --test org_id_parsing --test receiver_events --test receiver_guard --test ipc --test csp_policy --test state_assembly
+  - cargo test --manifest-path app/src-tauri/Cargo.toml --features test-support --test startup_policy --test connection_status --test org_id_parsing --test receiver_events --test receiver_guard --test ipc --test csp_policy --test state_assembly --test submit_flow --test invitation
   - npm --prefix app run check
   - npm --prefix app run test
 

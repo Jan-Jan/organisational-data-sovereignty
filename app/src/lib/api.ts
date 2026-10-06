@@ -1,8 +1,8 @@
 /**
- * Typed wrappers around Tauri invoke/listen for all 12 ODS commands + 8 events.
+ * Typed wrappers around Tauri invoke/listen for the ODS commands + 8 events.
  *
  * Command signatures mirror commands.rs exactly (camelCase arg names per Tauri convention).
- * Return shapes mirror the Rust DTOs (PersonaDto, OrgDto, JoinRequestDto, ConnectionStatus).
+ * Return shapes mirror the Rust DTOs (PersonaDto, OrgDto, InviteDto, InviteReplyDto, ConnectionStatus).
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -29,14 +29,21 @@ export interface OrgDto {
 	member_count: number;
 }
 
-export interface JoinRequestDto {
+export interface InviteDto {
+	org_name: string;
+	org_id: string;
+	invitee_name: string;
+	inviter_device_keys: string[];
+	invite_id: string;
+}
+
+export interface InviteReplyDto {
+	org_id: string;
 	handle: string;
 	name: string;
 	surname: string;
-	member_key: string;     // hex
-	device_key: string;     // hex
-	has_node_addr: boolean;
-	node_addr_blob: string; // hex — pass back to admit_member
+	member_key: string;
+	device_key: string;
 }
 
 /**
@@ -109,7 +116,7 @@ export interface ReceiverStoppedPayload {
 }
 
 // ---------------------------------------------------------------------------
-// Commands — all 12
+// Commands
 // ---------------------------------------------------------------------------
 
 /** Create a new persona (no chain interaction). Returns persona_id. */
@@ -125,52 +132,45 @@ export function createOrganisation(personaId: string): Promise<string> {
 	return invoke<string>('create_organisation', { personaId });
 }
 
-/** Export an invite blob for the given org_id. */
-export function exportInvite(orgId: string): Promise<string> {
-	return invoke<string>('export_invite', { orgId });
+/** REQ-prjja8: an Invite Blob for an Organisation this device belongs to. */
+export function exportInvite(orgId: string, orgName: string, inviteeName: string): Promise<string> {
+	return invoke<string>('export_invite', { orgId, orgName, inviteeName });
 }
 
-/**
- * Import an invite blob; returns the org_id it's for (40 hex chars).
- * Also stores the invite locally.
- */
-export function importInvite(blob: string): Promise<string> {
-	return invoke<string>('import_invite', { blob });
+/** REQ-yazum3: parse an Invite Blob; a field that does not parse is named. */
+export function importInvite(blob: string): Promise<InviteDto> {
+	return invoke<InviteDto>('import_invite', { blob });
 }
 
-/** Export a join-request blob for the given persona_id. */
-export function exportJoinRequest(personaId: string): Promise<string> {
-	return invoke<string>('export_join_request', { personaId });
+/** REQ-tcutr6 / REQ-ab2mfz: the reply, only with `confirmed` true. */
+export function produceInviteReply(inviteBlob: string, personaId: string, confirmed: boolean): Promise<string> {
+	return invoke<string>('produce_invite_reply', { inviteBlob, personaId, confirmed });
 }
 
-/**
- * Decode and return the fields of a join-request blob (no persistence).
- * Returns JoinRequestDto.
- */
-export function importJoinRequest(blob: string): Promise<JoinRequestDto> {
-	return invoke<JoinRequestDto>('import_join_request', { blob });
+/** REQ-65xqp8: parse a reply; refused unless it names an Invite outstanding for the Organisation it names. */
+export function importInviteReply(blob: string): Promise<InviteReplyDto> {
+	return invoke<InviteReplyDto>('import_invite_reply', { blob });
 }
 
-/**
- * Admit a new member from a join-request blob.
- * org_secret_hex is optional (pass null if not needed).
- * Returns the new member_id as 64 hex chars.
- */
+/** REQ-nfr3n2: admit through the chain, then commit and send. */
 export function admitMember(
 	orgId: string,
-	joinRequestBlob: string,
+	replyBlob: string,
+	peerAddrBlob: string,
 	orgSecretHex: string | null = null
 ): Promise<string> {
-	return invoke<string>('admit_member', { orgId, joinRequestBlob, orgSecretHex });
+	return invoke<string>('admit_member', { orgId, replyBlob, peerAddrBlob, orgSecretHex });
 }
 
 /**
  * Revoke a member by member_id_hex (64 hex chars) and peer_addr_blob (hex-encoded
- * postcard bytes of the iroh EndpointAddr from the original join request).
+ * postcard bytes of the revoked member's iroh EndpointAddr, needed for Loopback
+ * dialling only).
  *
  * REQ-vgr7s2: `peerAddrBlob` may be the empty string, which means "no address".
- * A Networked join request carries no address, so demanding one made revocation
- * unreachable in the default transport (HAZ-n97v5g). See `validateRevokeInput`.
+ * Networked mode dials by device key and has no address to give, so demanding
+ * one made revocation unreachable in the default transport (HAZ-n97v5g). See
+ * `validateRevokeInput`.
  */
 export function revokeMember(
 	orgId: string,

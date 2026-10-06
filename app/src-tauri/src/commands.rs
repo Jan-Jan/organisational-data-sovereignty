@@ -20,11 +20,11 @@ use rand::rngs::OsRng;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
-use org_node::blobs::JoinRequest;
 use org_node::service::SelfDeleteOutcome;
 use org_node::store::{OrgRecord, PersonaDetails, PersonaRecord};
 use org_node::{MemberId, OrgNodeError, OrgSecret, PersonaId};
 
+use crate::invitation::{self, Invite};
 use crate::parsing::parse_org_id;
 use crate::state::{AppState, ConnectionStatus};
 use crate::{events, policy};
@@ -106,7 +106,9 @@ pub async fn create_persona(
         .map_err(|e| e.to_string())
 }
 
-/// Create an organisation: build genesis trie + submit to chain.
+/// Create an organisation: org-node builds the genesis update, the app writes
+/// it to the chain through on-chain-client, then org-node commits it
+/// (REQ-nfr3n2, `crate::submit::found_organisation`).
 /// Returns the org_id (40 hex chars).
 #[tauri::command]
 pub async fn create_organisation(
@@ -114,132 +116,143 @@ pub async fn create_organisation(
     persona_id: String,
 ) -> Result<String, String> {
     let mut svc = state.service.lock().await;
-    let org_id = svc
-        .create_organisation(&mut OsRng, &PersonaId::new(persona_id))
-        .await
-        .map_err(|e| e.to_string())?;
+    let org_id =
+        crate::submit::found_organisation(&mut svc, &*state.writer, &mut OsRng, &PersonaId::new(persona_id))
+            .await?;
     Ok(hex::encode(org_id.as_bytes()))
 }
 
-/// Export an invite blob for the given org.
+/// Issue an Invite to `org_id` (LLR-9sraks): its Blob, with a fresh invite
+/// identifier kept as outstanding.
 #[tauri::command]
 pub async fn export_invite(
     state: State<'_, AppState>,
     org_id: String,
+    org_name: String,
+    invitee_name: String,
 ) -> Result<String, String> {
     let oid = parse_org_id(&org_id)?;
     let svc = state.service.lock().await;
-    svc.export_invite(oid).map_err(|e| e.to_string())
+    let mut outstanding = state.outstanding.lock().await;
+    invitation::issue_invite(&svc, &mut outstanding, &mut OsRng, oid, &org_name, &invitee_name)
 }
 
-/// Import an invite blob; returns the org_id it's for.
-#[tauri::command]
-pub async fn import_invite(
-    state: State<'_, AppState>,
-    blob: String,
-) -> Result<String, String> {
-    let mut svc = state.service.lock().await;
-    let inv = svc.import_invite(&mut OsRng, &blob).map_err(|e| e.to_string())?;
-    Ok(hex::encode(inv.org_id.as_bytes()))
+/// An Invite as the invitee is shown it. Nothing in it is verified
+/// (RC-wzb48r).
+#[derive(Debug, Serialize)]
+pub struct InviteDto {
+    pub org_name: String,
+    pub org_id: String,
+    pub invitee_name: String,
+    pub inviter_device_keys: Vec<String>,
+    pub invite_id: String,
 }
 
-/// Export a join-request blob for the given persona.
+/// Parse an Invite Blob (LLR-b7wgpf); stores nothing.
 #[tauri::command]
-pub async fn export_join_request(
-    state: State<'_, AppState>,
-    persona_id: String,
-) -> Result<String, String> {
-    let svc = state.service.lock().await;
-    svc.export_join_request(&PersonaId::new(persona_id))
-        .map_err(|e| e.to_string())
-}
-
-/// Decode and return the fields of a join-request blob (no persistence).
-#[tauri::command]
-pub async fn import_join_request(blob: String) -> Result<JoinRequestDto, String> {
-    let jr = decode_join_request(&blob)?;
-    Ok(JoinRequestDto {
-        handle: jr.handle.to_string(),
-        name: jr.name.to_string(),
-        surname: jr.surname.to_string(),
-        member_key: hex::encode(jr.member_key.as_bytes()),
-        device_key: hex::encode(jr.device_key.as_bytes()),
-        has_node_addr: !jr.node_addr.is_empty(),
-        node_addr_blob: hex::encode(&jr.node_addr),
+pub async fn import_invite(blob: String) -> Result<InviteDto, String> {
+    let invite = Invite::parse(&blob)?;
+    Ok(InviteDto {
+        org_name: invite.org_name,
+        org_id: hex::encode(invite.org_id.as_bytes()),
+        invitee_name: invite.invitee_name,
+        inviter_device_keys: invite.inviter_device_keys.iter().map(|k| hex::encode(k.as_bytes())).collect(),
+        invite_id: hex::encode(invite.invite_id.as_bytes()),
     })
 }
 
-fn decode_join_request(blob: &str) -> Result<JoinRequest, String> {
-    org_node::service::OrgService::import_join_request(blob).map_err(|e| e.to_string())
+/// The reply to an Invite from `persona_id`, only once the user confirmed
+/// (LLR-w4mhd4).
+#[tauri::command]
+pub async fn produce_invite_reply(
+    state: State<'_, AppState>,
+    invite_blob: String,
+    persona_id: String,
+    confirmed: bool,
+) -> Result<String, String> {
+    let mut svc = state.service.lock().await;
+    invitation::produce_reply(&mut svc, &mut OsRng, &invite_blob, &PersonaId::new(persona_id), confirmed)
 }
 
-/// DTO for an import_join_request response.
+/// An Invite reply as the inviter is shown it before admitting.
 #[derive(Debug, Serialize)]
-pub struct JoinRequestDto {
+pub struct InviteReplyDto {
+    pub org_id: String,
     pub handle: String,
     pub name: String,
     pub surname: String,
     pub member_key: String,
     pub device_key: String,
-    pub has_node_addr: bool,
-    /// The raw node_addr bytes as hex — pass back to admit_member.
-    pub node_addr_blob: String,
 }
 
-/// Admit a new member from a join-request blob.
+/// Parse an Invite reply Blob naming an outstanding Invite (LLR-pmus9f);
+/// stores nothing.
+#[tauri::command]
+pub async fn import_invite_reply(state: State<'_, AppState>, blob: String) -> Result<InviteReplyDto, String> {
+    let reply = invitation::check_reply(&*state.outstanding.lock().await, &blob)?;
+    Ok(InviteReplyDto {
+        org_id: hex::encode(reply.org_id.as_bytes()),
+        handle: reply.handle.to_string(),
+        name: reply.name.to_string(),
+        surname: reply.surname.to_string(),
+        member_key: hex::encode(reply.member_key.as_bytes()),
+        device_key: hex::encode(reply.device_key.as_bytes()),
+    })
+}
+
+/// Admit the person an Invite reply names (LLR-gha5f6): org-node builds the
+/// admission, the app writes it to the chain, then org-node commits it and
+/// sends it to the reply's device under the reply's invite id (REQ-nfr3n2).
+/// The target is the Organisation the reply's outstanding pair names;
+/// `org_id` is the operator's selection and is refused unless it is that one.
 ///
-/// The blob's `node_addr` is OPTIONAL: in `Networked` transport the joiner is
-/// reached by its `EndpointId` (its device key) via iroh relay/DNS discovery, so
-/// the blob carries no embedded address and the service ignores `peer_addr`. We
-/// only need a full `EndpointAddr` for `Loopback` (same-machine) dialing.
-///
-/// Returns the new member_id as 64 hex chars.
+/// The org id, then the Organisation secret (LLR-8krgzj), then the peer
+/// address (LLR-ctrfz4, as `revoke_member` reads it) are parsed before the
+/// reply is. Returns the new member_id as 64 hex chars.
 #[tauri::command]
 pub async fn admit_member(
     state: State<'_, AppState>,
     org_id: String,
-    join_request_blob: String,
+    reply_blob: String,
+    peer_addr_blob: String,
     org_secret_hex: Option<String>,
 ) -> Result<String, String> {
-    use iroh::EndpointAddr;
-
     let oid = parse_org_id(&org_id)?;
-    let jr = decode_join_request(&join_request_blob)?;
-
-    // Resolve the joiner's iroh address. In Networked mode the blob carries no
-    // node_addr (empty) — the peer is reached by EndpointId (its device key) via
-    // relay/DNS discovery, and the service ignores peer_addr — so build an
-    // id-only EndpointAddr from the device key. In Loopback the blob carries the
-    // full EndpointAddr to dial.
-    let peer_addr: EndpointAddr = if jr.node_addr.is_empty() {
-        iroh::EndpointId::from_bytes(jr.device_key.as_bytes())
-            .map_err(|e| format!("device_key is not a valid iroh EndpointId: {e}"))?
-            .into()
-    } else {
-        postcard::from_bytes(&jr.node_addr)
-            .map_err(|e| format!("node_addr decode: {e}"))?
-    };
-
     let org_secret: Option<OrgSecret> = match org_secret_hex {
         Some(hex_str) => {
-            let bytes = hex::decode(hex_str.trim_start_matches("0x"))
-                .map_err(|e| format!("org_secret hex: {e}"))?;
-            if bytes.len() != 32 {
-                return Err("org_secret must be 32 bytes".into());
-            }
-            let mut arr = [0u8; 32];
-            arr.copy_from_slice(&bytes);
+            let bytes = hex::decode(hex_str.trim_start_matches("0x")).map_err(|e| format!("org_secret hex: {e}"))?;
+            let arr: [u8; 32] = bytes.try_into().map_err(|_| "org_secret must be 32 bytes".to_string())?;
             Some(OrgSecret::from(arr))
         }
         None => None,
     };
-
+    let peer_addr = parse_peer_addr(&peer_addr_blob)?;
     let mut svc = state.service.lock().await;
-    let member_id = svc
-        .admit_member(&mut OsRng, oid, &jr, peer_addr, org_secret)
-        .await
-        .map_err(|e| e.to_string())?;
+    let mut outstanding = state.outstanding.lock().await;
+    let member_id = invitation::admit_reply(
+        &mut svc,
+        &*state.writer,
+        &mut outstanding,
+        &mut OsRng,
+        oid,
+        &reply_blob,
+        peer_addr,
+        org_secret,
+    )
+    .await?;
     Ok(hex::encode(member_id.as_bytes()))
+}
+
+/// A peer address as the commands take it: blank (only whitespace) is
+/// absent; otherwise hex of the postcard bytes of an iroh `EndpointAddr`,
+/// needed for Loopback dialling only.
+fn parse_peer_addr(peer_addr_blob: &str) -> Result<Option<iroh::EndpointAddr>, String> {
+    let trimmed = peer_addr_blob.trim().trim_start_matches("0x");
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let addr_bytes = hex::decode(trimmed).map_err(|e| format!("peer_addr_blob hex: {e}"))?;
+    postcard::from_bytes(&addr_bytes).map(Some).map_err(|e| format!("peer_addr decode: {e}"))
 }
 
 /// Revoke a member by member_id (64 hex chars). `peer_addr_blob` (hex-encoded
@@ -260,8 +273,6 @@ pub async fn revoke_member(
     member_id_hex: String,
     peer_addr_blob: String,
 ) -> Result<(), String> {
-    use iroh::EndpointAddr;
-
     let oid = parse_org_id(&org_id)?;
     let member_bytes = hex::decode(member_id_hex.strip_prefix("0x").unwrap_or(&member_id_hex))
         .map_err(|e| format!("member_id hex: {e}"))?;
@@ -271,22 +282,27 @@ pub async fn revoke_member(
     let mut member_id = [0u8; 32];
     member_id.copy_from_slice(&member_bytes);
 
-    // peer_addr is OPTIONAL: empty in Networked mode (the service reaches the
-    // revoked member by EndpointId, derived from its device key in the trie).
-    // Only Loopback needs the full EndpointAddr.
-    let trimmed = peer_addr_blob.trim().trim_start_matches("0x");
-    let peer_addr: Option<EndpointAddr> = if trimmed.is_empty() {
-        None
-    } else {
-        let addr_bytes =
-            hex::decode(trimmed).map_err(|e| format!("peer_addr_blob hex: {e}"))?;
-        Some(postcard::from_bytes(&addr_bytes).map_err(|e| format!("peer_addr decode: {e}"))?)
-    };
+    let peer_addr = parse_peer_addr(&peer_addr_blob)?;
 
+    // REQ-nfr3n2: org-node builds the removal, the app writes it to the
+    // chain, and only then does org-node commit it and send it to the revoked
+    // member's device (`crate::submit::submit_commit_send`).
     let mut svc = state.service.lock().await;
-    svc.revoke_member(&mut OsRng, oid, MemberId::new(member_id), peer_addr)
+    let member = MemberId::new(member_id);
+    let recipient = svc
+        .list_orgs()
+        .iter()
+        .find(|o| o.org_id == oid)
+        .ok_or_else(|| OrgNodeError::OrgNotOnChain.to_string())?
+        .trie_members
+        .iter()
+        .find(|m| m.id == member)
+        .and_then(|m| m.device_keys.first().copied())
+        .ok_or("member_id names no member of this organisation")?;
+    let update = svc.revoke_member(&mut OsRng, oid, member).map_err(|e| e.to_string())?;
+    crate::submit::submit_commit_send(&mut svc, &*state.writer, &mut OsRng, &update, recipient, peer_addr, None, None)
         .await
-        .map_err(|e| e.to_string())
+        .map(|_| ())
 }
 
 /// List all local personas (no key material returned).

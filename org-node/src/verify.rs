@@ -2,6 +2,7 @@
 //! envelope is committed only if applying its delta reproduces a root that
 //! independently matches the on-chain root at a newer epoch. Nothing about who
 //! delivered it is checked (REQ-ag6kqm). See spec §5.2.
+use org_members::delta::Delta;
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
 
@@ -37,6 +38,29 @@ pub struct VerifiedUpdate {
     pub epoch: Epoch,
 }
 
+/// The checks that need no chain, in this order: the Organisation, the
+/// Sequence number, the Change set decode, the base root. Returns the decoded
+/// Change set (LLR-fuq379).
+fn chain_free(local_trie: &Trie, envelope: &Envelope, ctx: &VerifyContext) -> Result<Delta, OrgNodeError> {
+    if envelope.org_id != ctx.expected_org_id {
+        return Err(OrgNodeError::OrgIdMismatch);
+    }
+    ctx.seq_guard.check(envelope.parent_seq)?;
+    let delta = envelope.decode_delta()?;
+    // apply_delta also checks the base, but the specific error comes first.
+    if delta.base_root() != &local_trie.root_hash()? {
+        return Err(OrgNodeError::DeltaBaseMismatch);
+    }
+    Ok(delta)
+}
+
+/// The chain-free half of verify-against-chain, so a caller can refuse a
+/// stranger's Envelope before it reads the chain (LLR-fuq379, RC-mj6gjq).
+/// Touches no `ChainReader`.
+pub fn check_chain_free(local_trie: &Trie, envelope: &Envelope, ctx: &VerifyContext) -> Result<(), OrgNodeError> {
+    chain_free(local_trie, envelope, ctx).map(|_| ())
+}
+
 /// Verify an envelope against the local trie and an independent chain oracle.
 ///
 /// Order is security-critical: cheap checks on what the envelope claims
@@ -48,19 +72,8 @@ pub fn verify_envelope_against_chain<C: ChainReader>(
     ctx: &VerifyContext,
     chain: &C,
 ) -> Result<VerifiedUpdate, OrgNodeError> {
-    // 1. Org binding.
-    if envelope.org_id != ctx.expected_org_id {
-        return Err(OrgNodeError::OrgIdMismatch);
-    }
-    // 2. Replay.
-    ctx.seq_guard.check(envelope.parent_seq)?;
-    // 3. Decode the delta (typed error on malformed/non-canonical wire form).
-    let delta = envelope.decode_delta()?;
-    // 4. Base-root must match the local trie (apply_delta also checks this, but
-    //    we surface the specific error before doing work).
-    if delta.base_root() != &local_trie.root_hash()? {
-        return Err(OrgNodeError::DeltaBaseMismatch);
-    }
+    // 1–4. Org binding, replay, decode, base root: no chain read yet.
+    let delta = chain_free(local_trie, envelope, ctx)?;
     // 5. Apply → candidate.
     let candidate = local_trie.apply_delta(&delta)?;
     // 6. Independent trusted root + epoch from the chain.

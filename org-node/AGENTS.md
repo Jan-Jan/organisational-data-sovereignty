@@ -10,8 +10,9 @@ Same rule as org-members; why: `../docs/adr/2026-10-04-parse-at-the-system-edge.
 
 - **Plain types (`&str`, `String`, `[u8; 32]`) only where data enters the
   system**, parsed there, once. org-node's edges: app/Tauri command inputs,
-  persona-store decoding (`store.rs`), invite/join blobs (`blobs.rs`),
-  transport frames (`transport/wire.rs`), chain reads (`chain_read.rs`).
+  persona-store decoding (`store.rs`), transport frames
+  (`transport/wire.rs`), chain reads (`chain_read.rs`). The invitation Blobs
+  are the app's edge (`app/src-tauri/src/invitation.rs`), not org-node's.
   Everywhere else -- every signature, struct field and return -- uses the
   newtype.
 - **Reuse org-members' types** (`Handle`, `MemberId`, `RootHash`, and
@@ -37,31 +38,26 @@ design sits under the owning items of org-node's decomposition — value types
 in `types.rs` (including the Organisation public key's parse) under
 SDD-swtd3w, seeds to key pairs under SDD-sxp8hb, the store's records and the
 refusals on load and import under SDD-af5vnt, each cross-referenced from the
-other items it constrains (`docs/architecture/2026-10-04-type-safety.md`). 39 lines
+other items it constrains (`docs/architecture/2026-10-04-type-safety.md`). 30 lines
 under `src/` still mention `[u8; 32]` (counted with `grep -c '\[u8; 32\]'`,
-re-counted 2026-10-05 by review round 3 on `worktree-person-shared-types`),
-each an edge, a type's own constructor/accessor, or a buffer:
-`types.rs` 15 (the newtypes' constructors, accessors and `Deserialize`),
-`store.rs` 9 (the `Raw…` decode mirrors and the private `StoreKey`),
+re-counted 2026-10-06 after the chain-authority change removed `blobs.rs`
+and `chain_write/`), each an edge, a type's own constructor/accessor, or a
+buffer:
+`types.rs` 18 (the newtypes' constructors, accessors and `Deserialize`),
+`store.rs` 6 (the `Raw…` decode mirrors and the private `StoreKey`),
 `keys.rs` 2 (`X25519Keypair`'s secret and its `public_bytes`),
 `chain.rs` 1 (`OrgState::from_chain`, the chain-read edge),
 `test_fixtures.rs` 2 (fixture device seeds, test support only),
-`chain_write/proxy.rs` 2 (`BlockSink::settle`, extrinsic-event decoding),
-`chain_write/multisig.rs` 2 (signer sort buffer, `blake2_256` output),
-`chain_write/calldata.rs` 2 (`build_update_calldata`, the pinned EVM encoder),
-`blobs.rs` 2 (the `RawJoinRequest` mirror), `service.rs` 1
-(`FinalitySink::settle`, the live-chain `BlockSink`), `bin/preflight.rs` 1
-(env parsing). Don't add new
-ones outside an edge.
+`bin/preflight.rs` 1 (env parsing). Don't add new ones outside an edge.
 
 ```rust
-// Edge: a decoded JoinRequest is parsed once, each field named on refusal...
-let jr = blobs::decode_join_request(blob)?; // OrgNodeError::InvalidField { field: "join_request.member_key", .. }
-                                            // (person's PersonPublicKey::parse refused it)
+// Edge: a decoded store record is parsed once, each field named on refusal...
+let data = StoreData::try_from(raw)?; // OrgNodeError::InvalidField { field: "provisional.org_pub_key", .. }
+                                      // (OrgPublicKey::parse refused it)
 
 // ...and everything past the edge takes the newtype, never &str / [u8; 32].
-fn admit_member(&mut self, rng: &mut R, org_id: OrgId, join_request: &JoinRequest,
-                peer_addr: EndpointAddr, org_secret: Option<OrgSecret>) -> Result<MemberId, OrgNodeError>;
+fn admit_member(&mut self, rng: &mut R, org_id: OrgId, joiner: &Joiner)
+    -> Result<ProvisionalUpdate, OrgNodeError>;
 
 // Secret: no Display, redacted Debug, bytes only through expose_secret.
 let member = persona.member_seed.x25519_keypair(); // X25519Keypair: not Clone, wiped on drop

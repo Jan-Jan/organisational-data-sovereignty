@@ -18,8 +18,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "time"] }
 hex = "0.4"
+# The invitation Blobs (`src/invitation.rs`): Base64 of postcard.
+base64 = "0.22"
 async-trait = "0.1"
 rand = "0.8"
 postcard = { version = "1", features = ["use-std"] }
@@ -27,7 +29,7 @@ iroh = { version = "0.98" }
 # Needed by state.rs connect_chain (only used when ODS_CHAIN_WS is set at runtime).
 subxt = { version = "0.50", default-features = false, features = ["native", "jsonrpsee"] }
 subxt-signer = { version = "0.50", default-features = false, features = ["sr25519", "subxt"] }
-on-chain-client = { path = "../../on-chain-client", default-features = false, features = ["dev-rpc"] }
+on-chain-client = { path = "../../on-chain-client", default-features = false, features = ["dev-rpc", "write"] }
 org-node = { path = "../../org-node", features = ["app"] }
 
 [features]
@@ -44,6 +46,9 @@ test-support = []
 # an optional feature of the main entry.
 tauri = { version = "2", features = ["test"] }
 tempfile = "3"
+# `tests/submit_flow.rs` runs the 90 s write bound (LLR-be3zv9) on tokio's
+# paused clock (`#[tokio::test(start_paused = true)]`).
+tokio = { version = "1", features = ["test-util"] }
 # `tests/receiver_events.rs` constructs `OrgNodeError::Trie(_)`, whose payload
 # is an `org_members::OrgMembersError`. org-node does not re-export the type and
 # an integration test crate cannot reach a transitive dependency, so the test
@@ -81,4 +86,12 @@ required-features = ["test-support"]
 
 [[test]]
 name = "state_assembly"
+required-features = ["test-support"]
+
+[[test]]
+name = "submit_flow"
+required-features = ["test-support"]
+
+[[test]]
+name = "invitation"
 required-features = ["test-support"]

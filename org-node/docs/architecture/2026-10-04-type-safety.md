@@ -85,8 +85,10 @@ already records that serialising is not formatting.)
 **LLR-s7whrn**: `ChainAccount` (32 bytes), `PersonaId` (string), `Epoch`
 (`u64`) and `SequenceNumber` (`u64`) are tag types: each is built infallibly by
 `new` and by `From` of the value it wraps, holds exactly that value, and
-returns it unchanged through its accessor; `ChainAccount` is converted to
-subxt's account type or to raw bytes only inside `chain_write`. Under `Debug`,
+returns it unchanged through its accessor; `ChainAccount` is opaque in
+org-node — nothing in org-node converts it to subxt's account type, and its
+bytes leave only through `as_bytes` for the app to hand to on-chain-client.
+Under `Debug`,
 `ChainAccount` renders as `ChainAccount(0x` followed by all 32 bytes in
 lower-case hex and `)`, and the other three render as their derived `Debug`
 does, the type name wrapping the value's own `Debug`: `PersonaId("p-alice")`,
@@ -100,19 +102,23 @@ describes, was stated by no requirement and checked by no test.
 since a Persona identifier, an epoch and a Sequence number are not secret and
 are short.)
 
+(Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`):
+this said `ChainAccount` "is converted to subxt's account type or to raw bytes
+only inside `chain_write`". `chain_write/` moves to on-chain-client, and the
+proxy account becomes opaque data org-node holds for the app (owner ruling 6),
+so nothing in org-node converts it.)
+
 **LLR-ayrdr8**: the postcard encoding of a fixed Persona store plaintext (one
 Persona, one Organisation with an Organisation secret and no Organisation
-private key, a chain account and members, one pending Invite), of a fixed
-admission Wire message, the Base64 text of a fixed Invite and Join request,
-and the EVM calldata of a fixed genesis and update are the values pinned in
+private key, a chain account and members, one provisional update and one
+expected admission) and of a fixed admission Wire message, whose Envelope
+carries no signature, are the values pinned in
 `org-node/tests/encoding_golden.rs`: every type `types.rs` defines, and the
 org-members and `person` types org-node holds, serialise exactly as the plain
-values they replace. Two pinned values differ from master's, each by one of
-this branch's two format changes and by nothing else. The store plaintext has
-one more byte, `00`, after the Organisation record's chain account: the
-`org_private_key: None` that REQ-ech45n adds (LLR-3fwykc). The Wire message
-has lost the Envelope's signature, the 65 bytes after its Change set bytes
-(LLR-e7s4ye).
+values they replace. In the store plaintext, the byte `00` after the
+Organisation record's chain account is the `org_private_key: None` that
+REQ-ech45n adds (LLR-3fwykc); the Wire message has no signature bytes after
+its Change set bytes (LLR-e7s4ye).
 satisfies: derived
 
 *Amended 2026-10-05 (owner ruling of that day, change
@@ -122,6 +128,15 @@ pinned values were master's; two changed, each by one of the format changes
 this item names. The two new values were derived from master's bytes, not
 captured from the code; `encoding_golden.rs` records master's values beside
 them.
+
+(Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`):
+this pinned also a pending Invite in the store, the Base64 text of a fixed
+Invite and Join request, and the EVM calldata of a fixed genesis and update.
+Invites, Join requests and their armour leave org-node for the app, and the
+calldata leaves with the chain write for on-chain-client, which pins it there;
+the store now holds provisional updates and expected admissions instead of
+pending Invites, and the Envelope has no signature field. The golden values
+are re-derived when the change is implemented.)
 
 **LLR-mmdu38**: `OrgPublicKey::parse(&[u8; 32])` and `TryFrom<[u8; 32]>`
 accept a value exactly when `person::x25519::is_valid_public_key` accepts it,
@@ -255,15 +270,23 @@ neither stated nor tested.)
 `Debug` rendering of `StoreKey([REDACTED])`.
 satisfies: REQ-y7tsft
 
-**LLR-g76zqd**: `PersonaRecord`, `MemberSnapshot` and `JoinRequest` hold the
-handle, name and surname as `Handle`, `Name` and `Surname`, so a record or Join
-request is constructed only from parsed values, and `create_persona` takes
+**LLR-g76zqd**: `PersonaRecord`, `MemberSnapshot` and `Joiner` hold the
+handle, name and surname as `Handle`, `Name` and `Surname`, so a record or a
+joiner is constructed only from parsed values, and `create_persona` takes
 them typed; every other field of `PersonaRecord`, `OrgRecord`,
-`MemberSnapshot`, `PendingInvite` and `JoinRequest` that was a plain array or
-counter holds its typed form (`MemberSeed`, `DeviceSeed`, `OrgSecret`,
-`MemberId`, `RootHash`, `OrgPublicKey`, `P2pMemberKey`, `P2pDeviceKey`,
-`ChainAccount`, `PersonaId`, `Epoch`, `SequenceNumber`).
+`MemberSnapshot`, `ProvisionalUpdate` and `Joiner` that is an array or counter
+holds its typed form (`MemberSeed`, `DeviceSeed`, `OrgSecret`, `MemberId`,
+`RootHash`, `OrgPublicKey`, `P2pMemberKey`, `P2pDeviceKey`, `ChainAccount`,
+`PersonaId`, `OrgId`, `Epoch`, `SequenceNumber`); `OrgRecord` has no
+administrator key.
 satisfies: REQ-qn2erx
+
+(Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`):
+this named `JoinRequest` and `PendingInvite`, and `OrgRecord`'s typed fields
+included `admin_member_key`. The Join request and the pending Invite leave
+org-node with the invitation exchange; the joiner's details reach
+`admit_member` as a `Joiner`, and the store holds `ProvisionalUpdate`s; the
+owner ruled that there is no administrator key anywhere in org-node.)
 
 **LLR-q6n25z**: `PersonaDetails::parse(handle: &str, name: &str, surname:
 &str) -> Result<PersonaDetails, OrgNodeError>` returns the three values parsed
@@ -282,20 +305,17 @@ that the parsed values are in NFC, although that is what is stored, listed
 and exported for a Persona whose details were given in another normal form;
 see "Observable changes".)
 
-**LLR-8bum44**: opening a Persona store, importing a Join request, or decoding
-a record snapshot (`first_admission_base`), whose decoded content holds a
-handle, name, surname or key that its type's parse refuses fails as a whole
-with `OrgNodeError::InvalidField`. Its `field` names the field that failed
-(`persona.*`, `org.*`, `member.*`, `pending_invite.*`, `join_request.*`), and
-nothing is opened, imported or extended. Each key is parsed by its own type: a
-Member-as-a-group key as a `PersonPublicKey` (X25519), a DevicePublicKey as a
-`DevicePublicKey`, and an Organisation public key as an `OrgPublicKey`
-(LLR-mmdu38). A member snapshot's DevicePublicKeys are held as a list of
-parsed keys, so a repeated key or more than four is not refused here;
-org-members refuses them, as a `Trie` error, when the members are rebuilt.
-Importing an Invite whose Organisation public key, administrator's
-Member-as-a-group key or administrator's DevicePublicKey is not a valid key of
-its kind fails (`Chain("blob decode: …")`) and stores no pending Invite.
+**LLR-8bum44**: opening a Persona store, or decoding a record snapshot
+(`first_admission_base`), whose decoded content holds a handle, name, surname
+or key that its type's parse refuses fails as a whole with
+`OrgNodeError::InvalidField`. Its `field` names the field that failed
+(`persona.*`, `org.*`, `member.*`, `provisional.*`), and nothing is opened or
+extended. Each key is parsed by its own type: a Member-as-a-group key as a
+`PersonPublicKey` (X25519), a DevicePublicKey as a `DevicePublicKey`, and an
+Organisation public key as an `OrgPublicKey` (LLR-mmdu38). A member
+snapshot's DevicePublicKeys are held as a list of parsed keys, so a repeated
+key or more than four is not refused here; org-members refuses them, as a
+`Trie` error, when the members are rebuilt.
 satisfies: REQ-qn2erx
 
 *Amended 2026-10-05 (owner ruling of that day, change
@@ -304,6 +324,13 @@ satisfies: REQ-qn2erx
 item said 'curve point' for every key; the keys now have three kinds, each
 parsed by its own type. REQ-qn2erx still says "not a curve point", master's
 wording; this item reads it as "not a valid key of its kind".
+
+(Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`):
+this also covered importing a Join request (`join_request.*`) and an Invite,
+and named the pending Invite's fields (`pending_invite.*`). REQ-qn2erx was
+amended by the same ruling to drop both imports, which move to the app's edge;
+the store's provisional updates hold Organisation public keys and member
+snapshots, parsed on open like the rest (`provisional.*`).)
 
 (Amended 2026-10-04 after independent review: the record snapshot decoded by
 `first_admission_base` and the Invite import were refused by the code but not
@@ -334,6 +361,12 @@ SDD-af5vnt above. No requirement of this change sits under it.
 section claimed the store open and the record-snapshot decode, which are
 `store.rs`'s and `first_admission_base`'s, and held LLR-8bum44. The
 requirement moved to SDD-af5vnt.)
+
+(Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`):
+`blobs.rs` is removed with the invitation exchange, which moves to the app.
+SDD-vee2fq now states that boundary (`2026-10-03-decomposition.md`); the
+Join request decode this section named, and LLR-8bum44's and LLR-g76zqd's
+clauses for it, are withdrawn there and here.)
 
 ### Observable changes
 

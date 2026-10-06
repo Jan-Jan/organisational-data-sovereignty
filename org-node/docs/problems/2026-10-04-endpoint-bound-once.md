@@ -78,8 +78,7 @@ different devices. The app binds its receiver from `personas.first()` and lets
 any Persona export a join request, so the app can reach this. In Networked
 mode an administrator dials by the device key, which nothing is listening on,
 so the send fails after `submit_update` has moved the chain (PR-vt244s's
-state). `pr_8qsnhx_a_join_request_advertises_the_bound_endpoint_not_its_personas`
-pins it. The cure is the one above: an endpoint per Persona. Folded in for
+state). A PR-8qsnhx pin on the join request pinned it. The cure is the one above: an endpoint per Persona. Folded in for
 that reason.
 
 ## Widened by review round 8 — a second reader
@@ -95,8 +94,15 @@ uses the key, not the address, so this costs the dial-back only. Same cure.
 sender check since the owner's ruling of that day; it uses neither the key
 nor the address of the Invite to accept an admission, so this still costs the
 dial-back only.)*
-`pr_8qsnhx_an_invite_advertises_the_bound_endpoint_not_its_administrators`
-pins it (review round 9).
+A second PR-8qsnhx pin, on the Invite, pinned it (review round 9).
+
+*(Note 2026-10-06, change `worktree-org-node-chain-authority`, T7: both readers
+left org-node with the invitation exchange — `export_join_request` and
+`export_invite` are deleted, and so are the two pins.
+`org_node_holds_no_invitation_exchange` (`org-node/tests/absences.rs`) carries
+the absence, and `persona_public_keys_returns_the_personas_two_keys` what the
+app now reads in their place. The sending side of this report, the endpoint
+bound once (LLR-6zjzn2), is unchanged.)*
 
 *Annotated 2026-10-05 by review round 1 of `worktree-worktree-person-shared-types`
 (finding-6); reworded the same day by docs/plans/2026-10-05-switch-trim.md.* The

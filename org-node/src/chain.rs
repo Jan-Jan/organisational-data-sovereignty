@@ -37,7 +37,8 @@ pub trait ChainReader {
     fn get_org_state(&self, org_id: &OrgId) -> Result<Option<OrgState>, String>;
 }
 
-/// In-memory ChainReader for tests. `set` simulates an admin's update().
+/// In-memory ChainReader for tests. `set` simulates the contract's `update()`
+/// moving a slot.
 #[derive(Default, Clone)]
 pub struct MockChain {
     slots: HashMap<OrgId, OrgState>,

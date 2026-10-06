@@ -9,7 +9,7 @@
 use org_members::{Handle, Name, RootHash, Surname};
 use org_node::ids::OrgId;
 use org_node::store::{self, OrgRecord, PersonaRecord, PersonaStatus, StoreData};
-use org_node::test_fixtures::{admit_member_delta, member_key, org_public_key};
+use org_node::test_fixtures::{admit_member_delta, org_public_key};
 use org_node::transport::wire::WireMessage;
 use org_node::{
     DeviceSeed, Envelope, Epoch, MemberSeed, OrgPrivateKey, OrgSecret, PersonaId, SequenceNumber,
@@ -81,7 +81,6 @@ fn persona(member: [u8; 32], device: [u8; 32]) -> PersonaRecord {
 }
 
 fn org(secret: Option<[u8; 32]>) -> OrgRecord {
-    let admin = member_key(0x31);
     OrgRecord {
         org_id: OrgId::new([5u8; 20]),
         root_hash: RootHash::new([0x11u8; 32]),
@@ -89,7 +88,6 @@ fn org(secret: Option<[u8; 32]>) -> OrgRecord {
         epoch: Epoch::new(1),
         org_secret: secret.map(OrgSecret::from),
         last_seq: SequenceNumber::new(0),
-        admin_member_key: admin,
         trie_members: vec![],
         proxy_account: None,
         org_private_key: Some(OrgPrivateKey::from(org_private())),
@@ -100,7 +98,7 @@ fn wire(secret: [u8; 32]) -> WireMessage {
     let admin = MemberSeed::from([1u8; 32]).x25519_keypair();
     let (delta, _) = admit_member_delta(&admin);
     let envelope = Envelope::build(OrgId::new([5u8; 20]), SequenceNumber::new(1), &delta).unwrap();
-    WireMessage { envelope, org_secret: Some(OrgSecret::from(secret)), genesis_snapshot: None }
+    WireMessage { envelope, org_secret: Some(OrgSecret::from(secret)), genesis_snapshot: None, invite_id: None }
 }
 
 // Adapted at the merge of master `1feb608` into worktree-person-shared-types:
@@ -112,7 +110,12 @@ fn records_and_wire_messages_never_render_secret_bytes() {
     let (member, device, secret) = (sentinel(0xd0), sentinel(0x10), sentinel(0x40));
     let p = persona(member, device);
     let o = org(Some(secret));
-    let data = StoreData { personas: vec![p.clone()], orgs: vec![o.clone()], pending_invites: vec![] };
+    let data = StoreData {
+        personas: vec![p.clone()],
+        orgs: vec![o.clone()],
+        provisional_updates: vec![],
+        expected_admissions: vec![],
+    };
     let w = wire(secret);
     for rendered in [format!("{p:?}"), format!("{p:#?}"), format!("{data:?}"), format!("{data:#?}")] {
         assert_not_rendered(&rendered, &member, "member seed");
@@ -158,7 +161,8 @@ fn secrets_at_the_high_byte_bound_and_many_records_stay_unrendered() {
     let data = StoreData {
         personas: personas.clone(),
         orgs: vec![org(Some(sentinel_down(0xdf))), org(None)],
-        pending_invites: vec![],
+        provisional_updates: vec![],
+        expected_admissions: vec![],
     };
     for rendered in [format!("{data:?}"), format!("{data:#?}")] {
         for i in 0..personas.len() as u8 {
