@@ -6,6 +6,7 @@ use person::compute_device_root;
 use crate::error::OrgMembersError;
 use crate::hasher::TrieHasher;
 use crate::node::{Node, NodeKind};
+use crate::proof::ProofEnding;
 use crate::types::{MemberId, MemberLeaf, NodeHash};
 
 /// Depth of the Sparse Merkle Tree (256 bits = 256 levels).
@@ -31,8 +32,12 @@ impl DefaultHashes {
         Self { hashes }
     }
 
-    pub fn at_level(&self, level: u16) -> &NodeHash {
-        &self.hashes[level as usize]
+    /// The default hash at `level` (0 = a leaf, 256 = the root), or
+    /// `IndexOutOfRange` for a level of 257 or more (LLR-wm5hpc, LLR-7jkcba).
+    pub fn at_level(&self, level: u16) -> Result<&NodeHash, OrgMembersError> {
+        self.hashes
+            .get(usize::from(level))
+            .ok_or(OrgMembersError::IndexOutOfRange)
     }
 
     pub fn empty_leaf(&self) -> &NodeHash {
@@ -40,8 +45,8 @@ impl DefaultHashes {
     }
 }
 
-pub fn empty_root(defaults: &DefaultHashes) -> Arc<Node> {
-    Arc::new(Node::empty(*defaults.at_level(SMT_DEPTH)))
+pub fn empty_root(defaults: &DefaultHashes) -> Result<Arc<Node>, OrgMembersError> {
+    Ok(Arc::new(Node::empty(*defaults.at_level(SMT_DEPTH)?)))
 }
 
 /// Inserts a member leaf at the position determined by its id bits.
@@ -49,11 +54,12 @@ pub fn insert<H: TrieHasher>(
     root: &Arc<Node>,
     member: MemberLeaf,
     defaults: &DefaultHashes,
-) -> Arc<Node> {
+) -> Result<Arc<Node>, OrgMembersError> {
     let id = *member.id();
     let device_root = compute_device_root::<H>(member.p2p_device_slots());
     let new_leaf = Arc::new(Node::leaf(member, device_root));
-    insert_at(root, &id, new_leaf, 0, defaults)
+    let mut bits = id.path_bits();
+    insert_at(root, &mut bits, new_leaf, 0, defaults)
 }
 
 /// Removes a member at the position determined by the id bits.
@@ -61,39 +67,35 @@ pub fn remove(
     root: &Arc<Node>,
     id: &MemberId,
     defaults: &DefaultHashes,
-) -> Arc<Node> {
+) -> Result<Arc<Node>, OrgMembersError> {
     let empty_leaf = Arc::new(Node::empty(*defaults.empty_leaf()));
-    insert_at(root, id, empty_leaf, 0, defaults)
+    insert_at(root, &mut id.path_bits(), empty_leaf, 0, defaults)
 }
 
 fn insert_at(
     node: &Arc<Node>,
-    id: &MemberId,
+    bits: &mut dyn Iterator<Item = bool>,
     new_leaf: Arc<Node>,
     depth: u16,
     defaults: &DefaultHashes,
-) -> Arc<Node> {
+) -> Result<Arc<Node>, OrgMembersError> {
     if depth == SMT_DEPTH {
-        return new_leaf;
+        return Ok(new_leaf);
     }
-
-    let go_right = id.bit(depth);
-
+    let go_right = bits.next().ok_or(OrgMembersError::InvariantViolated)?;
     let (left, right) = match &node.kind {
         NodeKind::Internal { left, right } => (left.clone(), right.clone()),
         NodeKind::Empty | NodeKind::Leaf(_) => {
-            let default_child = Arc::new(Node::empty(*defaults.at_level(SMT_DEPTH - depth - 1)));
+            let default_child = Arc::new(Node::empty(*defaults.at_level(SMT_DEPTH - depth - 1)?));
             (default_child.clone(), default_child)
         }
     };
-
     let (new_left, new_right) = if go_right {
-        (left, insert_at(&right, id, new_leaf, depth + 1, defaults))
+        (left, insert_at(&right, bits, new_leaf, depth + 1, defaults)?)
     } else {
-        (insert_at(&left, id, new_leaf, depth + 1, defaults), right)
+        (insert_at(&left, bits, new_leaf, depth + 1, defaults)?, right)
     };
-
-    Arc::new(Node::internal(new_left, new_right))
+    Ok(Arc::new(Node::internal(new_left, new_right)))
 }
 
 /// Recursively computes hashes for all nodes with empty OnceCell.
@@ -128,23 +130,61 @@ pub fn recalculate_hashes<H: TrieHasher>(
 /// Looks up a member by id, traversing the SMT by id bits.
 pub fn get_member(root: &Arc<Node>, id: &MemberId) -> Option<MemberLeaf> {
     let mut current = root.clone();
-    for depth in 0..SMT_DEPTH {
+    for go_right in id.path_bits() {
         match &current.kind {
             NodeKind::Internal { left, right } => {
-                current = if id.bit(depth) {
-                    right.clone()
-                } else {
-                    left.clone()
-                };
+                current = if go_right { right.clone() } else { left.clone() };
             }
-            NodeKind::Empty => return None,
-            NodeKind::Leaf(_) => return None,
+            NodeKind::Empty | NodeKind::Leaf(_) => return None,
         }
     }
     match &current.kind {
         NodeKind::Leaf(payload) => Some(payload.member.clone()),
         _ => None,
     }
+}
+
+/// The 256 sibling hashes along `id`'s path, index `level` holding the sibling
+/// at that level (0 = the leaf's level), and what the path ends in. Below an
+/// empty subtree every sibling is its level's default (LLR-wm5hpc). Refuses
+/// with `HashesNotCalculated` when a sibling's hash is unset (LLR-utp6x4).
+pub(crate) fn path(
+    root: &Arc<Node>,
+    id: &MemberId,
+    defaults: &DefaultHashes,
+) -> Result<(Vec<NodeHash>, ProofEnding), OrgMembersError> {
+    let mut top_down = Vec::with_capacity(usize::from(SMT_DEPTH));
+    let mut bits = id.path_bits();
+    let mut current = root.clone();
+    let mut depth: u16 = 0;
+    let end = loop {
+        if depth == SMT_DEPTH {
+            break match &current.kind {
+                NodeKind::Leaf(payload) => ProofEnding::Leaf(payload.member.clone()),
+                NodeKind::Empty => ProofEnding::Empty,
+                NodeKind::Internal { .. } => return Err(OrgMembersError::InvariantViolated),
+            };
+        }
+        match &current.kind {
+            NodeKind::Internal { left, right } => {
+                let go_right = bits.next().ok_or(OrgMembersError::InvariantViolated)?;
+                let (next, sibling) = if go_right { (right, left) } else { (left, right) };
+                top_down.push(*sibling.hash().ok_or(OrgMembersError::HashesNotCalculated)?);
+                current = next.clone();
+                depth += 1;
+            }
+            NodeKind::Empty => {
+                while depth < SMT_DEPTH {
+                    top_down.push(*defaults.at_level(SMT_DEPTH - depth - 1)?);
+                    depth += 1;
+                }
+                break ProofEnding::Empty;
+            }
+            NodeKind::Leaf(_) => return Err(OrgMembersError::InvariantViolated),
+        }
+    };
+    top_down.reverse();
+    Ok((top_down, end))
 }
 
 /// Collects all member leaves in the trie.

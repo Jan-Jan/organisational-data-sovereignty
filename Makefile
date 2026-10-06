@@ -179,8 +179,9 @@ PERSON_REGIONS := 99
 coverage: coverage-org-members coverage-on-chain-client coverage-person
 
 # Scope note: this omits `mbt_conformance` (`newtypes` and `encoding_golden`,
-# added 2026-10-04, and `person_error_mapping`, added 2026-10-06, are
-# measured), and the floors are calibrated against the reduced measurement — so
+# added 2026-10-04, and `person_error_mapping` and `absence_proofs`, both
+# added 2026-10-06, are measured), and the floors are calibrated against the
+# reduced measurement — so
 # the gate is conservative relative to the crate's true coverage, but NOT
 # relative to its own floor. The reason for omitting it is that it shells out
 # to the quint CLI and, measured with quint off PATH, FAILS rather than skips
@@ -195,6 +196,7 @@ coverage-org-members:
 	cargo llvm-cov -p org-members \
 		--lib --test integration_test --test fuzz_tests \
 		--test newtypes --test encoding_golden --test person_error_mapping \
+		--test absence_proofs \
 		--summary-only \
 		--fail-under-lines $(ORG_MEMBERS_LINES) \
 		--fail-under-regions $(ORG_MEMBERS_REGIONS)

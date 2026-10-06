@@ -196,6 +196,13 @@ the item's heading.)
 path-copying, lazy hashing and the diff walk — which holds member records
 without interpreting them. traces: REQ-d3prca, REQ-avmu3j, REQ-crjxk8
 
+(Amended 2026-10-06 by `worktree-org-members-absence-proofs`: the store also
+returns a MemberId's path siblings and the node its path ends in, LLR-utp6x4,
+for the absence proof SDD-57vaj4, which is the only code that interprets the
+leaf it ends in. LLR-7jkcba makes `MemberId::bit` and `DefaultHashes::at_level`
+return an error rather than panic, resolving PR-jq43gx. Both are in this
+change's `absence-proofs` architecture file.)
+
 **LLR-zbe553**: a member is addressed by the 256 bits of its identifier, index
 0 being the most significant bit of the first byte. satisfies: derived
 

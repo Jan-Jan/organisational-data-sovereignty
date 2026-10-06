@@ -64,6 +64,26 @@ pub enum OrgMembersError {
     #[error("hashes already calculated")]
     HashesAlreadyCalculated,
 
+    /// A bit index of 256 or more given to `MemberId::bit`, or a level of 257
+    /// or more given to `DefaultHashes::at_level`. LLR-7jkcba (PR-jq43gx).
+    #[error("index out of range")]
+    IndexOutOfRange,
+
+    /// The Member under an absence proof's MemberId holds the Device key.
+    /// LLR-4xz255, LLR-p2p8qy.
+    #[error("device key still held by the member")]
+    DeviceStillHeld,
+
+    /// An absence proof whose sibling hashes do not match its default map.
+    /// LLR-4rju5r.
+    #[error("malformed absence proof")]
+    AbsenceProofMalformed,
+
+    /// An absence proof that does not resolve to the root it was checked
+    /// against. LLR-dgzy7e.
+    #[error("absence proof does not resolve to the root")]
+    AbsenceProofRootMismatch,
+
     #[error("internal invariant violated")]
     InvariantViolated,
 

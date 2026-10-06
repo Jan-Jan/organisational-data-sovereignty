@@ -1,9 +1,18 @@
-//! Key fixtures shared by the integration test crates. Each test crate uses
-//! a subset, hence the `dead_code` allowance.
+//! Fixtures shared by the integration test crates. Each test crate uses a
+//! subset, hence the `dead_code` allowance.
 #![allow(dead_code)]
 
 use ed25519_dalek::SigningKey;
-use org_members::types::{DevicePublicKey, PersonPublicKey};
+use org_members::types::{DevicePublicKey, MemberId, PersonPublicKey};
+
+pub fn member_id(seed: &str) -> MemberId {
+    MemberId::new(blake3::hash(seed.as_bytes()).into())
+}
+
+/// How many levels an absence proof's default-sibling map marks.
+pub fn default_level_count(map: &[u8; 32]) -> usize {
+    map.iter().map(|byte| byte.count_ones() as usize).sum()
+}
 
 /// 32 bytes valid both as an ed25519 public key and as a canonical,
 /// non-small-order X25519 public key: the first seed variant whose ed25519

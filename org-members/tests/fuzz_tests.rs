@@ -1,6 +1,6 @@
 mod common;
 
-use common::{device_key, member_key};
+use common::{default_level_count, device_key, member_id, member_key};
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
 use org_members::types::{Handle, DevicePublicKey, MemberId, Name, PersonPublicKey, MemberLeaf, Surname};
@@ -23,11 +23,6 @@ fn recalculate_pending(
 ) -> Result<(TestTrie, org_members::delta::Delta), TestCaseError> {
     trie.recalculate()
         .map_err(|e| TestCaseError::fail(format!("recalculate of a pending trie failed: {:?}", e)))
-}
-
-fn member_id(seed: &str) -> MemberId {
-    let hash: [u8; 32] = blake3::hash(seed.as_bytes()).into();
-    MemberId::new(hash)
 }
 
 
@@ -1063,5 +1058,69 @@ proptest! {
             prop_assert!(replayed.is_ok(), "change set after {:?} refused: {:?}", op, replayed.err());
             prop_assert_eq!(replayed.unwrap().root_hash().unwrap(), root);
         }
+    }
+}
+
+// ============================================================
+// Absence proofs (SDD-57vaj4)
+// ============================================================
+
+/// Bytes in an absence proof's wire form: a default-sibling map, siblings and
+/// an ending. The sibling count is either the one the map implies or any count
+/// up to past the 256 bound, so decoding succeeds often enough for `verify` to
+/// run. Uniformly random bytes almost never decode to a proof.
+fn arb_wire_proof() -> impl Strategy<Value = Vec<u8>> {
+    let ending = prop_oneof![
+        Just(None),
+        arb_handle_idx().prop_map(|index| make_member(HANDLES[index], 0)),
+    ];
+    (any::<[u8; 32]>(), any::<bool>(), 0usize..300, any::<[u8; 32]>(), ending).prop_map(
+        |(map, consistent, free_len, fill, ending)| {
+            let len = if consistent { 256 - default_level_count(&map) } else { free_len };
+            let siblings: Vec<[u8; 32]> = (0..len)
+                .map(|index| {
+                    let mut sibling = fill;
+                    sibling[0] ^= index as u8;
+                    sibling
+                })
+                .collect();
+            postcard::to_allocvec(&(map, siblings, ending)).unwrap()
+        },
+    )
+}
+
+proptest! {
+    /// verifies: REQ-ds8ryr, LLR-2dcnbp, LLR-4rju5r
+    #[test]
+    fn absence_proof_decoding_and_verify_never_panic(
+        bytes in prop_oneof![
+            proptest::collection::vec(any::<u8>(), 0..2048),
+            arb_wire_proof(),
+        ],
+        target in any::<[u8; 32]>(),
+    ) {
+        if let Ok(proof) = postcard::from_bytes::<org_members::AbsenceProof>(&bytes) {
+            let root = org_members::types::RootHash::new(target);
+            let _ = proof.verify::<Blake3Hasher>(&root, &MemberId::new(target), &device_key("probe"));
+        }
+    }
+
+    /// verifies: LLR-utp6x4, LLR-dgzy7e, LLR-4xz255, REQ-535jcd, REQ-tk2qqj
+    #[test]
+    fn every_honest_absence_proof_verifies(
+        handle_indexes in proptest::collection::btree_set(0usize..HANDLES.len(), 1..6),
+        absent_seed in any::<u64>(),
+    ) {
+        let fail = |error: OrgMembersError| TestCaseError::fail(format!("{error:?}"));
+        let members: Vec<MemberLeaf> = handle_indexes
+            .iter()
+            .filter_map(|&index| make_member(HANDLES[index], 0))
+            .collect();
+        let trie = TestTrie::genesis(members).map_err(fail)?;
+        let root = trie.root_hash().map_err(fail)?;
+        let absent = member_id(&format!("absent-{absent_seed}"));
+        let probe = device_key("probe-device");
+        let proof = trie.prove_absent(&absent, &probe).map_err(fail)?;
+        prop_assert_eq!(proof.verify::<Blake3Hasher>(&root, &absent, &probe), Ok(()));
     }
 }

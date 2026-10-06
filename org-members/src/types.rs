@@ -50,12 +50,25 @@ impl MemberId {
         &self.0
     }
 
-    /// Returns the bit at the given index (0 = MSB of byte 0, 255 = LSB of byte 31).
-    /// Used for SMT path traversal.
-    pub fn bit(&self, index: u16) -> bool {
-        let byte_idx = (index / 8) as usize;
-        let bit_idx = 7 - (index % 8);
-        (self.0[byte_idx] >> bit_idx) & 1 == 1
+    /// Returns the bit at the given index (0 = MSB of byte 0, 255 = LSB of
+    /// byte 31), or `IndexOutOfRange` for an index of 256 or more
+    /// (LLR-zbe553, LLR-7jkcba).
+    pub fn bit(&self, index: u16) -> Result<bool, OrgMembersError> {
+        let byte = self
+            .0
+            .get(usize::from(index / 8))
+            .ok_or(OrgMembersError::IndexOutOfRange)?;
+        Ok((byte >> (7 - (index % 8))) & 1 == 1)
+    }
+
+    /// The identifier's 256 bits, most significant first: the path the
+    /// store walks (LLR-zbe553). It cannot go out of range (LLR-7jkcba).
+    pub(crate) fn path_bits(&self) -> impl DoubleEndedIterator<Item = bool> + '_ {
+        self.0.iter().flat_map(|byte| {
+            (0..8u8)
+                .rev()
+                .map(move |shift| (byte >> shift) & 1 == 1)
+        })
     }
 }
 

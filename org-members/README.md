@@ -147,6 +147,14 @@ What the crate cannot see is a key that is **no longer held** — it keeps no ke
 
 Deleting a member is permanent. A `MemberId` is a fresh random value chosen by the caller, and a deleted id must never be re-added: the trie keeps no record of deleted ids and will accept one, which is outside its contract. Delegation is always to a `MemberId`, never to a handle. The one exception to the bullets above (owner ruling, 2026-10-03): a re-admitted person is a new member under a fresh `MemberId` and may bring the keys their previous membership held when it was deleted; nothing granted to the old id carries over. If a removed device was compromised, fresh keys are the joiner's choice, not a software check — an accepted residual risk. The duty not to supply any other key no longer held stands — a Member-as-a-group key used earlier and since replaced, or the Device key of a device removed earlier while the member stayed — and a deleted member's keys must never be given to anyone else.
 
+### 12. Check an absence proof only against the current on-chain root, and give one only to the device it is about
+
+`AbsenceProof::verify` accepts a proof that resolves to the root you pass. It cannot know whether that root is current. A proof that was genuine under an older root fails against a newer one (`AbsenceProofRootMismatch`). But a proof checked against a stale root that predates a device's admission says "absent" truthfully, and a device that acts on it deletes its data while it is still a member (HAZ-adm7gv). Pass only the latest finalised on-chain root, read by the caller at the moment of checking.
+
+A proof that a Device key is absent from a Member who remains carries that Member's leaf: MemberId, handle, name, surname and keys (HAZ-gwbn5n). `prove_absent` cannot know who is asking. Produce a proof only for a requester whose authenticated Device key and supplied MemberId match a pair on your revoked-device list, and send it only over the connection that authenticated that key.
+
+`prove_absent` does not refuse a Device key that another Member holds. Keeping a revoked Device key from ever being admitted again, to any Member, is the duty of whoever keeps the revoked-device list.
+
 ## What the crate does on its own
 
 For completeness, what the caller does **not** need to re-do:

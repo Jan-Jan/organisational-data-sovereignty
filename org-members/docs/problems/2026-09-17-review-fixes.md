@@ -7,7 +7,8 @@ beyond (`index / 8` gives a byte offset of 32 or more into a `[u8; 32]`) and
 index into a 257-element `Vec`) — both reachable from outside the crate.
 affects: REQ-ds8ryr, LLR-h9gs32, LLR-zbe553, LLR-wm5hpc.
 opened: 2026-09-17
-status: open
+status: resolved
+resolution: `MemberId::bit` and `DefaultHashes::at_level` returned an unchecked index into a fixed array; both now return `IndexOutOfRange` (LLR-7jkcba), and the store steers by `MemberId::path_bits`. Reproduced by `member_id_bit_out_of_range_does_not_panic` and `default_hashes_at_level_out_of_range_does_not_panic` (`org-members/tests/integration_test.rs`).
 
 Found by the independent review of the architecture change (merge-change step
 6a, finding-4 of that review; this file previously miscited it as finding-2,

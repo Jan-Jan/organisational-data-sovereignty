@@ -2566,10 +2566,50 @@ fn member_id_bit_indexes_msb_first() {
     bytes[31] = 0b0000_0001;
     let id = MemberId::new(bytes);
 
-    assert!(id.bit(0), "index 0 must be the MSB of byte 0");
-    assert!(!id.bit(1));
-    assert!(id.bit(255), "index 255 must be the LSB of byte 31");
-    assert!(!id.bit(254));
+    assert_eq!(id.bit(0), Ok(true), "index 0 must be the MSB of byte 0");
+    assert_eq!(id.bit(1), Ok(false));
+    assert_eq!(id.bit(255), Ok(true), "index 255 must be the LSB of byte 31");
+    assert_eq!(id.bit(254), Ok(false));
+}
+
+/// verifies: LLR-7jkcba, PR-jq43gx
+///
+/// PR-jq43gx's reproduction: an index the type admits must not panic.
+#[test]
+fn member_id_bit_out_of_range_does_not_panic() {
+    let id = MemberId::new([0xff; 32]);
+    let outcome = std::panic::catch_unwind(|| {
+        let _ = id.bit(256);
+        let _ = id.bit(u16::MAX);
+    });
+    assert!(outcome.is_ok(), "MemberId::bit panicked on an out-of-range index (PR-jq43gx)");
+}
+
+/// verifies: LLR-7jkcba, PR-jq43gx
+///
+/// PR-jq43gx's second site.
+#[test]
+fn default_hashes_at_level_out_of_range_does_not_panic() {
+    let defaults = org_members::smt::DefaultHashes::compute::<Blake3Hasher>();
+    let outcome = std::panic::catch_unwind(|| {
+        let _ = defaults.at_level(257);
+        let _ = defaults.at_level(u16::MAX);
+    });
+    assert!(outcome.is_ok(), "DefaultHashes::at_level panicked on an out-of-range level (PR-jq43gx)");
+}
+
+/// verifies: LLR-7jkcba
+#[test]
+fn out_of_range_path_index_is_index_out_of_range() {
+    let id = MemberId::new([0xff; 32]);
+    assert_eq!(id.bit(255), Ok(true));
+    assert_eq!(id.bit(256), Err(OrgMembersError::IndexOutOfRange));
+    assert_eq!(id.bit(u16::MAX), Err(OrgMembersError::IndexOutOfRange));
+
+    let defaults = org_members::smt::DefaultHashes::compute::<Blake3Hasher>();
+    assert!(defaults.at_level(256).is_ok());
+    assert!(matches!(defaults.at_level(257), Err(OrgMembersError::IndexOutOfRange)));
+    assert!(matches!(defaults.at_level(u16::MAX), Err(OrgMembersError::IndexOutOfRange)));
 }
 
 /// verifies: LLR-wm5hpc, LLR-4n8zqx

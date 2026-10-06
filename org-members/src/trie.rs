@@ -8,6 +8,7 @@ use crate::delta::{CandidateTrie, Delta};
 use crate::error::OrgMembersError;
 use crate::hasher::TrieHasher;
 use crate::node::Node;
+use crate::proof::AbsenceProof;
 use crate::smt::{self, DefaultHashes};
 use crate::types::{
     DevicePublicKey, DeviceSlots, Handle, HandleSkeleton, HeldKey, MemberId, MemberLeaf, Name,
@@ -95,7 +96,7 @@ impl<H: TrieHasher> OrgTrie<H> {
     /// `DuplicateKey`.
     pub fn genesis(members: Vec<MemberLeaf>) -> Result<Self, OrgMembersError> {
         let defaults = Arc::new(DefaultHashes::compute::<H>());
-        let mut root = smt::empty_root(&defaults);
+        let mut root = smt::empty_root(&defaults)?;
         let mut count = 0;
         let mut skeleton_index = HashMap::new();
         let mut handle_index = HashMap::new();
@@ -121,7 +122,7 @@ impl<H: TrieHasher> OrgTrie<H> {
 
             skeleton_index.insert(skeleton, member.handle().clone());
             handle_index.insert(member.handle().clone(), *member.id());
-            root = smt::insert::<H>(&root, member, &defaults);
+            root = smt::insert::<H>(&root, member, &defaults)?;
             count += 1;
         }
 
@@ -171,6 +172,26 @@ impl<H: TrieHasher> OrgTrie<H> {
     pub fn get_by_handle(&self, handle: &Handle) -> Option<MemberLeaf> {
         let id = self.handle_index.get(handle)?;
         smt::get_member(&self.root, id)
+    }
+
+    /// A proof that `device` is absent under `id`: `id` holds no Member, or
+    /// the Member it holds lacks `device`. Refuses with `HashesNotCalculated`
+    /// on an uncalculated trie and with `DeviceStillHeld` when that Member
+    /// holds `device`. A key another Member holds does not refuse
+    /// (LLR-4xz255).
+    pub fn prove_absent(
+        &self,
+        id: &MemberId,
+        device: &DevicePublicKey,
+    ) -> Result<AbsenceProof, OrgMembersError> {
+        if !self.is_calculated() {
+            return Err(OrgMembersError::HashesNotCalculated);
+        }
+        let (siblings, ending) = smt::path(&self.root, id, &self.defaults)?;
+        if ending.holds(device) {
+            return Err(OrgMembersError::DeviceStillHeld);
+        }
+        AbsenceProof::from_path(siblings, ending, &self.defaults)
     }
 
     pub fn members(&self) -> Vec<MemberLeaf> {
@@ -399,7 +420,7 @@ impl<H: TrieHasher> OrgTrie<H> {
         let mut new_key_index = self.key_index.clone();
         index_leaf_keys(&mut new_key_index, &leaf)?;
 
-        let new_root = smt::insert::<H>(&self.root, leaf, &self.defaults);
+        let new_root = smt::insert::<H>(&self.root, leaf, &self.defaults)?;
 
         Ok(Self {
             root: new_root,
@@ -455,7 +476,7 @@ impl<H: TrieHasher> OrgTrie<H> {
             new_handle_index.insert(leaf.handle().clone(), *leaf.id());
         }
 
-        let new_root = smt::insert::<H>(&self.root, leaf, &self.defaults);
+        let new_root = smt::insert::<H>(&self.root, leaf, &self.defaults)?;
 
         Ok(Self {
             root: new_root,
@@ -473,7 +494,7 @@ impl<H: TrieHasher> OrgTrie<H> {
     fn delete_by_id(&self, id: &MemberId) -> Result<Self, OrgMembersError> {
         let existing = smt::get_member(&self.root, id).ok_or(OrgMembersError::IdNotFound)?;
 
-        let new_root = smt::remove(&self.root, id, &self.defaults);
+        let new_root = smt::remove(&self.root, id, &self.defaults)?;
 
         let mut new_skeleton_index = self.skeleton_index.clone();
         let mut new_handle_index = self.handle_index.clone();
@@ -692,7 +713,7 @@ impl<H: TrieHasher> OrgTrie<H> {
             let existing = smt::get_member(&root, id).ok_or(OrgMembersError::InvariantViolated)?;
             new_skeleton_index.remove(&HandleSkeleton::of(existing.handle()));
             new_handle_index.remove(existing.handle());
-            root = smt::remove(&root, id, &self.defaults);
+            root = smt::remove(&root, id, &self.defaults)?;
             count = count.checked_sub(1).ok_or(OrgMembersError::InvariantViolated)?;
         }
 
@@ -730,7 +751,7 @@ impl<H: TrieHasher> OrgTrie<H> {
                 new_handle_index.insert(member.handle().clone(), *member.id());
             }
 
-            root = smt::insert::<H>(&root, member.clone(), &self.defaults);
+            root = smt::insert::<H>(&root, member.clone(), &self.defaults)?;
             if existing.is_none() {
                 count = count.checked_add(1).ok_or(OrgMembersError::InvariantViolated)?;
             }
