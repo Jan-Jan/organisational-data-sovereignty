@@ -1,0 +1,273 @@
+# Design — the Organisation key pair reaches every Member
+
+Low-level requirements for change `worktree-org-node-org-key-pair`, change 3
+of the chain-authority sequence. They refine the owner rulings and the
+requirements of
+`org-node/docs/requirements/2026-10-07-org-key-pair.md`
+(REQ-szq3ud, REQ-stx9v3, REQ-jy6ybw, REQ-c29s93, REQ-bwx7eg, REQ-ju6vn2,
+REQ-3dsweu, REQ-vxqc5g), and
+REQ-8amu2a as amended in `2026-10-06-chain-authority.md`. They realise the
+receipt check RC-9cefcn
+(`org-node/docs/risk/2026-10-07-org-key-pair.md`).
+
+No software item is added; the decomposition's count of nineteen stands. Each
+requirement below sits under the item that owns the code it constrains, as
+`2026-10-06-chain-authority.md` does, and each owning item's `traces:` line is
+amended in place in `2026-10-03-decomposition.md` with a dated note:
+
+- SDD-kwncn7, which owns `transport/wire.rs`: LLR-js9dsu and LLR-ecxc76;
+- SDD-swtd3w, which owns `error.rs` and `types.rs`: LLR-j5vbqj and LLR-qsjde3;
+- SDD-af5vnt, which owns `store.rs`: LLR-byjvd9;
+- SDD-rx2yvy, which owns `admit_member`, `keep_change_set` and
+  `send_update`: LLR-6ymd6d and LLR-e2b7gv. LLR-e2b7gv also constrains
+  `revoke_member`, SDD-72ddm6's;
+- SDD-8cpyfa, which owns the receive-and-commit path and `commit_update`:
+  LLR-xn5pwc, LLR-ba2ejp, LLR-38e2kn, LLR-pt32fx, LLR-6s785x and LLR-4kh9w9.
+  LLR-ba2ejp, LLR-pt32fx and LLR-4kh9w9 also constrain
+  `receive_and_self_delete_if_revoked`, SDD-72ddm6's.
+
+Every item whose text the rulings falsify is amended in place, in the file
+that defines it, with a dated note naming this change. All items are class C,
+the unit's class. No dependency changes, so `soup.md` is unchanged.
+
+## The shape of the change, for an implementer
+
+- **Wire message.** `WireMessage` becomes an enum of two kinds.
+  `OrgInformation { envelope, record_snapshot, org_private_key }` always
+  carries the record snapshot and the Organisation private key; a body of that
+  kind without either does not decode. `Revocation { envelope }` carries
+  neither. No kind carries an invite identifier.
+- **No Organisation secret.** `OrgSecret`, `OrgRecord.org_secret` and
+  `InviteId` are removed. `OrgRecord.org_private_key` is a required
+  `OrgPrivateKey`: the creator's record holds it from `commit_genesis`, a
+  joiner's from its first admission. Stores written before this change are
+  not supported (owner ruling) and nothing migrates them.
+- **Sending.** `send_update(outgoing, recipient, peer_addr)` takes no secret,
+  key or invite identifier. It sends Organisation information, carrying the
+  Organisation private key of the epoch the update reaches as the node's
+  record holds it, to a Device the node's committed record lists, and a
+  revocation to any other Device. There is one Organisation private key per
+  epoch, shared Organisation-wide; no node has a key of its own. A node draws
+  a key pair only when it builds a provisional update and passes on the key
+  its record holds.
+- **Rotation** (owner ruling of 2026-10-06, later the same day, superseding
+  the earlier ruling that rotation is out of scope). A provisional update is a
+  batch of changes; when its resulting Membership root is calculated, the
+  building node draws a fresh X25519 Organisation key pair. The private key is
+  kept in the provisional update (`ProvisionalChange::ChangeSet` gains
+  `org_private_key`, as `Genesis` already has), and the public key is the
+  update's `org_pub_key`, which the app writes to the chain. Today
+  `admit_member` and `revoke_member` are each a batch of one. When
+  `commit_update` commits the update, the record's key and Organisation public
+  key become the update's; the record keeps only the current key, no history.
+  A provisional update is identified by its key as well as its root, so
+  rebuilding the same change never replaces an update whose key may already
+  be on the chain. Nothing about the kind is kept
+  in a provisional update or an outgoing update.
+- **Receiving.** An Organisation-information message is checked as before
+  (chain-free checks, one chain read, verification) and then the X25519
+  public half of the Organisation private key it carries is compared with the
+  `org_pub_key` read from the chain at verification; a mismatch is
+  refused with `OrgKeyMismatch`. On commit the received key is stored. A
+  revocation about an Organisation the node holds no record of is refused
+  before the chain is read; with a record it is verified as any update and
+  then accepted only if it removes this node's own Device, in which case the
+  node deletes its record (self-delete). A revocation after which the node's
+  Device is still listed is refused with `RevocationNotForThisDevice`, store
+  unchanged (owner ruling on relabelling), so a revocation never commits into
+  a record the node keeps. A first admission is matched against the expectations
+  by Organisation alone: `expect_admission(rng, org_id)`, and
+  `ExpectedAdmission { org_id }`.
+- **Commit paths.** `commit_held` takes no secret. `commit_update` replaces
+  the record's key with its provisional update's; `commit_genesis` stores the
+  genesis update's key, as before. A committed Organisation-information
+  message sets the record's key and Organisation public key to the received
+  key and the chain's key. No revocation commits into a kept record.
+
+The types this change alters:
+
+    WireMessage::OrgInformation { envelope: Envelope, record_snapshot: Vec<u8>, org_private_key: OrgPrivateKey }
+    WireMessage::Revocation { envelope: Envelope }
+    OrgRecord { org_id, root_hash, org_pub_key, epoch, last_seq, trie_members, proxy_account, org_private_key: OrgPrivateKey }
+    ProvisionalChange::ChangeSet { change_set: Vec<u8>, org_private_key: OrgPrivateKey }
+    ExpectedAdmission { org_id: OrgId }
+    OrgNodeError::{ MalformedMessage, OrgKeyMismatch { org_id }, RevocationNotHeld { org_id },
+                    RevocationNotForThisDevice { org_id } }
+
+## SDD-kwncn7 — The wire frame and its bound
+
+`org-node/src/transport/wire.rs`.
+
+**LLR-js9dsu**: `WireMessage` is an enum with exactly two variants, encoded by
+postcard as the variant index followed by the variant's fields in order:
+`OrgInformation { envelope: Envelope, record_snapshot: Vec<u8>,
+org_private_key: OrgPrivateKey }` (index 0) and `Revocation { envelope:
+Envelope }` (index 1). No field of either is optional, and neither carries an
+invite identifier or any other secret. `WireMessage::envelope(&self) ->
+&Envelope` returns the Envelope of either variant. `decode_body` refuses with
+`Malformed`, and does not panic, a body whose variant index is neither 0 nor
+1, and an `OrgInformation` body that ends before its record snapshot or before
+the 32 bytes of its Organisation private key.
+satisfies: REQ-c29s93, REQ-3dsweu
+
+**LLR-ecxc76**: the `Debug` rendering of a `WireMessage` of either variant
+contains none of the bytes of the Organisation private key it holds, in any
+form: an `OrgInformation` renders its key as `OrgPrivateKey([REDACTED])`
+(LLR-322xfu), and a `Revocation` holds no key. `WireMessage` formats no field
+itself.
+satisfies: REQ-y7tsft
+
+## SDD-swtd3w — Value types and the rejection vocabulary
+
+`org-node/src/error.rs`, `org-node/src/types.rs`.
+
+**LLR-j5vbqj**: `OrgNodeError` gains four variants, each distinct from every
+other variant: `MalformedMessage`, whose `Display` is "received wire message
+is malformed", for a received Wire message that does not decode
+(LLR-xn5pwc); `OrgKeyMismatch { org_id: OrgId }`, whose `Display` names the
+Organisation, for an Organisation-information message whose key's public half
+is not the chain's Organisation public key (LLR-ba2ejp);
+`RevocationNotHeld { org_id: OrgId }`, whose `Display` names the
+Organisation, for a revocation about an Organisation the node holds no record
+of (LLR-38e2kn); and `RevocationNotForThisDevice { org_id: OrgId }`, whose
+`Display` names the Organisation, for a revocation after whose verified
+Membership record this node's Device is still listed (LLR-pt32fx).
+satisfies: REQ-c29s93, REQ-bwx7eg, REQ-vxqc5g, REQ-3dsweu
+
+**LLR-qsjde3**: org-node defines no `OrgSecret` type and re-exports none: no
+record, store plaintext, Wire message, provisional update or `OrgService`
+operation holds, takes or returns an Organisation secret, and the only
+Organisation key material org-node holds is the `OrgPrivateKey`.
+satisfies: REQ-szq3ud
+
+## SDD-af5vnt — The encrypted persona store
+
+`org-node/src/store.rs`.
+
+**LLR-byjvd9**: `OrgRecord` (and its decode mirror `RawOrgRecord`) has no
+`org_secret` field, and its `org_private_key` is an `OrgPrivateKey`, not an
+`Option`, encoded as its plain 32 bytes with no option tag: every record a
+store holds carries the Organisation's private key, the one value the whole
+Organisation shares. `commit_genesis` fills it
+from the genesis provisional update (LLR-wzqqg9, LLR-qjz3q4), a first
+admission from the Organisation-information message it commits (LLR-ckk5nz),
+and no other operation creates a record; `commit_update` and a committed
+Organisation-information message replace it (LLR-6s785x, LLR-ckk5nz). The
+record holds only the current key and keeps no earlier one. Stores written before this change are
+not supported: nothing reads or migrates their layout.
+satisfies: REQ-ju6vn2, REQ-ech45n
+
+## SDD-rx2yvy — Admission
+
+`org-node/src/service.rs` (`keep_change_set`, which `admit_member` and
+`revoke_member` share, and `send_update`).
+
+**LLR-e2b7gv**: `admit_member` and `revoke_member`, each a batch of one
+change, build their provisional update through `keep_change_set(rng, rec,
+persona_id, new_trie, delta)`, which, after the resulting Membership root has
+been calculated, draws a fresh Organisation key pair from `rng`
+(`X25519Keypair` from 32 random bytes, as `create_organisation` does) and
+stores the update with `org_pub_key` that pair's public key and
+`ProvisionalChange::ChangeSet { change_set, org_private_key }` holding its
+private key. Before storing, it refuses with
+`Trie(OrgMembersError::DuplicateKey)` a public key equal to the record's
+current `org_pub_key` or to any Member-as-a-group key or DevicePublicKey of
+the resulting record (`OrgPublicKey::ensure_distinct_from`), keeping no
+provisional update, leaving the record unchanged and writing nothing. The
+record's `org_pub_key` and `org_private_key` are not changed by building the
+update.
+satisfies: REQ-stx9v3
+
+**LLR-6ymd6d**: `send_update(outgoing, recipient, peer_addr)` looks up the
+node's record of `outgoing.envelope.org_id`, refusing with `OrgNotOnChain`
+and sending nothing when it holds none, and chooses the kind from that record
+alone: when a member snapshot of the record lists `recipient` among its
+DevicePublicKeys it sends `WireMessage::OrgInformation` holding
+`outgoing.envelope`, `outgoing.record_snapshot` and the Organisation private
+key of the epoch the update reaches, as that record's `org_private_key` holds
+it (a clone; nothing is drawn); otherwise it sends `WireMessage::Revocation` holding
+`outgoing.envelope` only. Neither `ProvisionalUpdate`, `OutgoingUpdate` nor
+`CommitOutcome` holds a kind, a key or a recipient, and the kind does not
+depend on which operation built the update.
+satisfies: REQ-3dsweu, REQ-szq3ud
+
+The record consulted is the one the node holds when `send_update` runs, which
+is the committed record the outgoing update came from unless a later commit
+has replaced it. Either way the key sent is the one that record holds, and it
+never goes to a Device the node's current record does not list: a recipient a
+later commit removed is sent a revocation, and one a later commit admitted is
+sent the current key, which it may hold.
+
+## SDD-8cpyfa — The receive-and-commit path
+
+`org-node/src/service.rs` (`receive_one`, `receive_and_verify`,
+`receive_and_self_delete_if_revoked`, `commit_update`).
+
+**LLR-6s785x**: `commit_update(rng, org_id)` selects the stored provisional
+update for `org_id` whose `resulting_root` and `org_pub_key` both equal the
+root and the Organisation public key the chain state read carries
+(`NoProvisionalUpdate` for none), and, when that update commits, sets the
+record's `org_private_key` to the `org_private_key` its
+`ProvisionalChange::ChangeSet` holds and the record's `org_pub_key` to the
+update's `org_pub_key`, in the same store save as the rest of the commit; the
+record keeps no earlier key. When the commit is the node's own removal the
+record is deleted instead (LLR-b27jr6) and no key is kept. On any refusal the
+record's key and Organisation public key are unchanged (LLR-ewkg85).
+satisfies: REQ-jy6ybw
+
+**LLR-4kh9w9**: when `receive_and_verify` or
+`receive_and_self_delete_if_revoked` commits an Organisation-information
+message, the record's `org_pub_key` is set to the Organisation public key the
+chain state read at verification carries, which the key check (LLR-ba2ejp)
+has shown to be the public half of the stored `org_private_key`
+(LLR-ckk5nz), so the record never pairs a public key with a private key that
+is not its own half; a first admission creates the record with it
+(LLR-xq9nrq). A revocation never sets either key: it is either refused
+(LLR-pt32fx) or deletes the record (LLR-6p4pj2, LLR-b27jr6).
+satisfies: REQ-ju6vn2
+
+**LLR-xn5pwc**: `receive_one` returns `OrgNodeError::MalformedMessage` when
+`recv_one` refuses the received body with `TransportError::Malformed`, so an
+Organisation-information message that carries no Organisation private key, or
+a key shorter than 32 bytes, is refused by `receive_and_verify` and
+`receive_and_self_delete_if_revoked` with that typed error before any record
+or expectation is consulted and with no `read_state` call, leaving the store
+unchanged and unwritten.
+satisfies: REQ-c29s93
+
+**LLR-ba2ejp**: on an `OrgInformation` message, `receive_and_verify` and
+`receive_and_self_delete_if_revoked`, once the message has verified against
+the chain state read by their one `read_state` call, compare
+`org_private_key.x25519_keypair().org_public_key()` with that state's
+`org_pub_key`, and when they differ refuse with `OrgKeyMismatch { org_id }`
+before any commit, record deletion, Persona change or expectation clearing,
+leaving the store unchanged and unwritten. The check applies to a first
+admission and to an update to a held record alike, and on a first admission
+it runs before the own-Persona check (LLR-3f5h7b). A `Revocation` carries no
+key and is not checked.
+satisfies: REQ-bwx7eg
+
+**LLR-38e2kn**: on a `Revocation` about an Organisation the node holds no
+record of, `receive_and_verify` refuses with `RevocationNotHeld { org_id }`
+before consulting the expected admissions and with no `read_state` call,
+creating no record, clearing no expectation and writing nothing; an
+expectation for that Organisation stays in place.
+`receive_and_self_delete_if_revoked` refuses such a message, as any message
+about an unheld Organisation, with `OrgNotOnChain` before any chain read
+(LLR-379hnv).
+satisfies: REQ-vxqc5g
+
+**LLR-pt32fx**: on a `Revocation` about an Organisation the node holds a
+record of, `receive_and_verify` and `receive_and_self_delete_if_revoked`,
+once the message has verified against the chain state read by their one
+`read_state` call, and before any commit, record deletion, Persona change or
+provisional-update removal, decide from the verified Membership record alone:
+when it still lists the DevicePublicKey of any Persona bound to that
+Organisation (the test `still_member` makes), they refuse with
+`RevocationNotForThisDevice { org_id }`, leaving the record, its keys, the
+Personas and the provisional updates unchanged and writing nothing; otherwise
+the revocation is this node's own removal, and they delete the record and
+mark its Personas Revoked (LLR-6p4pj2, LLR-b27jr6). A revocation therefore
+never commits an update into a record the node keeps, and an
+Organisation-information message is never refused by this check.
+satisfies: REQ-3dsweu

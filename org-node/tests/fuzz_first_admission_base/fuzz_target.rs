@@ -29,7 +29,6 @@
 //! `cargo bolero test fuzz_first_admission_base --engine libfuzzer`.
 
 use org_node::service::first_admission_base;
-use org_node::OrgNodeError;
 use serde::Serialize;
 
 /// A member snapshot as it is encoded, with its fields plain. Ported
@@ -69,24 +68,16 @@ fn snapshot_from(bytes: &[u8]) -> PlainSnapshot {
     }
 }
 
-// Abnormal case of REQ-d9g6nt over arbitrary input: no snapshot is
-// always refused, and arbitrary snapshot bytes never panic.
+// Abnormal case of REQ-d9g6nt over arbitrary input: arbitrary snapshot bytes
+// never panic. (A first admission without a snapshot cannot be expressed:
+// Organisation information requires one, LLR-js9dsu, LLR-j6j95z.)
 // verifies: REQ-d9g6nt
 fn main() {
-    // No snapshot: refused with its own error, not some later failure.
-    match first_admission_base(None) {
-        Err(OrgNodeError::Chain(msg))
-            if msg.contains("first admission without a record snapshot") => {}
-        Err(other) => {
-            panic!("first admission without a snapshot refused for the wrong reason: {other:?}")
-        }
-        Ok(_) => panic!("first admission without a snapshot was accepted"),
-    }
     bolero::check!().for_each(|bytes: &[u8]| {
         // Shape 1 — the bytes are the whole encoded snapshot vector. Exercises
         // postcard's decode of `Vec<MemberSnapshot>`, including its length
         // prefix and the `String` fields.
-        let _ = first_admission_base(Some(bytes));
+        let _ = first_admission_base(bytes);
 
         // Shape 2 — the bytes are the KEY MATERIAL inside a well-formed
         // snapshot vector, so every iteration reaches `VerifyingKey::from_bytes`
@@ -96,7 +87,7 @@ fn main() {
         if !bytes.is_empty() {
             let snaps = vec![snapshot_from(bytes)];
             if let Ok(encoded) = postcard::to_allocvec(&snaps) {
-                let _ = first_admission_base(Some(&encoded));
+                let _ = first_admission_base(&encoded);
             }
         }
     });

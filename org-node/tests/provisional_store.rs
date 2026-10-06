@@ -11,8 +11,10 @@ use org_node::store::{
     MAX_PROVISIONAL_BYTES,
 };
 use org_node::test_fixtures::{device_key, member_key, org_public_key};
-use org_node::{Handle, InviteId, Name, OrgNodeError, OrgPrivateKey, PersonaId, RootHash, SequenceNumber, Surname};
+use org_node::{Handle, Name, OrgNodeError, OrgPrivateKey, PersonaId, RootHash, SequenceNumber, Surname};
 use rand::rngs::OsRng;
+
+const CHANGE_SET_PRIVATE: [u8; 32] = [0x99; 32];
 
 fn change_set(org: u8, root: u8, bytes: usize) -> ProvisionalUpdate {
     ProvisionalUpdate {
@@ -22,7 +24,7 @@ fn change_set(org: u8, root: u8, bytes: usize) -> ProvisionalUpdate {
         resulting_root: RootHash::new([root; 32]),
         seq: SequenceNumber::new(3),
         org_pub_key: org_public_key(),
-        change: ProvisionalChange::ChangeSet { change_set: vec![0xab; bytes] },
+        change: ProvisionalChange::ChangeSet { change_set: vec![0xab; bytes], org_private_key: OrgPrivateKey::from(CHANGE_SET_PRIVATE) },
     }
 }
 
@@ -70,7 +72,7 @@ fn provisional_updates_round_trip_through_the_encrypted_file() {
     let mut store = PersonaStore::open(path.clone(), "pw").unwrap();
     store.data_mut().insert_provisional(genesis("p-alice", 0x10)).unwrap();
     store.data_mut().insert_provisional(change_set(0xbb, 0x66, 4)).unwrap();
-    let expectation = ExpectedAdmission { org_id: OrgId::new([0xcc; 20]), invite_id: InviteId::new([0xee; 32]) };
+    let expectation = ExpectedAdmission { org_id: OrgId::new([0xcc; 20]) };
     store.data_mut().expected_admissions.push(expectation);
     store.save(&mut OsRng).unwrap();
     let reopened = PersonaStore::open(path, "pw").unwrap();
@@ -79,7 +81,7 @@ fn provisional_updates_round_trip_through_the_encrypted_file() {
 }
 
 // Abnormal: the same identity replaces rather than duplicates; different
-// identities — another root, another Persona's genesis — are all kept.
+// identities — another root, another key, another Persona's genesis — are all kept.
 // verifies: REQ-xs4ab8, LLR-95753m
 #[test]
 fn an_update_with_the_same_identity_replaces_and_others_are_kept() {
@@ -90,24 +92,38 @@ fn an_update_with_the_same_identity_replaces_and_others_are_kept() {
     data.insert_provisional(change_set(0xbb, 0x67, 4)).unwrap();
     data.insert_provisional(genesis("p-alice", 0x66)).unwrap();
     data.insert_provisional(genesis("p-bob", 0x66)).unwrap();
-    assert_eq!(data.provisional_updates.len(), 4);
+    // The same root under another key is another update (LLR-95753m).
+    let other_key = ProvisionalUpdate {
+        org_pub_key: OrgPrivateKey::from([0x55; 32]).x25519_keypair().org_public_key().unwrap(),
+        ..change_set(0xbb, 0x66, 5)
+    };
+    data.insert_provisional(other_key).unwrap();
+    assert_eq!(data.provisional_updates.len(), 5);
 }
 
-// Normal: a genesis update holds its Organisation private key, whose public
-// key is the update's, once in the store's plaintext; abnormal: with the
-// update gone, no copy of the key remains anywhere in the store.
-// verifies: REQ-ech45n, LLR-qjz3q4
+// Normal: a genesis update and a Change-set update each hold their
+// Organisation private key once in the store's plaintext; abnormal: with the
+// updates gone, no copy of either key remains anywhere in the store.
+// *Rewritten 2026-10-06 (change worktree-org-node-org-key-pair).* Was
+// `the_genesis_private_key_lives_only_in_its_provisional_update`: only a
+// genesis update held a key.
+// verifies: REQ-ech45n, REQ-stx9v3, LLR-qjz3q4
 #[test]
-fn the_genesis_private_key_lives_only_in_its_provisional_update() {
+fn every_updates_private_key_lives_only_in_its_provisional_update() {
     let mut data = StoreData::default();
     let update = genesis("p-alice", 0x10);
     let ProvisionalChange::Genesis { org_private_key, .. } = &update.change else { panic!("genesis") };
     assert_eq!(org_private_key.x25519_keypair().org_public_key().unwrap(), update.org_pub_key);
     data.insert_provisional(update).unwrap();
-    assert_eq!(contains(&postcard::to_allocvec(&data).unwrap(), &PRIVATE), 1);
+    data.insert_provisional(change_set(0xbb, 0x66, 4)).unwrap();
+    let plaintext = postcard::to_allocvec(&data).unwrap();
+    assert_eq!(contains(&plaintext, &PRIVATE), 1);
+    assert_eq!(contains(&plaintext, &CHANGE_SET_PRIVATE), 1);
     assert!(data.orgs.is_empty());
     data.provisional_updates.clear();
-    assert_eq!(contains(&postcard::to_allocvec(&data).unwrap(), &PRIVATE), 0);
+    let plaintext = postcard::to_allocvec(&data).unwrap();
+    assert_eq!(contains(&plaintext, &PRIVATE), 0);
+    assert_eq!(contains(&plaintext, &CHANGE_SET_PRIVATE), 0);
 }
 
 /// The postcard length of a one-update group whose change set is `n` bytes.

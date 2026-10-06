@@ -318,16 +318,27 @@ Cut by the sweep: that the decoded address is the one handed to the service.
 Decoding it and then handing none reddened nothing (run T5-A95), for the
 reason given under LLR-ty85xv.
 
-**LLR-8krgzj**: `admit_member` does not refuse a request that supplies no
-Organisation secret. A supplied secret must decode from hexadecimal, after a
-leading `0x`, to exactly thirty-two bytes. Text that is not hexadecimal is
-refused with a message beginning `org_secret hex:`, and any other length with
-`org_secret must be 32 bytes`.
+**LLR-8krgzj**: `admit_member` takes no Organisation secret or key: its
+arguments are `org_id`, `reply_blob` and `peer_addr_blob`, it parses no
+secret, and nothing it hands org-node carries an Organisation secret, an
+Organisation key or an invite identifier for the Wire message. The webview's
+`admitMember(orgId, replyBlob, peerAddrBlob)` (`app/src/lib/api.ts`) invokes
+it with those three values alone, and `Admit.svelte` passes no fourth.
 satisfies: derived
 
-Normal: `admit_member_does_not_refuse_a_32_byte_or_absent_org_secret` (ipc).
-Abnormal: `admit_member_refuses_an_org_secret_that_is_not_32_bytes`,
-`admit_member_refuses_an_org_secret_that_is_not_hex` (ipc).
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+This said `admit_member` accepts an optional `org_secret_hex`, refused unless
+it decodes from hexadecimal to thirty-two bytes (`org_secret hex:`,
+`org_secret must be 32 bytes`). The Organisation secret is removed from
+org-node; the Organisation private key an admission's Wire message carries is
+the one org-node's record holds, and `send_update` takes none from its caller
+(org-node's requirements, change `worktree-org-node-org-key-pair`). The parameter, its parse and its two refusals go, and
+the item states their absence. Its tests are rewritten accordingly; the
+`0x` note below no longer applies to this command.
+
+Normal and abnormal: `admit_member_takes_no_organisation_secret` (ipc,
+a stale `orgSecretHex` of any value is not read);
+`api.admit.test.ts` (the webview passes three values).
 
 The `0x` handling is deliberately left out of this requirement: the parse
 strips a run of prefixes, not one, and that is PR-5mc4d8's.
@@ -345,7 +356,7 @@ hexadecimal is refused with a message beginning `peer_addr_blob hex:`, and
 bytes that are not an `EndpointAddr` with one beginning `peer_addr decode:`.
 satisfies: derived
 
-Normal: `admit_member_does_not_refuse_a_32_byte_or_absent_org_secret`,
+Normal: `admit_member_takes_no_organisation_secret`,
 `admit_member_does_not_refuse_a_blank_or_decodable_peer_addr` (ipc).
 Abnormal: `admit_member_refuses_a_peer_addr_that_is_not_hex`,
 `admit_member_refuses_a_peer_addr_that_is_not_an_endpoint_addr` (ipc).
@@ -355,6 +366,12 @@ stated how `admit_member` read the node address a join request carried. The
 join request left org-node, and the Invite reply carries no address
 (REQ-tcutr6), so the caller passes the joiner's address as `revoke_member`'s
 caller does (LLR-ty85xv, LLR-n6twt7), needed in Loopback transport only.
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+The requirement's text is unchanged. Its first Normal test,
+`admit_member_does_not_refuse_a_32_byte_or_absent_org_secret`, also exercised
+the Organisation secret `admit_member` no longer takes (LLR-8krgzj); it is
+rewritten without that argument, and the address clauses it carries stay.
 
 Cut by the sweep: which address reaches the service. That the id-only address
 is built from the device key, and that a decoded address is the one handed
@@ -522,8 +539,23 @@ messages org-node formats.
 the error's message and no organisation. It classifies every other variant
 (`Chain`, `OrgNotOnChain`, `Trie`, `InvalidOrgPublicKey`, `InvalidField`,
 `AdmissionNotExpected`, `AdmissionNotOurs`, `ProvisionalLimit`,
-`NoProvisionalUpdate`) as `ReceiveError`, carrying the error's message.
+`NoProvisionalUpdate`, `PersonaAlreadyBound`, `MalformedMessage`,
+`OrgKeyMismatch`, `RevocationNotHeld`, `RevocationNotForThisDevice`) as
+`ReceiveError`, carrying the error's message.
 satisfies: REQ-kn5rtx
+
+*Amended 2026-10-06 (change `worktree-org-node-org-key-pair`).* org-node
+gains four refusals of a received Wire message: one that does not decode
+(`MalformedMessage`), a revocation about an Organisation the node holds no
+record of (`RevocationNotHeld`), a carried Organisation private key whose
+public half is not the chain's (`OrgKeyMismatch`), and a revocation after
+which this node's Device is still listed (`RevocationNotForThisDevice`). None
+is produced by `verify_envelope_against_chain`, the rule the note below
+states for a verdict: the first two are refused before anything is verified,
+the last two after it on a rule about the key or about this node, as
+`AdmissionNotOurs` is. Each is a receiver error. `PersonaAlreadyBound`, which
+the receiver list already matched, is now named. The abnormal test
+`locally_reachable_variants_are_classified_as_receiver_errors` lists the four.
 
 *Amended 2026-10-06 (change `worktree-org-node-chain-authority`).* org-node
 gains four refusals: a first admission no expectation matches, a first

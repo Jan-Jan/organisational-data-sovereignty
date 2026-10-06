@@ -2,7 +2,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 //! No secret reaches debug output (REQ-y7tsft, PR-hqwpg9): a Persona record,
 //! an Organisation record, the store plaintext and a Wire message holding a
-//! member seed, a device seed or an Organisation secret, and a signing key
+//! member seed, a device seed or an Organisation private key, and a signing key
 //! pair, render none of its bytes in any form (LLR-bwb9pu), and the store encryption key renders as
 //! its redaction marker (LLR-scgk5j).
 
@@ -12,7 +12,7 @@ use org_node::store::{self, OrgRecord, PersonaRecord, PersonaStatus, StoreData};
 use org_node::test_fixtures::{admit_member_delta, org_public_key};
 use org_node::transport::wire::WireMessage;
 use org_node::{
-    DeviceSeed, Envelope, Epoch, MemberSeed, OrgPrivateKey, OrgSecret, PersonaId, SequenceNumber,
+    DeviceSeed, Envelope, Epoch, MemberSeed, OrgPrivateKey, PersonaId, SequenceNumber,
 };
 
 /// The Organisation private key every `org` record holds (this branch's
@@ -80,25 +80,24 @@ fn persona(member: [u8; 32], device: [u8; 32]) -> PersonaRecord {
     }
 }
 
-fn org(secret: Option<[u8; 32]>) -> OrgRecord {
+fn org(private: [u8; 32]) -> OrgRecord {
     OrgRecord {
         org_id: OrgId::new([5u8; 20]),
         root_hash: RootHash::new([0x11u8; 32]),
         org_pub_key: org_public_key(),
         epoch: Epoch::new(1),
-        org_secret: secret.map(OrgSecret::from),
         last_seq: SequenceNumber::new(0),
         trie_members: vec![],
         proxy_account: None,
-        org_private_key: Some(OrgPrivateKey::from(org_private())),
+        org_private_key: OrgPrivateKey::from(private),
     }
 }
 
-fn wire(secret: [u8; 32]) -> WireMessage {
+fn wire(private: [u8; 32]) -> WireMessage {
     let admin = MemberSeed::from([1u8; 32]).x25519_keypair();
     let (delta, _) = admit_member_delta(&admin);
     let envelope = Envelope::build(OrgId::new([5u8; 20]), SequenceNumber::new(1), &delta).unwrap();
-    WireMessage { envelope, org_secret: Some(OrgSecret::from(secret)), genesis_snapshot: None, invite_id: None }
+    WireMessage::OrgInformation { envelope, record_snapshot: vec![], org_private_key: OrgPrivateKey::from(private) }
 }
 
 // Adapted at the merge of master `1feb608` into worktree-person-shared-types:
@@ -107,49 +106,65 @@ fn wire(secret: [u8; 32]) -> WireMessage {
 /// verifies: LLR-bwb9pu, LLR-2dvhz8
 #[test]
 fn records_and_wire_messages_never_render_secret_bytes() {
-    let (member, device, secret) = (sentinel(0xd0), sentinel(0x10), sentinel(0x40));
+    let (member, device, private) = (sentinel(0xd0), sentinel(0x10), org_private());
     let p = persona(member, device);
-    let o = org(Some(secret));
+    let o = org(private);
     let data = StoreData {
         personas: vec![p.clone()],
         orgs: vec![o.clone()],
         provisional_updates: vec![],
         expected_admissions: vec![],
     };
-    let w = wire(secret);
+    let w = wire(private);
     for rendered in [format!("{p:?}"), format!("{p:#?}"), format!("{data:?}"), format!("{data:#?}")] {
         assert_not_rendered(&rendered, &member, "member seed");
         assert_not_rendered(&rendered, &device, "device seed");
         assert!(rendered.contains("MemberSeed([REDACTED])") && rendered.contains("DeviceSeed([REDACTED])"));
     }
     for rendered in [format!("{o:?}"), format!("{o:#?}"), format!("{data:?}"), format!("{data:#?}"), format!("{w:?}"), format!("{w:#?}")] {
-        assert_not_rendered(&rendered, &secret, "Organisation secret");
-        assert!(rendered.contains("OrgSecret([REDACTED])"));
+        assert_not_rendered(&rendered, &private, "Organisation private key");
+        assert!(rendered.contains("OrgPrivateKey([REDACTED])"), "{rendered}");
     }
     for rendered in [format!("{o:?}"), format!("{o:#?}"), format!("{data:?}"), format!("{data:#?}")] {
-        assert_not_rendered(&rendered, &org_private(), "Organisation private key");
-        assert!(rendered.contains("org_private_key") && rendered.contains("OrgPrivateKey([REDACTED])"));
+        assert!(rendered.contains("org_private_key"));
     }
 }
 
-// LLR-2dvhz8's "only whether it is set", both ways (review round 4, gate
-// notes): a member's record, which holds no Organisation private key
-// (LLR-3fwykc), renders the field as `None`; the creator's renders it as set,
-// with the redaction marker in place of the bytes.
+// LLR-ecxc76: Organisation information renders its key as the redaction
+// marker and none of its bytes; a revocation holds no key and renders none.
+/// verifies: LLR-ecxc76, LLR-bwb9pu
+#[test]
+fn a_wire_message_of_either_kind_never_renders_the_key() {
+    for private in [sentinel(0x40), sentinel_down(0xff)] {
+        let info = wire(private);
+        let revocation = WireMessage::Revocation { envelope: info.envelope().clone() };
+        for rendered in [format!("{info:?}"), format!("{info:#?}")] {
+            assert_not_rendered(&rendered, &private, "Organisation private key");
+            assert!(rendered.contains("OrgPrivateKey([REDACTED])"), "{rendered}");
+        }
+        for rendered in [format!("{revocation:?}"), format!("{revocation:#?}")] {
+            assert_not_rendered(&rendered, &private, "Organisation private key");
+            assert!(!rendered.contains("OrgPrivateKey"), "a revocation holds no key: {rendered}");
+        }
+    }
+}
+
+// LLR-2dvhz8 as amended: the field is no longer optional, so a record renders
+// it as its redacted secret type, never its bytes, whatever they are.
+// *Rewritten 2026-10-06 (change worktree-org-node-org-key-pair).* Was
+// `a_record_debug_says_whether_the_organisation_private_key_is_set`.
 /// verifies: LLR-2dvhz8
 #[test]
-fn a_record_debug_says_whether_the_organisation_private_key_is_set() {
-    let mut member_record = org(None);
-    member_record.org_private_key = None;
-    for rendered in [format!("{member_record:?}"), format!("{member_record:#?}")] {
-        let squashed: String = rendered.chars().filter(|c| !c.is_whitespace()).collect();
-        assert!(squashed.contains("org_private_key:None"), "an unset key renders as None: {rendered}");
-    }
-    let creator_record = org(None);
-    for rendered in [format!("{creator_record:?}"), format!("{creator_record:#?}")] {
-        let squashed: String = rendered.chars().filter(|c| !c.is_whitespace()).collect();
-        assert!(squashed.contains("org_private_key:Some(OrgPrivateKey([REDACTED])"), "a set key renders as set: {rendered}");
-        assert_not_rendered(&rendered, &org_private(), "Organisation private key");
+fn a_record_debug_renders_the_organisation_private_key_redacted() {
+    for private in [org_private(), [0u8; 32], sentinel_down(0xff)] {
+        let record = org(private);
+        for rendered in [format!("{record:?}"), format!("{record:#?}")] {
+            let squashed: String = rendered.chars().filter(|c| !c.is_whitespace()).collect();
+            assert!(squashed.contains("org_private_key:OrgPrivateKey([REDACTED])"), "{rendered}");
+            if private != [0u8; 32] {
+                assert_not_rendered(&rendered, &private, "Organisation private key");
+            }
+        }
     }
 }
 
@@ -160,7 +175,7 @@ fn secrets_at_the_high_byte_bound_and_many_records_stay_unrendered() {
         (0..3u8).map(|i| persona(sentinel_down(0xff - i), sentinel_down(0xef - i))).collect();
     let data = StoreData {
         personas: personas.clone(),
-        orgs: vec![org(Some(sentinel_down(0xdf))), org(None)],
+        orgs: vec![org(sentinel_down(0xdf)), org(sentinel_down(0xcf))],
         provisional_updates: vec![],
         expected_admissions: vec![],
     };
@@ -169,8 +184,8 @@ fn secrets_at_the_high_byte_bound_and_many_records_stay_unrendered() {
             assert_not_rendered(&rendered, &sentinel_down(0xff - i), "member seed");
             assert_not_rendered(&rendered, &sentinel_down(0xef - i), "device seed");
         }
-        assert_not_rendered(&rendered, &sentinel_down(0xdf), "Organisation secret");
-        assert!(rendered.contains("org_secret: None"), "an absent secret still renders as None");
+        assert_not_rendered(&rendered, &sentinel_down(0xdf), "Organisation private key");
+        assert_not_rendered(&rendered, &sentinel_down(0xcf), "Organisation private key");
     }
 }
 

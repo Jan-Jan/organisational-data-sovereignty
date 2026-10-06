@@ -30,3 +30,13 @@ absence proofs bounds to a single leaf.
 Fix, in S3: the revocation path sends the revoked device an absence proof
 and no snapshot. The reproducing test sends a revocation to a device and
 asserts the Wire message it receives holds no other Member's data.
+
+*Note 2026-10-07 (change `worktree-org-node-org-key-pair`, at its merge of
+master `c036fab`):* that change makes the Wire message two kinds and sends a
+Device the committed record does not list a revocation carrying the Envelope
+alone, with no member snapshot and no Organisation private key (LLR-8hdu9x and
+LLR-6ymd6d as amended there; test
+`send_update_sends_organisation_information_to_a_listed_device_and_a_revocation_to_any_other`).
+The disclosure described above, every Member's record, no longer occurs. The
+item stays open for the owner's fix: the revoked Device receives an absence
+proof rather than the Envelope's Change set, in S3.

@@ -60,7 +60,7 @@ confirms. It is outside REQ-d9g6nt's scope and changes nothing here.
 Verified at the service API, normal and abnormal cases both, by
 `member_ids_are_not_derived_from_keys`,
 `readmission_with_same_keys_gets_a_fresh_member_id` and
-`first_admission_without_a_record_snapshot_is_refused` in
+`a_revocation_about_an_organisation_not_held_is_refused_before_the_chain` (renamed 2026-10-06, change worktree-org-node-org-key-pair) in
 `org-node/tests/admission_sender.rs`, by
 `the_founding_member_id_and_the_organisation_key_are_drawn_not_derived` in
 `org-node/tests/commit_paths.rs`, and by the fuzz target

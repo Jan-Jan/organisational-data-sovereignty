@@ -87,7 +87,16 @@ four chain-free checks run before the chain is read.
 together with the vocabulary in which every refusal is reported — a typed
 variant per rejection path **on the receive-and-commit path**, so a caller can
 state *why* a change was refused rather than only that it was.
-traces: REQ-gju89b, REQ-9g6as6, REQ-bcxz96, REQ-y7tsft, REQ-8jb4ny, REQ-ech45n, REQ-fwfku9, REQ-8amu2a, REQ-tqap3r, REQ-kt877x, REQ-yp75u9
+traces: REQ-gju89b, REQ-9g6as6, REQ-bcxz96, REQ-y7tsft, REQ-8jb4ny, REQ-ech45n, REQ-fwfku9, REQ-8amu2a, REQ-tqap3r, REQ-kt877x, REQ-yp75u9, REQ-c29s93, REQ-bwx7eg, REQ-vxqc5g, REQ-szq3ud, REQ-3dsweu
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+`types.rs` loses `OrgSecret` and `InviteId` (LLR-qsjde3, LLR-ms8njy), so the
+secrets it holds are the member seed, the device seed and the Organisation
+private key; and `OrgNodeError` gains `MalformedMessage`, `OrgKeyMismatch`,
+`RevocationNotHeld` and `RevocationNotForThisDevice` (LLR-j5vbqj, in
+`2026-10-07-org-key-pair.md`). The item traces
+REQ-c29s93, REQ-bwx7eg, REQ-vxqc5g, REQ-szq3ud and REQ-3dsweu too. Notes below that list
+the Organisation secret among `types.rs`'s secrets are history.
 
 *Amended 2026-10-06 (change `worktree-org-node-chain-authority`, independent
 review round 1, finding-1):* traces REQ-yp75u9 too, for the refusal
@@ -647,7 +656,18 @@ returned.)*
 **SDD-kwncn7**: the framing of one Wire message on the channel — what a frame is
 made of, the one-mebibyte ceiling on a body, and the refusal of anything over
 it on both the sending and the receiving side.
-traces: REQ-eg5j8u, REQ-9g6as6, REQ-y7tsft, REQ-8amu2a
+traces: REQ-eg5j8u, REQ-9g6as6, REQ-y7tsft, REQ-8amu2a, REQ-c29s93, REQ-3dsweu
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+A frame carried one shape of Wire message, with an optional Organisation
+secret and an optional invite identifier. The Wire message is now an enum of
+two kinds, Organisation information (always carrying the record snapshot and
+the Organisation private key) and revocation (carrying neither), and no kind
+carries an invite identifier (LLR-js9dsu, LLR-ecxc76 in
+`2026-10-07-org-key-pair.md`; LLR-ms8njy amended).
+A body of the first kind without its key does not decode, so the item traces
+REQ-c29s93 and REQ-3dsweu too. The notes below that speak of the Organisation
+secret or the invite identifier on the wire are history.
 
 *Amended 2026-10-06 (owner ruling on pre-emption, change
 `worktree-org-node-chain-authority`):* a Wire message carries the invite
@@ -759,9 +779,25 @@ decoder rather than by the read.*
 `org-node/src/store.rs`
 
 **SDD-af5vnt**: where every secret this node holds rests — the member and
-device seeds and the Organisation secret — and the form the file takes, which
-is ciphertext under a passphrase-derived key and nothing else.
-traces: REQ-hzm4kt, REQ-qn2erx, REQ-y7tsft, REQ-ech45n, REQ-xs4ab8, REQ-fwfku9, REQ-8amu2a, REQ-hhva9d
+device seeds and the Organisation private key — and the form the file takes,
+which is ciphertext under a passphrase-derived key and nothing else.
+traces: REQ-hzm4kt, REQ-qn2erx, REQ-y7tsft, REQ-ech45n, REQ-xs4ab8, REQ-fwfku9, REQ-8amu2a, REQ-hhva9d, REQ-ju6vn2, REQ-stx9v3
+
+*Amended 2026-10-06 (owner ruling on rotation, change
+`worktree-org-node-org-key-pair`):* traces REQ-stx9v3. Every provisional
+update the store holds now holds the private key of the fresh Organisation
+key pair drawn for it, not only a genesis update, and a provisional update is
+identified by its public key as well as its root (LLR-qjz3q4, LLR-95753m and
+LLR-7cmp38 amended).
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+This named "the Organisation secret" among the secrets the store holds. The
+Organisation secret is removed; every Organisation record now holds the
+Organisation private key, required, on the creating node and on every
+admitted node alike (LLR-byjvd9 in
+`2026-10-07-org-key-pair.md`), so the item traces
+REQ-ju6vn2 too. An expectation names the Organisation alone again
+(LLR-95753m amended).
 
 *Amended 2026-10-06 (change `worktree-org-node-chain-authority`):* an
 expectation the store holds names an invite identifier (LLR-95753m), so the
@@ -827,9 +863,13 @@ satisfies: REQ-hzm4kt
 rather than read as a nonce and an empty ciphertext.
 satisfies: REQ-hzm4kt
 
-**LLR-s78sh7**: no member seed, device seed or Organisation secret the store
-holds appears anywhere in the written file in clear.
+**LLR-s78sh7**: no member seed, device seed or Organisation private key the
+store holds appears anywhere in the written file in clear.
 satisfies: REQ-hzm4kt
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+This named the Organisation secret, which is removed; REQ-hzm4kt, amended the
+same day, names the Organisation private key in its place.
 
 ## SDD-vee2fq — Out-of-band exchange blobs
 
@@ -1099,7 +1139,12 @@ it.*
 **SDD-89es4z**: how a node acquires an identity and how an Organisation comes
 into existence — two keypairs drawn once, a genesis provisional update, and
 the Organisation record created only once the chain carries its root.
-traces: REQ-hzm4kt, REQ-nhe2zu, REQ-txvtm9, REQ-d9g6nt, REQ-qn2erx, REQ-ech45n, REQ-xs4ab8, REQ-tqap3r, REQ-yp75u9
+traces: REQ-hzm4kt, REQ-nhe2zu, REQ-txvtm9, REQ-d9g6nt, REQ-qn2erx, REQ-ech45n, REQ-xs4ab8, REQ-tqap3r, REQ-yp75u9, REQ-stx9v3
+
+*Amended 2026-10-06 (owner ruling on rotation, change
+`worktree-org-node-org-key-pair`):* traces REQ-stx9v3. Genesis draws the
+first Organisation key pair after its record's root is calculated, as every
+provisional update now does (LLR-s6qnht, LLR-sj7cd5 amended).
 
 *Amended 2026-10-06 (change `worktree-org-node-chain-authority`, independent
 review round 1, finding-1):* traces REQ-yp75u9, for `create_organisation`'s
@@ -1261,7 +1306,24 @@ on the inviting node, minting the new Member's leaf into an admission
 provisional update and, once that update has committed, sending the joiner the
 committed Envelope and everything they need to check it; on the joining node,
 recording that the app expects that admission.
-traces: REQ-xa6smf, REQ-ztdza4, REQ-nhe2zu, REQ-txvtm9, REQ-d9g6nt, REQ-qn2erx, REQ-xs4ab8, REQ-tqap3r, REQ-8amu2a
+traces: REQ-xa6smf, REQ-ztdza4, REQ-nhe2zu, REQ-txvtm9, REQ-d9g6nt, REQ-qn2erx, REQ-xs4ab8, REQ-tqap3r, REQ-8amu2a, REQ-szq3ud, REQ-3dsweu, REQ-stx9v3
+
+*Amended 2026-10-06 (owner ruling on rotation, change
+`worktree-org-node-org-key-pair`):* traces REQ-stx9v3. An admission
+provisional update, built through `keep_change_set`, draws a fresh
+Organisation key pair once its root is calculated, keeps the private key and
+publishes the public key (LLR-e2b7gv; LLR-ghja3x amended).
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+"Everything they need to check it" now includes the Organisation private key
+of the epoch the update reaches, as the node's record holds it, which
+`send_update` puts in every Organisation-information message without taking
+it from its caller; and `send_update` chooses the kind of Wire message by
+whether the node's committed record lists the recipient Device (LLR-6ymd6d,
+in `2026-10-07-org-key-pair.md`; LLR-2xzys9,
+LLR-48jakr, LLR-bg3vsw, LLR-jn5jeh and LLR-9zfnmb amended). On the joining
+node the expectation names the Organisation alone. The item traces
+REQ-szq3ud and REQ-3dsweu too.
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
@@ -1306,10 +1368,19 @@ item said the signed change.
 
 **LLR-ghja3x**: an admission or revocation provisional update carries the
 record's root as its base root, as its Sequence number the epoch the update
-produces on the chain — the record's epoch plus one (REQ-txvtm9) — the
-record's Organisation public key as the value to publish, the postcard-encoded
-Change set, and the root that Change set produces; nothing in it is signed.
-satisfies: REQ-xs4ab8
+produces on the chain — the record's epoch plus one (REQ-txvtm9) — as the
+value to publish the public key of the fresh Organisation key pair drawn for
+it once that root is calculated (LLR-e2b7gv), never the record's current
+Organisation public key, the postcard-encoded Change set with that pair's
+private key, and the root that Change set produces; nothing in it is signed.
+satisfies: REQ-xs4ab8, REQ-stx9v3
+
+*Amended 2026-10-06 (owner ruling on rotation, change
+`worktree-org-node-org-key-pair`).* This said the update carries "the
+record's Organisation public key as the value to publish". The owner ruled
+that every provisional update draws a fresh Organisation key pair when its
+resulting root is calculated and publishes its public key (REQ-stx9v3), so
+the key changes with every update.
 
 *Amended 2026-10-06 (merge of master `5f7c177` into change
 `worktree-org-node-chain-authority`).* This said "one greater than the
@@ -1335,11 +1406,17 @@ writes to the chain or signs, and admission builds a provisional update
 by construction: nothing can be sent before `commit_update` has verified the
 update against the chain.
 
-**LLR-bg3vsw**: the outgoing update `commit_update` returns, and so the Wire
-message `send_update` sends, carries the member snapshots as they were
-**before** the committed update, so a joiner holding no record of the
-Organisation can rebuild the trie the change applies to.
+**LLR-bg3vsw**: the outgoing update `commit_update` returns, and so every
+Organisation-information Wire message `send_update` sends, carries the member
+snapshots as they were **before** the committed update, so a joiner holding
+no record of the Organisation can rebuild the trie the change applies to; a
+revocation carries no snapshot.
 satisfies: REQ-xa6smf
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+This said "the Wire message `send_update` sends", of a message of one kind.
+A revocation goes only to a Device the committed record no longer lists, which
+never rebuilds from a snapshot, and carries none (LLR-js9dsu, LLR-6ymd6d).
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 This said "the Wire message carries", of the message `admit_member` sent. The
@@ -1348,11 +1425,17 @@ property is unchanged.
 
 **LLR-jn5jeh**: in Loopback mode `send_update` dials the recipient at the full
 `EndpointAddr` its caller passes, not by endpoint identity alone. Nothing
-checks that the address names the recipient's DevicePublicKey, so an admission and
-its Organisation secret go wherever the address points. That is PR-2dmjzj's
+checks that the address names the recipient's DevicePublicKey, so an
+Organisation-information message and the Organisation private key it carries
+go wherever the address points. That is PR-2dmjzj's
 defect, stated here and not endorsed. One of its cures (dial by key in both
 modes) would replace this requirement.
 satisfies: REQ-ztdza4
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+This said "an admission and its Organisation secret". The secret is gone, and
+every Organisation-information message, for any operation, carries the
+Organisation private key (REQ-szq3ud), which the wrong address now receives.
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 This named `admit_member`, which no longer sends; the dial moves with the send
@@ -1491,13 +1574,18 @@ tests that carried the earlier statements — one round-tripping the out-of-band
 blobs, and review round 9's PR-8qsnhx pin on the Invite — were deleted
 2026-10-06 with the blobs (change `worktree-org-node-chain-authority`, T7).*
 
-**LLR-9zfnmb**: `expect_admission(rng, org_id, invite_id)` records the pair
-of Organisation and invite identifier in `expected_admissions` at most once —
-a repeated declaration of the same pair leaves one entry rather than
-appending, and a pair differing in either part is a second entry — and the
-store is written before it returns, so the refusal LLR-s8xp7m performs has one
-answer and survives a restart.
+**LLR-9zfnmb**: `expect_admission(rng, org_id)` records the Organisation in
+`expected_admissions` at most once — a repeated declaration for the same
+Organisation leaves one entry rather than appending, and another Organisation
+is a second entry — and the store is written before it returns, so the
+refusal LLR-s8xp7m performs has one answer and survives a restart.
 satisfies: REQ-8amu2a
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+This said `expect_admission(rng, org_id, invite_id)` recorded the pair of
+Organisation and invite identifier. The invite identifier no longer travels
+between peers (REQ-8amu2a as amended again), so the expectation is the
+Organisation alone, as before the re-trace note below.
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
@@ -1555,7 +1643,32 @@ node's own provisional updates, run every check that needs no chain, read the
 chain once, verify against it, and commit, discarding the provisional updates
 the commit orphans. A first admission is attempted only for an Organisation the
 app declared it expects. Nothing about the sender is checked.
-traces: REQ-xa6smf, REQ-ztdza4, REQ-nhe2zu, REQ-txvtm9, REQ-bvh8v6, REQ-d9g6nt, REQ-qn2erx, REQ-f2k4tr, REQ-8amu2a, REQ-tqap3r, REQ-uv3v5w, REQ-uxv2x2, REQ-kt877x, REQ-yp75u9
+traces: REQ-xa6smf, REQ-ztdza4, REQ-nhe2zu, REQ-txvtm9, REQ-bvh8v6, REQ-d9g6nt, REQ-qn2erx, REQ-f2k4tr, REQ-8amu2a, REQ-tqap3r, REQ-uv3v5w, REQ-uxv2x2, REQ-kt877x, REQ-yp75u9, REQ-c29s93, REQ-bwx7eg, REQ-ju6vn2, REQ-3dsweu, REQ-vxqc5g, REQ-jy6ybw
+
+*Amended 2026-10-06 (owner ruling on rotation, change
+`worktree-org-node-org-key-pair`):* traces REQ-jy6ybw. `commit_update`
+selects the node's provisional update by its root and its fresh Organisation
+public key, and on commit replaces the record's Organisation private key and
+public key with the update's (LLR-6s785x; LLR-cmdrp9 amended); a committed
+Organisation-information message sets the record's public key to the chain's
+(LLR-4kh9w9).
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+The path now receives two kinds of Wire message. An Organisation-information
+message that does not decode is refused with a typed error before anything
+else (LLR-xn5pwc); one that verifies is refused when the X25519 public half
+of the Organisation private key it carries is not the `org_pub_key` read from
+the chain at verification (LLR-ba2ejp), and on commit its key is stored
+(LLR-ckk5nz amended). A revocation about an Organisation the node holds no
+record of is refused before the chain is read (LLR-38e2kn); one about a held
+Organisation is verified and then refused with `RevocationNotForThisDevice`
+unless it removes this node's own Device, in which case the record is deleted
+(LLR-pt32fx, owner ruling on relabelling), so no revocation commits into a
+record the node keeps. A first admission is matched by Organisation alone
+(LLR-s8xp7m amended). LLR-xn5pwc, LLR-ba2ejp, LLR-38e2kn and LLR-pt32fx are
+in
+`2026-10-07-org-key-pair.md`. The item traces
+REQ-c29s93, REQ-bwx7eg, REQ-ju6vn2, REQ-3dsweu and REQ-vxqc5g too.
 
 *Amended 2026-10-06 (change `worktree-org-node-chain-authority`, independent
 review round 1, finding-1):* traces REQ-yp75u9, for the rule that no commit
@@ -1595,9 +1708,20 @@ its type's parse refuses fails as a whole with `InvalidField` naming the
 `member.…` field, and extends nothing. So the item traces REQ-qn2erx too.)*
 
 **LLR-j6j95z**: a first admission to an Organisation the node holds no record
-of is refused explicitly when the Wire message carries no snapshot of the Membership
-record the change extends, rather than attempted against a reconstructed one.
+of is attempted only from an Organisation-information Wire message, whose
+record snapshot is required, so it always rebuilds from the snapshot of the
+Membership record the change extends (`first_admission_base(&[u8])`) and never
+from a reconstructed one; a body of that kind without a snapshot does not
+decode (LLR-js9dsu), and a revocation, which carries none, is refused
+(LLR-38e2kn).
 satisfies: REQ-d9g6nt
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+This said a first admission is refused "when the Wire message carries no
+snapshot", because the snapshot was optional. The Organisation-information
+kind requires it, so the absence is a decode refusal or a revocation's
+refusal, and `first_admission_base` takes the snapshot bytes, not an
+`Option`.
 
 **LLR-j83kc8**: a first admission to an expected Organisation that verifies
 against the chain and lists one of the node's own Personas is committed
@@ -1619,9 +1743,17 @@ decides.
 
 **LLR-u6rq4s**: on a Wire message about an Organisation already held, the
 Device key the connection authenticated is compared with no Membership record:
-an update that verifies against the chain is committed whether that key is in
-the record before the update, after it, or in neither.
+an Organisation-information update that verifies against the chain is
+committed whether that key is in the record before the update, after it, or in
+neither, and a revocation is accepted or refused (LLR-pt32fx) by the receiving
+node's own Device, never by the sender's.
 satisfies: REQ-ztdza4
+
+*Amended 2026-10-06 (owner ruling on relabelling, change
+`worktree-org-node-org-key-pair`).* This said "an update that verifies
+against the chain is committed". A revocation that leaves the receiving
+Device listed is now refused (LLR-pt32fx); what the item protects, that the
+sender's key decides nothing, is unchanged.
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
@@ -1637,13 +1769,32 @@ checked (REQ-xa6smf and REQ-ztdza4 as amended): authority is the chain's, and a
 chain-valid update relayed by any peer is harmless. Both are rewritten to that
 rule. The two `BadSignature` refusals they described are removed.
 
-**LLR-37cj3n**: what `receive_and_verify` commits is decided by the
-Organisation state it reads from the chain itself and by its own record, never
-by a key or a value carried in the Wire message, and never by the device that
-delivered it. The Organisation state contributes only its Membership root and
-its epoch to that decision, so a state holding any Organisation public key
-commits the same Change set.
+**LLR-37cj3n**: which Change set `receive_and_verify` commits, and the
+record it produces, are decided by the Organisation state it reads from the
+chain itself and by its own record, never by a value carried in the Wire
+message other than its Envelope, its Organisation private key (which becomes
+the record's key, and only when its public half is the chain's Organisation
+public key, LLR-ba2ejp, REQ-ju6vn2) and, on a first admission, its snapshot,
+and never by the device that delivered it. The Organisation state's
+Membership root and epoch decide the Change set; its Organisation public key
+decides only whether an Organisation-information message commits at all,
+through the check of the carried Organisation private key against it
+(LLR-ba2ejp).
 satisfies: REQ-nhe2zu
+
+*Amended 2026-10-07 (change `worktree-org-node-org-key-pair`, review round 1,
+finding-3).* This named the Envelope and, on a first admission, the snapshot
+as the only carried values that decide the record. Since this change the
+record's Organisation private key is the carried key, constrained by the
+chain's public key, so the carried key is named as the third input.
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+This said a value carried in the Wire message never decides what is
+committed, and that the Organisation state contributes only its root and
+epoch, "so a state holding any Organisation public key commits the same
+Change set". The receipt check RC-9cefcn makes the chain's public key, and
+the private key the message carries, decide whether an Organisation-information
+message commits; neither changes which Change set does.
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
@@ -1689,10 +1840,16 @@ asserted the opposite; it reddened when this was implemented and was rewritten
 which carries this requirement now.
 
 **LLR-mbjfq8**: a first admission to an Organisation the app declared it
-expects, under the invite identifier its Wire message carries, is accepted on
-the chain anchor and the own-Persona rule (LLR-3f5h7b) alone: no Invite, no
-signature and no sender key is consulted.
+expects is accepted on the chain anchor, the check of the Organisation private
+key it carries against the chain (LLR-ba2ejp) and the own-Persona rule
+(LLR-3f5h7b) alone: no Invite, no invite identifier, no signature and no
+sender key is consulted.
 satisfies: REQ-xa6smf, REQ-8amu2a
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+This said "under the invite identifier its Wire message carries". The invite
+identifier no longer travels between peers, and the receipt check (RC-9cefcn)
+is added to what the admission rests on.
 
 *Amended 2026-10-06 (owner ruling on pre-emption, change
 `worktree-org-node-chain-authority`).* This said "on the chain anchor alone"
@@ -1731,9 +1888,13 @@ marks no Persona and writes nothing to disk.
 change's Organisation identifier names — the local Membership record it
 verifies against, the expectation it checks and clears, the record it commits
 into and the provisional updates it discards — so a node holding more than one
-Organisation leaves every other Organisation's record, secret, expectation and
-provisional updates exactly as they were.
+Organisation leaves every other Organisation's record, Organisation private
+key, expectation and provisional updates exactly as they were.
 satisfies: REQ-nhe2zu, REQ-txvtm9, REQ-xa6smf
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+"secret" read the Organisation secret, which is removed; the record's
+Organisation private key takes its place.
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
@@ -1785,13 +1946,44 @@ its administrator's Member-as-a-group key". The owner ruled that there is no
 `admin_member_key` anywhere in org-node; the value read from the chain is kept
 in the record's `org_pub_key`, where it already was.
 
-**LLR-ckk5nz**: on first admission the Organisation secret the Wire message
-carries is stored in the new record. On a later received update the stored
-secret is overwritten with whatever the Wire message carries, including
-nothing. That is PR-xwek5e, whose intended behaviour is unruled, and it is
-stated rather than endorsed. A node committing its own provisional update
-(`commit_update`) leaves its stored secret as it was.
-satisfies: derived
+**LLR-ckk5nz**: when `receive_and_verify` or
+`receive_and_self_delete_if_revoked` commits an Organisation-information Wire
+message that has passed the key check (LLR-ba2ejp), the record's
+`org_private_key` is the Organisation private key the message carries: the
+first admission creates the record with it, and an update replaces the stored
+key with it, in the same store save as the rest of the commit. A revocation
+never commits into a record the node keeps: it is refused unless it removes
+this node's own Device (LLR-pt32fx), and then, like any commit that is the
+node's own removal, it deletes the record, key included (LLR-b27jr6,
+LLR-6p4pj2). `commit_update`
+replaces the record's `org_private_key` with its provisional update's
+(LLR-6s785x), and `commit_genesis` stores the genesis provisional update's
+key (LLR-wzqqg9). `commit_held` draws no key of its own: it takes the
+Organisation key pair to store from its caller, as
+`commit_held(org_id, verified, org_private_key, org_pub_key)` —
+`commit_update` passes its provisional update's pair, and
+`commit_received` the carried private key with the Organisation public key
+of the chain state read. The record keeps only the current key.
+satisfies: REQ-ju6vn2, REQ-3dsweu
+
+*Amended 2026-10-07 (change `worktree-org-node-org-key-pair`, review round 1,
+finding-2).* This said "`commit_held` takes no key or secret argument". Since
+rotation, `commit_held` writes the key pair its caller passes, so the item
+states that interface and where each caller's pair comes from.
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+This stated, without endorsing it, that a later received update overwrote the
+stored Organisation secret with whatever the Wire message carried, including
+nothing (PR-xwek5e), and was derived. The owner ruled that the secret is
+replaced by the Organisation private key, which every Organisation-information
+message carries and a revocation never does (REQ-ju6vn2, REQ-3dsweu).
+PR-xwek5e is resolved by that ruling, and the item now satisfies those
+requirements. By the owner's later rulings the same day, `commit_update`
+replaces the record's key with its provisional update's (rotation,
+REQ-jy6ybw), where it had left the stored secret as it was; and a revocation
+is accepted only as the node's own removal (relabelling, REQ-3dsweu as
+rewritten), so no received revocation commits into a kept record, where an
+earlier draft of this change had it keep the stored key.
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 The last sentence is added: `commit_update` is a new commit path, and it
@@ -1855,6 +2047,11 @@ LLR-xq9nrq; the exclusion is removed, and its pin is rewritten to the amended
 LLR-e5c9ud as
 `the_persona_marked_active_is_the_first_whose_device_is_in_the_record`.)*
 
+*(Note 2026-10-06, change `worktree-org-node-org-key-pair`: the first test
+named in the note above is now
+`a_first_admission_records_the_chains_key_the_private_key_and_the_member`,
+renamed with the Organisation secret's removal.)*
+
 *Re-traced 2026-10-04 by review round 6. All three said `satisfies:
 REQ-xa6smf`, which states only the first-admission sender check against the
 invite. None of the three refines that check: the secret overwrite on later
@@ -1882,11 +2079,17 @@ first-admission sender cross-check — RC-b6mydy's explicit trust root —
 comparing the authenticated sender against whichever pending invite came
 first.*
 
-**LLR-q8emds**: the expectation a first admission matched — its Organisation
-and its invite identifier — is cleared, in the same store save, once that
-admission has committed, and no other expectation is cleared; a refused first
-admission leaves every expectation in `expected_admissions`.
+**LLR-q8emds**: the expectation a first admission matched — the one naming its
+Organisation — is cleared, in the same store save, once that admission has
+committed, and no expectation for another Organisation is cleared; a refused
+first admission leaves every expectation in `expected_admissions`.
 satisfies: REQ-8amu2a
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+This said the expectation matched was "its Organisation and its invite
+identifier", so a second Invite's expectation for the same Organisation
+stayed. An expectation names the Organisation alone now (LLR-9zfnmb), and at
+most one is held per Organisation.
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 This said a pending Invite is discarded only once the first admission has
@@ -1909,7 +2112,26 @@ Organisation (a second Invite) stays.
 the one path where committing a verified change means deleting the record
 rather than updating it. The item also owns the revoking side, `revoke_member`,
 which builds that change. Nothing about the sender is checked on this path.
-traces: REQ-uxv2x2, REQ-nhe2zu, REQ-txvtm9, REQ-xs4ab8, REQ-tqap3r, REQ-ztdza4
+traces: REQ-uxv2x2, REQ-nhe2zu, REQ-txvtm9, REQ-xs4ab8, REQ-tqap3r, REQ-ztdza4, REQ-bwx7eg, REQ-ju6vn2, REQ-3dsweu, REQ-vxqc5g, REQ-stx9v3
+
+*Amended 2026-10-06 (owner ruling on rotation, change
+`worktree-org-node-org-key-pair`):* traces REQ-stx9v3. `revoke_member` builds
+through `keep_change_set`, so a revocation draws a fresh Organisation key pair
+once its root is calculated (LLR-e2b7gv; LLR-tax3pm amended); the removed
+Device keeps only the key of the epoch before its removal.
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+The receiving half now takes either kind of Wire message. On an
+Organisation-information message it applies the key check (LLR-ba2ejp) and,
+on an update branch, stores the received key (LLR-ckk5nz amended). A
+revocation it accepts only as this node's own removal, which deletes the
+record; one after whose verified record this node's Device is still listed
+is refused with `RevocationNotForThisDevice`, store unchanged (LLR-pt32fx,
+owner ruling on relabelling); and one about an Organisation not held is
+refused before the chain is read, as any such message is (LLR-379hnv,
+LLR-38e2kn). The revocation `send_update` sends a removed Device carries no
+Organisation private key (LLR-8hdu9x amended). The item traces REQ-bwx7eg,
+REQ-ju6vn2, REQ-3dsweu and REQ-vxqc5g too.
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
@@ -1938,9 +2160,18 @@ Organisation is marked revoked.
 satisfies: REQ-uxv2x2
 
 **LLR-jsx922**: when the device key of a Persona bound to this Organisation is
-still present, the change is committed as an ordinary update and reported as
-such, with nothing deleted.
-satisfies: REQ-uxv2x2
+still present after an Organisation-information message, the change is
+committed as an ordinary update and reported as such, with nothing deleted;
+after a revocation it is refused with `RevocationNotForThisDevice`, nothing
+committed or deleted (LLR-pt32fx).
+satisfies: REQ-uxv2x2, REQ-3dsweu
+
+*Amended 2026-10-06 (owner ruling on relabelling, change
+`worktree-org-node-org-key-pair`).* This committed every verified change that
+left the node's Device listed. The owner ruled that a revocation is accepted
+only as the receiving Device's own removal, so a relabelled
+Organisation-information message cannot be committed as a keyless update; the
+item now scopes the update branch to Organisation information.
 
 *Clarified 2026-10-04 by review round 5. This read "the node's own device
 key", which is the property a reader wants and not the one the code checks.
@@ -2007,9 +2238,13 @@ first admission cannot complete there.
 names — the record it verifies against, the Personas whose binding names that
 Organisation (and only those) to decide whether the node is still a member,
 the record it deletes or updates, and the Personas it marks Revoked — so a node
-revoked from one Organisation keeps every other Organisation's record, secret
-and Personas.
+revoked from one Organisation keeps every other Organisation's record,
+Organisation private key and Personas.
 satisfies: REQ-uxv2x2
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+"secret" read the Organisation secret, which is removed; the record's
+Organisation private key takes its place.
 
 *Narrowed 2026-10-04 by review round 5.* This ended "and a Persona bound to
 another Organisation cannot keep it in this one". That is true of this path
@@ -2058,9 +2293,16 @@ item said the signed revocation.
 **LLR-tax3pm**: a revocation provisional update carries what LLR-ghja3x
 states for every provisional update — the record's root as base, the
 Sequence number the epoch the update produces on the chain, the record's
-epoch plus one (REQ-txvtm9), the record's Organisation
-public key — and is signed by no key.
-satisfies: REQ-xs4ab8
+epoch plus one (REQ-txvtm9), and the public key of a fresh Organisation key
+pair, whose private key it holds (LLR-e2b7gv) — and is signed by no key.
+satisfies: REQ-xs4ab8, REQ-stx9v3
+
+*Amended 2026-10-06 (owner ruling on rotation, change
+`worktree-org-node-org-key-pair`).* This said the revocation carries "the
+record's Organisation public key", as LLR-ghja3x did. A revocation now
+rotates the Organisation key pair like every other update (REQ-stx9v3), so
+the removed Device's copy of the earlier key is not the Organisation's key
+once the revocation commits.
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
@@ -2116,12 +2358,26 @@ PR-b9wab3, opened by this change, records that the check sits after
 refuses. The shipped test asserts the epoch advanced, pinning the defect so
 that correcting the order reddens it.*
 
-**LLR-8hdu9x**: the Wire message `send_update` sends carries the committed
-Envelope, the member snapshots as they were **before** the committed update,
-and exactly the Organisation secret its caller passes — none for a revocation.
-A receiver on `receive_and_verify` stores that absence over the secret it
-held. That is PR-xwek5e, stated here and not endorsed.
-satisfies: derived
+**LLR-8hdu9x**: the Wire message `send_update` sends to the Device a
+committed revocation removed — which the node's committed record no longer
+lists — is a `Revocation` carrying the committed Envelope and nothing else:
+no member snapshot and no Organisation private key. Every Device the record
+still lists is sent an `OrgInformation` carrying the committed Envelope, the
+member snapshots as they were **before** the committed update, and the
+Organisation private key of the epoch the update reaches, as the node's
+record holds it (LLR-6ymd6d). A receiver accepts the revocation only as its
+own removal and deletes its record; one whose Device is still listed refuses
+it (LLR-pt32fx).
+satisfies: REQ-3dsweu, REQ-szq3ud
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+This said the message carries exactly the Organisation secret the caller
+passes — none for a revocation — and that a receiver stored that absence
+over the secret it held (PR-xwek5e, stated and not endorsed); it was derived.
+The owner ruled that the kind of message depends on the recipient, that a
+revocation carries no key, and (later the same day, on relabelling) that a
+receiver accepts a revocation only as its own removal (REQ-3dsweu,
+REQ-szq3ud). PR-xwek5e is resolved by those rulings.
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change

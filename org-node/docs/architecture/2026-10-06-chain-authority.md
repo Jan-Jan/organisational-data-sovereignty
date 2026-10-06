@@ -108,6 +108,13 @@ The types this change adds, in `store.rs` unless named otherwise:
     service::OutgoingUpdate { envelope: Envelope, record_snapshot: Vec<u8> }
     service::CommitOutcome { org_id, epoch, root, outgoing: OutgoingUpdate }
 
+*Note 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+`ExpectedAdmission` names the Organisation alone, `InviteId` and the Wire
+message's `org_secret` and `invite_id` are removed, and `WireMessage` is an
+enum of two kinds; see
+`2026-10-07-org-key-pair.md` (finalised under its
+merge date) and the items amended below.
+
 ## SDD-swtd3w — Value types and the rejection vocabulary
 
 `org-node/src/error.rs`: the refusals the provisional-update and
@@ -117,7 +124,7 @@ expected-admission paths add.
 `ProvisionalLimit { limit: usize }`, whose `Display` names the limit in bytes
 ("provisional updates for one Organisation would exceed {limit} bytes");
 `AdmissionNotExpected { org_id: OrgId }`, for a first admission whose
-Organisation and invite identifier match no expectation the app declared;
+Organisation matches no expectation the app declared;
 `AdmissionNotOurs { org_id: OrgId }`, for a first admission whose verified
 Membership record lists none of the node's own Personas; and
 `NoProvisionalUpdate`, for a commit whose Organisation state on the chain
@@ -137,6 +144,12 @@ that `create_organisation` or `commit_genesis` is asked to bind to another
 (LLR-6z5xya, LLR-eyc4ud); it is distinct from every other variant, and this
 item now also satisfies REQ-yp75u9.
 
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+`AdmissionNotExpected` was for a first admission whose "Organisation and
+invite identifier" matched no expectation. The invite identifier no longer
+travels between peers and an expectation names the Organisation alone
+(REQ-8amu2a as amended). The variants that change adds are LLR-j5vbqj.
+
 ## SDD-na9nc3 — Verify-against-chain
 
 `org-node/src/verify.rs`: the chain-free half of the check, exposed so that a
@@ -153,14 +166,22 @@ satisfies: REQ-f2k4tr
 
 ## SDD-kwncn7 — The wire frame and its bound
 
-`org-node/src/transport/wire.rs` and `org-node/src/types.rs` (`InviteId`).
+`org-node/src/transport/wire.rs`. *(It also named `org-node/src/types.rs`
+for the invite identifier's type, removed 2026-10-06, change
+`worktree-org-node-org-key-pair`, LLR-ms8njy.)*
 
-**LLR-ms8njy**: `WireMessage` carries, after its record snapshot, an
-`invite_id: Option<InviteId>`, where `InviteId` is exactly 32 bytes (it is
-not secret, and travels in plain text in the app's Invite); a frame round-trips its
-invite identifier unchanged (LLR-er2x8n), and a body whose invite identifier
-is not 32 bytes does not decode (`Malformed`).
+**LLR-ms8njy**: no kind of `WireMessage` carries an invite identifier, and
+org-node defines no `InviteId` type: the bytes of an encoded Wire message of
+either kind (LLR-js9dsu) are exactly its variant index, its Envelope and, for
+Organisation information, its record snapshot and Organisation private key.
 satisfies: REQ-8amu2a
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+This said `WireMessage` carries, after its record snapshot, an `invite_id:
+Option<InviteId>` of exactly 32 bytes, round-tripped by a frame. The owner
+ruled that the invite identifier travels only in the Invite and its reply,
+never between peers (REQ-8amu2a as amended), so the field and the type are
+removed and the item states their absence.
 
 ## SDD-af5vnt — The encrypted persona store
 
@@ -169,18 +190,36 @@ Persona store holds, and the bound on the first.
 
 **LLR-95753m**: `StoreData` holds `provisional_updates: Vec<ProvisionalUpdate>`
 and `expected_admissions: Vec<ExpectedAdmission>`, each expectation an
-Organisation and an invite identifier, and no pending Invites; both reach the
+Organisation identifier alone (`ExpectedAdmission { org_id }`), and no pending
+Invites; both reach the
 encrypted file with the rest of the store and are read back when it is opened.
 A provisional update is identified by its Organisation — its `org_id`, or for a
-genesis update the Persona that built it — together with its `resulting_root`:
-`StoreData::insert_provisional` replaces a stored provisional update with the
-same identity rather than adding a second, and otherwise appends, so several
-provisional updates for one Organisation are held at once.
+genesis update the Persona that built it — together with its `resulting_root`
+and its `org_pub_key`: `StoreData::insert_provisional` replaces a stored
+provisional update with the same identity rather than adding a second, and
+otherwise appends, so several provisional updates for one Organisation are
+held at once, and two built for the same change with different fresh keys
+are two updates.
 satisfies: REQ-xs4ab8, REQ-8amu2a
 
 *Amended 2026-10-06 (owner ruling on pre-emption, REQ-8amu2a as amended).*
 `expected_admissions` held Organisation identifiers alone; an expectation now
 names the invite identifier the app's Invite reply carries as well.
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+The amendment above is reversed: each expectation was an Organisation and an
+invite identifier. The invite identifier no longer travels between peers, so
+a joiner's node has nothing to match it against, and an expectation names the
+Organisation alone (REQ-8amu2a as amended again).
+
+*Amended 2026-10-06 (owner ruling on rotation, change
+`worktree-org-node-org-key-pair`).* A provisional update's identity was its
+target and `resulting_root`. Every provisional update now holds a fresh
+Organisation key pair (LLR-e2b7gv), and a revocation rebuilt for the same
+member has the same root, so identity by root alone would let the rebuild
+replace an update whose public key the app may already have written to the
+chain, losing the only copy of that key's private half. The identity now
+includes `org_pub_key`.
 
 **LLR-jq7qh7**: `StoreData::insert_provisional(update) -> Result<(),
 OrgNodeError>` measures the postcard encoding of the `Vec<ProvisionalUpdate>`
@@ -201,14 +240,23 @@ and Organisation public key, so the app can submit one after a restart; neither
 changes the store.
 satisfies: REQ-xs4ab8
 
-**LLR-qjz3q4**: a genesis provisional update holds the Organisation private key
+**LLR-qjz3q4**: every provisional update holds the Organisation private key
 whose X25519 public key is its `org_pub_key`, as an `OrgPrivateKey` inside
-`ProvisionalChange::Genesis`; it reaches the disk only inside the encrypted
-Persona store, is moved into the new record's `org_private_key` by the
-`commit_genesis` that consumes the update, and leaves the store with the update
-when the update is removed without being committed. No other provisional
-update holds a private key.
-satisfies: REQ-ech45n
+`ProvisionalChange::Genesis` or `ProvisionalChange::ChangeSet`; it reaches the
+disk only inside the encrypted Persona store, is moved into the record's
+`org_private_key` by the `commit_genesis` (creating the record) or
+`commit_update` (replacing the record's key, LLR-6s785x) that consumes the
+update, and leaves the store with the update when the update is removed
+without being committed — discarded (LLR-7cmp38) or orphaned by another
+commit (LLR-mkj4bz).
+satisfies: REQ-ech45n, REQ-stx9v3
+
+*Amended 2026-10-06 (owner ruling on rotation, change
+`worktree-org-node-org-key-pair`).* This was about a genesis provisional
+update only and ended "No other provisional update holds a private key". The
+owner ruled that every provisional update draws a fresh key pair when its
+resulting root is calculated and keeps the private key until it commits
+(REQ-stx9v3), so admissions and revocations hold one too.
 
 *Added 2026-10-06 (merge of master `5f7c177`).* Master's `create_organisation`
 put the Organisation private key straight into the record it created. Creation
@@ -217,16 +265,24 @@ encrypted store" is met by the update until `commit_genesis` creates the
 record; the owner ruled (2026-10-06) that an update never committed takes the
 key with it.
 
-**LLR-7cmp38**: `OrgService::discard_provisional(rng, target, resulting_root)
--> Result<(), OrgNodeError>` (the `rng` seals the store on save, as every
-other mutating operation's does), where `target` is `ProvisionalTarget::Org(org_id)`
-or `ProvisionalTarget::Genesis(persona_id)`, removes the one stored provisional
-update for that target whose `resulting_root` equals `resulting_root` — a
-genesis update together with the Organisation private key it holds — and saves
-the store before returning; when no such update is stored it returns
+**LLR-7cmp38**: `OrgService::discard_provisional(rng, target, resulting_root,
+org_pub_key) -> Result<(), OrgNodeError>` (the `rng` seals the store on save,
+as every other mutating operation's does), where `target` is
+`ProvisionalTarget::Org(org_id)` or `ProvisionalTarget::Genesis(persona_id)`,
+removes the one stored provisional update for that target whose
+`resulting_root` equals `resulting_root` and whose `org_pub_key` equals
+`org_pub_key` — together with the Organisation private key it holds — and
+saves the store before returning; when no such update is stored it returns
 `NoProvisionalUpdate`, leaves the store unchanged and writes nothing. It never
 touches a record, an expectation or another provisional update.
 satisfies: REQ-hhva9d
+
+*Amended 2026-10-06 (owner ruling on rotation, change
+`worktree-org-node-org-key-pair`).* The operation named an update by target
+and `resulting_root`, and only a genesis update held a private key. Every
+provisional update now holds a fresh key pair, and its identity includes its
+`org_pub_key` (LLR-95753m), so the operation takes the key too and discards
+exactly one update and its private key.
 
 ## SDD-89es4z — Persona and Organisation genesis
 
@@ -242,8 +298,17 @@ through `insert_provisional`, a provisional update with `org_id` `None`,
 genesis record's root, `org_pub_key` that key pair's public key and
 `ProvisionalChange::Genesis` holding that Member's snapshot and the key pair's
 private key (LLR-qjz3q4); it saves the store before returning, and calls no
-chain operation.
-satisfies: REQ-xs4ab8
+chain operation. The key pair is drawn after the genesis record's root is
+calculated, as every provisional update's is (LLR-e2b7gv).
+satisfies: REQ-xs4ab8, REQ-stx9v3
+
+*Amended 2026-10-06 (owner ruling on rotation, change
+`worktree-org-node-org-key-pair`).* Genesis was the only operation that drew
+an Organisation key pair. The owner ruled that every provisional update draws
+one when its resulting root is calculated (REQ-stx9v3); genesis is the case
+with no earlier key, and this item already draws its pair after building the
+record, so the last sentence states the order and the item also satisfies
+REQ-stx9v3.
 
 *(Merged 2026-10-06 with master `5f7c177`: this read "`org_pub_key` the
 founding Member's Member key (`OrgPublicKey::from(&P2pMemberKey)`,
@@ -266,8 +331,8 @@ selects the genesis provisional update the named Persona built whose
 epoch other than the update's Sequence number 1, and with `RootMismatch` a
 record rebuilt from its members whose root is not the root read, and only then
 creates the Organisation record — `org_id`, that root, the Organisation public
-key and epoch read, Sequence number 1, no Organisation secret, the members,
-the update's Organisation private key, and `proxy_account`
+key and epoch read, Sequence number 1, the members, the update's
+Organisation private key, and `proxy_account`
 `Some(proxy_account)` — removes that provisional update, and saves the store;
 on any refusal the store is unchanged and not written.
 satisfies: REQ-tqap3r
@@ -293,6 +358,12 @@ root and key again (an admission later undone) gives `SeqNotEpoch`.
 `a_chain_past_epoch_one_refuses_commit_genesis_and_keeps_the_update` asserts
 both.
 
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+The record was created with "no Organisation secret" as well. `OrgSecret` and
+`OrgRecord.org_secret` are removed (LLR-qsjde3, LLR-byjvd9), so the clause
+goes; the record's required `org_private_key` is the genesis update's key, as
+before.
+
 **LLR-6z5xya**: `create_organisation(rng, persona_id)` refuses with
 `PersonaAlreadyBound { persona_id }`, naming the Persona, a Persona whose
 `org_id` is set, before it draws anything from `rng`; it keeps no provisional
@@ -311,8 +382,8 @@ so the first could no longer be managed (PR-mdv38y's second writer).
 `org-node/src/service.rs` (`send_update`): which Persona's device a committed
 update goes out under, and what it carries.
 
-**LLR-2xzys9**: `send_update(outgoing, recipient, peer_addr, org_secret,
-invite_id)` binds the endpoint, when none is bound, from the device seed of
+**LLR-2xzys9**: `send_update(outgoing, recipient, peer_addr)`, which takes
+no Organisation key, secret or invite identifier, binds the endpoint, when none is bound, from the device seed of
 the first Persona in the store bound to the Organisation
 `outgoing.envelope.org_id` names, and refuses with a typed error, sending
 nothing, when no Persona is bound to it; an endpoint already bound is used as
@@ -321,11 +392,23 @@ satisfies: derived
 
 *Amended 2026-10-06:* the signature gains `invite_id` (LLR-48jakr).
 
-**LLR-48jakr**: the Wire message `send_update` sends carries in `invite_id`
-exactly the invite identifier its caller passes — the Invite reply's for an
-admission, none for any other update — and `send_update` neither reads nor
-stores an invite identifier.
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+The signature was `send_update(outgoing, recipient, peer_addr, org_secret,
+invite_id)`. The Organisation secret is gone and the caller supplies no
+Organisation key: the Organisation private key a message carries is the one
+the node's record holds (REQ-szq3ud, LLR-6ymd6d). The invite identifier no
+longer travels between peers (LLR-48jakr).
+
+**LLR-48jakr**: `send_update` takes no invite identifier, and no Wire message
+it sends carries one (LLR-ms8njy); `send_update` neither reads nor stores an
+invite identifier.
 satisfies: REQ-8amu2a
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+This said the Wire message carries in `invite_id` exactly the invite
+identifier the caller passes — the Invite reply's for an admission, none
+otherwise. The owner ruled that the invite identifier travels only in the
+Invite and its reply (REQ-8amu2a as amended), so the parameter goes.
 
 ## SDD-8cpyfa — The receive-and-commit path
 
@@ -341,18 +424,26 @@ the provisional updates and the expected admissions unchanged; the early
 `read_state` that existed to obtain a signing key is removed.
 satisfies: REQ-f2k4tr
 
-**LLR-s8xp7m**: on a Wire message about an Organisation the node holds no
-record of, `receive_and_verify` refuses with `AdmissionNotExpected { org_id }`,
-before decoding the record snapshot and with no `read_state` call, unless
-`expected_admissions` holds an expectation whose Organisation is `org_id` and
-whose invite identifier is the Wire message's `invite_id` (a message carrying
-none matches nothing); and when one does, decodes the snapshot
+**LLR-s8xp7m**: on an Organisation-information Wire message about an
+Organisation the node holds no record of, `receive_and_verify` refuses with
+`AdmissionNotExpected { org_id }`, before decoding the record snapshot and
+with no `read_state` call, unless `expected_admissions` holds an expectation
+whose Organisation is `org_id`; and when one does, decodes the snapshot
 (`first_admission_base`), runs `check_chain_free` against it, and only then
-reads the chain once. Every refusal leaves every expectation in place.
+reads the chain once. Every refusal leaves every expectation in place. (A
+revocation about such an Organisation is refused before this check,
+LLR-38e2kn.)
 satisfies: REQ-8amu2a
 
 *Amended 2026-10-06 (owner ruling on pre-emption, REQ-8amu2a as amended).*
 The expectation matched on the Organisation alone.
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+The amendment above is reversed. The expectation had to match the Wire
+message's `invite_id` as well, and a message carrying none matched nothing.
+The invite identifier no longer travels between peers, so a first admission
+is matched by Organisation alone, and only an Organisation-information
+message can be one.
 
 **LLR-3f5h7b**: on a first admission that has verified against the chain,
 `receive_and_verify` commits only when the verified Membership record holds the
@@ -372,16 +463,26 @@ record that lists only Personas bound elsewhere is refused with
 
 **LLR-cmdrp9**: `commit_update(rng, org_id) -> Result<CommitOutcome,
 OrgNodeError>` reads the Organisation state for `org_id` once, selects the
-stored provisional update for `org_id` whose `resulting_root` equals the root
-read (`NoProvisionalUpdate` for none), builds from it the Envelope `(org_id,
+stored provisional update for `org_id` whose `resulting_root` and
+`org_pub_key` equal the root and the Organisation public key read
+(`NoProvisionalUpdate` for none), builds from it the Envelope `(org_id,
 seq, change_set)`, and runs `verify_envelope_against_chain` on it against the
 record, the record's Sequence-number mark and last committed epoch, and a
 reader serving that one state — the checks a received update passes, the
 epoch rule (REQ-txvtm9) included — and on success commits as a received update
-commits (root, epoch, Sequence number and members together, store saved) and
-returns the Envelope and the encoded snapshot of the record as it stood before
-the commit as `outgoing`.
-satisfies: REQ-tqap3r
+commits (root, epoch, Sequence number and members together, store saved),
+with the record's Organisation private key and public key replaced by the
+update's (LLR-6s785x), and returns the Envelope and the encoded snapshot of
+the record as it stood before the commit as `outgoing`.
+satisfies: REQ-tqap3r, REQ-jy6ybw
+
+*Amended 2026-10-06 (owner ruling on rotation, change
+`worktree-org-node-org-key-pair`).* The update was selected by its root alone
+and the commit left the record's keys as they were. Every provisional update
+now carries a fresh key pair whose public key the app writes to the chain
+(REQ-stx9v3), so the selection also matches that key — two updates for the
+same change can differ only in it — and the commit takes the update's key
+into the record (REQ-jy6ybw).
 
 **LLR-ewkg85**: a `commit_update` or `commit_genesis` refused at any step —
 no record, a failed or empty chain read, no matching provisional update, or

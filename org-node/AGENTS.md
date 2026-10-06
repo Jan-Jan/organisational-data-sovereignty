@@ -26,7 +26,7 @@ Same rule as org-members; why: `../docs/adr/2026-10-04-parse-at-the-system-edge.
 - **Serde parses too.** A persisted/wire struct field is the newtype; its
   `Deserialize` goes through `parse`. Wrapping must not change stored or wire
   bytes -- prove it with a round-trip test against bytes from before the change.
-- **Secrets** (member/device seed, Organisation secret, Organisation private
+- **Secrets** (member/device seed, Organisation private
   key, store key) get a newtype with redacted `Debug` and no `Display`. An
   X25519 secret in use is an `X25519Keypair` (not `Clone`, wiped on drop). Never `derive(Debug)` on a
   struct that holds a secret as a plain array (PR-hqwpg9).

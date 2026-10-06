@@ -22,10 +22,10 @@ use crate::store::{
     ProvisionalChange, ProvisionalUpdate, RawMemberSnapshot, StoreData,
 };
 pub use crate::store::ProvisionalTarget;
-use crate::transport::TransportMode;
+use crate::transport::{TransportError, TransportMode};
 use crate::transport::endpoint::OrgEndpoint;
 use crate::transport::wire::WireMessage;
-use crate::types::{ChainAccount, Epoch, InviteId, OrgPublicKey, OrgSecret, PersonaId, SequenceNumber};
+use crate::types::{ChainAccount, Epoch, OrgPrivateKey, OrgPublicKey, PersonaId, SequenceNumber};
 use crate::verify::{VerifiedUpdate, VerifyContext, verify_envelope_against_chain};
 
 type Trie = OrgTrie<Blake3Hasher>;
@@ -242,25 +242,23 @@ fn snapshot_of(m: &MemberLeaf) -> MemberSnapshot {
     }
 }
 
-/// The record a first admission extends: decoded from the snapshot the
-/// sending node sent. A first admission without one is refused (REQ-d9g6nt).
+/// The record a first admission extends, decoded from the snapshot its
+/// Organisation-information message carries (REQ-d9g6nt, LLR-j6j95z).
 // Public only for the fuzz target `fuzz_first_admission_base`; not API.
 #[doc(hidden)]
-pub fn first_admission_base(genesis_snapshot: Option<&[u8]>) -> Result<Trie, OrgNodeError> {
-    let snap_bytes = genesis_snapshot.ok_or_else(|| {
-        OrgNodeError::Chain("first admission without a record snapshot".into())
-    })?;
-    let raw: Vec<RawMemberSnapshot> = postcard::from_bytes(snap_bytes)
-        .map_err(|e| OrgNodeError::Chain(format!("genesis_snapshot decode: {e}")))?;
+pub fn first_admission_base(record_snapshot: &[u8]) -> Result<Trie, OrgNodeError> {
+    let raw: Vec<RawMemberSnapshot> = postcard::from_bytes(record_snapshot)
+        .map_err(|e| OrgNodeError::Chain(format!("record snapshot decode: {e}")))?;
     let snaps = raw.into_iter().map(MemberSnapshot::try_from).collect::<Result<Vec<_>, _>>()?;
     trie_from_snapshots(&snaps)
 }
 
-/// Encode the record a pushed envelope extends, as a `WireMessage`'s
-/// `genesis_snapshot`; `first_admission_base` decodes it.
+/// Encode the record a committed update extends, as an
+/// Organisation-information message's `record_snapshot`;
+/// `first_admission_base` decodes it.
 fn encode_record_snapshot(snapshots: &[MemberSnapshot]) -> Result<Vec<u8>, OrgNodeError> {
     postcard::to_allocvec(snapshots)
-        .map_err(|e| OrgNodeError::Chain(format!("genesis_snapshot encode: {e}")))
+        .map_err(|e| OrgNodeError::Chain(format!("record snapshot encode: {e}")))
 }
 
 /// The person an admission adds, as parsed values the app built from the
@@ -442,11 +440,10 @@ impl OrgService {
             root_hash: state.root_hash,
             org_pub_key: state.org_pub_key,
             epoch: state.epoch,
-            org_secret: None,
             last_seq: update.seq,
             trie_members: members,
             proxy_account: Some(proxy_account),
-            org_private_key: Some(org_private_key),
+            org_private_key,
         });
         data.provisional_updates.retain(|u| *u != update);
         Self::discard_orphans(data, org_id, state.root_hash);
@@ -461,20 +458,22 @@ impl OrgService {
         data.provisional_updates.retain(|u| u.org_id != Some(org_id) || u.base_root == Some(root));
     }
 
-    /// Remove the one provisional update for `target` whose resulting root is
-    /// `resulting_root` — a genesis update with the Organisation private key
-    /// it holds — and save; refuse one not stored with `NoProvisionalUpdate`,
-    /// changing and writing nothing (LLR-7cmp38).
+    /// Remove the one provisional update for `target` whose resulting root
+    /// is `resulting_root` and whose Organisation public key is
+    /// `org_pub_key`, with the Organisation private key it holds, and save;
+    /// refuse one not stored with `NoProvisionalUpdate`, changing and writing
+    /// nothing (LLR-7cmp38).
     pub fn discard_provisional<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         target: ProvisionalTarget,
         resulting_root: RootHash,
+        org_pub_key: OrgPublicKey,
     ) -> Result<(), OrgNodeError> {
         let updates = &mut self.store.data_mut().provisional_updates;
         let position = updates
             .iter()
-            .position(|u| u.resulting_root == resulting_root && target.names(u))
+            .position(|u| u.resulting_root == resulting_root && u.org_pub_key == org_pub_key && target.names(u))
             .ok_or(OrgNodeError::NoProvisionalUpdate)?;
         updates.remove(position);
         self.store.save(rng)
@@ -544,8 +543,12 @@ impl OrgService {
 
     /// Keep a Change set built on `rec` as a provisional update: its Sequence
     /// number is the epoch it produces, the record's plus one (LLR-ghja3x,
-    /// REQ-txvtm9, Decision 16). A refusal by the bound writes nothing
-    /// (LLR-jq7qh7).
+    /// REQ-txvtm9, Decision 16). Its root calculated, the batch ends and a
+    /// fresh Organisation key pair is drawn for it (REQ-stx9v3, LLR-e2b7gv):
+    /// distinct from the record's current key and from every key of the
+    /// resulting record, else `DuplicateKey`, nothing kept or written. The
+    /// update holds the private key; the record's keys are not changed. A
+    /// refusal by the bound writes nothing (LLR-jq7qh7).
     fn keep_change_set<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -555,15 +558,23 @@ impl OrgService {
         delta: &Delta,
     ) -> Result<ProvisionalUpdate, OrgNodeError> {
         let seq = SequenceNumber::new(rec.epoch.get() + 1);
+        let resulting_root = new_trie.root_hash().map_err(OrgNodeError::Trie)?;
+        let org_kp = X25519Keypair::generate(rng);
+        let org_pub_key = org_kp.org_public_key()?;
+        if org_pub_key == rec.org_pub_key {
+            return Err(OrgNodeError::Trie(org_members::OrgMembersError::DuplicateKey));
+        }
+        org_pub_key.ensure_distinct_from(&new_trie.members())?;
         let update = ProvisionalUpdate {
             org_id: Some(rec.org_id),
             persona_id,
             base_root: Some(rec.root_hash),
-            resulting_root: new_trie.root_hash().map_err(OrgNodeError::Trie)?,
+            resulting_root,
             seq,
-            org_pub_key: rec.org_pub_key,
+            org_pub_key,
             change: ProvisionalChange::ChangeSet {
                 change_set: Envelope::build(rec.org_id, seq, delta)?.delta_bytes,
+                org_private_key: org_kp.org_private_key(),
             },
         };
         self.store.data_mut().insert_provisional(update.clone())?;
@@ -572,7 +583,8 @@ impl OrgService {
     }
 
     /// Commit the node's own provisional update for `org_id` once the chain
-    /// carries its root, by the checks a received update passes (LLR-cmdrp9).
+    /// carries its root and key, by the checks a received update passes,
+    /// taking the update's key pair into the record (LLR-cmdrp9, LLR-6s785x).
     /// A refusal changes and writes nothing (LLR-ewkg85); nothing is bound or
     /// sent (LLR-4tcxsu). A commit that removes every Persona bound to the
     /// Organisation forgets it instead (LLR-b27jr6).
@@ -588,10 +600,12 @@ impl OrgService {
             .data()
             .provisional_updates
             .iter()
-            .find(|u| u.org_id == Some(org_id) && u.resulting_root == state.root_hash)
+            .find(|u| {
+                u.org_id == Some(org_id) && u.resulting_root == state.root_hash && u.org_pub_key == state.org_pub_key
+            })
             .cloned()
             .ok_or(OrgNodeError::NoProvisionalUpdate)?;
-        let ProvisionalChange::ChangeSet { change_set } = update.change else {
+        let ProvisionalChange::ChangeSet { change_set, org_private_key } = update.change else {
             return Err(OrgNodeError::NoProvisionalUpdate);
         };
         let envelope = Envelope { org_id, parent_seq: update.seq, delta_bytes: change_set };
@@ -605,7 +619,8 @@ impl OrgService {
         let record_snapshot = encode_record_snapshot(&rec.trie_members)?;
         let root = verified.trie.root_hash().map_err(OrgNodeError::Trie)?;
         if self.still_member(org_id, &verified.trie) {
-            self.commit_held(org_id, &verified, None)?;
+            // The record takes the update's key pair (REQ-jy6ybw).
+            self.commit_held(org_id, &verified, org_private_key, update.org_pub_key)?;
         } else {
             self.forget_organisation(org_id);
         }
@@ -614,14 +629,16 @@ impl OrgService {
     }
 
     /// Write a verified update to a held record — root, epoch, mark and
-    /// members together (LLR-cja9zv) — and drop the provisional updates it
-    /// orphans (LLR-mkj4bz). `secret`: `Some(s)` replaces the stored secret
-    /// (a received update, LLR-ckk5nz); `None` keeps it (the node's own).
+    /// members together (LLR-cja9zv), and the Organisation key pair of the
+    /// update, replacing the one it held, no earlier one kept (LLR-6s785x,
+    /// LLR-ckk5nz, LLR-4kh9w9) — and drop the provisional updates it orphans
+    /// (LLR-mkj4bz).
     fn commit_held(
         &mut self,
         org_id: OrgId,
         verified: &VerifiedUpdate,
-        secret: Option<Option<OrgSecret>>,
+        org_private_key: OrgPrivateKey,
+        org_pub_key: OrgPublicKey,
     ) -> Result<(), OrgNodeError> {
         let root = verified.trie.root_hash().map_err(OrgNodeError::Trie)?;
         let snapshots: Vec<MemberSnapshot> = verified.trie.members().iter().map(snapshot_of).collect();
@@ -631,11 +648,38 @@ impl OrgService {
         rec.epoch = verified.epoch;
         rec.last_seq = verified.seq_guard.last_seen();
         rec.trie_members = snapshots;
-        if let Some(secret) = secret {
-            rec.org_secret = secret;
-        }
+        rec.org_private_key = org_private_key;
+        rec.org_pub_key = org_pub_key;
         Self::discard_orphans(data, org_id, root);
         Ok(())
+    }
+
+    /// Commit a received update that leaves this node listed in its held
+    /// record. Only Organisation information is: a revocation is accepted
+    /// only as this node's own removal, so one that leaves its Device listed
+    /// is refused, nothing written (LLR-pt32fx, REQ-3dsweu). The record takes
+    /// the key the message carried and the chain's public key, a pair
+    /// (REQ-ju6vn2, LLR-ckk5nz, LLR-4kh9w9).
+    fn commit_received(
+        &mut self,
+        org_id: OrgId,
+        verified: &VerifiedUpdate,
+        carried_key: Option<OrgPrivateKey>,
+        chain_state: &OrgState,
+    ) -> Result<(), OrgNodeError> {
+        let key = carried_key.ok_or(OrgNodeError::RevocationNotForThisDevice { org_id })?;
+        self.commit_held(org_id, verified, key, chain_state.org_pub_key)
+    }
+
+    /// Refuse an Organisation private key whose X25519 public half is not the
+    /// Organisation public key the chain state read carries (LLR-ba2ejp,
+    /// RC-9cefcn).
+    fn check_carried_key(org_id: OrgId, key: &OrgPrivateKey, state: &OrgState) -> Result<(), OrgNodeError> {
+        if key.x25519_keypair().org_public_key()? == state.org_pub_key {
+            Ok(())
+        } else {
+            Err(OrgNodeError::OrgKeyMismatch { org_id })
+        }
     }
 
     /// Whether any Persona bound to `org_id` has its device in `trie`.
@@ -661,20 +705,33 @@ impl OrgService {
     }
 
     /// Send a committed update to `recipient`'s device, from the device of
-    /// the first Persona bound to its Organisation (LLR-2xzys9), carrying
-    /// exactly the secret and invite identifier given (LLR-8hdu9x,
-    /// LLR-48jakr). Loopback dials `peer_addr` and refuses without one,
-    /// before binding (LLR-jn5jeh, LLR-pw369n); Networked dials by
-    /// `recipient`. Writes nothing (LLR-t4znbk).
+    /// the first Persona bound to its Organisation (LLR-2xzys9). The kind
+    /// follows the recipient (LLR-6ymd6d): a Device the node's record of the
+    /// Organisation lists receives Organisation information — the Envelope,
+    /// the record as it stood before the commit, and the Organisation
+    /// private key that record holds, none taken from the caller
+    /// (REQ-szq3ud); any other Device a revocation, the Envelope alone
+    /// (REQ-3dsweu, LLR-8hdu9x). No invite identifier (LLR-48jakr). No
+    /// record: `OrgNotOnChain`, nothing sent. Loopback dials `peer_addr` and
+    /// refuses without one, before binding (LLR-jn5jeh, LLR-pw369n);
+    /// Networked dials by `recipient`. Writes nothing (LLR-t4znbk).
     pub async fn send_update(
         &mut self,
         outgoing: &OutgoingUpdate,
         recipient: DevicePublicKey,
         peer_addr: Option<iroh::EndpointAddr>,
-        org_secret: Option<OrgSecret>,
-        invite_id: Option<InviteId>,
     ) -> Result<(), OrgNodeError> {
         let mode = self.transport_mode;
+        let rec = self.find_org(outgoing.envelope.org_id)?;
+        let msg = if rec.trie_members.iter().any(|m| m.device_keys.contains(&recipient)) {
+            WireMessage::OrgInformation {
+                envelope: outgoing.envelope.clone(),
+                record_snapshot: outgoing.record_snapshot.clone(),
+                org_private_key: rec.org_private_key.clone(),
+            }
+        } else {
+            WireMessage::Revocation { envelope: outgoing.envelope.clone() }
+        };
         let persona_id = self.first_persona_bound_to(outgoing.envelope.org_id)?.persona_id.clone();
         let loopback_addr = match (mode, peer_addr) {
             (TransportMode::Loopback, None) => {
@@ -682,12 +739,6 @@ impl OrgService {
             }
             (TransportMode::Loopback, Some(addr)) => Some(addr),
             (TransportMode::Networked, _) => None,
-        };
-        let msg = WireMessage {
-            envelope: outgoing.envelope.clone(),
-            org_secret,
-            genesis_snapshot: Some(outgoing.record_snapshot.clone()),
-            invite_id,
         };
         let ep = self.ensure_endpoint(&persona_id).await?;
         match loopback_addr {
@@ -714,25 +765,39 @@ impl OrgService {
         rng: &mut R,
     ) -> Result<ReceiveOutcome, OrgNodeError> {
         let msg = self.receive_one().await?;
-        let org_id = msg.envelope.org_id;
+        let org_id = msg.envelope().org_id;
 
         // The record this message extends. Nothing about the sender is
         // checked and no Invite is required (REQ-xa6smf, REQ-ztdza4, owner
         // ruling 2026-10-05): the chain decides.
         let existing = self.store.data().orgs.iter().find(|o| o.org_id == org_id).cloned();
         let is_first_admission = existing.is_none();
-        // A first admission is read only when the app expects it, for this
-        // Organisation under this invite identifier — before its snapshot is
-        // decoded or the chain is read (LLR-s8xp7m, RC-2ferct).
-        let expectation = msg.invite_id.map(|invite_id| ExpectedAdmission { org_id, invite_id });
-        if is_first_admission && !expectation.is_some_and(|e| self.store.data().expected_admissions.contains(&e)) {
+        // What the message carries besides its Envelope (LLR-js9dsu). A
+        // revocation about an Organisation not held is refused before the
+        // expectations are consulted or the chain is read (LLR-38e2kn).
+        let (envelope, record_snapshot, carried_key) = match msg {
+            WireMessage::OrgInformation { envelope, record_snapshot, org_private_key } => {
+                (envelope, Some(record_snapshot), Some(org_private_key))
+            }
+            WireMessage::Revocation { .. } if is_first_admission => {
+                return Err(OrgNodeError::RevocationNotHeld { org_id });
+            }
+            WireMessage::Revocation { envelope } => (envelope, None, None),
+        };
+        // A first admission is read only when the app expects one to this
+        // Organisation — before its snapshot is decoded or the chain is read
+        // (LLR-s8xp7m, RC-2ferct).
+        let expectation = ExpectedAdmission { org_id };
+        if is_first_admission && !self.store.data().expected_admissions.contains(&expectation) {
             return Err(OrgNodeError::AdmissionNotExpected { org_id });
         }
-        let (local_trie, last_seq, last_epoch) = match &existing {
-            Some(rec) => (trie_from_snapshots(&rec.trie_members)?, rec.last_seq, rec.epoch),
-            // The record a first admission extends: from the snapshot it
-            // carries (REQ-d9g6nt).
-            None => (first_admission_base(msg.genesis_snapshot.as_deref())?, SequenceNumber::new(0), Epoch::new(0)),
+        let (local_trie, last_seq, last_epoch) = match (&existing, &record_snapshot) {
+            (Some(rec), _) => (trie_from_snapshots(&rec.trie_members)?, rec.last_seq, rec.epoch),
+            // The record a first admission extends: from the snapshot its
+            // Organisation-information message carries (REQ-d9g6nt,
+            // LLR-j6j95z).
+            (None, Some(snapshot)) => (first_admission_base(snapshot)?, SequenceNumber::new(0), Epoch::new(0)),
+            (None, None) => return Err(OrgNodeError::RevocationNotHeld { org_id }),
         };
         let ctx = VerifyContext {
             expected_org_id: org_id,
@@ -740,7 +805,14 @@ impl OrgService {
             last_committed_epoch: last_epoch,
         };
         // What the Change set must reach (RC-6a2dke, RC-e5atck).
-        let (verified, chain_state) = self.verify_received(&local_trie, &msg.envelope, &ctx).await?;
+        let (verified, chain_state) = self.verify_received(&local_trie, &envelope, &ctx).await?;
+        // The key Organisation information carries must be the private half
+        // of the chain's key (LLR-ba2ejp, RC-9cefcn) — checked before the
+        // own-Persona rule and before anything is written; a revocation
+        // carries none.
+        if let Some(key) = &carried_key {
+            Self::check_carried_key(org_id, key, &chain_state)?;
+        }
         let members = verified.trie.members();
 
         let new_root = verified.trie.root_hash().map_err(OrgNodeError::Trie)?;
@@ -765,6 +837,9 @@ impl OrgService {
         }
 
         if is_first_admission {
+            let Some(org_private_key) = carried_key else {
+                return Err(OrgNodeError::RevocationNotHeld { org_id });
+            };
             let data = self.store.data_mut();
             data.orgs.push(OrgRecord {
                 org_id,
@@ -773,23 +848,19 @@ impl OrgService {
                 // (LLR-xq9nrq).
                 org_pub_key: chain_state.org_pub_key,
                 epoch: verified.epoch,
-                org_secret: msg.org_secret,
                 last_seq: verified.seq_guard.last_seen(),
                 trie_members: members.iter().map(snapshot_of).collect(),
                 // A first-admission record: only `commit_genesis` keeps a
                 // proxy account (LLR-3v5nu9).
                 proxy_account: None,
-                org_private_key: None,
+                org_private_key,
             });
             // Clear the expectation the committed first admission matched,
             // and only that one (LLR-q8emds).
-            if let Some(matched) = expectation {
-                data.expected_admissions.retain(|e| *e != matched);
-            }
+            data.expected_admissions.retain(|e| *e != expectation);
             Self::discard_orphans(data, org_id, new_root);
         } else if self.still_member(org_id, &verified.trie) {
-            // A received update replaces the stored secret (LLR-ckk5nz).
-            self.commit_held(org_id, &verified, Some(msg.org_secret))?;
+            self.commit_received(org_id, &verified, carried_key, &chain_state)?;
         } else {
             // The node's own removal, on this path as on every other
             // (LLR-b27jr6): nothing is committed, nothing bound.
@@ -844,8 +915,12 @@ impl OrgService {
         &mut self,
         rng: &mut R,
     ) -> Result<SelfDeleteOutcome, OrgNodeError> {
-        let msg = self.receive_one().await?;
-        let org_id = msg.envelope.org_id;
+        // The key Organisation information carries; a revocation carries none.
+        let (envelope, carried_key) = match self.receive_one().await? {
+            WireMessage::OrgInformation { envelope, org_private_key, .. } => (envelope, Some(org_private_key)),
+            WireMessage::Revocation { envelope } => (envelope, None),
+        };
+        let org_id = envelope.org_id;
         // An Organisation not held is refused before any chain read (LLR-379hnv).
         let existing = self
             .store
@@ -861,11 +936,14 @@ impl OrgService {
             seq_guard: SeqGuard::from_last_seen(existing.last_seq),
             last_committed_epoch: existing.epoch,
         };
-        let (verified, _) = self.verify_received(&local_trie, &msg.envelope, &ctx).await?;
+        let (verified, chain_state) = self.verify_received(&local_trie, &envelope, &ctx).await?;
+        // The receipt check, before any commit or record deletion (LLR-ba2ejp).
+        if let Some(key) = &carried_key {
+            Self::check_carried_key(org_id, key, &chain_state)?;
+        }
         if self.still_member(org_id, &verified.trie) {
-            // Regular admit/update — commit the update normally; this path
-            // never touched the secret.
-            self.commit_held(org_id, &verified, None)?;
+            // An ordinary update.
+            self.commit_received(org_id, &verified, carried_key, &chain_state)?;
             self.store.save(rng)?;
             return Ok(SelfDeleteOutcome::UpdatedNotRevoked { org_id });
         }
@@ -890,7 +968,13 @@ impl OrgService {
             .persona_id
             .clone();
         let ep = self.ensure_endpoint(&first_persona_id).await?;
-        let (_sender, msg) = ep.recv_one().await.map_err(|e| OrgNodeError::Chain(format!("iroh recv: {e}")))?;
+        // A body that does not decode — Organisation information without its
+        // snapshot or key among them — is refused as such, before any record,
+        // expectation or chain is consulted (LLR-xn5pwc, REQ-c29s93).
+        let (_sender, msg) = ep.recv_one().await.map_err(|e| match e {
+            TransportError::Malformed => OrgNodeError::MalformedMessage,
+            other => OrgNodeError::Chain(format!("iroh recv: {other}")),
+        })?;
         Ok(msg)
     }
 
@@ -921,15 +1005,14 @@ impl OrgService {
         &self.store.data().orgs
     }
 
-    /// Record that the app expects a first admission to `org_id` under
-    /// `invite_id`, at most once, and save before returning (LLR-9zfnmb).
+    /// Record that the app expects a first admission to `org_id`, at most
+    /// once, and save before returning (LLR-9zfnmb).
     pub fn expect_admission<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         org_id: OrgId,
-        invite_id: InviteId,
     ) -> Result<(), OrgNodeError> {
-        let expectation = ExpectedAdmission { org_id, invite_id };
+        let expectation = ExpectedAdmission { org_id };
         let expected = &mut self.store.data_mut().expected_admissions;
         if !expected.contains(&expectation) {
             expected.push(expectation);

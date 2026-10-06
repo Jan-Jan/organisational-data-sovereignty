@@ -44,4 +44,4 @@ pub enum TransportError {
 }
 
 /// Maximum accepted frame size (defensive cap against a hostile peer).
-pub const MAX_FRAME: usize = 1 << 20; // 1 MiB — generous for a delta + secret.
+pub const MAX_FRAME: usize = 1 << 20; // 1 MiB — generous for a delta, a record snapshot and a key.

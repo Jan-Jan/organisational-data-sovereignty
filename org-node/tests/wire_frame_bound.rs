@@ -9,28 +9,58 @@ use org_node::ids::OrgId;
 use org_node::test_fixtures::admit_member_delta;
 use org_node::transport::wire::{decode_body, encode_frame, WireMessage};
 use org_node::transport::{TransportError, MAX_FRAME};
-use org_node::{Envelope, MemberSeed, OrgSecret, SequenceNumber};
+use org_node::{Envelope, MemberSeed, OrgPrivateKey, SequenceNumber};
 
-fn sample_msg() -> WireMessage {
+fn sample_envelope() -> Envelope {
     let (delta, _) = admit_member_delta(&MemberSeed::from([1u8; 32]).x25519_keypair());
-    let env = Envelope::build(OrgId::new([5u8; 20]), SequenceNumber::new(2), &delta).unwrap();
-    WireMessage { envelope: env, org_secret: Some(OrgSecret::from([9u8; 32])), genesis_snapshot: None, invite_id: None }
+    Envelope::build(OrgId::new([5u8; 20]), SequenceNumber::new(2), &delta).unwrap()
 }
 
-// Normal: a frame carries its invite identifier, or its absence, unchanged.
-// Abnormal: a body whose invite identifier is cut short does not decode.
-// verifies: LLR-ms8njy, REQ-8amu2a
-#[test]
-fn a_wire_message_carries_its_invite_id_and_refuses_a_short_one() {
-    for invite_id in [Some(org_node::InviteId::new([0x5c; 32])), None] {
-        let msg = WireMessage { invite_id, ..sample_msg() };
-        let framed = encode_frame(&msg).unwrap();
-        assert_eq!(decode_body(&framed[4..]).unwrap(), msg);
+fn sample_msg() -> WireMessage {
+    WireMessage::OrgInformation {
+        envelope: sample_envelope(),
+        record_snapshot: vec![1, 2, 3],
+        org_private_key: OrgPrivateKey::from([9u8; 32]),
     }
-    let with_id = WireMessage { invite_id: Some(org_node::InviteId::new([0x5c; 32])), ..sample_msg() };
-    let framed = encode_frame(&with_id).unwrap();
-    let cut = &framed[4..framed.len() - 1];
-    assert!(matches!(decode_body(cut), Err(TransportError::Malformed)));
+}
+
+/// The postcard body of `msg`, without the frame's length prefix.
+fn body_of(msg: &WireMessage) -> Vec<u8> {
+    encode_frame(msg).unwrap()[4..].to_vec()
+}
+
+// Normal: each kind round-trips through a frame, begins with its variant
+// index (0 Organisation information, 1 revocation) and hands back its
+// Envelope. Abnormal: a body whose index is neither 0 nor 1 does not decode.
+// verifies: LLR-js9dsu, REQ-3dsweu
+#[test]
+fn the_two_kinds_round_trip_and_a_body_of_neither_kind_is_refused() {
+    let revocation = WireMessage::Revocation { envelope: sample_envelope() };
+    for msg in [sample_msg(), revocation.clone()] {
+        assert_eq!(decode_body(&body_of(&msg)).unwrap(), msg);
+        assert_eq!(msg.envelope(), &sample_envelope());
+    }
+    assert_eq!(body_of(&sample_msg())[0], 0);
+    assert_eq!(body_of(&revocation)[0], 1);
+    let mut other = body_of(&revocation);
+    for index in [2u8, 3, 0x7f] {
+        other[0] = index;
+        assert!(matches!(decode_body(&other), Err(TransportError::Malformed)), "index {index}");
+    }
+}
+
+// Abnormal: an Organisation-information body that ends before its record
+// snapshot, or before the 32 bytes of its Organisation private key, does not
+// decode, and does not panic.
+// verifies: LLR-js9dsu, REQ-c29s93
+#[test]
+fn an_organisation_information_body_without_its_snapshot_or_key_does_not_decode() {
+    let body = body_of(&sample_msg());
+    let mut no_snapshot = body_of(&WireMessage::Revocation { envelope: sample_envelope() });
+    no_snapshot[0] = 0; // Organisation information's index, then the Envelope and nothing
+    for cut in [no_snapshot, body[..body.len() - 32].to_vec(), body[..body.len() - 1].to_vec()] {
+        assert!(matches!(decode_body(&cut), Err(TransportError::Malformed)), "{} bytes", cut.len());
+    }
 }
 
 // verifies: REQ-eg5j8u, LLR-fa7jt8, LLR-er2x8n
@@ -56,8 +86,11 @@ fn oversize_body_is_rejected() {
 // verifies: REQ-eg5j8u, LLR-sc6zuh
 #[test]
 fn oversize_message_is_rejected_on_encode() {
-    let mut msg = sample_msg();
-    msg.genesis_snapshot = Some(vec![0u8; MAX_FRAME + 1]);
+    let msg = WireMessage::OrgInformation {
+        envelope: sample_envelope(),
+        record_snapshot: vec![0u8; MAX_FRAME + 1],
+        org_private_key: OrgPrivateKey::from([9u8; 32]),
+    };
     assert!(matches!(encode_frame(&msg), Err(TransportError::FrameTooLarge(_))));
 }
 
@@ -86,11 +119,10 @@ fn a_body_that_is_not_an_encoded_message_is_refused() {
 // verifies: REQ-eg5j8u, LLR-8kh3zf
 #[test]
 fn a_body_of_exactly_the_bound_is_not_refused_for_its_size() {
-    // 0xff, not zero: since the Envelope lost its signature (merged
-    // 2026-10-05), an all-zero body IS a valid message — an empty envelope
-    // with no secret and no snapshot — because nothing in the wire form needs
-    // a non-zero length any more. Ten 0xff bytes after the Organisation
-    // identifier are a varint that overflows its u64, so this body is not.
+    // 0xff, not zero: an all-zero body IS a valid message — Organisation
+    // information with an empty envelope, an empty snapshot and an all-zero
+    // key. A leading run of 0xff bytes is a variant-index varint that
+    // overflows, so this body is not.
     let at_bound = vec![0xffu8; MAX_FRAME];
     // It is not a valid message, so it is refused — but as Malformed, which is
     // the decode verdict, never as FrameTooLarge, which is the size verdict.

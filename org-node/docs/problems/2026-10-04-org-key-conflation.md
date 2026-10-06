@@ -7,7 +7,8 @@ Organisation key pair whose secret every Member holds
 (`Organisational Data Sovereignty p1.md`, design point 5).
 affects: REQ-ech45n, LLR-3fwykc
 opened: 2026-10-04
-status: open
+status: resolved
+resolution: every Organisation-information message carries the Organisation private key the sending node's record holds (REQ-szq3ud), and its receiver stores it once its public half is the chain's key (REQ-ju6vn2, REQ-bwx7eg); `OrgPublicKey` is parsed by person's X25519 rule (LLR-3jjgtw); reproduced by `pr_szkat6_an_admitted_member_holds_the_organisation_private_key` (org-node/tests/admission_sender.rs), red before (a member's record held none), green after.
 
 *Restated 2026-10-05 by review round 4 (finding-6).* The report first read:
 "The node verifies every Envelope under the key stored in the Organisation

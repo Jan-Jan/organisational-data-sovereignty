@@ -98,6 +98,14 @@ pub fn classify_receive_error(e: &OrgNodeError) -> ReceiverOutcome {
         // provisional-update refusals never arise on receive. A Persona
         // already bound to an Organisation (`PersonaAlreadyBound`) is a
         // refusal about this node's own store, before anything is verified.
+        // The four refusals of a received Wire message are not verdicts of
+        // `verify_envelope_against_chain` either (LLR-7bk6qh): a message that
+        // does not decode (`MalformedMessage`) and a revocation about an
+        // Organisation not held (`RevocationNotHeld`) are refused before
+        // anything is verified; a key that is not the chain's
+        // (`OrgKeyMismatch`) and a revocation that leaves this node listed
+        // (`RevocationNotForThisDevice`) after it, on a rule about the key or
+        // this node.
         OrgNodeError::Chain(_)
         | OrgNodeError::OrgNotOnChain
         | OrgNodeError::Trie(_)
@@ -107,7 +115,11 @@ pub fn classify_receive_error(e: &OrgNodeError) -> ReceiverOutcome {
         | OrgNodeError::AdmissionNotOurs { .. }
         | OrgNodeError::ProvisionalLimit { .. }
         | OrgNodeError::NoProvisionalUpdate
-        | OrgNodeError::PersonaAlreadyBound { .. } => ReceiverOutcome::ReceiveError {
+        | OrgNodeError::PersonaAlreadyBound { .. }
+        | OrgNodeError::MalformedMessage
+        | OrgNodeError::OrgKeyMismatch { .. }
+        | OrgNodeError::RevocationNotHeld { .. }
+        | OrgNodeError::RevocationNotForThisDevice { .. } => ReceiverOutcome::ReceiveError {
             message: e.to_string(),
         },
     }

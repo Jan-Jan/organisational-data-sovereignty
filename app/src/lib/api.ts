@@ -152,14 +152,13 @@ export function importInviteReply(blob: string): Promise<InviteReplyDto> {
 	return invoke<InviteReplyDto>('import_invite_reply', { blob });
 }
 
-/** REQ-nfr3n2: admit through the chain, then commit and send. */
-export function admitMember(
-	orgId: string,
-	replyBlob: string,
-	peerAddrBlob: string,
-	orgSecretHex: string | null = null
-): Promise<string> {
-	return invoke<string>('admit_member', { orgId, replyBlob, peerAddrBlob, orgSecretHex });
+/**
+ * REQ-nfr3n2: admit through the chain, then commit and send. No Organisation
+ * secret or key is passed: the key the admission carries is the one
+ * org-node's record holds (LLR-8krgzj).
+ */
+export function admitMember(orgId: string, replyBlob: string, peerAddrBlob: string): Promise<string> {
+	return invoke<string>('admit_member', { orgId, replyBlob, peerAddrBlob });
 }
 
 /**

@@ -9,11 +9,13 @@
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+use ods_poc_lib::commands::revoke_and_send;
 use ods_poc_lib::submit::{found_organisation, submit_commit_send};
 use org_node::service::{MockChainOps, OrgService};
 use org_node::store::PersonaStore;
 use org_node::transport::endpoint::OrgEndpoint;
-use org_node::{DeviceSeed, Epoch, Handle, Joiner, MemberSeed, Name, Surname};
+use org_node::transport::wire::WireMessage;
+use org_node::{DeviceSeed, Epoch, Handle, Joiner, MemberId, MemberSeed, Name, Surname};
 use rand::rngs::OsRng;
 
 mod support;
@@ -52,7 +54,7 @@ async fn founding_writes_the_chain_then_commits() {
     let rec = a.list_orgs().iter().find(|o| o.org_id == org).cloned().unwrap();
     assert_eq!((rec.epoch, rec.last_seq.get()), (Epoch::new(1), 1));
     assert!(rec.proxy_account.is_some());
-    assert!(rec.org_private_key.is_some());
+    assert_eq!(rec.org_private_key.x25519_keypair().org_public_key().unwrap(), rec.org_pub_key, "the founder holds the Organisation's key pair");
 }
 
 // verifies: LLR-qhjp6g
@@ -79,8 +81,7 @@ async fn an_admission_is_written_then_committed_then_sent() {
     let org = found_organisation(&mut a, &writer, &mut OsRng, &pid_a).await.unwrap();
     let mut b = service("admit-b", &chain);
     let pid_b = persona(&mut b, "bob");
-    let invite = org_node::InviteId::new([0x44; 32]);
-    b.expect_admission(&mut OsRng, org, invite).unwrap();
+    b.expect_admission(&mut OsRng, org).unwrap();
     let rec_b = b.list_personas()[0].clone();
     let (member_key, device_key) = b.persona_public_keys(&pid_b).unwrap();
     let bob = Joiner { handle: rec_b.handle, name: rec_b.name, surname: rec_b.surname, member_key, device_key };
@@ -94,7 +95,7 @@ async fn an_admission_is_written_then_committed_then_sent() {
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
     let update = a.admit_member(&mut OsRng, org, &bob).unwrap();
-    let out = submit_commit_send(&mut a, &writer, &mut OsRng, &update, device_key, Some(addr_b), None, Some(invite))
+    let out = submit_commit_send(&mut a, &writer, &mut OsRng, &update, device_key, Some(addr_b))
         .await
         .unwrap();
     assert_eq!(out.epoch, Epoch::new(2));
@@ -105,7 +106,7 @@ async fn an_admission_is_written_then_committed_then_sent() {
     let mut b = b;
     let carol = joiner(0x71, "carol");
     let update = b.admit_member(&mut OsRng, org, &carol).unwrap();
-    let err = submit_commit_send(&mut b, &writer, &mut OsRng, &update, carol.device_key, None, None, None)
+    let err = submit_commit_send(&mut b, &writer, &mut OsRng, &update, carol.device_key, None)
         .await
         .unwrap_err();
     assert!(err.contains("proxy account"), "{err}");
@@ -123,7 +124,7 @@ async fn a_failed_update_write_neither_commits_nor_sends() {
     let bob = joiner(0x61, "bob");
     let update = a.admit_member(&mut OsRng, org, &bob).unwrap();
     writer.failing.store(true, Ordering::SeqCst);
-    let err = submit_commit_send(&mut a, &writer, &mut OsRng, &update, bob.device_key, None, None, None)
+    let err = submit_commit_send(&mut a, &writer, &mut OsRng, &update, bob.device_key, None)
         .await
         .unwrap_err();
     assert!(err.contains("node unreachable"), "{err}");
@@ -149,10 +150,95 @@ async fn a_submission_that_never_finishes_times_out_and_nothing_is_committed() {
     writer.hanging.store(true, Ordering::SeqCst);
     let bob = joiner(0x61, "bob");
     let update = a.admit_member(&mut OsRng, org, &bob).unwrap();
-    let err = submit_commit_send(&mut a, &writer, &mut OsRng, &update, bob.device_key, None, None, None)
+    let err = submit_commit_send(&mut a, &writer, &mut OsRng, &update, bob.device_key, None)
         .await
         .unwrap_err();
     assert!(err.contains("timed out"), "{err}");
     assert_eq!(a.list_orgs()[0].epoch, Epoch::new(1), "nothing committed");
     assert!(a.endpoint().is_none(), "nothing sent");
+}
+
+// LLR-q225ws: each command asks org-node for exactly one send, to exactly one
+// DevicePublicKey, passing no key, secret or invite identifier; org-node
+// chooses the kind from its committed record. The admission goes to the
+// joiner's Device, which the record lists: Organisation information. The
+// revocation goes to the removed Member's first Device, which it no longer
+// lists: a revocation. Nothing else is sent.
+// verifies: LLR-q225ws
+#[tokio::test(flavor = "multi_thread")]
+async fn each_command_sends_once_to_one_device_and_the_kind_follows_the_record() {
+    let chain = MockChainOps::new();
+    let writer = FakeWriter::over(&chain);
+    let mut a = service("kinds", &chain);
+    let pid = persona(&mut a, "alice");
+    let org = found_organisation(&mut a, &writer, &mut OsRng, &pid).await.unwrap();
+    let bob = joiner(0x61, "bob");
+    let sink = OrgEndpoint::bind(&DeviceSeed::from([0x62; 32]).signing_keypair()).await.unwrap();
+
+    let addr = sink.inner().addr();
+    let task = tokio::spawn(async move {
+        let got = sink.recv_one().await;
+        (sink, got)
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let update = a.admit_member(&mut OsRng, org, &bob).unwrap();
+    submit_commit_send(&mut a, &writer, &mut OsRng, &update, bob.device_key, Some(addr)).await.unwrap();
+    let (sink, got) = task.await.unwrap();
+    assert!(matches!(got.unwrap().1, WireMessage::OrgInformation { .. }), "the joiner's Device is listed");
+
+    let bob_id = a.list_orgs()[0].trie_members.iter().find(|m| m.member_key == bob.member_key).unwrap().id;
+    let addr = sink.inner().addr();
+    let task = tokio::spawn(async move {
+        let got = sink.recv_one().await;
+        (sink, got)
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    revoke_and_send(&mut a, &writer, &mut OsRng, org, bob_id, Some(addr)).await.unwrap();
+    let (sink, got) = task.await.unwrap();
+    assert!(matches!(got.unwrap().1, WireMessage::Revocation { .. }), "the removed Device is not listed");
+    assert!(
+        tokio::time::timeout(Duration::from_secs(2), sink.recv_one()).await.is_err(),
+        "nothing else is sent"
+    );
+}
+
+// LLR-q225ws, abnormal input: a revocation of a member id the record does not
+// hold is refused before anything is built, written, committed or sent: no
+// provisional update kept, the chain and the record at the epoch they were,
+// and nothing at the sink.
+// verifies: LLR-q225ws
+#[tokio::test(flavor = "multi_thread")]
+async fn a_revocation_of_a_member_the_record_does_not_hold_is_refused_and_sends_nothing() {
+    let chain = MockChainOps::new();
+    let writer = FakeWriter::over(&chain);
+    let mut a = service("revoke-unknown", &chain);
+    let pid = persona(&mut a, "alice");
+    let org = found_organisation(&mut a, &writer, &mut OsRng, &pid).await.unwrap();
+    let bob = joiner(0x61, "bob");
+    let sink = OrgEndpoint::bind(&DeviceSeed::from([0x62; 32]).signing_keypair()).await.unwrap();
+    let addr = sink.inner().addr();
+    let task = tokio::spawn(async move {
+        let got = sink.recv_one().await;
+        (sink, got)
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let update = a.admit_member(&mut OsRng, org, &bob).unwrap();
+    submit_commit_send(&mut a, &writer, &mut OsRng, &update, bob.device_key, Some(addr)).await.unwrap();
+    let (sink, _) = task.await.unwrap();
+
+    let held: Vec<MemberId> = a.list_orgs()[0].trie_members.iter().map(|m| m.id).collect();
+    let unknown = MemberId::new([0xee; 32]);
+    assert!(!held.contains(&unknown), "the id is not one the record holds");
+    let chain_epoch = chain.get(&org).unwrap().epoch;
+
+    let addr = sink.inner().addr();
+    let err = revoke_and_send(&mut a, &writer, &mut OsRng, org, unknown, Some(addr)).await.unwrap_err();
+    assert!(err.contains("names no member"), "{err}");
+    assert_eq!(a.list_orgs()[0].epoch, Epoch::new(2), "nothing committed");
+    assert!(a.provisional_updates(org).is_empty(), "no provisional update kept");
+    assert_eq!(chain.get(&org).unwrap().epoch, chain_epoch, "nothing written to the chain");
+    assert!(
+        tokio::time::timeout(Duration::from_secs(2), sink.recv_one()).await.is_err(),
+        "nothing sent"
+    );
 }

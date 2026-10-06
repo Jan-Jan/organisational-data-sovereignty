@@ -34,15 +34,21 @@ every other.
 _Avoid_: pending update, draft, proposal
 
 **Wire message**:
-What one device sends another in one Receive operation: an Envelope, a
-snapshot of the membership as it stood before the Change set, the
-Organisation secret when the sender passes one, and the invite identifier of
-the admission it carries, if any. Wider than the Envelope, because none of
-these is part of it.
-The snapshot is sent with every update, but only a first admission's receiver
-reads it, to rebuild the record it is being admitted to; every other receiver
-rebuilds from its own store. The invite identifier is what a node waiting to
-be admitted matches against the admission it declared it expects.
+What one device sends another in one Receive operation: an Envelope, and
+whatever else its kind carries; wider than the Envelope, because none of that
+is part of it. It is of one of two kinds: *Organisation information*, which
+also carries a snapshot of the membership as it stood before the Change set
+and the Organisation private key, always; and *revocation*, which carries the
+Envelope alone, no snapshot and no key. Only a first admission's receiver
+reads the snapshot, to rebuild the record it is being admitted to; every other
+receiver rebuilds from its own store. No Wire message carries an invite
+identifier: a node waiting to be admitted matches a first admission against
+the Organisation alone.
+*Amended 2026-10-07 (change `worktree-org-node-org-key-pair`, review round 1,
+finding-1):* it said every Wire message carried the snapshot and the invite
+identifier of the admission it carried, and that a waiting node matched the
+invite identifier; a revocation now carries neither snapshot nor key, and the
+invite identifier never travels between peers.
 _Avoid_: message, packet, payload
 
 **Sequence number**:
@@ -76,9 +82,17 @@ _Avoid_: using it in new text; DevicePublicKey is the term
 
 **Organisation private key**:
 The X25519 secret behind the Organisation public key (root
-`docs/CONTEXT.md`), drawn for one Organisation alone and kept by the node
-that created it, in its Persona store. It is not the Organisation secret.
-_Avoid_: org key, Organisation key, Organisation secret
+`docs/CONTEXT.md`): one value per epoch, shared by the whole Organisation, so
+no node has a key of its own. An administrator's node draws a fresh one at
+genesis and whenever it calculates the root of a provisional update, and the
+chain publishes its public half; every node keeps the Organisation's key in its Persona store and
+passes that same key to every Member's Devices with every
+Organisation-information Wire message; a receiver keeps it only if its public
+half is the Organisation public key the chain holds.
+*Amended 2026-10-06 (change `worktree-org-node-org-key-pair`):* it was kept
+only by the node that created the Organisation, and the Organisation secret
+was something else.
+_Avoid_: org key, Organisation key, Organisation secret, group secret
 
 **Persona**:
 One identity a device holds: a Member's keys and name, and the Organisation
@@ -92,28 +106,22 @@ yet committed or discarded, and the admissions it has declared it expects.
 _Avoid_: keystore, wallet, database
 
 **Expected admission**:
-An Organisation identifier and invite identifier the app has declared, when
-its user confirms the reply to an Invite, that this device expects a first
-admission for. A
-first admission that matches none is refused before the chain is read.
+An Organisation the app has declared, when its user confirms the reply to an
+Invite, that this device expects a first admission to. A first admission to
+an Organisation that matches none is refused before the chain is read.
+*Amended 2026-10-07 (change `worktree-org-node-org-key-pair`, review round 1,
+finding-1):* it was "an Organisation identifier and invite identifier"; the
+expectation now names the Organisation alone.
 _Avoid_: pending invite, invitation
 
-**Organisation secret**:
-An opaque value shared by every current Member. A sender may pass it in the
-Wire message of any update it sends, not only an admission, and a receiver
-that commits an update replaces the secret it holds with the one the message
-carries, or with none (LLR-ckk5nz; PR-xwek5e, unruled). What it protects is the next capability's
-concern. The design intends it as the secret half of the Organisation key
-pair; the node does not yet relate it to the Organisation public key
-(PR-szkat6), and nothing authenticates it until it does (PR-ve9zw8).
-*Amended 2026-10-06 (independent review round 2, finding-10):* it said the
-Member who admits another passes it on "with the admission"; `send_update`
-carries an optional secret on any update.
-_Avoid_: org key, group secret, shared key
+*Organisation secret* was defined here until 2026-10-06, when the change
+`worktree-org-node-org-key-pair` replaced it with the Organisation private
+key: an opaque value shared by Members, unrelated to the Organisation public
+key and authenticated by nothing (PR-szkat6, PR-ve9zw8, PR-xwek5e).
 
 **Secret**:
 A value whose holder can act as someone else: a member seed, a device seed,
-the Organisation secret, the Organisation private key, or the key the Persona
+the Organisation private key, or the key the Persona
 store is encrypted under.
 Never shown in diagnostic output; given up only where it is deliberately used.
 _Avoid_: key material, private key (ambiguous with the public half)

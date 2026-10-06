@@ -2,27 +2,36 @@
 use serde::{Deserialize, Serialize};
 
 use crate::envelope::Envelope;
-use crate::types::{InviteId, OrgSecret};
+use crate::types::OrgPrivateKey;
 use crate::transport::{TransportError, MAX_FRAME};
 
-/// One message over the org-node channel: an Envelope carrying one delta,
-/// plus the Organisation secret the sender chose to hand over, if any.
-///
-/// `genesis_snapshot` carries postcard-encoded `Vec<MemberSnapshot>` (from the
-/// `app` feature store module): the record the Envelope extends, as it stood
-/// before the sender's commit. `send_update` includes it in every update, so
-/// a recipient with no record of the Organisation (a first admission) can
-/// rebuild the trie the delta's `base_root` names.
+/// One message over the org-node channel, of one of two kinds (LLR-js9dsu).
+/// The kind follows the recipient, not the operation (REQ-3dsweu): a Device
+/// the sending node's committed record lists receives Organisation
+/// information, any other Device a revocation. Neither kind carries an
+/// invite identifier (LLR-ms8njy). `Debug` is derived: the only secret
+/// either kind holds is an `OrgPrivateKey`, whose own `Debug` redacts it
+/// (LLR-ecxc76).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WireMessage {
-    pub envelope: Envelope,
-    /// The Organisation secret, redacted in `Debug`.
-    pub org_secret: Option<OrgSecret>,
-    /// postcard(Vec<MemberSnapshot>): the record the Envelope extends.
-    pub genesis_snapshot: Option<Vec<u8>>,
-    /// The invite identifier an admission is delivered under (LLR-ms8njy,
-    /// REQ-8amu2a); `None` for every other update.
-    pub invite_id: Option<InviteId>,
+pub enum WireMessage {
+    /// Index 0: the committed Envelope; the record it extends, postcard
+    /// `Vec<MemberSnapshot>` as it stood before the commit, so a joiner with
+    /// no record can rebuild the trie the delta's `base_root` names
+    /// (LLR-bg3vsw); and the Organisation private key of the epoch the update
+    /// reaches (REQ-szq3ud). A body without either does not decode
+    /// (REQ-c29s93).
+    OrgInformation { envelope: Envelope, record_snapshot: Vec<u8>, org_private_key: OrgPrivateKey },
+    /// Index 1: the committed Envelope alone — no snapshot, no key.
+    Revocation { envelope: Envelope },
+}
+
+impl WireMessage {
+    /// The Envelope of either kind (LLR-js9dsu).
+    pub fn envelope(&self) -> &Envelope {
+        match self {
+            Self::OrgInformation { envelope, .. } | Self::Revocation { envelope } => envelope,
+        }
+    }
 }
 
 /// Encode a WireMessage as `len(u32 LE) ‖ postcard(msg)`.

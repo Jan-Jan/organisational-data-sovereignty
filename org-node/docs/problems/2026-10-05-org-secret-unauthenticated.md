@@ -13,7 +13,8 @@ catch it, because the secret is not part of what is checked against the
 chain.
 affects: SDD-8cpyfa, LLR-ckk5nz, RC-b6mydy
 opened: 2026-10-05
-status: open
+status: resolved
+resolution: the Organisation secret is replaced by the Organisation private key, which a receiver stores only if its X25519 public half is the chain's `org_pub_key` (RC-9cefcn, REQ-bwx7eg, LLR-ba2ejp); reproduced by `pr_ve9zw8_a_first_admission_carrying_a_substituted_key_is_refused` and `pr_ve9zw8_an_update_carrying_a_substituted_key_is_refused_on_both_paths` (org-node/tests/admission_sender.rs), red before (the substituted key was committed), green after.
 
 ## What was observed
 

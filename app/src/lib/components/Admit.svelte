@@ -80,8 +80,7 @@
 		admitBusy = true;
 		admitErr = '';
 		try {
-			// No Organisation secret is typed into the UI; the backend is sent none.
-			memberId = await admitMember(selectedOrgId, pastedBlob.trim(), peerAddrBlob.trim(), null);
+			memberId = await admitMember(selectedOrgId, pastedBlob.trim(), peerAddrBlob.trim());
 			admitted = true;
 			notifyReload?.();
 		} catch (e) {

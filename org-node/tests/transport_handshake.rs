@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use org_node::chain::{MockChain, OrgState};
-use org_node::{DeviceSeed, MemberSeed, OrgSecret};
+use org_node::{DeviceSeed, MemberSeed};
 use org_node::ids::OrgId;
 use org_node::keys::{SigningKeypair, X25519Keypair};
 use org_node::sequence::SeqGuard;
@@ -73,7 +73,7 @@ async fn delivers_and_verifies_admit_over_iroh() {
     let (genesis, new_trie, delta) = genesis_and_admit(&member, &a_device);
     let new_root = new_trie.root_hash().unwrap();
     let env = Envelope::build(org, SequenceNumber::new(2), &delta).unwrap();
-    let msg = WireMessage { envelope: env.clone(), org_secret: Some(OrgSecret::from([0xab; 32])), genesis_snapshot: None, invite_id: None };
+    let msg = WireMessage::OrgInformation { envelope: env.clone(), record_snapshot: vec![], org_private_key: OrgPrivateKey::from([0xab; 32]) };
 
     // Bind both endpoints (relay disabled, loopback only).
     let ep_a = OrgEndpoint::bind(&a_device).await.unwrap();
@@ -124,7 +124,7 @@ async fn delivers_and_verifies_admit_over_iroh() {
         seq_guard: SeqGuard::from_last_seen(SequenceNumber::new(1)),
         last_committed_epoch: Epoch::new(1),
     };
-    let out = verify_envelope_against_chain(&genesis, &got.envelope, &ctx, &chain)
+    let out = verify_envelope_against_chain(&genesis, got.envelope(), &ctx, &chain)
         .expect("verify_envelope_against_chain must succeed");
 
     assert_eq!(
@@ -395,7 +395,7 @@ async fn the_length_prefix_is_not_checked_against_the_body() {
     let admin = MemberSeed::from([1u8; 32]).x25519_keypair();
     let (delta, _) = admit_member_delta(&admin);
     let env = org_node::Envelope::build(org_node::OrgId::new([5u8; 20]), SequenceNumber::new(2), &delta).unwrap();
-    let msg = WireMessage { envelope: env, org_secret: None, genesis_snapshot: None, invite_id: None };
+    let msg = WireMessage::Revocation { envelope: env };
     let mut framed = encode_frame(&msg).unwrap();
     framed[0..4].copy_from_slice(&0u32.to_le_bytes());
 

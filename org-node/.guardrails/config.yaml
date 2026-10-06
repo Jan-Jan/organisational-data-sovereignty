@@ -235,8 +235,12 @@ test_paths:
 # moved to on-chain-client; chain_write_pure and calldata_typed deleted and
 # dropped from the line below (their evidence is on-chain-client's
 # write_pure and org-node's absences).
+# 2026-10-06, T4 of docs/plans/2026-10-06-org-key-pair.md: a fourth bolero
+# target, fuzz_wire_decode (LLR-js9dsu), fuzzes `decode_body` of the
+# two-kind Wire message. Change worktree-org-node-org-key-pair adds no other
+# target; per-target counts at the final run: see the verification record.
 verify_commands:
-  - cargo test -p org-node --features app,test-support --lib --test service_stories --test transport_handshake --test transport_networked --test fuzz_envelope_decode --test fuzz_verify_against_chain --test fuzz_first_admission_base --test verify_against_chain --test wire_frame_bound --test store_at_rest --test admission_sender --test value_types --test key_custody --test envelope_binding --test service_lifecycle --test encoding_golden --test node_value_types --test chain_read_state --test persona_records --test secret_redaction --test organisation_key --test receive_chain_reads --test expected_admission --test absences --test provisional_store --test commit_paths
+  - cargo test -p org-node --features app,test-support --lib --test service_stories --test transport_handshake --test transport_networked --test fuzz_envelope_decode --test fuzz_verify_against_chain --test fuzz_first_admission_base --test fuzz_wire_decode --test verify_against_chain --test wire_frame_bound --test store_at_rest --test admission_sender --test value_types --test key_custody --test envelope_binding --test service_lifecycle --test encoding_golden --test node_value_types --test chain_read_state --test persona_records --test secret_redaction --test organisation_key --test receive_chain_reads --test expected_admission --test absences --test provisional_store --test commit_paths
   - quint --version
   - quint typecheck org-node/quint/protocol.qnt
   - quint typecheck org-node/quint/ods_instances.qnt

@@ -631,10 +631,10 @@ fn a_persona_in_no_organisation_reports_a_null_org_id() {
 // The invitation commands (T15 of docs/plans/2026-10-05-chain-authority.md):
 // the Invite and its reply are the app's, parsed in `crate::invitation`.
 //
-// `admit_member` parses the org id, then the Organisation secret, then the
-// peer address, and only then the reply. Its normal-case tests hand it the
-// reply `"x"`, which is not a Blob, so a call that got past every argument
-// ends in the reply parser's refusal and no other.
+// `admit_member` parses the org id, then the peer address, and only then
+// the reply. Its normal-case tests hand it the reply `"x"`, which is not a
+// Blob, so a call that got past every argument ends in the reply parser's
+// refusal and no other.
 // ---------------------------------------------------------------------------
 
 /// `export_invite`'s arguments.
@@ -643,13 +643,8 @@ fn export_args(org_id: &str) -> serde_json::Value {
 }
 
 /// `admit_member`'s arguments, with the reply `"x"`.
-fn admit_args(org_id: &str, peer_addr_blob: &str, org_secret_hex: serde_json::Value) -> serde_json::Value {
-    serde_json::json!({
-        "orgId": org_id,
-        "replyBlob": "x",
-        "peerAddrBlob": peer_addr_blob,
-        "orgSecretHex": org_secret_hex
-    })
+fn admit_args(org_id: &str, peer_addr_blob: &str) -> serde_json::Value {
+    serde_json::json!({ "orgId": org_id, "replyBlob": "x", "peerAddrBlob": peer_addr_blob })
 }
 
 /// The refusal `admit_member` ends in once every argument before the reply
@@ -696,7 +691,7 @@ fn export_invite_does_not_refuse_a_well_formed_org_id() {
 fn admit_member_refuses_a_malformed_org_id_with_the_parsers_message() {
     let h = harness();
     for bad in malformed_org_ids() {
-        let err = invoke_err(&h, "admit_member", admit_args(&bad, "", serde_json::Value::Null));
+        let err = invoke_err(&h, "admit_member", admit_args(&bad, ""));
         assert_eq!(err, parser_refusal(&bad), "{bad}");
     }
 }
@@ -706,43 +701,23 @@ fn admit_member_refuses_a_malformed_org_id_with_the_parsers_message() {
 fn admit_member_does_not_refuse_a_well_formed_org_id() {
     let h = harness();
     for org_id in [org_id_40(), format!("0x{}", org_id_40())] {
-        let err = invoke_err(&h, "admit_member", admit_args(&org_id, "", serde_json::Value::Null));
+        let err = invoke_err(&h, "admit_member", admit_args(&org_id, ""));
         assert_eq!(err, refused_for_the_reply(), "{org_id}");
     }
 }
 
-// verifies: LLR-8krgzj
-#[test]
-fn admit_member_refuses_an_org_secret_that_is_not_32_bytes() {
-    let h = harness();
-    for bad in ["aa".repeat(31), "aa".repeat(33), String::new()] {
-        let err = invoke_err(&h, "admit_member", admit_args(&org_id_40(), "", serde_json::json!(bad)));
-        assert_eq!(err, "org_secret must be 32 bytes", "{bad}");
-    }
-}
-
-// verifies: LLR-8krgzj
-#[test]
-fn admit_member_refuses_an_org_secret_that_is_not_hex() {
-    let h = harness();
-    for bad in ["zz".repeat(32), "a".repeat(63)] {
-        let err = invoke_err(&h, "admit_member", admit_args(&org_id_40(), "", serde_json::json!(bad)));
-        assert!(err.starts_with("org_secret hex:"), "{bad}: {err}");
-    }
-}
-
+// LLR-8krgzj as amended: `admit_member` takes no Organisation secret — an
+// `orgSecretHex` a caller still sends is not read, whatever it holds — and a
+// blank peer address is the absent one (LLR-ctrfz4).
 // verifies: LLR-8krgzj, LLR-ctrfz4
 #[test]
-fn admit_member_does_not_refuse_a_32_byte_or_absent_org_secret() {
-    // The peer address is blank, so this is also the absent-address branch.
+fn admit_member_takes_no_organisation_secret() {
     let h = harness();
-    for secret in [
-        serde_json::json!("aa".repeat(32)),
-        serde_json::json!(format!("0x{}", "aa".repeat(32))),
-        serde_json::Value::Null,
-    ] {
-        let err = invoke_err(&h, "admit_member", admit_args(&org_id_40(), "", secret.clone()));
-        assert_eq!(err, refused_for_the_reply(), "{secret}");
+    for stale in [serde_json::json!("zz".repeat(32)), serde_json::json!("aa"), serde_json::Value::Null] {
+        let mut args = admit_args(&org_id_40(), "");
+        args["orgSecretHex"] = stale.clone();
+        let err = invoke_err(&h, "admit_member", args);
+        assert_eq!(err, refused_for_the_reply(), "{stale}");
     }
 }
 
@@ -752,7 +727,7 @@ fn admit_member_does_not_refuse_a_blank_or_decodable_peer_addr() {
     let h = harness();
     let addr = hex::encode(encoded_endpoint_addr());
     for peer in ["", "   ", "\n", addr.as_str()] {
-        let err = invoke_err(&h, "admit_member", admit_args(&org_id_40(), peer, serde_json::Value::Null));
+        let err = invoke_err(&h, "admit_member", admit_args(&org_id_40(), peer));
         assert_eq!(err, refused_for_the_reply(), "{peer:?}");
     }
 }
@@ -762,7 +737,7 @@ fn admit_member_does_not_refuse_a_blank_or_decodable_peer_addr() {
 fn admit_member_refuses_a_peer_addr_that_is_not_hex() {
     let h = harness();
     for bad in ["zz", "abc", "not hex at all"] {
-        let err = invoke_err(&h, "admit_member", admit_args(&org_id_40(), bad, serde_json::Value::Null));
+        let err = invoke_err(&h, "admit_member", admit_args(&org_id_40(), bad));
         assert!(err.starts_with("peer_addr_blob hex:"), "{bad:?}: {err}");
     }
 }
@@ -772,7 +747,7 @@ fn admit_member_refuses_a_peer_addr_that_is_not_hex() {
 fn admit_member_refuses_a_peer_addr_that_is_not_an_endpoint_addr() {
     let h = harness();
     for bad in ["00", "ff", "deadbeef"] {
-        let err = invoke_err(&h, "admit_member", admit_args(&org_id_40(), bad, serde_json::Value::Null));
+        let err = invoke_err(&h, "admit_member", admit_args(&org_id_40(), bad));
         assert!(err.starts_with("peer_addr decode:"), "{bad:?}: {err}");
     }
 }

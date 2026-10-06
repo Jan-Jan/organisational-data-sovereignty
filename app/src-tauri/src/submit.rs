@@ -13,8 +13,7 @@ use on_chain_client::{OnChainRootHash, OrgPubKey};
 use org_node::service::OrgService;
 use org_node::store::ProvisionalUpdate;
 use org_node::{
-    ChainAccount, CommitOutcome, DevicePublicKey, Epoch, InviteId, OrgId, OrgNodeError, OrgPublicKey, OrgSecret,
-    PersonaId, RootHash,
+    ChainAccount, CommitOutcome, DevicePublicKey, Epoch, OrgId, OrgNodeError, OrgPublicKey, PersonaId, RootHash,
 };
 use rand::{CryptoRng, RngCore};
 
@@ -111,8 +110,9 @@ pub async fn found_organisation<R: RngCore + CryptoRng + Send>(
 }
 
 /// Write `update` to the chain; only once that executed, commit it and send
-/// it to `recipient`, under `invite_id` for an admission (REQ-nfr3n2).
-#[allow(clippy::too_many_arguments)]
+/// it to `recipient` (REQ-nfr3n2). org-node chooses the kind of message from
+/// its committed record; the app passes it no key, secret or invite
+/// identifier (LLR-q225ws).
 pub async fn submit_commit_send<R: RngCore + CryptoRng + Send>(
     svc: &mut OrgService,
     writer: &dyn ChainWriter,
@@ -120,8 +120,6 @@ pub async fn submit_commit_send<R: RngCore + CryptoRng + Send>(
     update: &ProvisionalUpdate,
     recipient: DevicePublicKey,
     peer_addr: Option<iroh::EndpointAddr>,
-    org_secret: Option<OrgSecret>,
-    invite_id: Option<InviteId>,
 ) -> Result<CommitOutcome, String> {
     let org_id = update.org_id.ok_or("a genesis update is founded, not submitted")?;
     let rec = svc
@@ -137,7 +135,7 @@ pub async fn submit_commit_send<R: RngCore + CryptoRng + Send>(
         .await
         .map_err(|e| format!("chain write failed; nothing committed or sent: {e}"))?;
     let outcome = svc.commit_update(rng, org_id).await.map_err(|e| e.to_string())?;
-    svc.send_update(&outcome.outgoing, recipient, peer_addr, org_secret, invite_id)
+    svc.send_update(&outcome.outgoing, recipient, peer_addr)
         .await
         .map_err(|e| format!("committed at epoch {}, but the send failed: {e}", outcome.epoch.get()))?;
     Ok(outcome)

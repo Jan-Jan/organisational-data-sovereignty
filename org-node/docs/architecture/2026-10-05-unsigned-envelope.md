@@ -84,7 +84,7 @@ would be told the wrong thing. Every refusal has a distinct variant
 ## Under SDD-swtd3w (`org-node/src/types.rs`)
 
 **LLR-322xfu**: `OrgPrivateKey` is a secret type with every property
-LLR-sz4xhc states of `MemberSeed`, `DeviceSeed` and `OrgSecret`. It is built
+LLR-sz4xhc states of `MemberSeed` and `DeviceSeed`. It is built
 infallibly from 32 bytes by `From<[u8; 32]>`, is `Clone` and not `Copy`, keeps
 `PartialEq`/`Eq`, has no `Display`, and renders under `Debug` as
 `OrgPrivateKey([REDACTED])` whatever bytes it holds. Its bytes leave only
@@ -109,14 +109,26 @@ covered by LLR-sj7cd5 and LLR-3fwykc. *(Corrected 2026-10-05 by review round
 4, finding-3: this sentence also named LLR-2dvhz8, which was re-traced to
 derived in the same round.)*
 
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+This said "of `MemberSeed`, `DeviceSeed` and `OrgSecret`"; `OrgSecret` is
+removed (LLR-qsjde3). The item stays derived: REQ-y7tsft now names the
+Organisation private key's formatting, but not its `Clone`, `Copy` or
+key-pair derivation clauses.
+
 ## Under SDD-8cpyfa (`org-node/src/service.rs`, `receive_and_verify`)
 
 **LLR-rys5nx**: on first admission the new Organisation record's
 Organisation public key is the one in the Organisation state read from the
 chain in the same operation, never a value carried in the Wire message, and
-the record holds no other key of the Organisation: no administrator key, from
-an Invite or from anywhere else.
+the record holds no other public key of the Organisation: no administrator
+key, from an Invite or from anywhere else.
 satisfies: derived
+
+*Amended 2026-10-06 (change `worktree-org-node-org-key-pair`).* This said
+"no other key of the Organisation", which now reads against REQ-ju6vn2: the
+record also stores the Organisation private key the message carried, checked
+against this same public key (LLR-ba2ejp). The item meant no other public
+key, and now says so.
 
 *Amended 2026-10-06 (owner ruling of 2026-10-05, change
 `worktree-org-node-chain-authority`).* This said the record also holds an
@@ -151,9 +163,21 @@ owns its code, and that item traces REQ-ech45n.
 **LLR-sj7cd5**: `create_organisation` refuses with
 `Trie(OrgMembersError::DuplicateKey)`, before any provisional update is kept
 and with nothing stored or written, an Organisation public key equal to any
-Member-as-a-group key or any DevicePublicKey of the genesis record. The
-comparison is `OrgPublicKey::ensure_distinct_from` over the record's members.
-satisfies: REQ-ech45n
+Member-as-a-group key or any DevicePublicKey of the genesis record; and
+`admit_member` and `revoke_member` refuse in the same way, through
+`keep_change_set`, a freshly drawn Organisation public key equal to the
+record's current `org_pub_key` or to any Member-as-a-group key or
+DevicePublicKey of the resulting record (LLR-e2b7gv). The comparison is
+`OrgPublicKey::ensure_distinct_from` over the resulting record's members, and
+for an update the record's current key as well.
+satisfies: REQ-ech45n, REQ-stx9v3
+
+*Amended 2026-10-06 (owner ruling on rotation, change
+`worktree-org-node-org-key-pair`).* This constrained `create_organisation`
+alone, the only operation that drew an Organisation key pair. Every
+provisional update now draws one when its root is calculated, distinct from
+the record's current key and every key of the resulting record (REQ-stx9v3),
+so the refusal extends to admissions and revocations.
 
 `ensure_distinct_from` is defined in `types.rs` (SDD-swtd3w).
 
@@ -166,12 +190,30 @@ the refusal comes before that update is kept.
 
 ### Under SDD-af5vnt (`org-node/src/store.rs`, `OrgRecord`)
 
-**LLR-3fwykc**: the Organisation private key is held only in
-`OrgRecord.org_private_key` of the creating node's record and, until
-`commit_genesis` creates that record, in the genesis provisional update
-(LLR-qjz3q4); both reach the disk only through the encrypted Persona store.
-Every other node's record holds `None` there.
-satisfies: REQ-ech45n
+**LLR-3fwykc**: a node holds the Organisation private key only in
+`OrgRecord.org_private_key` of its record of that Organisation and, on the
+creating node until `commit_genesis` creates that record, in the genesis
+provisional update (LLR-qjz3q4); both reach the disk only through the
+encrypted Persona store. Every record holds it: the creating node's from the
+genesis update, every other node's from the Organisation-information message
+that admitted it. A record's key is replaced by the one each later committed
+Organisation-information message carries (LLR-ckk5nz) or, on the node that
+built the update, by the one its provisional update holds (LLR-6s785x); the
+record keeps only the current key. The key is the Organisation's, one value
+per epoch shared by every Member; a fresh one is drawn only when a
+provisional update is built (LLR-e2b7gv, LLR-s6qnht).
+satisfies: REQ-ech45n, REQ-ju6vn2, REQ-jy6ybw
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+This said the key is held only in the creating node's record and that every
+other node's record holds `None`. The owner ruled that the Organisation
+private key reaches every Member: every Organisation-information message
+carries it and its receiver stores it (REQ-szq3ud, REQ-ju6vn2), so every
+record holds it and the field is no longer optional (LLR-byjvd9). By the
+owner's later ruling the same day the key rotates with every provisional
+update (REQ-stx9v3, REQ-jy6ybw), so the item states how a record's key is
+replaced, and that every provisional update, not only genesis, holds one
+until it commits (LLR-qjz3q4).
 
 *Amended 2026-10-06 (change `worktree-org-node-chain-authority`, after the
 merge of master `5f7c177`).* "and, until `commit_genesis` creates that
@@ -180,8 +222,14 @@ provisional update and the record is created only once the genesis verifies
 against the chain.
 
 **LLR-2dvhz8**: `OrgRecord`'s `Debug` names the `org_private_key` field and
-prints only whether it is set, never the key's bytes.
-satisfies: derived
+renders it as `OrgPrivateKey([REDACTED])`, never the key's bytes.
+satisfies: REQ-y7tsft
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+This said the field prints "only whether it is set". The field is no longer
+an `Option` (LLR-byjvd9), so it renders as its redacted secret type. REQ-y7tsft,
+amended the same day, names the Organisation private key and the records that
+hold it, so the item is re-traced from derived to REQ-y7tsft.
 
 *Re-traced 2026-10-05 (review round 3, as LLR-322xfu):* REQ-ech45n states that
 the secret is kept in the encrypted store, not how a record renders, so this
@@ -198,10 +246,10 @@ Each item has a normal and an abnormal case:
 | LLR-98ufry | `x25519_seed_round_trip_preserves_key` | `x25519_debug_does_not_print_the_secret`; `an_x25519_key_pair_declares_zeroize_on_drop_and_zeroize_clears_its_secret`; `an_x25519_key_pair_cannot_be_cloned`, with the compile-time assertion beside it. The `Drop` call itself is verified by inspection only. |
 | LLR-9f5hmr | `happy_path_commits_when_root_matches_chain` | `a_sequence_number_other_than_the_chain_epoch_is_refused` |
 | LLR-322xfu | `the_organisation_private_key_is_a_secret_type_and_the_only_way_to_its_key_pair` | the same test's 31-byte decode and boundary secrets; `the_organisation_private_key_and_its_key_pair_never_render_its_bytes` |
-| LLR-rys5nx | `a_first_admission_records_the_chains_key_the_secret_and_the_member` | `a_first_admission_records_the_chains_organisation_public_key`: the record holds the chain's Organisation public key and no other key (LLR-xq9nrq); `org_node_has_no_administrator_key`: no record has a field for one |
+| LLR-rys5nx | `a_first_admission_records_the_chains_key_the_private_key_and_the_member` | `a_first_admission_records_the_chains_organisation_public_key`: the record holds the chain's Organisation public key (LLR-xq9nrq); `org_node_has_no_administrator_key`: no record has a field for one |
 | LLR-sj7cd5 | a created Organisation's fresh key | its collisions with a genesis key |
-| LLR-3fwykc | `the_organisation_private_key_is_kept_only_in_the_encrypted_store`; `a_created_organisation_publishes_a_fresh_key_no_genesis_key_equals` | the same at-rest test's wrong passphrase, which opens nothing; `a_first_admission_records_the_chains_key_the_secret_and_the_member`: a member's record holds `None` |
-| LLR-2dvhz8 | `the_organisation_private_key_is_not_in_the_record_debug_output` | `records_and_wire_messages_never_render_secret_bytes` (sentinel bytes, the `{:#?}` form, the record inside `StoreData`); `a_record_debug_says_whether_the_organisation_private_key_is_set` (the unset key of a member's record) |
+| LLR-3fwykc | `the_organisation_private_key_is_kept_only_in_the_encrypted_store`; `a_created_organisation_publishes_a_fresh_key_no_genesis_key_equals` | the same at-rest test's wrong passphrase, which opens nothing; `pr_szkat6_an_admitted_member_holds_the_organisation_private_key`: a member's record holds the Organisation's key |
+| LLR-2dvhz8 | `the_organisation_private_key_is_not_in_the_record_debug_output` | `records_and_wire_messages_never_render_secret_bytes` (sentinel bytes, the `{:#?}` form, the record inside `StoreData`); `a_record_debug_renders_the_organisation_private_key_redacted` (boundary bytes) |
 
 *Rows for LLR-3fwykc and LLR-2dvhz8 added, and the LLR-98ufry and LLR-rys5nx
 rows amended, 2026-10-05 by review round 4 (finding-2, finding-3 and the gate
@@ -210,3 +258,5 @@ notes).*
 *The LLR-rys5nx and LLR-3fwykc rows amended 2026-10-06 (change
 `worktree-org-node-chain-authority`): the tests they named were renamed with
 the Invite's removal, and the Invite-key case was deleted with it (T7, T8).*
+
+*Rows for LLR-rys5nx, LLR-3fwykc and LLR-2dvhz8 updated 2026-10-06 (change worktree-org-node-org-key-pair): tests renamed or rewritten with the Organisation secret's removal.*

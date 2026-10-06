@@ -53,7 +53,7 @@ fn org_id_debug_is_the_twenty_bytes_in_order_as_forty_lowercase_hex_digits() {
     assert!(inner.ends_with("b3"), "last byte must come last: {inner}");
 }
 
-// verifies: REQ-9g6as6, REQ-bcxz96, LLR-z8fubr, LLR-mxskg9
+// verifies: REQ-9g6as6, REQ-bcxz96, LLR-z8fubr, LLR-mxskg9, LLR-j5vbqj
 #[test]
 fn every_rejection_variant_is_distinct_from_every_other() {
     let all = [
@@ -77,6 +77,13 @@ fn every_rejection_variant_is_distinct_from_every_other() {
         OrgNodeError::ProvisionalLimit { limit: 1 },
         // No provisional update produces the chain's state (LLR-mxskg9).
         OrgNodeError::NoProvisionalUpdate,
+        // A Persona already bound to an Organisation (REQ-yp75u9).
+        OrgNodeError::PersonaAlreadyBound { persona_id: org_node::PersonaId::new("p".into()) },
+        // The four refusals of a received Wire message (LLR-j5vbqj).
+        OrgNodeError::MalformedMessage,
+        OrgNodeError::OrgKeyMismatch { org_id: OrgId::new([1; 20]) },
+        OrgNodeError::RevocationNotHeld { org_id: OrgId::new([1; 20]) },
+        OrgNodeError::RevocationNotForThisDevice { org_id: OrgId::new([1; 20]) },
     ];
     for (i, a) in all.iter().enumerate() {
         for (j, b) in all.iter().enumerate() {
@@ -109,6 +116,29 @@ fn the_provisional_limit_refusal_names_the_limit() {
     let err = OrgNodeError::ProvisionalLimit { limit: 1_048_576 };
     assert_eq!(err.to_string(), "provisional updates for one Organisation would exceed 1048576 bytes");
     assert_ne!(err, OrgNodeError::ProvisionalLimit { limit: 1 });
+}
+
+// Normal: the malformed-message refusal says what it refuses, and each of the
+// other three names its Organisation. Abnormal: two Organisations' refusals
+// differ, and the three refusals of one Organisation are distinct, in value
+// and in message.
+// verifies: LLR-j5vbqj
+#[test]
+fn the_received_message_refusals_say_what_they_refuse() {
+    assert_eq!(OrgNodeError::MalformedMessage.to_string(), "received wire message is malformed");
+    let org = OrgId::new([0xa0; 20]);
+    let refusals = [
+        OrgNodeError::OrgKeyMismatch { org_id: org },
+        OrgNodeError::RevocationNotHeld { org_id: org },
+        OrgNodeError::RevocationNotForThisDevice { org_id: org },
+    ];
+    for err in &refusals {
+        assert!(err.to_string().contains(&format!("{org:?}")), "{err}");
+    }
+    assert_ne!(refusals[0], OrgNodeError::OrgKeyMismatch { org_id: OrgId::new([0xa1; 20]) });
+    assert_ne!(refusals[1], refusals[2]);
+    assert_ne!(refusals[0].to_string(), refusals[1].to_string());
+    assert_ne!(refusals[1].to_string(), refusals[2].to_string());
 }
 
 // verifies: REQ-9g6as6, REQ-bcxz96, LLR-z8fubr

@@ -34,9 +34,15 @@ journey, 2026-10-05).
 and a Persona the user chose, an Invite reply as a Blob carrying that
 Persona's Member-as-a-group key, DevicePublicKey, handle, name and surname, and the Organisation identifier and
 invite identifier the Invite named; and shall declare to org-node that it
-expects a first admission to that Organisation carrying that invite
-identifier.
+expects a first admission to that Organisation.
 satisfies: derived
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+The declaration named the invite identifier as well, which the admission's
+Wire message carried. The owner ruled that the invite identifier travels only
+in the Invite and its reply, never between peers; org-node matches a first
+admission against the Organisation alone
+(`org-node/docs/requirements/2026-10-06-chain-authority.md`).
 
 **REQ-65xqp8**: The software shall refuse an imported Invite reply whose invite
 identifier is not one it holds as outstanding for the Organisation the reply

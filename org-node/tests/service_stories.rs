@@ -16,7 +16,7 @@
 
 mod support;
 use support::{
-    admit, device_kp, found, h, joiner_of, nm, open_store, org_secret, prepare_to_join, reopen_store, revoke, sn,
+    admit, device_kp, found, h, joiner_of, nm, open_store, prepare_to_join, reopen_store, revoke, revoke_and_tell, sn,
     spawn_receive, spawn_self_delete,
 };
 
@@ -116,7 +116,7 @@ async fn five_stories_full_e2e() {
 
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    let b_member_id = admit(&mut svc_a, &chain, org_id, &joiner_b, b_addr_admit, org_secret())
+    let b_member_id = admit(&mut svc_a, &chain, org_id, &joiner_b, b_addr_admit)
         .await
         .expect("admit_member failed");
 
@@ -143,7 +143,7 @@ async fn five_stories_full_e2e() {
     // B must have the OrgRecord.
     assert_eq!(svc_b3.list_orgs().len(), 1, "B must have exactly 1 OrgRecord");
     assert_eq!(svc_b3.list_orgs()[0].epoch, Epoch::new(2));
-    assert_eq!(svc_b3.list_orgs()[0].org_secret, org_secret());
+    assert_eq!(svc_b3.list_orgs()[0].org_private_key, svc_a.list_orgs()[0].org_private_key);
     assert!(svc_b3.expected_admissions().is_empty(), "the expectation is cleared on commit");
 
     // ---- Story 5: A revokes B; B self-deletes ----
@@ -249,7 +249,7 @@ async fn revocation_of_another_member_is_committed_not_self_deleted() {
     // ---- Stories 3-4: A admits B; B receives and commits epoch 2 ----
     let (b_addr, b_task) = spawn_receive(svc_b, &b_device_kp).await;
 
-    admit(&mut svc_a, &chain, org_id, &jr_b, b_addr, org_secret())
+    admit(&mut svc_a, &chain, org_id, &jr_b, b_addr)
         .await
         .expect("admit_member(B) failed");
     assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(2), "admitting B must bump to epoch 2");
@@ -268,7 +268,7 @@ async fn revocation_of_another_member_is_committed_not_self_deleted() {
 
     let (b_addr, b_task) = spawn_receive(svc_b, &b_device_kp).await;
 
-    let c_member_id = admit(&mut svc_a, &chain, org_id, &jr_c, b_addr, org_secret())
+    let c_member_id = admit(&mut svc_a, &chain, org_id, &jr_c, b_addr)
         .await
         .expect("admit_member(C) failed");
     assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(3), "admitting C must bump to epoch 3");
@@ -281,7 +281,9 @@ async fn revocation_of_another_member_is_committed_not_self_deleted() {
     // ---- A revokes C; B receives the revocation ----
     let (b_addr, b_task) = spawn_self_delete(svc_b, &b_device_kp).await;
 
-    revoke(&mut svc_a, &chain, org_id, c_member_id, Some(b_addr))
+    // Told to B's Device, which the committed record lists: Organisation
+    // information (REQ-3dsweu).
+    revoke_and_tell(&mut svc_a, &chain, org_id, c_member_id, b_device_kp.device_key().unwrap(), b_addr)
         .await
         .expect("revoke_member(C) failed");
     assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(4), "revoking C must bump to epoch 4");
@@ -392,7 +394,7 @@ async fn revocation_from_an_unknown_device_leaves_the_record_in_place() {
     // ---- A admits B; B receives and commits epoch 2 ----
     let (b_addr, b_task) = spawn_receive(svc_b, &b_device_kp).await;
 
-    let b_member_id = admit(&mut svc_a, &chain, org_id, &jr_b, b_addr, org_secret())
+    let b_member_id = admit(&mut svc_a, &chain, org_id, &jr_b, b_addr)
         .await
         .expect("admit_member(B) failed");
     assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(2), "admitting B must bump to epoch 2");
@@ -457,7 +459,7 @@ async fn revocation_from_an_unknown_device_leaves_the_record_in_place() {
         "the forging device must not be in B's record"
     );
     let envelope = Envelope::build(org_id, SequenceNumber::new(seq_before.get() + 1), &delta).unwrap();
-    let msg = WireMessage { envelope, org_secret: None, genesis_snapshot: None, invite_id: None };
+    let msg = WireMessage::Revocation { envelope };
 
     // ---- B receives the forged revocation ----
     let (b_addr, b_task) = spawn_self_delete(svc_b, &b_device_kp).await;

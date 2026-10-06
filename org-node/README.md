@@ -29,7 +29,7 @@ iroh transport, persona/org persistence, and the Tauri/Svelte shell.
   Member-as-a-group key `PersonPublicKey`, or the Organisation private key
   behind the Organisation public key).
 - `types.rs` — the value types: the redacted secrets (`MemberSeed`,
-  `DeviceSeed`, `OrgSecret`, `OrgPrivateKey`), `OrgPublicKey` (parsed through
+  `DeviceSeed`, `OrgPrivateKey`), `OrgPublicKey` (parsed through
   `person`'s X25519 rule), and the tags `ChainAccount`, `PersonaId`, `Epoch`,
   `SequenceNumber`.
 - `ids.rs` — `OrgId` (= `h160_of(P)`).
@@ -115,9 +115,12 @@ ODS protocol:
 
 ### Wire protocol
 
-Messages are typed as `WireMessage { envelope: Envelope, org_secret: Option<OrgSecret>, genesis_snapshot: Option<Vec<u8>>, invite_id: Option<InviteId> }`
-(`genesis_snapshot` is the record the Envelope extends; the invite
-identifier is present only on an admission).
+Messages are typed as `WireMessage::OrgInformation { envelope, record_snapshot, org_private_key }`
+(index 0: the committed Envelope, the record it extends, and the Organisation
+private key the sending node's record holds) or `WireMessage::Revocation { envelope }`
+(index 1: the Envelope alone). The kind follows the recipient: a Device the
+sender's committed record lists receives Organisation information, any other
+a revocation. No message carries an invite identifier.
 
 Framing is **length-prefixed**: a 4-byte little-endian `u32` body length precedes
 each `postcard`-serialised `WireMessage`. The maximum body size is 1 MiB

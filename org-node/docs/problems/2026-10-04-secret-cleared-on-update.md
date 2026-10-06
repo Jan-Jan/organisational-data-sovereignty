@@ -12,7 +12,8 @@ that receives another member's revocation on this path loses the Organisation
 secret while remaining a member.
 affects: SDD-8cpyfa, SDD-72ddm6, LLR-ckk5nz, LLR-8hdu9x
 opened: 2026-10-04
-status: open
+status: resolved
+resolution: the Organisation secret is replaced by the Organisation private key, which every Organisation-information message carries (REQ-szq3ud) and a revocation — sent only to a Device the committed record no longer lists — never does (REQ-3dsweu), and a revocation is accepted only as the receiver's own removal (LLR-pt32fx); reproduced by `pr_xwek5e_another_members_removal_leaves_the_receiver_holding_the_organisations_key` and `a_revocation_that_leaves_this_device_listed_is_refused_on_both_paths` (org-node/tests/admission_sender.rs), red before, green after.
 
 ## What was observed
 

@@ -17,16 +17,18 @@
 //! into one outcome (`next_outcomes`), and emitting.
 
 use rand::rngs::OsRng;
+use rand::{CryptoRng, RngCore};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
-use org_node::service::SelfDeleteOutcome;
+use org_node::service::{OrgService, SelfDeleteOutcome};
 use org_node::store::{OrgRecord, PersonaDetails, PersonaRecord};
-use org_node::{MemberId, OrgNodeError, OrgSecret, PersonaId};
+use org_node::{CommitOutcome, MemberId, OrgId, OrgNodeError, PersonaId};
 
 use crate::invitation::{self, Invite};
 use crate::parsing::parse_org_id;
 use crate::state::{AppState, ConnectionStatus};
+use crate::submit::{submit_commit_send, ChainWriter};
 use crate::{events, policy};
 
 // ---------------------------------------------------------------------------
@@ -202,30 +204,22 @@ pub async fn import_invite_reply(state: State<'_, AppState>, blob: String) -> Re
 
 /// Admit the person an Invite reply names (LLR-gha5f6): org-node builds the
 /// admission, the app writes it to the chain, then org-node commits it and
-/// sends it to the reply's device under the reply's invite id (REQ-nfr3n2).
-/// The target is the Organisation the reply's outstanding pair names;
-/// `org_id` is the operator's selection and is refused unless it is that one.
+/// sends it to the reply's device (REQ-nfr3n2, LLR-q225ws). The target is the
+/// Organisation the reply's outstanding pair names; `org_id` is the
+/// operator's selection and is refused unless it is that one.
 ///
-/// The org id, then the Organisation secret (LLR-8krgzj), then the peer
-/// address (LLR-ctrfz4, as `revoke_member` reads it) are parsed before the
-/// reply is. Returns the new member_id as 64 hex chars.
+/// The org id, then the peer address (LLR-ctrfz4, as `revoke_member` reads
+/// it) are parsed before the reply is. It takes no Organisation secret or key
+/// (LLR-8krgzj): the key the admission's message carries is the one
+/// org-node's record holds. Returns the new member_id as 64 hex chars.
 #[tauri::command]
 pub async fn admit_member(
     state: State<'_, AppState>,
     org_id: String,
     reply_blob: String,
     peer_addr_blob: String,
-    org_secret_hex: Option<String>,
 ) -> Result<String, String> {
     let oid = parse_org_id(&org_id)?;
-    let org_secret: Option<OrgSecret> = match org_secret_hex {
-        Some(hex_str) => {
-            let bytes = hex::decode(hex_str.trim_start_matches("0x")).map_err(|e| format!("org_secret hex: {e}"))?;
-            let arr: [u8; 32] = bytes.try_into().map_err(|_| "org_secret must be 32 bytes".to_string())?;
-            Some(OrgSecret::from(arr))
-        }
-        None => None,
-    };
     let peer_addr = parse_peer_addr(&peer_addr_blob)?;
     let mut svc = state.service.lock().await;
     let mut outstanding = state.outstanding.lock().await;
@@ -237,7 +231,6 @@ pub async fn admit_member(
         oid,
         &reply_blob,
         peer_addr,
-        org_secret,
     )
     .await?;
     Ok(hex::encode(member_id.as_bytes()))
@@ -284,25 +277,38 @@ pub async fn revoke_member(
 
     let peer_addr = parse_peer_addr(&peer_addr_blob)?;
 
-    // REQ-nfr3n2: org-node builds the removal, the app writes it to the
-    // chain, and only then does org-node commit it and send it to the revoked
-    // member's device (`crate::submit::submit_commit_send`).
     let mut svc = state.service.lock().await;
-    let member = MemberId::new(member_id);
+    revoke_and_send(&mut svc, &*state.writer, &mut OsRng, oid, MemberId::new(member_id), peer_addr)
+        .await
+        .map(|_| ())
+}
+
+/// Revoke `member` from `org_id` (REQ-nfr3n2): org-node builds the removal,
+/// the app writes it to the chain, and only then does org-node commit it and
+/// send it, once, to the first DevicePublicKey of the removed Member's
+/// snapshot in the record as it stood before the removal — which the
+/// committed record no longer lists, so org-node sends that Device a
+/// revocation (LLR-q225ws). The `revoke_member` command's body.
+pub async fn revoke_and_send<R: RngCore + CryptoRng + Send>(
+    svc: &mut OrgService,
+    writer: &dyn ChainWriter,
+    rng: &mut R,
+    org_id: OrgId,
+    member: MemberId,
+    peer_addr: Option<iroh::EndpointAddr>,
+) -> Result<CommitOutcome, String> {
     let recipient = svc
         .list_orgs()
         .iter()
-        .find(|o| o.org_id == oid)
+        .find(|o| o.org_id == org_id)
         .ok_or_else(|| OrgNodeError::OrgNotOnChain.to_string())?
         .trie_members
         .iter()
         .find(|m| m.id == member)
         .and_then(|m| m.device_keys.first().copied())
         .ok_or("member_id names no member of this organisation")?;
-    let update = svc.revoke_member(&mut OsRng, oid, member).map_err(|e| e.to_string())?;
-    crate::submit::submit_commit_send(&mut svc, &*state.writer, &mut OsRng, &update, recipient, peer_addr, None, None)
-        .await
-        .map(|_| ())
+    let update = svc.revoke_member(rng, org_id, member).map_err(|e| e.to_string())?;
+    submit_commit_send(svc, writer, rng, &update, recipient, peer_addr).await
 }
 
 /// List all local personas (no key material returned).

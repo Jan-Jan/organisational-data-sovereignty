@@ -2,7 +2,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 //! Encrypted-at-rest evidence for `PersonaStore` (REQ-hzm4kt): the store
 //! round-trips through disk, a wrong passphrase yields an error rather than
-//! data, and neither a persona secret nor an Organisation secret appears in
+//! data, and neither a persona secret nor the Organisation private key appears in
 //! the clear in the file.
 
 use std::path::PathBuf;
@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use org_members::{Handle, Name, RootHash, Surname};
 use org_node::ids::OrgId;
 use org_node::store::{OrgRecord, PersonaRecord, PersonaStatus, PersonaStore};
-use org_node::{DeviceSeed, Epoch, MemberSeed, OrgPrivateKey, OrgSecret, PersonaId, SequenceNumber};
+use org_node::{DeviceSeed, Epoch, MemberSeed, OrgPrivateKey, PersonaId, SequenceNumber};
 use rand::rngs::OsRng;
 
 /// A fresh, per-test file path under the OS temp dir (any stale file removed).
@@ -36,18 +36,18 @@ fn persona(member_seed: [u8; 32], device_seed: [u8; 32]) -> PersonaRecord {
     }
 }
 
-/// An org record carrying `org_secret`, with the remaining fields fixed.
-fn org_record(org_secret: Option<[u8; 32]>) -> OrgRecord {
+/// An org record holding the Organisation private key `key`, with the
+/// remaining fields fixed.
+fn org_record(key: [u8; 32]) -> OrgRecord {
     OrgRecord {
         org_id: OrgId::new([5u8; 20]),
         root_hash: RootHash::new([0x11u8; 32]),
-        org_pub_key: OrgPrivateKey::from([0x22u8; 32]).x25519_keypair().org_public_key().unwrap(),
+        org_pub_key: OrgPrivateKey::from(key).x25519_keypair().org_public_key().unwrap(),
         epoch: Epoch::new(3),
-        org_secret: org_secret.map(OrgSecret::from),
         last_seq: SequenceNumber::new(2),
         trie_members: Vec::new(),
         proxy_account: None,
-        org_private_key: None,
+        org_private_key: OrgPrivateKey::from(key),
     }
 }
 
@@ -103,16 +103,19 @@ fn seeds_do_not_appear_in_the_file() {
     let _ = std::fs::remove_file(&path);
 }
 
+// *Renamed 2026-10-06 (change worktree-org-node-org-key-pair).* Was
+// `organisation_secret_does_not_appear_in_the_file`; LLR-s78sh7 names the
+// Organisation private key in the secret's place.
 // verifies: REQ-hzm4kt, LLR-s78sh7
 #[test]
-fn organisation_secret_does_not_appear_in_the_file() {
-    let path = tmp_path("orgsecret");
+fn organisation_private_key_does_not_appear_in_the_file() {
+    let path = tmp_path("orgkey");
     let mut s = PersonaStore::open(path.clone(), "pw").unwrap();
-    let org_secret = [0x7eu8; 32];
-    s.data_mut().orgs.push(org_record(Some(org_secret)));
+    let key = [0x7eu8; 32];
+    s.data_mut().orgs.push(org_record(key));
     s.save(&mut OsRng).unwrap();
     let bytes = std::fs::read(&path).unwrap();
-    assert!(!contains(&bytes, &org_secret), "org secret in clear");
+    assert!(!contains(&bytes, &key), "Organisation private key in clear");
     let _ = std::fs::remove_file(&path);
 }
 

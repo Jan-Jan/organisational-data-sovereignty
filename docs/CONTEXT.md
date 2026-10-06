@@ -133,9 +133,9 @@ _Avoid_: org state, registry slot, on-chain record
 The Organisation's X25519 public key, published in its Organisation state so
 that a member who is given the Organisation's private key can check it is the
 real one. It is a key-agreement key, not a signing key: it identifies no admin
-and authorises nothing. Today only the node that created the Organisation
-holds the private key; no software hands it to a member yet (org-node's
-*Organisation private key*).
+and authorises nothing. org-node hands the private key to every Member's
+Devices, and a receiver keeps it only if its public half is this key
+(org-node's *Organisation private key*).
 _Avoid_: signing key, org key, admin key
 
 **Finalised block**:

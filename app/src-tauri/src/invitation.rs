@@ -9,11 +9,28 @@ use std::path::PathBuf;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use org_node::service::{Joiner, OrgService};
-use org_node::{DevicePublicKey, Handle, InviteId, Name, OrgId, OrgNodeError, OrgSecret, PersonPublicKey, PersonaId, Surname};
+use org_node::{DevicePublicKey, Handle, Name, OrgId, OrgNodeError, PersonPublicKey, PersonaId, Surname};
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 
 use crate::submit::{submit_commit_send, ChainWriter};
+
+/// The identifier an Invite carries and its reply echoes (REQ-65xqp8): 32
+/// bytes this device drew at random. Not secret. The app's own type: it binds
+/// a reply to the Invite this device issued and never reaches org-node
+/// (REQ-tcutr6 as amended).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InviteId([u8; 32]);
+
+impl InviteId {
+    pub fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
 
 /// An Invite as parsed: what the inviter typed, the Organisation it names,
 /// the inviter's devices, and the identifier its reply must echo.
@@ -276,7 +293,8 @@ pub fn issue_invite<R: RngCore + CryptoRng>(
 
 /// LLR-w4mhd4: the reply to `invite_blob` from `persona_id`, only once the
 /// user confirmed and only for a Persona bound to no Organisation
-/// (LLR-rt8gdz); declares the expected admission under the invite id.
+/// (LLR-rt8gdz); declares the expected admission to the Invite's
+/// Organisation (REQ-tcutr6 as amended).
 pub fn produce_reply<R: RngCore + CryptoRng>(
     svc: &mut OrgService,
     rng: &mut R,
@@ -309,7 +327,7 @@ pub fn produce_reply<R: RngCore + CryptoRng>(
         surname: p.surname,
     }
     .encode()?;
-    svc.expect_admission(rng, invite.org_id, invite.invite_id).map_err(|e| e.to_string())?;
+    svc.expect_admission(rng, invite.org_id).map_err(|e| e.to_string())?;
     Ok(reply)
 }
 
@@ -324,11 +342,10 @@ pub fn check_reply(outstanding: &OutstandingInvites, reply_blob: &str) -> Result
 }
 
 /// LLR-gha5f6, LLR-qhjp6g: admit the person a reply names, through the
-/// chain, to the Organisation its outstanding pair names, the admission
-/// carrying the reply's invite id; the Invite is settled once the admission
+/// chain, to the Organisation its outstanding pair names, sent to the
+/// reply's Device alone (LLR-q225ws); the Invite is settled once the admission
 /// has committed, even when the send that follows fails. `org_id` is the
 /// operator's selection: it is not trusted, and must be that Organisation.
-#[allow(clippy::too_many_arguments)]
 pub async fn admit_reply<R: RngCore + CryptoRng + Send>(
     svc: &mut OrgService,
     writer: &dyn ChainWriter,
@@ -337,7 +354,6 @@ pub async fn admit_reply<R: RngCore + CryptoRng + Send>(
     org_id: OrgId,
     reply_blob: &str,
     peer_addr: Option<iroh::EndpointAddr>,
-    org_secret: Option<OrgSecret>,
 ) -> Result<org_node::MemberId, String> {
     let reply = check_reply(outstanding, reply_blob)?;
     if reply.org_id != org_id {
@@ -351,8 +367,7 @@ pub async fn admit_reply<R: RngCore + CryptoRng + Send>(
         device_key: reply.device_key,
     };
     let update = svc.admit_member(rng, org_id, &joiner).map_err(|e| e.to_string())?;
-    let sent =
-        submit_commit_send(svc, writer, rng, &update, reply.device_key, peer_addr, org_secret, Some(reply.invite_id)).await;
+    let sent = submit_commit_send(svc, writer, rng, &update, reply.device_key, peer_addr).await;
     let admitted = svc
         .list_orgs()
         .iter()

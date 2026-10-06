@@ -50,8 +50,8 @@ pub enum OrgNodeError {
     #[error("invalid {field}: {reason}")]
     InvalidField { field: &'static str, reason: String },
 
-    /// A first admission whose Organisation and invite identifier match no
-    /// expectation the app declared (LLR-mxskg9, LLR-s8xp7m).
+    /// A first admission whose Organisation matches no expectation the app
+    /// declared (LLR-mxskg9, LLR-s8xp7m).
     #[error("first admission not expected for organisation {org_id:?}")]
     AdmissionNotExpected { org_id: OrgId },
 
@@ -74,6 +74,29 @@ pub enum OrgNodeError {
     /// bound to at most one (LLR-mxskg9, LLR-6z5xya, LLR-eyc4ud, REQ-yp75u9).
     #[error("persona {} is already bound to an organisation", persona_id.as_str())]
     PersonaAlreadyBound { persona_id: PersonaId },
+
+    /// A received Wire message that does not decode — an
+    /// Organisation-information message without its record snapshot or
+    /// Organisation private key among them (LLR-j5vbqj, LLR-xn5pwc,
+    /// REQ-c29s93).
+    #[error("received wire message is malformed")]
+    MalformedMessage,
+
+    /// An Organisation-information message whose Organisation private key's
+    /// public half is not the chain's Organisation public key (LLR-j5vbqj,
+    /// LLR-ba2ejp, REQ-bwx7eg).
+    #[error("organisation private key received for organisation {org_id:?} is not the chain's organisation key")]
+    OrgKeyMismatch { org_id: OrgId },
+
+    /// A revocation about an Organisation this node holds no record of
+    /// (LLR-j5vbqj, LLR-38e2kn, REQ-vxqc5g).
+    #[error("revocation for organisation {org_id:?}, of which this node holds no record")]
+    RevocationNotHeld { org_id: OrgId },
+
+    /// A revocation after whose verified Membership record this node's
+    /// Device is still listed (LLR-j5vbqj, LLR-pt32fx, REQ-3dsweu).
+    #[error("revocation for organisation {org_id:?} leaves this node's device in the record")]
+    RevocationNotForThisDevice { org_id: OrgId },
 }
 
 impl From<org_members::OrgMembersError> for OrgNodeError {

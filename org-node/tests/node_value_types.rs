@@ -12,7 +12,7 @@ use org_node::keys::{SigningKeypair, X25519Keypair};
 use org_node::{implements_copy, implements_display};
 use org_node::{
     ChainAccount, DeviceSeed, Epoch, MemberSeed, OrgNodeError, OrgPrivateKey, OrgPublicKey,
-    OrgSecret, PersonaId, SequenceNumber,
+    PersonaId, SequenceNumber,
 };
 use rand::rngs::OsRng;
 
@@ -46,19 +46,15 @@ fn secret_types_redact_debug_and_give_bytes_only_through_the_accessor() {
     let bytes = [0x5au8; 32];
     let member = MemberSeed::from(bytes);
     let device = DeviceSeed::from(bytes);
-    let org = OrgSecret::from(bytes);
     assert_eq!(member.expose_secret(), &bytes);
     assert_eq!(device.expose_secret(), &bytes);
-    assert_eq!(org.expose_secret(), &bytes);
     assert_eq!(format!("{member:?}"), "MemberSeed([REDACTED])");
     assert_eq!(format!("{device:?}"), "DeviceSeed([REDACTED])");
-    assert_eq!(format!("{org:?}"), "OrgSecret([REDACTED])");
     assert_eq!(member.clone(), member);
-    assert_ne!(OrgSecret::from([1u8; 32]), org);
+    assert_ne!(MemberSeed::from([1u8; 32]), member);
     assert!(implements_display!(String) && implements_copy!(u8), "the probe itself works");
     assert!(!implements_display!(MemberSeed) && !implements_copy!(MemberSeed));
     assert!(!implements_display!(DeviceSeed) && !implements_copy!(DeviceSeed));
-    assert!(!implements_display!(OrgSecret) && !implements_copy!(OrgSecret));
 }
 
 /// verifies: LLR-sz4xhc
@@ -68,7 +64,7 @@ fn secret_debug_is_the_same_whatever_the_bytes() {
     for bytes in [[0u8; 32], [0xffu8; 32], *b"MemberSeed([REDACTED])0123456789"] {
         assert_eq!(format!("{:?}", MemberSeed::from(bytes)), "MemberSeed([REDACTED])");
         assert_eq!(format!("{:#?}", DeviceSeed::from(bytes)), "DeviceSeed([REDACTED])");
-        assert_eq!(format!("{:?}", Some(OrgSecret::from(bytes))), "Some(OrgSecret([REDACTED]))");
+        assert_eq!(format!("{:?}", Some(DeviceSeed::from(bytes))), "Some(DeviceSeed([REDACTED]))");
     }
 }
 
@@ -78,11 +74,10 @@ fn secret_types_serialise_as_the_plain_bytes() {
     let bytes = [0xa5u8; 32];
     assert_eq!(plain(&MemberSeed::from(bytes)), plain(&bytes));
     assert_eq!(plain(&DeviceSeed::from(bytes)), plain(&bytes));
-    assert_eq!(plain(&OrgSecret::from(bytes)), plain(&bytes));
-    let back: OrgSecret = postcard::from_bytes(&plain(&bytes)).unwrap();
-    assert_eq!(back, OrgSecret::from(bytes));
+    let back: MemberSeed = postcard::from_bytes(&plain(&bytes)).unwrap();
+    assert_eq!(back, MemberSeed::from(bytes));
     // Abnormal: 31 bytes are not a secret.
-    assert!(postcard::from_bytes::<OrgSecret>(&plain(&bytes)[..31]).is_err());
+    assert!(postcard::from_bytes::<MemberSeed>(&plain(&bytes)[..31]).is_err());
 }
 
 // Adapted at the merge of master `1feb608` into worktree-person-shared-types:

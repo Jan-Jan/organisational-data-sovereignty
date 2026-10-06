@@ -86,6 +86,26 @@ fn org_node_has_no_administrator_key() {
     assert_absent("fn admin_persona_for_org", "no Persona is looked up by an administrator key");
 }
 
+// The Organisation secret is gone: org-node defines, holds, takes and returns
+// none, and the Organisation private key is the only Organisation key
+// material it holds (LLR-qsjde3).
+// verifies: LLR-qsjde3
+#[test]
+fn org_node_holds_no_organisation_secret() {
+    assert_absent("OrgSecret", "LLR-qsjde3: no Organisation secret type");
+    assert_absent("org_secret", "LLR-qsjde3: no record, message or operation holds one");
+}
+
+// The invite identifier never travels between peers: org-node defines no type
+// for it, no Wire message or expectation holds one, and `send_update` takes
+// none (REQ-8amu2a as amended).
+// verifies: LLR-ms8njy, LLR-48jakr
+#[test]
+fn org_node_holds_no_invite_identifier() {
+    assert_absent("InviteId", "LLR-ms8njy: no invite identifier type");
+    assert_absent("invite_id", "LLR-ms8njy, LLR-48jakr: no field or argument carries one");
+}
+
 // The service's chain seam writes nothing; the proxy account is never handed
 // to it (absences, no input side).
 // verifies: LLR-65py3d, LLR-3v5nu9, REQ-xs4ab8

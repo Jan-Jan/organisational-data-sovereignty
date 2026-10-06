@@ -47,7 +47,7 @@ pub use ids::OrgId;
 pub use keys::SigningKeypair;
 pub use sequence::SeqGuard;
 pub use types::{
-    ChainAccount, DeviceSeed, Epoch, InviteId, MemberSeed, OrgPrivateKey, OrgPublicKey, OrgSecret, PersonaId, SequenceNumber,
+    ChainAccount, DeviceSeed, Epoch, MemberSeed, OrgPrivateKey, OrgPublicKey, PersonaId, SequenceNumber,
 };
 pub use verify::{verify_envelope_against_chain, VerifyContext, VerifiedUpdate};
 

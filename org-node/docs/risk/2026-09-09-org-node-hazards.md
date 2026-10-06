@@ -459,6 +459,12 @@ admission. The hazard text above is unchanged; its residual is **not
 acceptable** until the key-pair change checks a received key against the
 chain (owner-accepted window, 2026-10-05).
 
+*Amended 2026-10-06 (change `worktree-org-node-org-key-pair`):* the
+Organisation secret is replaced by the Organisation private key, and RC-9cefcn
+refuses any received key whose public half is not the chain's `org_pub_key`.
+A substituted key is refused; the 2026-10-05 window closes. Residual S3, P1,
+acceptable (`org-node/docs/risk/2026-10-07-org-key-pair.md`).
+
 **RC-b6mydy**: the node commits a received Wire message only through the
 checks of RC-pm9kmx, RC-6a2dke, RC-e5atck, RC-m4r75s and RC-95dgg8, and
 checks nothing about the Device key the connection authenticated: not on a
@@ -558,6 +564,13 @@ holds the device. Severity: S3. Probability: P2.
 
 P2, and no attacker is needed: a device that is offline at the moment of
 revocation is the ordinary case for a lost or stolen device.
+
+*Amended 2026-10-06 (change `worktree-org-node-org-key-pair`):* what a removed
+device keeps is now the genuine Organisation private key, held by every
+Member's Devices, but the update that removes a Device draws a fresh key pair
+that only the new record's Devices receive, so a removed Device holds no key
+used after its removal (residual P1, acceptable)
+(`org-node/docs/risk/2026-10-07-org-key-pair.md`).
 
 **RC-wqgm2p**: on committing a Change set that removes its own Device key
 from the Organisation's record, the node deletes its record of that

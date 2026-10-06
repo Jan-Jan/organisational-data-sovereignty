@@ -7,7 +7,7 @@
 use std::sync::atomic::Ordering;
 
 use ods_poc_lib::invitation::{
-    admit_reply, check_reply, issue_invite, produce_reply, Invite, InviteReply, OutstandingInvites,
+    admit_reply, check_reply, issue_invite, produce_reply, Invite, InviteId, InviteReply, OutstandingInvites,
 };
 use ods_poc_lib::submit::found_organisation;
 use org_node::service::{MockChainOps, OrgService};
@@ -138,7 +138,7 @@ fn an_outstanding_invites_file_that_is_not_a_list_of_pairs_is_refused() {
     let path = d.join("outstanding_invites.json");
     std::fs::write(&path, pair(&org, &id)).unwrap();
     let held = OutstandingInvites::open(path).unwrap();
-    assert!(held.holds(OrgId::new([1; 20]), &org_node::InviteId::new([3; 32])));
+    assert!(held.holds(OrgId::new([1; 20]), &InviteId::new([3; 32])));
 }
 
 // verifies: LLR-b7wgpf
@@ -191,7 +191,7 @@ async fn a_reply_that_does_not_parse_acts_on_nothing() {
     let (mut a, org, mut outstanding, _) = founded("bad-reply", &chain, &writer).await;
     issue_invite(&a, &mut outstanding, &mut OsRng, org, "Acme", "Bob").unwrap();
     let before = a.list_orgs()[0].clone();
-    assert!(admit_reply(&mut a, &writer, &mut outstanding, &mut OsRng, org, "not base64 !", None, None).await.is_err());
+    assert!(admit_reply(&mut a, &writer, &mut outstanding, &mut OsRng, org, "not base64 !", None).await.is_err());
     assert!(!outstanding.is_empty(), "nothing settled");
     assert_eq!(a.list_orgs()[0].trie_members.len(), before.trie_members.len());
     assert!(a.provisional_updates(org).is_empty(), "no service call");
@@ -211,7 +211,7 @@ async fn a_confirmed_reply_carries_the_persona_and_declares_the_expected_admissi
     assert_eq!((reply.member_key, reply.device_key, reply.handle.as_str()), (mk, dk, "bob"));
     assert_eq!((reply.name.to_string(), reply.surname.to_string()), ("Bob".to_string(), "Builder".to_string()));
     assert_eq!((reply.org_id, reply.invite_id), (org, invite_id));
-    assert_eq!(b.expected_admissions(), &[org_node::store::ExpectedAdmission { org_id: org, invite_id }]);
+    assert_eq!(b.expected_admissions(), &[org_node::store::ExpectedAdmission { org_id: org }]);
 }
 
 // verifies: LLR-w4mhd4
@@ -287,7 +287,7 @@ async fn a_bound_persona_founds_nothing_and_the_chain_is_not_written() {
     assert!(a.genesis_provisional_updates(&pid).is_empty(), "nothing kept");
 }
 
-// verifies: LLR-gha5f6
+// verifies: LLR-gha5f6, LLR-q225ws
 #[tokio::test(flavor = "multi_thread")]
 async fn a_reply_is_acted_on_once_and_only_if_its_invite_is_outstanding() {
     let chain = MockChainOps::new();
@@ -310,14 +310,17 @@ async fn a_reply_is_acted_on_once_and_only_if_its_invite_is_outstanding() {
         let msg = sink.recv_one().await;
         (sink, msg)
     });
-    admit_reply(&mut a, &writer, &mut outstanding, &mut OsRng, org, &reply_blob, Some(addr), None).await.unwrap();
+    admit_reply(&mut a, &writer, &mut outstanding, &mut OsRng, org, &reply_blob, Some(addr)).await.unwrap();
     let id = InviteReply::parse(&reply_blob).unwrap().invite_id;
     let (_sink, msg) = received.await.unwrap();
-    assert_eq!(msg.unwrap().1.invite_id, Some(id), "sent under the reply's invite id");
+    assert!(
+        matches!(msg.unwrap().1, org_node::transport::wire::WireMessage::OrgInformation { .. }),
+        "the reply's Device is listed: Organisation information, carrying no invite id"
+    );
     assert!(!outstanding.holds(org, &id), "settled once acted on");
     assert_eq!(a.list_orgs()[0].trie_members.len(), 2);
     // The same reply again is refused: its invite is no longer outstanding.
-    assert!(admit_reply(&mut a, &writer, &mut outstanding, &mut OsRng, org, &reply_blob, None, None).await.is_err());
+    assert!(admit_reply(&mut a, &writer, &mut outstanding, &mut OsRng, org, &reply_blob, None).await.is_err());
     assert_eq!(a.list_orgs()[0].trie_members.len(), 2, "acted on once");
 }
 
@@ -331,7 +334,7 @@ async fn a_reply_whose_admission_fails_on_chain_stays_outstanding() {
     let (mut b, pid) = joiner_service("write-fails", &chain);
     let reply_blob = produce_reply(&mut b, &mut OsRng, &invite, &pid, true).unwrap();
     writer.failing.store(true, Ordering::SeqCst);
-    assert!(admit_reply(&mut a, &writer, &mut outstanding, &mut OsRng, org, &reply_blob, None, None).await.is_err());
+    assert!(admit_reply(&mut a, &writer, &mut outstanding, &mut OsRng, org, &reply_blob, None).await.is_err());
     assert!(outstanding.holds(org, &InviteReply::parse(&reply_blob).unwrap().invite_id));
     assert_eq!(a.list_orgs()[0].trie_members.len(), 1, "nothing committed");
 }
@@ -355,7 +358,7 @@ async fn a_reply_admitted_under_another_selected_organisation_is_refused() {
     let (mut b, pid) = joiner_service("other-org", &chain);
     let reply_blob = produce_reply(&mut b, &mut OsRng, &invite, &pid, true).unwrap();
     let members = |a: &OrgService, o: OrgId| a.list_orgs().iter().find(|r| r.org_id == o).unwrap().trie_members.len();
-    let err = admit_reply(&mut a, &writer, &mut outstanding, &mut OsRng, elsewhere, &reply_blob, None, None)
+    let err = admit_reply(&mut a, &writer, &mut outstanding, &mut OsRng, elsewhere, &reply_blob, None)
         .await
         .unwrap_err();
     assert_eq!(err, "this reply is for another Organisation");
@@ -387,7 +390,7 @@ async fn a_reply_naming_another_held_organisation_with_an_outstanding_invite_id_
     assert_eq!((reply.org_id, reply.invite_id), (elsewhere, issued.invite_id));
     let members = |a: &OrgService, o: OrgId| a.list_orgs().iter().find(|r| r.org_id == o).unwrap().trie_members.len();
     assert!(check_reply(&outstanding, &reply_blob).is_err(), "not outstanding for the Organisation it names");
-    let err = admit_reply(&mut a, &writer, &mut outstanding, &mut OsRng, reply.org_id, &reply_blob, None, None)
+    let err = admit_reply(&mut a, &writer, &mut outstanding, &mut OsRng, reply.org_id, &reply_blob, None)
         .await
         .unwrap_err();
     assert_eq!(err, "this reply names no Invite this device has outstanding");
@@ -408,7 +411,7 @@ async fn a_reply_is_settled_once_committed_even_when_the_send_fails() {
     let reply_blob = produce_reply(&mut b, &mut OsRng, &invite, &pid, true).unwrap();
     // Loopback transport with no peer address: the write and the commit
     // succeed, and the send that follows fails.
-    let err = admit_reply(&mut a, &writer, &mut outstanding, &mut OsRng, org, &reply_blob, None, None).await.unwrap_err();
+    let err = admit_reply(&mut a, &writer, &mut outstanding, &mut OsRng, org, &reply_blob, None).await.unwrap_err();
     assert!(err.contains("the send failed"), "{err}");
     assert_eq!(a.list_orgs()[0].trie_members.len(), 2, "the admission committed");
     assert!(!outstanding.holds(org, &InviteReply::parse(&reply_blob).unwrap().invite_id), "settled although the send failed");

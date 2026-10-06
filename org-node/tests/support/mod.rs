@@ -21,29 +21,13 @@ use org_node::store::{MemberSnapshot, OrgRecord, PersonaRecord, PersonaStore, Pr
 use org_node::{ChainAccount, Joiner, OrgPrivateKey};
 use org_node::transport::endpoint::OrgEndpoint;
 use org_node::transport::wire::WireMessage;
-use org_node::{DeviceSeed, Epoch, InviteId, OrgSecret, PersonaId};
+use org_node::{DeviceSeed, Epoch, PersonaId};
 use rand::rngs::OsRng;
-
-/// The invite identifier a story's joiner replies under: its device key's
-/// bytes (Decision 18), so no story helper needs another argument.
-pub fn invite_for(device: &DevicePublicKey) -> InviteId {
-    InviteId::new(*device.as_bytes())
-}
-
-/// The device key of `svc`'s first Persona.
-pub fn first_device(svc: &OrgService) -> DevicePublicKey {
-    svc.list_personas()[0].device_seed.signing_keypair().device_key().unwrap()
-}
 
 pub const NET: Duration = Duration::from_secs(30);
 
 /// The rogue relay's device seed — a third device, neither A's nor B's.
 pub const ROGUE_SEED: [u8; 32] = [0x33u8; 32];
-
-/// The Organisation secret every admission in these tests hands over.
-pub fn org_secret() -> Option<OrgSecret> {
-    Some(OrgSecret::from([0xffu8; 32]))
-}
 
 pub fn h(s: &str) -> Handle {
     Handle::parse(s).unwrap()
@@ -198,11 +182,12 @@ pub fn test_proxy() -> ChainAccount {
     ChainAccount::new([0x5a; 32])
 }
 
-/// The Organisation private key a genesis update holds.
+/// The Organisation private key a provisional update holds.
 pub fn private_key_of(update: &ProvisionalUpdate) -> OrgPrivateKey {
     match &update.change {
-        ProvisionalChange::Genesis { org_private_key, .. } => org_private_key.clone(),
-        ProvisionalChange::ChangeSet { .. } => panic!("a genesis update"),
+        ProvisionalChange::Genesis { org_private_key, .. } | ProvisionalChange::ChangeSet { org_private_key, .. } => {
+            org_private_key.clone()
+        }
     }
 }
 
@@ -218,7 +203,7 @@ pub async fn found(svc: &mut OrgService, chain: &MockChainOps, pid: &PersonaId) 
 /// Story 2, the joining node's half: whatever it must hold before an
 /// admission to `org_id` reaches it.
 pub fn prepare_to_join(svc_b: &mut OrgService, org_id: OrgId) {
-    svc_b.expect_admission(&mut OsRng, org_id, invite_for(&first_device(svc_b))).expect("expect the admission");
+    svc_b.expect_admission(&mut OsRng, org_id).expect("expect the admission");
 }
 
 /// The joiner `pid` of `svc` is admitted as: the Persona's details and its
@@ -230,15 +215,13 @@ pub fn joiner_of(svc: &OrgService, pid: &PersonaId) -> Joiner {
 }
 
 /// Story 3: admit `joiner` into `org_id`: build, write the chain (mock),
-/// commit, send to `addr` under the joiner's invite identifier. Returns the
-/// joiner's new MemberId.
+/// commit, send to `addr`. Returns the joiner's new MemberId.
 pub async fn admit(
     svc: &mut OrgService,
     chain: &MockChainOps,
     org_id: OrgId,
     joiner: &Joiner,
     addr: iroh::EndpointAddr,
-    secret: Option<OrgSecret>,
 ) -> Result<MemberId, OrgNodeError> {
     let update = svc.admit_member(&mut OsRng, org_id, joiner)?;
     chain.apply_update(org_id, update.resulting_root, update.org_pub_key, rec_of(svc, org_id).epoch)?;
@@ -249,8 +232,7 @@ pub async fn admit(
         .find(|m| m.member_key == joiner.member_key)
         .map(|m| m.id)
         .expect("the joiner is in the committed record");
-    let invite = Some(invite_for(&joiner.device_key));
-    tokio::time::timeout(NET, svc.send_update(&outcome.outgoing, joiner.device_key, Some(addr), secret, invite))
+    tokio::time::timeout(NET, svc.send_update(&outcome.outgoing, joiner.device_key, Some(addr)))
         .await
         .expect("send timed out")?;
     Ok(id)
@@ -271,12 +253,76 @@ pub async fn revoke(
         .find(|m| m.id == member_id)
         .and_then(|m| m.device_keys.first().copied())
         .expect("the removed member has a device");
+    revoke_and_send(svc, chain, org_id, member_id, recipient, addr).await
+}
+
+/// Story 5, told to a Device the committed record still lists: build, write
+/// the chain (mock), commit, and send the committed removal to `recipient`
+/// at `addr`.
+pub async fn revoke_and_tell(
+    svc: &mut OrgService,
+    chain: &MockChainOps,
+    org_id: OrgId,
+    member_id: MemberId,
+    recipient: DevicePublicKey,
+    addr: iroh::EndpointAddr,
+) -> Result<(), OrgNodeError> {
+    revoke_and_send(svc, chain, org_id, member_id, recipient, Some(addr)).await
+}
+
+/// Build the removal of `member_id`, write the chain (mock), commit, and
+/// send the committed update to `recipient`.
+async fn revoke_and_send(
+    svc: &mut OrgService,
+    chain: &MockChainOps,
+    org_id: OrgId,
+    member_id: MemberId,
+    recipient: DevicePublicKey,
+    addr: Option<iroh::EndpointAddr>,
+) -> Result<(), OrgNodeError> {
     let update = svc.revoke_member(&mut OsRng, org_id, member_id)?;
     chain.apply_update(org_id, update.resulting_root, update.org_pub_key, rec_of(svc, org_id).epoch)?;
     let outcome = svc.commit_update(&mut OsRng, org_id).await?;
-    tokio::time::timeout(NET, svc.send_update(&outcome.outgoing, recipient, addr, None, None))
+    tokio::time::timeout(NET, svc.send_update(&outcome.outgoing, recipient, addr))
         .await
         .expect("send timed out")
+}
+
+/// `msg`, of the same kind, with its Envelope replaced.
+pub fn with_envelope(msg: &WireMessage, envelope: org_node::Envelope) -> WireMessage {
+    match msg {
+        WireMessage::OrgInformation { record_snapshot, org_private_key, .. } => WireMessage::OrgInformation {
+            envelope,
+            record_snapshot: record_snapshot.clone(),
+            org_private_key: org_private_key.clone(),
+        },
+        WireMessage::Revocation { .. } => WireMessage::Revocation { envelope },
+    }
+}
+
+/// The Organisation information `msg`, with its record snapshot replaced.
+pub fn with_snapshot(msg: &WireMessage, record_snapshot: Vec<u8>) -> WireMessage {
+    match msg {
+        WireMessage::OrgInformation { envelope, org_private_key, .. } => WireMessage::OrgInformation {
+            envelope: envelope.clone(),
+            record_snapshot,
+            org_private_key: org_private_key.clone(),
+        },
+        WireMessage::Revocation { .. } => panic!("a revocation carries no snapshot"),
+    }
+}
+
+/// The Organisation information `msg`, with its Organisation private key
+/// replaced.
+pub fn with_key(msg: &WireMessage, org_private_key: OrgPrivateKey) -> WireMessage {
+    match msg {
+        WireMessage::OrgInformation { envelope, record_snapshot, .. } => WireMessage::OrgInformation {
+            envelope: envelope.clone(),
+            record_snapshot: record_snapshot.clone(),
+            org_private_key,
+        },
+        WireMessage::Revocation { .. } => panic!("a revocation carries no key"),
+    }
 }
 
 /// Stories 1–2 over the service API: A creates a persona and the organisation
@@ -342,7 +388,7 @@ pub async fn setup_over(
 pub async fn admit_b_directly(mut s: Setup) -> Setup {
     let (b_addr, b_task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
 
-    admit(&mut s.svc_a, &s.chain, s.org_id, &s.joiner_b, b_addr, org_secret())
+    admit(&mut s.svc_a, &s.chain, s.org_id, &s.joiner_b, b_addr)
         .await
         .expect("admit_member(B) failed");
     assert_eq!(s.chain.get(&s.org_id).unwrap().epoch, Epoch::new(2), "admitting B must bump to epoch 2");
@@ -371,7 +417,7 @@ pub fn joiner_for_c(svc_a: &mut OrgService) -> Joiner {
 /// delivered to B.
 pub async fn captured_admission(s: &mut Setup, joiner: &Joiner) -> WireMessage {
     let (sink_addr, sink) = spawn_recv_one(rand::random()).await;
-    admit(&mut s.svc_a, &s.chain, s.org_id, joiner, sink_addr, org_secret()).await.expect("admit the joiner");
+    admit(&mut s.svc_a, &s.chain, s.org_id, joiner, sink_addr).await.expect("admit the joiner");
     sink.await.unwrap().2
 }
 
@@ -386,6 +432,20 @@ pub async fn captured_admission_of_c(s: &mut Setup) -> WireMessage {
 pub async fn deliver(addr: iroh::EndpointAddr, msg: &WireMessage) {
     let relay = OrgEndpoint::bind(&DeviceSeed::from([0x5bu8; 32]).signing_keypair()).await.unwrap();
     tokio::time::timeout(NET, relay.send(addr, msg)).await.expect("deliver timed out").expect("deliver failed");
+}
+
+/// Send `body`, framed as `encode_frame` frames a message, to `addr` from a
+/// relay device: bytes no `WireMessage` encodes to.
+pub async fn deliver_raw(addr: iroh::EndpointAddr, body: &[u8]) {
+    let relay = OrgEndpoint::bind(&DeviceSeed::from([0x5cu8; 32]).signing_keypair()).await.unwrap();
+    let conn = relay.inner().connect(addr, org_node::transport::ALPN).await.expect("connect");
+    let (mut send, _recv) = conn.open_bi().await.expect("open_bi");
+    let mut framed = (body.len() as u32).to_le_bytes().to_vec();
+    framed.extend_from_slice(body);
+    send.write_all(&framed).await.expect("write");
+    send.finish().expect("finish");
+    // Hold the connection until the receiver has read the stream.
+    let _ = tokio::time::timeout(NET, send.stopped()).await;
 }
 
 /// The encoded member snapshots of `trie`, as a first admission carries them.

@@ -139,9 +139,13 @@ satisfies: derived
 **REQ-hzm4kt**: The software shall write the Persona store only as ciphertext
 under a key derived from a passphrase, such that opening the store file with a
 different passphrase yields an error and not data, and no member seed, device
-seed or Organisation secret appears in the file in clear.
+seed or Organisation private key appears in the file in clear.
 (implements: RC-jjsz97)
 satisfies: derived
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+The item named the Organisation secret, which that change removes in favour of
+the Organisation private key (REQ-szq3ud).
 
 ## What these requirements do not say
 

@@ -37,11 +37,15 @@ Owner rulings (2026-10-04):
 ## Secrets in formatted output
 
 **REQ-y7tsft**: The software shall not include the bytes of a member seed, a
-device seed, an Organisation secret or the store encryption key in the debug
+device seed, an Organisation private key or the store encryption key in the debug
 formatting of that value or of any record, store or wire message that holds
 it, and shall offer no display formatting for these values.
 (implements: RC-8a4xjb)
 satisfies: derived
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+The item named the Organisation secret, which that change removes in favour of
+the Organisation private key (REQ-szq3ud).
 
 ## Persona details
 

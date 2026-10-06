@@ -88,6 +88,11 @@ bare invite identifiers, so an identifier was outstanding for every
 Organisation; it now holds the Organisation each was issued for, as
 org-node keys its expected admissions by (Organisation, invite identifier).
 
+*Note 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+The requirement's text holds. The reason the note above gives does not:
+org-node now keys its expected admissions by Organisation alone. The pair is
+still what binds a reply to the Invite this device issued (REQ-65xqp8).
+
 **LLR-w4mhd4**: `produce_reply(svc, rng, invite_blob, persona_id, confirmed)`
 refuses, producing nothing and declaring nothing, when `confirmed` is false —
 with a message that begins `confirm first` — when `persona_id` names no
@@ -95,9 +100,15 @@ Persona of this device, and when it names one bound to an Organisation, as
 LLR-rt8gdz states (amended 2026-10-06, review round 1). Otherwise it returns an Invite reply Blob carrying that
 Persona's Member-as-a-group key, DevicePublicKey, handle, name and surname and
 the Invite's Organisation identifier and invite identifier, and before
-returning declares to org-node, through `expect_admission(org_id, invite_id)`,
-the first admission it expects.
+returning declares to org-node, through `expect_admission(org_id)`, the
+first admission to that Organisation it expects.
 satisfies: REQ-tcutr6, REQ-ab2mfz
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+The declaration was `expect_admission(org_id, invite_id)`. REQ-tcutr6 as
+amended declares the Organisation alone, because org-node matches a first
+admission against the Organisation alone; the reply still carries the invite
+identifier back to the inviter.
 
 Normal: `a_confirmed_reply_carries_the_persona_and_declares_the_expected_admission`
 (invitation).
@@ -134,8 +145,8 @@ The `unboundPersonas` filter sits in `invite.ts`, SDD-jx363y's file, beside
 **LLR-gha5f6**: `check_reply(outstanding, reply_blob)` refuses, with `this
 reply names no Invite this device has outstanding`, a reply whose pair
 (its `org_id`, its invite identifier) is not outstanding (LLR-f35pda).
-`admit_reply(svc, writer, outstanding, rng, org_id, reply_blob, peer_addr,
-org_secret)` refuses, acting on nothing, a reply `check_reply` refuses, and
+`admit_reply(svc, writer, outstanding, rng, org_id, reply_blob, peer_addr)`
+refuses, acting on nothing, a reply `check_reply` refuses, and
 one whose outstanding pair's Organisation is not `org_id`, with `this reply is
 for another Organisation`. The target Organisation is the one the outstanding
 pair names: `org_id` is kept as the operator's selection in the Admit panel,
@@ -143,11 +154,18 @@ which preselects it from the reply, and is not trusted — it can only confirm
 that Organisation, never choose another. Otherwise `admit_reply` builds
 org-node's `Joiner` from the reply's five values, has org-node build the
 admission to that Organisation, submits it as LLR-qhjp6g states with the
-reply's DevicePublicKey as recipient and its invite identifier in the Wire
-message, and settles that pair once the admission has committed — even when
-the send that follows fails; when the submission fails the pair stays
-outstanding.
+reply's DevicePublicKey as the one recipient (LLR-q225ws), passing org-node no
+Organisation secret, key or invite identifier, and settles that pair once the
+admission has committed — even when the send that follows fails; when the
+submission fails the pair stays outstanding.
 satisfies: REQ-65xqp8, REQ-nfr3n2
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+`admit_reply` took an `org_secret` and passed it, with the reply's invite
+identifier "in the Wire message", to `send_update`. org-node's `send_update`
+now takes neither: the Organisation private key comes from org-node's record,
+and the invite identifier never travels between peers (REQ-tcutr6 as
+amended). The invite identifier still settles the outstanding pair here.
 
 Normal: `a_reply_is_acted_on_once_and_only_if_its_invite_is_outstanding`
 (invitation).

@@ -41,6 +41,11 @@ Owner rulings (2026-10-05):
   while its public half equals the on-chain `org_pub_key`, and is cleared
   otherwise. This rules on PR-xwek5e. Generating a new key pair on removal
   (rotation) is out of scope and recorded as a problem report.
+  *Superseded 2026-10-06 by owner ruling* in
+  `org-node/docs/requirements/2026-10-07-org-key-pair.md`:
+  a message carrying Organisation information always carries the key (its
+  absence is a parse error), and a revocation carries none and leaves the
+  stored key in place.
 - Stores written before this change are not supported: the code is not
   deployed, and no migration or requirement covers them.
 - `admit_member` always sends the Organisation private key from the sender's
@@ -133,11 +138,18 @@ root. (implements: RC-mj6gjq)
 satisfies: derived
 
 **REQ-8amu2a**: The software shall read the chain for a first admission only
-when the Organisation it names and the invite identifier its Wire message
-carries match an admission the app has declared it expects, and shall reject
+when the Organisation it names matches an admission the app has declared it
+expects, and shall reject
 any other first admission with a typed error and without reading the chain,
 leaving every declared expectation in place. (implements: RC-2ferct)
 satisfies: derived
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+The item also required the Wire message's invite identifier to match the
+expectation's. The owner ruled that the invite identifier never travels
+between peers (only in the Invite and its reply), so an expectation names the
+Organisation alone. Pre-emption stays controlled by REQ-kt877x: the verified
+record must list one of the node's own unbound Personas.
 
 **REQ-yp75u9**: The software shall bind each Persona to at most one
 Organisation: it shall refuse, with a typed error and changing nothing, to

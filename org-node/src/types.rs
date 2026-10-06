@@ -55,15 +55,9 @@ secret_type!(
     DeviceSeed
 );
 secret_type!(
-    /// The Organisation secret handed to a Member at admission.
-    OrgSecret
-);
-
-secret_type!(
-    /// The Organisation's X25519 private key, generated fresh when the
-    /// Organisation is created and held only in the creating node's
-    /// Organisation record (REQ-ech45n, LLR-3fwykc). Its in-memory key pair
-    /// is `keys::X25519Keypair` (LLR-98ufry).
+    /// The Organisation's X25519 private key: one per epoch, shared by every
+    /// Member of the Organisation (REQ-ech45n, REQ-szq3ud, LLR-3fwykc). Its
+    /// in-memory key pair is `keys::X25519Keypair` (LLR-98ufry).
     OrgPrivateKey
 );
 
@@ -184,22 +178,6 @@ impl PersonaId {
 impl From<String> for PersonaId {
     fn from(id: String) -> Self {
         Self(id)
-    }
-}
-
-/// The identifier an Invite carries and its reply echoes (REQ-8amu2a): 32
-/// bytes the inviting app drew at random. Not secret.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct InviteId([u8; 32]);
-
-impl InviteId {
-    pub fn new(bytes: [u8; 32]) -> Self {
-        Self(bytes)
-    }
-
-    pub fn as_bytes(&self) -> &[u8; 32] {
-        &self.0
     }
 }
 

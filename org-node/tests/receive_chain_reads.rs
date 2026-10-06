@@ -9,7 +9,7 @@ mod support;
 use org_node::error::OrgNodeError;
 use org_node::ids::OrgId;
 use org_node::test_fixtures::admit_member_delta;
-use org_node::transport::wire::WireMessage;
+use org_node::transport::wire::{encode_frame, WireMessage};
 use org_node::{Envelope, Epoch, MemberSeed, SequenceNumber};
 use support::*;
 
@@ -70,7 +70,7 @@ async fn a_change_set_on_another_base_is_refused_without_a_chain_read() {
     let envelope = Envelope::build(s.org_id, SequenceNumber::new(mark.get() + 1), &foreign_delta()).unwrap();
     let before = counting.reads();
     let (b_addr, b_task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
-    deliver(b_addr, &WireMessage { envelope, org_secret: None, genesis_snapshot: None, invite_id: None }).await;
+    deliver(b_addr, &WireMessage::Revocation { envelope }).await;
     let (_svc_b, result) = b_task.await.unwrap();
     assert_eq!(result.unwrap_err(), OrgNodeError::DeltaBaseMismatch);
     assert_eq!(counting.reads(), before);
@@ -85,7 +85,7 @@ async fn undecodable_change_set_bytes_are_refused_without_a_chain_read() {
     let envelope = Envelope { org_id: s.org_id, parent_seq: SequenceNumber::new(mark.get() + 1), delta_bytes: vec![0xff; 16] };
     let before = counting.reads();
     let (b_addr, b_task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
-    deliver(b_addr, &WireMessage { envelope, org_secret: None, genesis_snapshot: None, invite_id: None }).await;
+    deliver(b_addr, &WireMessage::Revocation { envelope }).await;
     let (_svc_b, result) = b_task.await.unwrap();
     assert_eq!(result.unwrap_err(), OrgNodeError::MalformedDelta);
     assert_eq!(counting.reads(), before);
@@ -111,7 +111,9 @@ async fn the_self_delete_path_refuses_a_stale_envelope_without_a_chain_read() {
 
 // Abnormal: an Organisation the node holds no record of is refused on the
 // self-delete path before any chain read, and nothing is written.
-// verifies: LLR-379hnv
+// It is also LLR-jwhzh3's abnormal case: a change naming another Organisation
+// is not verified against, nor written into, the record the node holds.
+// verifies: LLR-379hnv, LLR-38e2kn, LLR-jwhzh3
 #[tokio::test(flavor = "multi_thread")]
 async fn the_self_delete_path_refuses_an_unheld_organisation_without_a_chain_read() {
     let (s, counting) = admitted("sd-unheld").await;
@@ -119,7 +121,7 @@ async fn the_self_delete_path_refuses_an_unheld_organisation_without_a_chain_rea
     let on_disk = store_bytes("sd-unheld", "b");
     let before = counting.reads();
     let (b_addr, b_task) = spawn_self_delete(s.svc_b, &s.b_device_kp).await;
-    deliver(b_addr, &WireMessage { envelope, org_secret: None, genesis_snapshot: None, invite_id: None }).await;
+    deliver(b_addr, &WireMessage::Revocation { envelope }).await;
     let (_svc_b, result) = b_task.await.unwrap();
     assert_eq!(result.unwrap_err(), OrgNodeError::OrgNotOnChain);
     assert_eq!(counting.reads(), before);
@@ -136,7 +138,7 @@ async fn a_held_organisation_absent_from_the_chain_is_refused_after_the_chain_fr
     counting.hide(s.org_id);
     let held = rec_of(&s.svc_b, s.org_id);
     // A chain-free failure is reported as itself, not as the absence.
-    let garbled = WireMessage { envelope: Envelope { delta_bytes: vec![0xff; 16], ..msg.envelope.clone() }, ..msg.clone() };
+    let garbled = with_envelope(&msg, Envelope { delta_bytes: vec![0xff; 16], ..msg.envelope().clone() });
     let before = counting.reads();
     let (b_addr, b_task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
     deliver(b_addr, &garbled).await;
@@ -150,4 +152,67 @@ async fn a_held_organisation_absent_from_the_chain_is_refused_after_the_chain_fr
     assert_eq!(result.unwrap_err(), OrgNodeError::OrgNotOnChain);
     assert_eq!(counting.reads() - before, 1);
     assert_eq!(rec_of(&svc_b, s.org_id).last_seq, held.last_seq);
+}
+
+/// Bodies of Organisation information that does not decode, from `genuine`:
+/// its key cut off, its key one byte short, and no snapshot and no key.
+fn keyless_bodies(genuine: &WireMessage) -> [Vec<u8>; 3] {
+    let body = encode_frame(genuine).unwrap()[4..].to_vec();
+    let mut no_snapshot = encode_frame(&WireMessage::Revocation { envelope: genuine.envelope().clone() }).unwrap()[4..].to_vec();
+    no_snapshot[0] = 0;
+    [body[..body.len() - 32].to_vec(), body[..body.len() - 1].to_vec(), no_snapshot]
+}
+
+// LLR-xn5pwc, REQ-c29s93: Organisation information without its Organisation
+// private key, or with a key short of 32 bytes, does not decode, and both
+// receive paths refuse it with the typed error before any record is consulted
+// and with no chain read; the record is untouched and nothing is written.
+// verifies: LLR-xn5pwc, LLR-j5vbqj, REQ-c29s93
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_without_its_organisation_private_key_is_refused_before_the_chain() {
+    let (mut s, counting) = admitted("keyless").await;
+    let genuine = captured_admission_of_c(&mut s).await;
+    let held = rec_of(&s.svc_b, s.org_id);
+    let on_disk = store_bytes("keyless", "b");
+    let before = counting.reads();
+    let mut svc_b = s.svc_b;
+    for raw in keyless_bodies(&genuine) {
+        let (addr, task) = spawn_receive(svc_b, &s.b_device_kp).await;
+        deliver_raw(addr, &raw).await;
+        let (back, result) = task.await.unwrap();
+        assert_eq!(result.unwrap_err(), OrgNodeError::MalformedMessage, "{} bytes", raw.len());
+        let (addr, task) = spawn_self_delete(back, &s.b_device_kp).await;
+        deliver_raw(addr, &raw).await;
+        let (back, result) = task.await.unwrap();
+        assert_eq!(result.unwrap_err(), OrgNodeError::MalformedMessage, "{} bytes", raw.len());
+        svc_b = back;
+    }
+    assert_eq!(counting.reads(), before, "no chain read");
+    let after = rec_of(&svc_b, s.org_id);
+    assert_eq!((after.epoch, after.root_hash, after.last_seq), (held.epoch, held.root_hash, held.last_seq));
+    assert_eq!(store_bytes("keyless", "b"), on_disk, "nothing written");
+}
+
+// The same refusal on a first admission: before the expectations are
+// consulted — the expectation stays — and with no chain read.
+// verifies: LLR-xn5pwc, REQ-c29s93
+#[tokio::test(flavor = "multi_thread")]
+async fn a_first_admission_without_its_key_is_refused_and_keeps_the_expectation() {
+    let (mut s, counting) = setup_counted("keyless-first").await;
+    let joiner = s.joiner_b.clone();
+    let genuine = captured_admission(&mut s, &joiner).await;
+    let on_disk = store_bytes("keyless-first", "b");
+    let before = counting.reads();
+    let mut svc_b = s.svc_b;
+    for raw in keyless_bodies(&genuine) {
+        let (addr, task) = spawn_receive(svc_b, &s.b_device_kp).await;
+        deliver_raw(addr, &raw).await;
+        let (back, result) = task.await.unwrap();
+        assert_eq!(result.unwrap_err(), OrgNodeError::MalformedMessage, "{} bytes", raw.len());
+        svc_b = back;
+    }
+    assert_eq!(counting.reads(), before, "no chain read");
+    assert!(svc_b.list_orgs().is_empty());
+    assert_eq!(svc_b.expected_admissions().len(), 1, "the expectation is kept");
+    assert_eq!(store_bytes("keyless-first", "b"), on_disk, "nothing written");
 }

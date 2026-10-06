@@ -15,10 +15,9 @@ use org_node::store::{
     self, ExpectedAdmission, MemberSnapshot, OrgRecord, PersonaDetails, PersonaRecord, PersonaStatus, PersonaStore,
     ProvisionalChange, StoreData,
 };
-use org_node::InviteId;
 use org_node::test_fixtures::{device_key, member_key};
 use org_node::{
-    ChainAccount, DeviceSeed, Epoch, MemberSeed, MockChainOps, OrgNodeError, OrgPrivateKey, OrgPublicKey, OrgSecret, OrgService,
+    ChainAccount, DeviceSeed, Epoch, MemberSeed, MockChainOps, OrgNodeError, OrgPrivateKey, OrgPublicKey, OrgService,
     PersonaId, SequenceNumber,
 };
 use rand::rngs::OsRng;
@@ -64,7 +63,6 @@ fn org_with_member() -> OrgRecord {
         root_hash: RootHash::new([0x11u8; 32]),
         org_pub_key: OrgPublicKey::parse(member_key(0x31).as_bytes()).unwrap(),
         epoch: Epoch::new(1),
-        org_secret: None,
         last_seq: SequenceNumber::new(0),
         trie_members: vec![MemberSnapshot {
             id: MemberId::new([1u8; 32]),
@@ -75,7 +73,7 @@ fn org_with_member() -> OrgRecord {
             device_keys: vec![device_key(0x22)],
         }],
         proxy_account: None,
-        org_private_key: None,
+        org_private_key: OrgPrivateKey::from([0x5d; 32]),
     }
 }
 
@@ -227,7 +225,7 @@ struct WireStore {
     personas: Vec<WirePersona>,
     orgs: Vec<WireOrg>,
     provisional_updates: Vec<WireProvisional>,
-    expected_admissions: Vec<([u8; 20], [u8; 32])>,
+    expected_admissions: Vec<[u8; 20]>,
 }
 
 #[derive(serde::Serialize)]
@@ -249,11 +247,10 @@ struct WireOrg {
     root_hash: RootHash,
     org_pub_key: [u8; 32],
     epoch: Epoch,
-    org_secret: Option<OrgSecret>,
     last_seq: SequenceNumber,
     trie_members: Vec<WireMember>,
     proxy_account: Option<ChainAccount>,
-    org_private_key: Option<OrgPrivateKey>,
+    org_private_key: OrgPrivateKey,
 }
 
 #[derive(serde::Serialize)]
@@ -281,7 +278,7 @@ struct WireProvisional {
 enum WireChange {
     Genesis { members: Vec<WireMember>, org_private_key: [u8; 32] },
     #[allow(dead_code)]
-    ChangeSet { change_set: Vec<u8> },
+    ChangeSet { change_set: Vec<u8>, org_private_key: [u8; 32] },
 }
 
 fn wire_bob() -> WireMember {
@@ -314,11 +311,10 @@ fn wire_store() -> WireStore {
             root_hash: RootHash::new([0x11u8; 32]),
             org_pub_key: *member_key(0x32).as_bytes(),
             epoch: Epoch::new(1),
-            org_secret: None,
             last_seq: SequenceNumber::new(0),
             trie_members: vec![wire_bob()],
             proxy_account: None,
-            org_private_key: None,
+            org_private_key: OrgPrivateKey::from([0x5e; 32]),
         }],
         provisional_updates: vec![WireProvisional {
             org_id: None,
@@ -329,7 +325,7 @@ fn wire_store() -> WireStore {
             org_pub_key: *member_key(0x33).as_bytes(),
             change: WireChange::Genesis { members: vec![wire_bob()], org_private_key: [0x88; 32] },
         }],
-        expected_admissions: vec![([0x77; 20], [0x78; 32])],
+        expected_admissions: vec![[0x77; 20]],
     }
 }
 
@@ -361,8 +357,36 @@ fn a_store_with_every_record_kind_opens_with_every_field_parsed() {
     assert_eq!(members[0].handle.as_str(), "bob");
     assert_eq!(
         d.expected_admissions,
-        vec![ExpectedAdmission { org_id: OrgId::new([0x77; 20]), invite_id: InviteId::new([0x78; 32]) }]
+        vec![ExpectedAdmission { org_id: OrgId::new([0x77; 20]) }]
     );
+}
+
+// LLR-byjvd9: every record carries the Organisation private key, encoded as
+// its plain 32 bytes with no option tag, and it is read back. A store written
+// before the change worktree-org-node-org-key-pair — the record ending in an
+// option tag and no key — is refused, not read or migrated.
+// verifies: LLR-byjvd9
+#[test]
+fn a_record_carries_its_organisation_private_key_and_a_store_without_one_is_refused() {
+    let data = StoreData {
+        personas: vec![],
+        orgs: vec![org_with_member()],
+        provisional_updates: vec![],
+        expected_admissions: vec![],
+    };
+    let plaintext = postcard::to_allocvec(&data).unwrap();
+    let key = org_with_member().org_private_key;
+    // The record's last 32 bytes, before the two empty lists, are the key.
+    assert_eq!(&plaintext[plaintext.len() - 34..plaintext.len() - 2], key.expose_secret(), "no option tag");
+    let path = tmp_path("with-key");
+    store::seal_for_test(&path, "pw", &plaintext, &mut OsRng).unwrap();
+    assert_eq!(PersonaStore::open(path, "pw").unwrap().data().orgs[0].org_private_key, key);
+
+    let mut legacy = plaintext[..plaintext.len() - 34].to_vec();
+    legacy.extend_from_slice(&[0x00, 0x00, 0x00]); // `org_private_key: None`, then the two empty lists
+    let path = tmp_path("without-key");
+    store::seal_for_test(&path, "pw", &legacy, &mut OsRng).unwrap();
+    assert!(PersonaStore::open(path, "pw").is_err(), "a record without the key is not read");
 }
 
 /// Every field the store-open refusal names (design ledger, "Observable
@@ -437,7 +461,7 @@ fn snapshot_bytes(handle: &str, name: &str, surname: &str, member_key: [u8; 32],
 #[test]
 fn a_valid_record_snapshot_decodes_with_every_field_parsed() {
     let bytes = snapshot_bytes("bob", "Bob", "Jones", *member_key(0x21).as_bytes(), vec![*device_key(0x22).as_bytes()]);
-    let trie = first_admission_base(Some(&bytes)).unwrap();
+    let trie = first_admission_base(&bytes).unwrap();
     let leaf = trie.get(&MemberId::new([1u8; 32])).expect("the member is in the record");
     assert_eq!(leaf.handle().as_str(), "bob");
     assert_eq!(*leaf.p2p_key(), member_key(0x21));
@@ -458,7 +482,7 @@ fn a_record_snapshot_holding_an_invalid_value_is_refused_naming_the_field() {
         (snapshot_bytes("bob", "Bob", "Jones", mk, vec![dk, off_curve_key()]), "member.device_keys"),
     ];
     for (bytes, field) in cases {
-        let err = first_admission_base(Some(&bytes)).expect_err("must be refused");
+        let err = first_admission_base(&bytes).expect_err("must be refused");
         assert!(matches!(&err, OrgNodeError::InvalidField { field: f, .. } if *f == field), "got {err:?}");
         assert!(err.to_string().contains(field), "the message names the field: {err}");
     }
@@ -471,7 +495,7 @@ fn a_record_snapshot_holding_an_invalid_value_is_refused_naming_the_field() {
 #[test]
 fn a_record_snapshot_with_an_invalid_handle_and_member_key_reports_the_handle() {
     let bytes = snapshot_bytes("Bob", "Bob", "Jones", off_curve_key(), vec![*device_key(0x22).as_bytes()]);
-    let err = first_admission_base(Some(&bytes)).expect_err("must be refused");
+    let err = first_admission_base(&bytes).expect_err("must be refused");
     assert!(matches!(&err, OrgNodeError::InvalidField { field: "member.handle", .. }), "got {err:?}");
 }
 
@@ -481,6 +505,6 @@ fn a_record_snapshot_with_an_invalid_handle_and_member_key_reports_the_handle() 
 #[test]
 fn bytes_that_are_not_a_record_snapshot_are_refused() {
     for bytes in [&[][..], &[0xff; 8][..], &[0x05, 0x00][..]] {
-        assert!(org_node::service::first_admission_base(Some(bytes)).is_err(), "{bytes:?}");
+        assert!(org_node::service::first_admission_base(bytes).is_err(), "{bytes:?}");
     }
 }

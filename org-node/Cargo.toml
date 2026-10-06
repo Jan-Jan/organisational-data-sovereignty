@@ -104,6 +104,14 @@ path = "tests/fuzz_first_admission_base/fuzz_target.rs"
 harness = false
 required-features = ["app"]
 
+# `decode_body` on arbitrary bytes and on bytes after an Organisation-information
+# prefix (LLR-js9dsu), change worktree-org-node-org-key-pair.
+[[test]]
+name = "fuzz_wire_decode"
+path = "tests/fuzz_wire_decode/fuzz_target.rs"
+harness = false
+required-features = ["transport"]
+
 [[test]]
 name = "transport_handshake"
 path = "tests/transport_handshake.rs"

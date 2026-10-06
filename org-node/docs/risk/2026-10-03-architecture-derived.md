@@ -618,7 +618,10 @@ review round 2, finding-11: the test named in the note above is now
 `a_first_admission_records_the_chains_key_the_secret_and_the_member`
 (`org-node/tests/admission_sender.rs`), and
 `a_first_admission_records_the_chains_organisation_public_key` carries
-LLR-xq9nrq as amended.)*
+LLR-xq9nrq as amended.)* *(Note 2026-10-06, change
+`worktree-org-node-org-key-pair`: the first test named in the note above is
+now `a_first_admission_records_the_chains_key_the_private_key_and_the_member`,
+renamed with the Organisation secret's removal.)*
 
 *Amended 2026-10-05. The chain's key is now the Organisation public key, an
 X25519 key that is not the administrator's member key (REQ-ech45n). By the

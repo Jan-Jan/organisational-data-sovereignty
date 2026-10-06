@@ -742,6 +742,12 @@ fn locally_reachable_variants_are_classified_as_receiver_errors() {
     // this node, and the other two never arise on receive. A Persona already
     // bound to an Organisation is a refusal about this node's own store,
     // raised before anything is verified.
+    // The four refusals of a received Wire message are not verdicts of
+    // `verify_envelope_against_chain` either: a message that does not decode
+    // and a revocation about an Organisation not held are refused before
+    // anything is verified, and a key that is not the chain's and a
+    // revocation that leaves this node listed after it, on a rule about the
+    // key or this node.
     for e in [
         OrgNodeError::OrgNotOnChain,
         OrgNodeError::Trie(OrgMembersError::IdNotFound),
@@ -750,6 +756,10 @@ fn locally_reachable_variants_are_classified_as_receiver_errors() {
         OrgNodeError::ProvisionalLimit { limit: 1 },
         OrgNodeError::NoProvisionalUpdate,
         OrgNodeError::PersonaAlreadyBound { persona_id: org_node::PersonaId::new("p".into()) },
+        OrgNodeError::MalformedMessage,
+        OrgNodeError::OrgKeyMismatch { org_id: org_node::OrgId::new([1; 20]) },
+        OrgNodeError::RevocationNotHeld { org_id: org_node::OrgId::new([1; 20]) },
+        OrgNodeError::RevocationNotForThisDevice { org_id: org_node::OrgId::new([1; 20]) },
     ] {
         let outcome = events::classify_receive_error(&e);
         assert_eq!(

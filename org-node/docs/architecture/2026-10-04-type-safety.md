@@ -62,7 +62,7 @@ public key's parse together with what the chain read view serves when that
 parse refuses a fetched state (LLR-mmdu38). The seed-to-key-pair conversion is
 stated with the key pair it builds (LLR-56hc77, under SDD-sxp8hb).
 
-**LLR-sz4xhc**: `MemberSeed`, `DeviceSeed` and `OrgSecret` are each built
+**LLR-sz4xhc**: `MemberSeed` and `DeviceSeed` are each built
 infallibly from 32 bytes by `From<[u8; 32]>`, are `Clone` and not `Copy`, keep
 `PartialEq`/`Eq`, have no `Display`, and render under `Debug` as the type
 name and `([REDACTED])` — `MemberSeed([REDACTED])` — whatever bytes they hold,
@@ -81,6 +81,12 @@ secret can be kept in the store and carried in the Wire message.
 `secret_types_serialise_as_the_plain_bytes` verifies that clause, which the
 requirement did not state. REQ-y7tsft is about formatting only, and RC-8a4xjb
 already records that serialising is not formatting.)
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+This named `OrgSecret` as a third such type. The Organisation secret is
+removed (LLR-qsjde3); the Organisation private key, which the store keeps and
+the Wire message carries in its place, has the same properties as
+`OrgPrivateKey` (LLR-322xfu).
 
 **LLR-s7whrn**: `ChainAccount` (32 bytes), `PersonaId` (string), `Epoch`
 (`u64`) and `SequenceNumber` (`u64`) are tag types: each is built infallibly by
@@ -109,17 +115,33 @@ proxy account becomes opaque data org-node holds for the app (owner ruling 6),
 so nothing in org-node converts it.)
 
 **LLR-ayrdr8**: the postcard encoding of a fixed Persona store plaintext (one
-Persona, one Organisation with an Organisation secret and no Organisation
-private key, a chain account and members, one provisional update and one
-expected admission) and of a fixed admission Wire message, whose Envelope
-carries no signature, are the values pinned in
-`org-node/tests/encoding_golden.rs`: every type `types.rs` defines, and the
-org-members and `person` types org-node holds, serialise exactly as the plain
-values they replace. In the store plaintext, the byte `00` after the
-Organisation record's chain account is the `org_private_key: None` that
-REQ-ech45n adds (LLR-3fwykc); the Wire message has no signature bytes after
-its Change set bytes (LLR-e7s4ye).
+Persona, one Organisation with its Organisation private key, a chain account
+and members, one change-set provisional update holding the private key of its
+Organisation key pair, and one expected admission naming an Organisation
+alone), of a fixed Organisation-information Wire message and of
+a fixed revocation Wire message, whose Envelopes carry no signature, are the
+values pinned in `org-node/tests/encoding_golden.rs`: every type `types.rs`
+defines, and the org-members and `person` types org-node holds, serialise
+exactly as the plain values they replace. In the store plaintext, the
+Organisation record has no Organisation-secret bytes after its epoch, and its
+chain account is followed by the 32 bytes of its Organisation private key
+with no option tag (LLR-byjvd9); the expected admission is the Organisation
+identifier's bytes alone. Each Wire message begins with its variant index (00
+for Organisation information, 01 for revocation), has no signature bytes
+after its Change set bytes (LLR-e7s4ye), and no invite identifier bytes
+(LLR-ms8njy).
 satisfies: derived
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+This pinned an Organisation with an Organisation secret and no Organisation
+private key (the byte `00` after the chain account being `org_private_key:
+None`), an expected admission holding an invite identifier, and one admission
+Wire message with an optional secret and invite identifier. The secret and the
+invite identifier are removed, the record's key is required, and the Wire
+message is an enum of two kinds (LLR-js9dsu); by the owner's later ruling
+the same day a change-set provisional update holds a private key too
+(LLR-e2b7gv). The pinned values are re-derived when the change is
+implemented.
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
@@ -234,13 +256,20 @@ the store open, the Join request decode and the record-snapshot decode share.
 **LLR-bwb9pu**: the debug rendering of every org-node value that holds a
 secret contains none of that secret's bytes in any form. Those values are
 `PersonaRecord`, `OrgRecord`, `StoreData`, `WireMessage`, `SigningKeypair` and
-`X25519Keypair`. The records, the store plaintext and the Wire message hold
-each secret in its secret type: `MemberSeed`, `DeviceSeed`, `OrgSecret`
+`X25519Keypair`. The records, the store plaintext and the Wire message (of
+either kind) hold each secret in its secret type: `MemberSeed`, `DeviceSeed`
 (LLR-sz4xhc) or `OrgPrivateKey` (LLR-322xfu). `SigningKeypair` holds its seed
 in ed25519-dalek's `SigningKey`, whose `Debug` omits it (soup.md).
 `X25519Keypair` renders as `X25519Keypair(..)` (LLR-98ufry). None of them
 formats the bytes itself.
 satisfies: REQ-y7tsft
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+The secret types listed `OrgSecret`, which is removed (LLR-qsjde3). The Wire
+message is now an enum of two kinds, and its `OrgInformation` holds the
+Organisation private key as an `OrgPrivateKey` (LLR-ecxc76). REQ-y7tsft,
+amended the same day, names the Organisation private key, so the parent note
+below no longer puts the `OrgPrivateKey` clauses outside it.
 
 *Amended 2026-10-05 (owner answer Q4 of that day to
 docs/plans/2026-10-05-switch-trim.md; written by change
@@ -275,11 +304,16 @@ handle, name and surname as `Handle`, `Name` and `Surname`, so a record or a
 joiner is constructed only from parsed values, and `create_persona` takes
 them typed; every other field of `PersonaRecord`, `OrgRecord`,
 `MemberSnapshot`, `ProvisionalUpdate` and `Joiner` that is an array or counter
-holds its typed form (`MemberSeed`, `DeviceSeed`, `OrgSecret`, `MemberId`,
-`RootHash`, `OrgPublicKey`, `P2pMemberKey`, `P2pDeviceKey`, `ChainAccount`,
-`PersonaId`, `OrgId`, `Epoch`, `SequenceNumber`); `OrgRecord` has no
-administrator key.
+holds its typed form (`MemberSeed`, `DeviceSeed`, `OrgPrivateKey`,
+`MemberId`, `RootHash`, `OrgPublicKey`, `P2pMemberKey`, `P2pDeviceKey`,
+`ChainAccount`, `PersonaId`, `OrgId`, `Epoch`, `SequenceNumber`); `OrgRecord`
+has no administrator key and no Organisation secret.
 satisfies: REQ-qn2erx
+
+*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
+The typed forms listed `OrgSecret`, the type of `OrgRecord.org_secret`. Both
+are removed (LLR-qsjde3, LLR-byjvd9); `OrgRecord.org_private_key` holds an
+`OrgPrivateKey`.
 
 (Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`):
 this named `JoinRequest` and `PendingInvite`, and `OrgRecord`'s typed fields
