@@ -1120,13 +1120,22 @@ ABI gives them. mitigates: HAZ-xfg9cz
 How it sits in the code, at three levels. The widths first, because the other
 two are written against them: `OrgAdmin` wraps `[u8; 20]`, `OnChainRootHash` and
 `OrgPubKey` `[u8; 32]`, and `Epoch` a `u64`
-(`on-chain-client/src/types.rs:19`, `:23`, `:29`, `:34`) — 20, 32, 32 and 8,
+(`on-chain-client/src/types.rs:19`, `:23`, `:37`, `:42`) — 20, 32, 32 and 8,
 which is why a three-slot blob is 96 bytes and why every fixed-width
 `copy_from_slice` in the
-state decoder is the length it is. That is REQ-2qa5r5, and its evidence is
+state decoder is the length it is. (Line numbers re-resolved 2026-10-05: the
+`OrgPubKey` and `Epoch` lines were `:29` and `:34` before the doc comment on
+`OrgPubKey` grew on 2026-10-05.) That is REQ-2qa5r5, and its evidence is
 `on-chain-client/tests/type_widths.rs`, relocated in this change's fix round
 out of a `#[cfg(test)]` module in `types.rs` where no gate could read its
 annotation.
+*(Note 2026-10-05, review round 3, finding-13, change
+`worktree-person-shared-types`: REQ-2qa5r5 is superseded by REQ-54txzh
+(`2026-10-05-organisation-public-key.md`), which states the same widths and
+calls the thirty-two-byte key field the Organisation public key. What is
+said here of REQ-2qa5r5 holds for REQ-54txzh, which carries this exemption
+and this evidence; REQ-2qa5r5 is named as the record of the earlier text. The same holds for the
+next paragraph's exemption.)*
 
 **What that test gates, and what it does not — both measured.** It gates the
 four widths, and it reds honestly on each of them. The obvious mutation
@@ -1156,6 +1165,10 @@ reading: shifting both regions in
 `decode_uint256_to_u64` from `bytes[..24]`/`bytes[24..32]` to
 `bytes[..16]`/`bytes[16..24]`, each keeping its width so the crate still
 compiles — left `type_widths` **green, 2 passed**.
+
+*(Note 2026-10-05, review round 3, finding-13: the REQ-2qa5r5 of this
+paragraph is superseded by REQ-54txzh, which the same test verifies; see the
+note above.)*
 
 **That is a documentation-accuracy point and not a coverage hole**, and the same
 negative control is what establishes the difference rather than asserting it:
@@ -2096,6 +2109,15 @@ assesses: REQ-4astjb
   declaration and has no runtime input domain, so there is no input to malform.
   Its evidence reds by mutating the type, which is the only thing there is to
   mutate, and that is measured above.
+
+  **Note, 2026-10-05:** the sentence above saying both glossaries call the
+  field the Organisation's signing key was true when it was written and is
+  not true now. The owner ruled (2026-10-04) that the field is the
+  Organisation's X25519 key-agreement key and never a signing key. The root
+  `docs/CONTEXT.md` now defines *Organisation public key* for it, and both
+  glossaries use that term. REQ-54txzh supersedes REQ-2qa5r5 with that term
+  and is assessed in `on-chain-client/docs/risk/2026-10-05-organisation-public-key.md`.
+  This assessment stays as the record of REQ-2qa5r5.
 
 assesses: REQ-2qa5r5
 

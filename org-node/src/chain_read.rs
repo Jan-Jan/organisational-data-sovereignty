@@ -8,22 +8,18 @@
 use std::sync::Mutex;
 
 use on_chain_client::{OrgAdmin, OrgRegistryClient};
-use org_members::RootHash;
 
 use crate::chain::{ChainReader, OrgState};
 use crate::error::OrgNodeError;
 use crate::ids::OrgId;
-use crate::types::{Epoch, OrgPublicKey};
 
-/// Parses an Organisation state read from the chain into org-node's types.
-/// The Organisation public key is parsed here, at the read: bytes that are
-/// not a curve point are refused with `InvalidKey` (LLR-mmdu38).
+/// Parses an Organisation state read from the chain into org-node's types,
+/// through the one edge that refuses an invalid Organisation public key:
+/// bytes that are not a valid X25519 public key are refused with
+/// `InvalidOrgPublicKey` (REQ-8jb4ny), and the cache fails closed
+/// (LLR-mmdu38's cache clause).
 pub fn org_state_from_chain(s: on_chain_client::OrgState) -> Result<OrgState, OrgNodeError> {
-    Ok(OrgState {
-        root_hash: RootHash::new(s.root_hash.0),
-        org_pub_key: OrgPublicKey::parse(&s.org_pub_key.0)?,
-        epoch: Epoch::new(s.epoch.0),
-    })
+    OrgState::from_chain(s.root_hash.0, s.org_pub_key.0, s.epoch.0)
 }
 
 /// The cached Organisation state behind [`OnChainReader`], pinned to one

@@ -1,15 +1,28 @@
 # Problem reports — Envelope signing key conflated with the Organisation public key
 
-**PR-szkat6**: The node verifies every Envelope under the key stored in the
-Organisation state's `org_pub_key` field (REQ-ag6kqm) and sets that field to
-the administrator's Member-as-a-group key at genesis (`service.rs`
+**PR-szkat6**: The Organisation private key is held only by the node that
+created the Organisation (LLR-3fwykc) and no admission gives it to a Member,
+whereas the design intends `org_pub_key` to be the public half of an
+Organisation key pair whose secret every Member holds
+(`Organisational Data Sovereignty p1.md`, design point 5).
+affects: REQ-ech45n, LLR-3fwykc
+opened: 2026-10-04
+status: open
+
+*Restated 2026-10-05 by review round 4 (finding-6).* The report first read:
+"The node verifies every Envelope under the key stored in the Organisation
+state's `org_pub_key` field (REQ-ag6kqm) and sets that field to the
+administrator's Member-as-a-group key at genesis (`service.rs`
 `create_organisation`), whereas the design intends `org_pub_key` to be the
 public half of the Organisation key pair whose secret every Member holds, so
 once that key pair is implemented as designed any Member could sign a Change
-set the node accepts.
-affects: REQ-ag6kqm, RC-pm9kmx
-opened: 2026-10-04
-status: open
+set the node accepts", with `affects: REQ-ag6kqm, RC-pm9kmx`. Neither half
+holds on change `worktree-person-shared-types`: the Envelope carries no
+signature and nothing is verified under `org_pub_key` (REQ-ag6kqm and
+RC-pm9kmx as amended), and `org_pub_key` is the public half of a fresh X25519
+key pair (REQ-ech45n). What stays open is the part the reopening note below
+names, so the statement is that part and `affects:` names the items whose
+behaviour resolving it changes.
 
 Found 2026-10-04 in the `grill-requirements` interview for the org-node
 type-safety change, when the owner stated that `org_pub_key` is not an
@@ -33,3 +46,13 @@ that the Organisation public key is an X25519 key belonging to org-node and
 checked by `person`'s X25519 rule. Resolving this report must therefore also
 move `OrgPublicKey` to that rule, or the published X25519 key would be refused
 for about half of its values.)
+
+**Reopened 2026-10-05** (docs/plans/2026-10-05-switch-trim.md). Change
+`worktree-person-shared-types` makes `org_pub_key` the public half of a fresh
+X25519 Organisation key pair, distinct from every genesis key (REQ-ech45n,
+LLR-sj7cd5, LLR-3fwykc, LLR-322xfu), parses it by `person`'s X25519 rule
+(LLR-3jjgtw, LLR-mmdu38), and verifies nothing under it (REQ-ag6kqm as
+amended). What the design intends is not done yet: the Organisation private
+key is not given to the Members. Chain-authority's change 2 (admission sends
+the Organisation private key, which a receiver checks against the chain's
+`org_pub_key`) resolves this report.

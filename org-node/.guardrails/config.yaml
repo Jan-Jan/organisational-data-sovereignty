@@ -154,6 +154,29 @@ test_paths:
 # comments up — it applies between the key and its first item too, which is
 # how this second merge repeated the first one's mistake.
 #
+# Merged 2026-10-05 into worktree-person-shared-types: this change
+# (docs/plans/2026-10-05-org-node-organisation-public-key.md) adds a target
+# organisation_key (REQ-ech45n, REQ-8jb4ny) to the line below, after master's
+# targets. The Envelope lost its signature; by owner ruling nothing replaced it
+# (trimmed 2026-10-05, docs/plans/2026-10-05-switch-trim.md).
+# Measured before this merge (agent sandbox, 2026-10-05): 70 passed on this
+# branch's shorter line. Measured after it (agent sandbox, 2026-10-05,
+# CARGO_HOME=/tmp/cargo_home_fuzz) on the line below: 131 passed, 0 failed —
+# admission_sender 42, verify_against_chain 20, organisation_key 8,
+# service_lifecycle 8, chain_write_pure 8, key_custody 7, store_at_rest 7,
+# value_types 6, transport_handshake 6, blob_exchange 5, wire_frame_bound 5,
+# envelope_binding 4, service_stories 3, transport_networked 1, lib 1; the
+# three bolero targets report iteration totals, not pass counts.
+# Re-measured 2026-10-05 after review round 1 of that change (agent sandbox,
+# CARGO_HOME=/tmp/cargo_home_fuzz), which added eight tests: 139 passed,
+# 0 failed — admission_sender 48, verify_against_chain 21, organisation_key 9,
+# every other target as above. The fuzz_verify_against_chain envelope now
+# carries the chain's epoch (9) as its Sequence number, as REQ-txvtm9 requires,
+# so its accepting path is still reachable.
+# Re-measured 2026-10-05 after review round 2 of that change (agent sandbox,
+# CARGO_HOME=/tmp/cargo_home_fuzz), which added four tests: 143 passed,
+# 0 failed — admission_sender 50, verify_against_chain 22, key_custody 8,
+# every other target as above.
 # Merged 2026-10-05: master `05f6f04` (ratchet tooth 4) into the org-node
 # type-safety change. Master's line is the base; the type-safety change's six
 # targets are appended. Both sides wrote a `tests/value_types.rs`: master's
@@ -169,8 +192,38 @@ test_paths:
 # lib 1, transport_networked 1 (master's 122 and the type-safety change's 45);
 # the three bolero targets report no pass count. (Re-measured 2026-10-05 after
 # review round 8 added two `node_value_types` Debug tests: 165 -> 167.)
+# Merged 2026-10-05: master `1feb608` (org-node type-safety) into
+# worktree-person-shared-types. Master's line is the base; this change's
+# organisation_key target is appended. Pass counts are recorded in the
+# change's verification record once re-measured.
+# Re-measured 2026-10-05 after review round 3a and the merge items of that
+# change (agent sandbox, CARGO_HOME=/tmp/cargo_home_fuzz, quint 0.33.0) on the
+# line below: 190 passed, 0 failed — admission_sender 50, verify_against_chain
+# 22, persona_records 18, node_value_types 12, organisation_key 9, chain_write_pure
+# 8, key_custody 8, service_lifecycle 8, secret_redaction 7, store_at_rest 7,
+# transport_handshake 6, value_types 6, blob_exchange 5, encoding_golden 5,
+# wire_frame_bound 5, envelope_binding 4, chain_read_state 3, service_stories 3,
+# calldata_typed 2, lib 1, transport_networked 1; the three bolero targets
+# report iteration totals, not pass counts. The two typechecks and five
+# simulator runs pass.
+# Re-measured 2026-10-05 after the switch trim
+# (docs/plans/2026-10-05-switch-trim.md; agent sandbox,
+# CARGO_HOME=/tmp/cargo_home_fuzz, quint 0.33.0) on the line below: 183
+# passed, 0 failed — admission_sender 45, verify_against_chain 20,
+# persona_records 18, node_value_types 12, organisation_key 9,
+# chain_write_pure 8, key_custody 8, service_lifecycle 8, secret_redaction 7,
+# store_at_rest 7, transport_handshake 6, value_types 6, blob_exchange 5,
+# encoding_golden 5, wire_frame_bound 5, envelope_binding 4,
+# chain_read_state 3, service_stories 3, calldata_typed 2, lib 1,
+# transport_networked 1; the three bolero targets report iteration totals,
+# not pass counts. The two typechecks and five simulator runs pass.
+# Re-measured 2026-10-06 after review round 4 of that change added three
+# tests (agent sandbox, a clean scratch CARGO_HOME copied from
+# /tmp/cargo_home_fuzz, whose extracted sources were found emptied; quint
+# 0.33.0): 186 passed, 0 failed — admission_sender 46, key_custody 9,
+# secret_redaction 8, every other target as above.
 verify_commands:
-  - cargo test -p org-node --features app,test-support --lib --test service_stories --test transport_handshake --test transport_networked --test fuzz_envelope_decode --test fuzz_verify_against_chain --test fuzz_first_admission_base --test verify_against_chain --test wire_frame_bound --test store_at_rest --test admission_sender --test value_types --test key_custody --test envelope_binding --test blob_exchange --test chain_write_pure --test service_lifecycle --test encoding_golden --test node_value_types --test chain_read_state --test persona_records --test secret_redaction --test calldata_typed
+  - cargo test -p org-node --features app,test-support --lib --test service_stories --test transport_handshake --test transport_networked --test fuzz_envelope_decode --test fuzz_verify_against_chain --test fuzz_first_admission_base --test verify_against_chain --test wire_frame_bound --test store_at_rest --test admission_sender --test value_types --test key_custody --test envelope_binding --test blob_exchange --test chain_write_pure --test service_lifecycle --test encoding_golden --test node_value_types --test chain_read_state --test persona_records --test secret_redaction --test calldata_typed --test organisation_key
   - quint --version
   - quint typecheck org-node/quint/protocol.qnt
   - quint typecheck org-node/quint/ods_instances.qnt
@@ -184,7 +237,10 @@ problem_age_days: 30
 # Raised 2026-10-05 by owner ruling: the org-node type-safety change opens four
 # deferred reports (PR-szkat6, PR-vkw22m, PR-4b2v6p, PR-k2xxaq) on top of the
 # nine other reports open after tooth 4 (13 open in all); each is genuine
-# deferred work, not a ruling not to fix.
+# deferred work, not a ruling not to fix. (2026-10-05, worktree-person-shared-types:
+# PR-szkat6 and PR-vkw22m are resolved there; 11 open after it.)
+# (2026-10-05, docs/plans/2026-10-05-switch-trim.md: PR-szkat6 is open again
+# after the trim; PR-vkw22m is resolved. 12 open after it.)
 problem_open_max: 15
 
 # No coverage_command: org-node's coverage has never been measured. Under
@@ -207,5 +263,6 @@ expectation_open_max: 10
 depends_on:
   - org-members
   - on-chain-client
+  - person
 # segregated_from:
 #   - <unit> (RC-xxxxxx)

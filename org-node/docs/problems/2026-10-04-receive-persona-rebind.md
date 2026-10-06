@@ -100,3 +100,8 @@ Persona's member id from the Organisation it was bound to before
 (LLR-q3aj8z), so after it the Persona names a member id that is not in the
 Organisation it is bound to. `pr_mdv38y_founding_an_organisation_rebinds_a_member_persona`
 asserts it.
+
+*Annotated 2026-10-05 by review round 1 of `worktree-worktree-person-shared-types`
+(finding-6); reworded the same day by docs/plans/2026-10-05-switch-trim.md.* The
+items the `affects:` line names are amended in place on that branch rather
+than superseded, so the line names them alone.

@@ -2,20 +2,23 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 
-use org_members::{Handle, Name, P2pDeviceKey, P2pMemberKey, Surname};
+use org_members::{DevicePublicKey, Handle, Name, PersonPublicKey, Surname};
 
 use crate::ids::OrgId;
 use crate::store::parse_field;
 use crate::types::OrgPublicKey;
 use crate::OrgNodeError;
 
-/// A → B: enough for B to read the org slot and to dial / authenticate A.
+/// A → B: enough for B to read the org slot and to dial A. Nothing in it is
+/// compared with a message B receives (REQ-xa6smf, REQ-ztdza4).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Invite {
     pub org_id: OrgId,
     pub org_pub_key: OrgPublicKey,
-    pub admin_member_key: P2pMemberKey,
-    pub admin_device_key: P2pDeviceKey,
+    /// Parsed on decode: a valid X25519 Member-as-a-group key or no Invite.
+    pub admin_member_key: PersonPublicKey,
+    /// Parsed on decode: a valid DevicePublicKey or no Invite.
+    pub admin_device_key: DevicePublicKey,
     /// postcard-encoded iroh EndpointAddr for dialing A.
     pub admin_node_addr: Vec<u8>,
 }
@@ -27,8 +30,8 @@ pub struct JoinRequest {
     pub handle: Handle,
     pub name: Name,
     pub surname: Surname,
-    pub member_key: P2pMemberKey,
-    pub device_key: P2pDeviceKey,
+    pub member_key: PersonPublicKey,
+    pub device_key: DevicePublicKey,
     /// postcard-encoded iroh EndpointAddr for dialing B.
     pub node_addr: Vec<u8>,
 }
@@ -52,8 +55,8 @@ impl TryFrom<RawJoinRequest> for JoinRequest {
             handle: parse_field("join_request.handle", Handle::parse(&raw.handle))?,
             name: parse_field("join_request.name", Name::parse(&raw.name))?,
             surname: parse_field("join_request.surname", Surname::parse(&raw.surname))?,
-            member_key: parse_field("join_request.member_key", P2pMemberKey::parse(&raw.member_key))?,
-            device_key: parse_field("join_request.device_key", P2pDeviceKey::parse(&raw.device_key))?,
+            member_key: parse_field("join_request.member_key", PersonPublicKey::parse(&raw.member_key))?,
+            device_key: parse_field("join_request.device_key", DevicePublicKey::parse(&raw.device_key))?,
             node_addr: raw.node_addr,
         })
     }
@@ -81,4 +84,3 @@ pub fn decode_join_request(s: &str) -> Result<JoinRequest, OrgNodeError> {
     let raw: RawJoinRequest = decode(s)?;
     JoinRequest::try_from(raw)
 }
-

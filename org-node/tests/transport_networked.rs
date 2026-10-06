@@ -11,11 +11,11 @@
 use std::time::Duration;
 
 use iroh::address_lookup::MemoryLookup;
-use org_node::{Epoch, OrgPublicKey, SequenceNumber, SignedDeltaEnvelope};
-use org_node::{DeviceSeed, MemberSeed, OrgSecret};
+use org_node::Envelope;
+use org_node::{DeviceSeed, Epoch, MemberSeed, OrgPrivateKey, OrgSecret, SequenceNumber};
 use org_node::chain::{MockChain, OrgState};
 use org_node::ids::OrgId;
-use org_node::keys::SigningKeypair;
+use org_node::keys::{SigningKeypair, X25519Keypair};
 use org_node::sequence::SeqGuard;
 use org_node::transport::endpoint::OrgEndpoint;
 use org_node::transport::wire::WireMessage;
@@ -33,29 +33,29 @@ type Trie = OrgTrie<Blake3Hasher>;
 // org-members refuses a leaf whose member key is also an enrolled device key
 // (`DuplicateKey`). Returns (genesis_trie, new_trie_with_bob, delta).
 fn genesis_and_admit(
-    admin: &SigningKeypair,
+    admin: &X25519Keypair,
     admin_device: &SigningKeypair,
 ) -> (Trie, Trie, org_members::delta::Delta) {
     let admin_leaf = MemberLeaf::new(
         MemberId::new([1u8; 32]),
         Handle::parse("admin").unwrap(),
-        admin.member_key(),
+        admin.member_key().expect("valid key"),
         Name::parse("Admin").unwrap(),
         Surname::parse("User").unwrap(),
-        vec![admin_device.device_key()],
+        vec![admin_device.device_key().unwrap()],
     )
     .unwrap();
     let genesis = Trie::genesis(vec![admin_leaf]).unwrap();
 
-    let b_member = MemberSeed::from([2u8; 32]).signing_keypair();
+    let b_member = MemberSeed::from([2u8; 32]).x25519_keypair();
     let b_device = DeviceSeed::from([3u8; 32]).signing_keypair();
     let b_leaf = MemberLeaf::new(
         MemberId::new([2u8; 32]),
         Handle::parse("bob").unwrap(),
-        b_member.member_key(),
+        b_member.member_key().expect("valid key"),
         Name::parse("Bob").unwrap(),
         Surname::parse("User").unwrap(),
-        vec![b_device.device_key()],
+        vec![b_device.device_key().unwrap()],
     )
     .unwrap();
     let (new_trie, delta) = genesis.add_member(b_leaf).unwrap().recalculate().unwrap();
@@ -68,16 +68,15 @@ fn genesis_and_admit(
 // verifies: LLR-v873fx
 #[tokio::test]
 async fn delivers_and_verifies_admit_over_relay_by_id() {
-    // Admin MEMBER key signs the envelope.
-    let admin = MemberSeed::from([1u8; 32]).signing_keypair();
+    let member = MemberSeed::from([1u8; 32]).x25519_keypair();
     // A's iroh identity, enrolled in the trie as the admin's device.
     let a_device = DeviceSeed::from([10u8; 32]).signing_keypair();
     let b_device = DeviceSeed::from([11u8; 32]).signing_keypair(); // B's iroh identity
     let org = OrgId::new([5u8; 20]);
 
-    let (genesis, new_trie, delta) = genesis_and_admit(&admin, &a_device);
+    let (genesis, new_trie, delta) = genesis_and_admit(&member, &a_device);
     let new_root = new_trie.root_hash().unwrap();
-    let env = SignedDeltaEnvelope::build(org, SequenceNumber::new(2), &delta, &admin).unwrap();
+    let env = Envelope::build(org, SequenceNumber::new(2), &delta).unwrap();
     let msg = WireMessage {
         envelope: env.clone(),
         org_secret: Some(OrgSecret::from([0xab; 32])),
@@ -135,7 +134,7 @@ async fn delivers_and_verifies_admit_over_relay_by_id() {
     // 1. QUIC handshake authenticated A's device key.
     assert_eq!(
         remote_device.as_bytes(),
-        a_device.device_key().as_bytes(),
+        a_device.device_key().unwrap().as_bytes(),
         "authenticated remote device key must equal A's device key"
     );
     // 2. The WireMessage arrived intact over the relay.
@@ -146,11 +145,10 @@ async fn delivers_and_verifies_admit_over_relay_by_id() {
     let mut chain = MockChain::new();
     chain.set(
         org,
-        OrgState { root_hash: new_root, org_pub_key: OrgPublicKey::parse(&[0u8; 32]).unwrap(), epoch: Epoch::new(2) },
+        OrgState { root_hash: new_root, org_pub_key: OrgPrivateKey::from([9u8; 32]).x25519_keypair().org_public_key().unwrap(), epoch: Epoch::new(2) },
     );
     let ctx = VerifyContext {
         expected_org_id: org,
-        author_member_key: &admin.verifying_key(),
         seq_guard: SeqGuard::from_last_seen(SequenceNumber::new(1)),
         last_committed_epoch: Epoch::new(1),
     };

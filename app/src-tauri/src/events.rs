@@ -68,29 +68,34 @@ pub fn classify_receive_error(e: &OrgNodeError) -> ReceiverOutcome {
     match e {
         // Verdicts on an incoming update: each one means "this did not verify",
         // and each is produced only by `verify_envelope_against_chain`.
+        // `StaleEpoch` refuses the update because the chain holds no state
+        // newer than the node's record for it to be the change to.
         OrgNodeError::OrgIdMismatch
-        | OrgNodeError::BadSignature
         | OrgNodeError::StaleSeq { .. }
         | OrgNodeError::MalformedDelta
         | OrgNodeError::DeltaBaseMismatch
         | OrgNodeError::RootMismatch
-        | OrgNodeError::StaleEpoch { .. } => ReceiverOutcome::VerifyFailed {
+        | OrgNodeError::StaleEpoch { .. }
+        // A Sequence number other than the chain's epoch (an org-node commit
+        // rule) refuses the received update itself.
+        | OrgNodeError::SeqNotEpoch { .. } => ReceiverOutcome::VerifyFailed {
             // REQ-affyf5: the organisation is absent rather than invented. The
             // service reports the failure without naming one.
             org_id: None,
             message: e.to_string(),
         },
 
-        // Not a verdict: the chain could not be read, the transport failed, the
-        // local store could not supply what the verification needed, or a
-        // value read from the chain, the store or a received snapshot is not
-        // one its type admits (InvalidKey, InvalidField — before org-node
-        // parsed these they surfaced as Chain or Trie, so the class is
-        // unchanged).
+        // Not a verdict: the chain could not be read or answered with an
+        // Organisation state the node refuses (`InvalidOrgPublicKey`, before
+        // anything is verified against it), the transport failed, the local
+        // store could not supply what the verification needed, or a value
+        // read from the store or a received snapshot is not one its type
+        // admits (`InvalidField` — before org-node parsed these they surfaced
+        // as Chain or Trie, so the class is unchanged).
         OrgNodeError::Chain(_)
         | OrgNodeError::OrgNotOnChain
         | OrgNodeError::Trie(_)
-        | OrgNodeError::InvalidKey
+        | OrgNodeError::InvalidOrgPublicKey
         | OrgNodeError::InvalidField { .. } => ReceiverOutcome::ReceiveError {
             message: e.to_string(),
         },

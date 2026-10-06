@@ -1,7 +1,8 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use crate::device_trie::compute_device_root;
+use person::compute_device_root;
+
 use crate::error::OrgMembersError;
 use crate::hasher::TrieHasher;
 use crate::node::{Node, NodeKind};

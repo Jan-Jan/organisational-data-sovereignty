@@ -1,7 +1,9 @@
-use ed25519_dalek::SigningKey;
+mod common;
+
+use common::{device_key, member_key};
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
-use org_members::types::{Handle, P2pDeviceKey, MemberId, Name, P2pMemberKey, MemberLeaf, Surname};
+use org_members::types::{Handle, DevicePublicKey, MemberId, Name, PersonPublicKey, MemberLeaf, Surname};
 use proptest::prelude::*;
 
 type TestTrie = OrgTrie<Blake3Hasher>;
@@ -28,19 +30,6 @@ fn member_id(seed: &str) -> MemberId {
     MemberId::new(hash)
 }
 
-fn member_key(seed: &str) -> P2pMemberKey {
-    let mut bytes = [0u8; 32];
-    let hash: [u8; 32] = blake3::hash(seed.as_bytes()).into();
-    bytes.copy_from_slice(&hash);
-    P2pMemberKey::new(SigningKey::from_bytes(&bytes).verifying_key())
-}
-
-fn device_key(seed: &str) -> P2pDeviceKey {
-    let mut bytes = [0u8; 32];
-    let hash: [u8; 32] = blake3::hash(seed.as_bytes()).into();
-    bytes.copy_from_slice(&hash);
-    P2pDeviceKey::new(SigningKey::from_bytes(&bytes).verifying_key())
-}
 
 fn make_member(handle: &str, variant: u8) -> Option<MemberLeaf> {
     let id = member_id(&format!("{}-id-{}", handle, variant));
@@ -683,11 +672,11 @@ fn pool_id(member_idx: usize) -> MemberId {
     member_id(&format!("{}-id-0", HANDLES[member_idx]))
 }
 
-fn pool_device(member_idx: usize, device_idx: usize) -> P2pDeviceKey {
+fn pool_device(member_idx: usize, device_idx: usize) -> DevicePublicKey {
     device_key(&format!("{}-d-{}", HANDLES[member_idx], device_idx))
 }
 
-fn pool_key(member_idx: usize, variant: u8) -> P2pMemberKey {
+fn pool_key(member_idx: usize, variant: u8) -> PersonPublicKey {
     member_key(&format!("{}-mk-{}", HANDLES[member_idx], variant))
 }
 
@@ -705,7 +694,7 @@ fn pool_member(member_idx: usize) -> MemberLeaf {
     .unwrap()
 }
 
-fn resolve_key(choice: &KeyChoice, member_idx: usize, current: P2pMemberKey) -> P2pMemberKey {
+fn resolve_key(choice: &KeyChoice, member_idx: usize, current: PersonPublicKey) -> PersonPublicKey {
     match choice {
         KeyChoice::Current => current,
         KeyChoice::Seeded(v) => pool_key(member_idx, *v),
@@ -831,11 +820,11 @@ fn uniq_bytes(k: usize) -> [u8; 32] {
     *uniq_mk(k).as_bytes()
 }
 
-fn uniq_mk(k: usize) -> P2pMemberKey {
+fn uniq_mk(k: usize) -> PersonPublicKey {
     member_key(&format!("uniq-key-{}", k))
 }
 
-fn uniq_dk(k: usize) -> P2pDeviceKey {
+fn uniq_dk(k: usize) -> DevicePublicKey {
     device_key(&format!("uniq-key-{}", k))
 }
 

@@ -49,6 +49,18 @@ The part of the membership model another unit's model may import; nothing
 outside it is visible across the unit boundary.
 _Avoid_: shared types, public model
 
+**Device key**:
+The name this unit's requirements and risk controls written before 2026-10-05
+use for a DevicePublicKey (root `docs/CONTEXT.md`), among them REQ-xdx2c2,
+REQ-shk82j, RC-mqtks7 and RC-4apk6w, which are not reworded for a change of
+term.
+_Avoid_: using it in new text; DevicePublicKey is the term
+
+**Device key set**:
+The name the same items use for a Member's set of DevicePublicKeys, the
+`DeviceSlots` a member record holds.
+_Avoid_: using it in new text; say a Member's DevicePublicKeys
+
 **Newtype**:
 A single-field type that gives a value its own type, so it cannot be confused
 with another value of the same representation; either a Validated type or a

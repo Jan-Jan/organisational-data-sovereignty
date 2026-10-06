@@ -8,36 +8,31 @@
 //! identifier and rejection vocabulary).
 
 use ed25519_dalek::SigningKey;
-use org_node::keys::{verify, SigningKeypair};
-use org_node::test_fixtures::member_key;
+use org_node::keys::{SigningKeypair, X25519Keypair};
 use org_node::{implements_copy, implements_display};
 use org_node::{
-    ChainAccount, DeviceSeed, Epoch, MemberSeed, OrgNodeError, OrgPublicKey, OrgSecret,
-    PersonaId, SequenceNumber,
+    ChainAccount, DeviceSeed, Epoch, MemberSeed, OrgNodeError, OrgPrivateKey, OrgPublicKey,
+    OrgSecret, PersonaId, SequenceNumber,
 };
 use rand::rngs::OsRng;
 
-fn curve_key(seed: u8) -> [u8; 32] {
-    *SigningKey::from_bytes(&[seed; 32]).verifying_key().as_bytes()
+/// A valid X25519 public key: the Organisation public key of a fixed secret.
+fn x25519_key(seed: u8) -> [u8; 32] {
+    *OrgPrivateKey::from([seed; 32]).x25519_keypair().org_public_key().unwrap().as_bytes()
 }
 
-/// y = 0: a point of small order. Decompresses.
+/// y = 0 / u = 0: a point of small order. Decompresses as Edwards; refused
+/// by the X25519 rule.
 fn weak_key() -> [u8; 32] {
     [0u8; 32]
 }
 
-/// y = p + 1: a non-canonical encoding of the identity. Decompresses.
+/// p + 1: a non-canonical encoding. Decompresses as Edwards; refused by the
+/// X25519 rule.
 fn non_canonical_key() -> [u8; 32] {
     let mut b = [0xffu8; 32];
     b[0] = 0xee;
     b[31] = 0x7f;
-    b
-}
-
-/// y = 2: not on the curve.
-fn off_curve_key() -> [u8; 32] {
-    let mut b = [0u8; 32];
-    b[0] = 2;
     b
 }
 
@@ -90,56 +85,105 @@ fn secret_types_serialise_as_the_plain_bytes() {
     assert!(postcard::from_bytes::<OrgSecret>(&plain(&bytes)[..31]).is_err());
 }
 
+// Adapted at the merge of master `1feb608` into worktree-person-shared-types:
+// on this branch the Member-as-a-group key is X25519, so a member seed yields
+// an `X25519Keypair` (`MemberSeed::x25519_keypair`, LLR-98ufry) and hands its
+// seed back as a `MemberSeed`; a device seed yields a `SigningKeypair` as on
+// master. LLR-56hc77's `MemberSeed::signing_keypair()` clause does not hold
+// here; its rule — no seed passes through a plain byte array — does.
 /// verifies: LLR-56hc77
 #[test]
 fn a_seed_yields_its_key_pair_and_a_key_pair_its_seed() {
-    let member_kp = SigningKeypair::generate(&mut OsRng);
-    assert_eq!(member_kp.member_seed().signing_keypair().verifying_key(), member_kp.verifying_key());
+    let member_kp = X25519Keypair::generate(&mut OsRng);
+    assert_eq!(member_kp.member_seed().x25519_keypair().public_bytes(), member_kp.public_bytes());
     let device_kp = SigningKeypair::generate(&mut OsRng);
     assert_eq!(device_kp.device_seed().signing_keypair().verifying_key(), device_kp.verifying_key());
-    // The seed is the RFC 8032 secret key: any ed25519 implementation derives
-    // the same key pair from it.
+    // The device seed is the RFC 8032 secret key: any ed25519 implementation
+    // derives the same key pair from it.
     assert_eq!(
-        MemberSeed::from([0x11; 32]).signing_keypair().verifying_key(),
+        DeviceSeed::from([0x11; 32]).signing_keypair().verifying_key(),
         SigningKey::from_bytes(&[0x11; 32]).verifying_key()
     );
 }
 
+// Adapted at the same merge: master signed and verified with both seed types'
+// key pairs; nothing signs on this branch (REQ-ag6kqm). Each seed at the byte
+// bounds yields a key pair whose public key is valid in its role.
 /// verifies: LLR-56hc77
 #[test]
 fn seeds_at_the_byte_bounds_yield_working_key_pairs() {
     for bytes in [[0u8; 32], [0xffu8; 32]] {
-        let member = MemberSeed::from(bytes).signing_keypair();
+        let member = MemberSeed::from(bytes).x25519_keypair();
         let device = DeviceSeed::from(bytes).signing_keypair();
-        // The seed type names the role; it does not change the derivation.
-        assert_eq!(member.verifying_key(), device.verifying_key());
-        let sig = member.sign(b"bound");
-        assert!(verify(&member.verifying_key(), b"bound", &sig));
-        assert!(!verify(&member.verifying_key(), b"other", &sig));
+        assert!(member.member_key().is_ok(), "a valid Member-as-a-group key");
+        assert!(device.device_key().is_ok(), "a valid DevicePublicKey");
     }
 }
 
-/// verifies: LLR-mmdu38
+// The Organisation private key is a secret type like the three above, and the
+// only way to its key pair and back. No requirement stated it until the
+// merge of master `1feb608`. Normal case: a fresh key, its key pair, its
+// public key and the round trip; boundary bytes still yield a valid
+// Organisation public key.
+/// verifies: LLR-322xfu, LLR-56hc77
 #[test]
-fn org_public_key_accepts_every_curve_point_unchanged() {
-    for bytes in [curve_key(0x11), weak_key(), non_canonical_key()] {
+fn the_organisation_private_key_is_a_secret_type_and_the_only_way_to_its_key_pair() {
+    let bytes = [0x5au8; 32];
+    let key = OrgPrivateKey::from(bytes);
+    assert_eq!(key.expose_secret(), &bytes);
+    assert_eq!(format!("{key:?}"), "OrgPrivateKey([REDACTED])");
+    assert_eq!(format!("{:#?}", Some(OrgPrivateKey::from([0u8; 32]))), "Some(\n    OrgPrivateKey([REDACTED]),\n)");
+    assert_eq!(key.clone(), key);
+    assert_ne!(OrgPrivateKey::from([1u8; 32]), key);
+    assert!(!implements_display!(OrgPrivateKey) && !implements_copy!(OrgPrivateKey));
+    assert_eq!(plain(&key), plain(&bytes), "serialises as the plain bytes");
+    assert_eq!(postcard::from_bytes::<OrgPrivateKey>(&plain(&bytes)).unwrap(), key);
+    assert!(postcard::from_bytes::<OrgPrivateKey>(&plain(&bytes)[..31]).is_err(), "31 bytes are not a key");
+
+    let pair = key.x25519_keypair();
+    assert_eq!(pair.org_private_key(), key, "the key pair hands back the same secret");
+    assert_eq!(pair.org_private_key().x25519_keypair().public_bytes(), pair.public_bytes());
+    assert_eq!(
+        pair.org_public_key().unwrap().as_bytes(),
+        &curve25519_dalek::montgomery::MontgomeryPoint::mul_base_clamped(bytes).to_bytes(),
+        "the Organisation public key is the X25519 public key of the secret (RFC 7748)"
+    );
+    for boundary in [[0u8; 32], [0xffu8; 32]] {
+        let public = OrgPrivateKey::from(boundary).x25519_keypair().org_public_key();
+        assert!(public.is_ok(), "a secret of {boundary:?} yields a valid Organisation public key");
+    }
+}
+
+// Was master's `org_public_key_accepts_every_curve_point_unchanged`
+// (LLR-mmdu38's Edwards-point clause, which does not hold on this branch):
+// the parse accepts what `person`'s X25519 rule accepts — here a key pair's
+// public key and the canonical twist point u = 2, which master refused as off
+// the Edwards curve — and keeps the bytes unchanged.
+/// verifies: LLR-3jjgtw, LLR-mmdu38
+#[test]
+fn org_public_key_accepts_valid_x25519_keys_unchanged() {
+    let mut twist = [0u8; 32];
+    twist[0] = 2;
+    for bytes in [x25519_key(0x11), twist] {
         let key = OrgPublicKey::parse(&bytes).unwrap();
         assert_eq!(key.as_bytes(), &bytes);
         assert_eq!(OrgPublicKey::try_from(bytes).unwrap(), key);
         assert_eq!(plain(&key), plain(&bytes), "serialises as the plain bytes");
         assert_eq!(postcard::from_bytes::<OrgPublicKey>(&plain(&bytes)).unwrap(), key);
     }
-    let member = member_key(0x11);
-    assert_eq!(OrgPublicKey::from(&member).as_bytes(), member.as_bytes());
 }
 
-/// verifies: LLR-mmdu38
+// Was master's `org_public_key_refuses_bytes_off_the_curve` (`InvalidKey`):
+// the X25519 rule refuses the small-order u = 0 and the non-canonical p + 1,
+// both of which master accepted, with `InvalidOrgPublicKey`, on decode too.
+/// verifies: LLR-3jjgtw, LLR-mmdu38
 #[test]
-fn org_public_key_refuses_bytes_off_the_curve() {
-    let bytes = off_curve_key();
-    assert_eq!(OrgPublicKey::parse(&bytes), Err(OrgNodeError::InvalidKey));
-    assert_eq!(OrgPublicKey::try_from(bytes), Err(OrgNodeError::InvalidKey));
-    assert!(postcard::from_bytes::<OrgPublicKey>(&plain(&bytes)).is_err());
+fn org_public_key_refuses_what_the_x25519_rule_refuses() {
+    for bytes in [weak_key(), non_canonical_key()] {
+        assert_eq!(OrgPublicKey::parse(&bytes), Err(OrgNodeError::InvalidOrgPublicKey));
+        assert_eq!(OrgPublicKey::try_from(bytes), Err(OrgNodeError::InvalidOrgPublicKey));
+        assert!(postcard::from_bytes::<OrgPublicKey>(&plain(&bytes)).is_err());
+    }
 }
 
 /// verifies: LLR-mmdu38

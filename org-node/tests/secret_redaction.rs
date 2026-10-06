@@ -9,12 +9,17 @@
 use org_members::{Handle, Name, RootHash, Surname};
 use org_node::ids::OrgId;
 use org_node::store::{self, OrgRecord, PersonaRecord, PersonaStatus, StoreData};
-use org_node::test_fixtures::{admit_member_delta, member_key};
+use org_node::test_fixtures::{admit_member_delta, member_key, org_public_key};
 use org_node::transport::wire::WireMessage;
 use org_node::{
-    DeviceSeed, Epoch, MemberSeed, OrgPublicKey, OrgSecret, PersonaId, SequenceNumber,
-    SignedDeltaEnvelope,
+    DeviceSeed, Envelope, Epoch, MemberSeed, OrgPrivateKey, OrgSecret, PersonaId, SequenceNumber,
 };
+
+/// The Organisation private key every `org` record holds (this branch's
+/// field, REQ-ech45n): distinctive, so a rendering of it is caught.
+fn org_private() -> [u8; 32] {
+    sentinel(0x80)
+}
 
 /// 32 bytes counting up from `start`, so each secret is distinctive.
 fn sentinel(start: u8) -> [u8; 32] {
@@ -80,25 +85,28 @@ fn org(secret: Option<[u8; 32]>) -> OrgRecord {
     OrgRecord {
         org_id: OrgId::new([5u8; 20]),
         root_hash: RootHash::new([0x11u8; 32]),
-        org_pub_key: OrgPublicKey::from(&admin),
+        org_pub_key: org_public_key(),
         epoch: Epoch::new(1),
         org_secret: secret.map(OrgSecret::from),
         last_seq: SequenceNumber::new(0),
         admin_member_key: admin,
         trie_members: vec![],
         proxy_account: None,
+        org_private_key: Some(OrgPrivateKey::from(org_private())),
     }
 }
 
 fn wire(secret: [u8; 32]) -> WireMessage {
-    let admin = MemberSeed::from([1u8; 32]).signing_keypair();
+    let admin = MemberSeed::from([1u8; 32]).x25519_keypair();
     let (delta, _) = admit_member_delta(&admin);
-    let envelope =
-        SignedDeltaEnvelope::build(OrgId::new([5u8; 20]), SequenceNumber::new(1), &delta, &admin).unwrap();
+    let envelope = Envelope::build(OrgId::new([5u8; 20]), SequenceNumber::new(1), &delta).unwrap();
     WireMessage { envelope, org_secret: Some(OrgSecret::from(secret)), genesis_snapshot: None }
 }
 
-/// verifies: LLR-bwb9pu
+// Adapted at the merge of master `1feb608` into worktree-person-shared-types:
+// the Organisation record also holds this branch's Organisation private key,
+// which renders as its redaction marker and none of its bytes (LLR-2dvhz8).
+/// verifies: LLR-bwb9pu, LLR-2dvhz8
 #[test]
 fn records_and_wire_messages_never_render_secret_bytes() {
     let (member, device, secret) = (sentinel(0xd0), sentinel(0x10), sentinel(0x40));
@@ -114,6 +122,31 @@ fn records_and_wire_messages_never_render_secret_bytes() {
     for rendered in [format!("{o:?}"), format!("{o:#?}"), format!("{data:?}"), format!("{data:#?}"), format!("{w:?}"), format!("{w:#?}")] {
         assert_not_rendered(&rendered, &secret, "Organisation secret");
         assert!(rendered.contains("OrgSecret([REDACTED])"));
+    }
+    for rendered in [format!("{o:?}"), format!("{o:#?}"), format!("{data:?}"), format!("{data:#?}")] {
+        assert_not_rendered(&rendered, &org_private(), "Organisation private key");
+        assert!(rendered.contains("org_private_key") && rendered.contains("OrgPrivateKey([REDACTED])"));
+    }
+}
+
+// LLR-2dvhz8's "only whether it is set", both ways (review round 4, gate
+// notes): a member's record, which holds no Organisation private key
+// (LLR-3fwykc), renders the field as `None`; the creator's renders it as set,
+// with the redaction marker in place of the bytes.
+/// verifies: LLR-2dvhz8
+#[test]
+fn a_record_debug_says_whether_the_organisation_private_key_is_set() {
+    let mut member_record = org(None);
+    member_record.org_private_key = None;
+    for rendered in [format!("{member_record:?}"), format!("{member_record:#?}")] {
+        let squashed: String = rendered.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(squashed.contains("org_private_key:None"), "an unset key renders as None: {rendered}");
+    }
+    let creator_record = org(None);
+    for rendered in [format!("{creator_record:?}"), format!("{creator_record:#?}")] {
+        let squashed: String = rendered.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(squashed.contains("org_private_key:Some(OrgPrivateKey([REDACTED])"), "a set key renders as set: {rendered}");
+        assert_not_rendered(&rendered, &org_private(), "Organisation private key");
     }
 }
 
@@ -139,14 +172,38 @@ fn secrets_at_the_high_byte_bound_and_many_records_stay_unrendered() {
 
 /// `SigningKeypair` derives `Debug` over ed25519-dalek's `SigningKey`, whose
 /// own `Debug` omits the secret (soup.md, ed25519-dalek); this pins that.
-/// verifies: LLR-bwb9pu
+/// Adapted at the merge of master `1feb608`: a member seed yields an
+/// `X25519Keypair` on this branch, whose hand-written `Debug` renders none of
+/// its bytes either (LLR-98ufry).
+/// verifies: LLR-bwb9pu, LLR-98ufry
 #[test]
 fn a_signing_key_pair_never_renders_its_seed() {
     for seed in [sentinel(0x60), sentinel_down(0xff)] {
-        for kp in [MemberSeed::from(seed).signing_keypair(), DeviceSeed::from(seed).signing_keypair()] {
-            for rendered in [format!("{kp:?}"), format!("{kp:#?}")] {
-                assert_not_rendered(&rendered, &seed, "key pair seed");
+        let device = DeviceSeed::from(seed).signing_keypair();
+        for rendered in [format!("{device:?}"), format!("{device:#?}")] {
+            assert_not_rendered(&rendered, &seed, "device key pair seed");
+        }
+        let member = MemberSeed::from(seed).x25519_keypair();
+        for rendered in [format!("{member:?}"), format!("{member:#?}")] {
+            assert_not_rendered(&rendered, &seed, "member key pair seed");
+        }
+    }
+}
+
+/// The Organisation private key, alone and as its key pair, renders none of
+/// its bytes, at both byte bounds. LLR-bwb9pu, before its amendment of
+/// 2026-10-05, named neither.
+/// verifies: LLR-bwb9pu, LLR-322xfu
+#[test]
+fn the_organisation_private_key_and_its_key_pair_never_render_its_bytes() {
+    for secret in [sentinel(0x90), sentinel_down(0xff), [0u8; 32]] {
+        let key = OrgPrivateKey::from(secret);
+        let pair = key.x25519_keypair();
+        for rendered in [format!("{key:?}"), format!("{key:#?}"), format!("{pair:?}"), format!("{pair:#?}")] {
+            if secret != [0u8; 32] {
+                assert_not_rendered(&rendered, &secret, "Organisation private key");
             }
+            assert!(rendered == "OrgPrivateKey([REDACTED])" || rendered == "X25519Keypair(..)", "{rendered}");
         }
     }
 }

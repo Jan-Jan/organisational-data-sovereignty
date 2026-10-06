@@ -9,24 +9,29 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use org_members::{Handle, Name, Surname};
 use org_node::blobs::{decode, decode_join_request, encode, Invite, JoinRequest};
 use org_node::ids::OrgId;
-use org_node::{DeviceSeed, MemberSeed, OrgPublicKey};
+use org_node::{DeviceSeed, MemberSeed, OrgPrivateKey};
 
 // Ported 2026-10-05 to the typed blob fields of the org-node type-safety
-// change: each key is a real curve point from a seed, where the relocated test
-// used the plain arrays `[1u8; 32]`, `[2u8; 32]`, … the fields no longer hold.
-fn member_key(seed: u8) -> org_members::P2pMemberKey {
-    MemberSeed::from([seed; 32]).signing_keypair().member_key()
+// change: each key is a valid key of its kind from a seed, where the relocated
+// test used the plain arrays `[1u8; 32]`, `[2u8; 32]`, … the fields no longer
+// hold. The Member-as-a-group key is X25519 (person's PersonPublicKey).
+fn member_key(seed: u8) -> org_members::PersonPublicKey {
+    MemberSeed::from([seed; 32]).x25519_keypair().member_key().unwrap()
 }
 
-fn device_key(seed: u8) -> org_members::P2pDeviceKey {
-    DeviceSeed::from([seed; 32]).signing_keypair().device_key()
+fn device_key(seed: u8) -> org_members::DevicePublicKey {
+    DeviceSeed::from([seed; 32]).signing_keypair().device_key().unwrap()
 }
 
 fn an_invite() -> Invite {
     Invite {
         org_id: OrgId::new([0xabu8; 20]),
-        org_pub_key: OrgPublicKey::from(&member_key(1)),
+        // A valid X25519 Organisation public key: `OrgPublicKey` is built only
+        // through `parse` (REQ-8jb4ny), on decode too.
+        org_pub_key: OrgPrivateKey::from([1u8; 32]).x25519_keypair().org_public_key().unwrap(),
+        // A valid Member-as-a-group key: the Invite parses it on decode too.
         admin_member_key: member_key(2),
+        // A valid DevicePublicKey: the Invite parses it on decode too.
         admin_device_key: device_key(3),
         admin_node_addr: vec![4, 5, 6],
     }
@@ -43,7 +48,7 @@ fn a_join_request() -> JoinRequest {
     }
 }
 
-// verifies: REQ-xa6smf, LLR-g9vmbx
+// verifies: LLR-g9vmbx
 #[test]
 fn an_invite_round_trips_carrying_every_field() {
     let original = an_invite();
@@ -58,7 +63,7 @@ fn an_invite_round_trips_carrying_every_field() {
     assert_eq!(back.admin_node_addr, original.admin_node_addr);
 }
 
-// verifies: REQ-xa6smf, LLR-kkj64b
+// verifies: LLR-kkj64b
 #[test]
 fn a_join_request_round_trips_carrying_every_field() {
     let original = a_join_request();

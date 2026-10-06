@@ -50,3 +50,8 @@ the receive paths do with the node's own membership.
 
 *Annotated 2026-10-05 by review round 8.* LLR-cja9zv states the commit this
 report books, and now names it. The pin carries LLR-cja9zv.
+
+*Annotated 2026-10-05 by review round 1 of `worktree-worktree-person-shared-types`
+(finding-6); reworded the same day by docs/plans/2026-10-05-switch-trim.md.* The
+items the `affects:` line names are amended in place on that branch rather
+than superseded, so the line names them alone.

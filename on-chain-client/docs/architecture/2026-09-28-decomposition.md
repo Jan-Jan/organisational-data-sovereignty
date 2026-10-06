@@ -48,7 +48,11 @@ reported — a block reference, a decoded event, an event paired with the
 contract that emitted it, the notification a subscriber receives, the typed
 error a caller of the client surface is handed, and the stream those
 observations arrive on.
-traces: REQ-2qa5r5, REQ-5upq6n, REQ-ntn4ss
+traces: REQ-2qa5r5, REQ-54txzh, REQ-5upq6n, REQ-ntn4ss
+
+(Note, 2026-10-05: REQ-2qa5r5 is superseded by REQ-54txzh, which names the
+second field the Organisation public key. It stays in the trace above as
+history, beside its replacement.)
 
 `SubscribedEvent` distinguishes an observation taken from a best block from one
 taken from a finalised block. That distinction is carried by the type but
@@ -61,7 +65,11 @@ requirement here. An LLR must refine a requirement; there is none to refine.
 **LLR-xv7auy**: each on-chain field is a public, distinct newtype whose width is
 the ABI's — `OnChainRootHash` and `OrgPubKey` thirty-two bytes, `Epoch` a
 `u64`, `OrgAdmin` twenty — so that two fields of equal width cannot be
-substituted for one another. satisfies: REQ-2qa5r5
+substituted for one another. satisfies: REQ-2qa5r5, REQ-54txzh
+
+(Note, 2026-10-05: LLR-xv7auy satisfies REQ-54txzh. REQ-2qa5r5, which
+REQ-54txzh supersedes, stays in the line above as history, beside its
+replacement.)
 
 **LLR-z8rrkr**: a decoded event is carried together with the twenty-byte
 address of the contract that emitted it, as one value, so that the address
@@ -205,6 +213,7 @@ satisfies: REQ-4astjb
 **LLR-nq7nhg**: the ninety-six bytes are read as the Membership root in the
 first slot, the Organisation's signing key in the second and the Epoch in the
 third, each at its own thirty-two byte offset. satisfies: REQ-4astjb
+superseded-by: LLR-hezpr7
 
 **LLR-emp3g9**: the Epoch slot is a big-endian `uint256` whose high twenty-four
 bytes must all be zero; a non-zero byte anywhere in them is refused, never
@@ -533,6 +542,9 @@ carry both sides and fourteen carry one**. That count is reported here rather
 than left for a reader to rediscover, and the fourteen are argued rather than
 closed by inventing cases — the same course this unit's requirements ledger
 took for REQ-2qa5r5 and REQ-n6v896.
+*(Note 2026-10-05, review round 3, finding-13: REQ-2qa5r5 is superseded by
+REQ-54txzh, which carries the same exemption in
+`../requirements/2026-10-05-organisation-public-key.md`.)*
 
 **Twelve of the fourteen have their other side inside the same software
 item, carried by a sibling LLR.** That is an artifact of how these LLRs are
@@ -546,6 +558,7 @@ exactly as complete.
 |---|---|
 | LLR-b3s7st (resolves the pinned version) | LLR-u8ajby (refuses every other) — and the reverse |
 | LLR-nq7nhg (decodes the three fields) | LLR-sq76u3 (refuses every other length) — and the reverse |
+| LLR-hezpr7 (decodes the three fields, the second as the Organisation public key; supersedes LLR-nq7nhg) | LLR-sq76u3 (refuses every other length) — and the reverse |
 | LLR-9qp3k7 (the admin is read from both shapes) | LLR-kfr75c (a non-matching admin is refused) |
 | LLR-u2e389 (the Emitting contract is returned) | LLR-8242kq, LLR-n6gghu (malformed payloads refused) |
 | LLR-rjcqg3 (unknown topic yields nothing) | LLR-6tjhgk (a known one round-trips every field) |
@@ -553,6 +566,12 @@ exactly as complete.
 | LLR-mzh8df (an Epoch above range is refused) | LLR-6tjhgk's `root_updated_round_trips_every_field` (an in-range Epoch decodes) |
 | LLR-2y9qdc (the wrap at the top of the space) | LLR-bhwsn6 (ordinary carry, four cases) |
 | LLR-v62yjq (three consecutive distinct keys) | LLR-2y9qdc (the boundary of the same arithmetic) |
+
+(Amended 2026-10-05: LLR-nq7nhg is superseded by LLR-hezpr7
+(`2026-10-05-organisation-public-key.md`), which restates the same decoding
+with the second field named the Organisation public key. LLR-hezpr7 takes
+LLR-nq7nhg's pairing with LLR-sq76u3; the LLR-nq7nhg row is kept as the record
+of the count above.)
 
 **The other two have no sibling at all, and their exemptions differ from each
 other.**
@@ -591,6 +610,8 @@ test at `:166`, `:167` and `:175`. All four were re-run in the 2026-09-28
 falsifiability sweep. This is the same argument, on the same grounds, that this
 unit's requirements ledger records for REQ-2qa5r5, the high-level requirement
 LLR-xv7auy refines.
+*(Note 2026-10-05, review round 3, finding-13: LLR-xv7auy also satisfies
+REQ-54txzh, which supersedes REQ-2qa5r5 and carries the same argument.)*
 
 The same holds for its **distinctness** clause, which the falsifiability sweep
 cut on 2026-09-28 and review round 5 restored on 2026-09-29 after measuring a
@@ -750,6 +771,9 @@ route exists for each, and both red this unit's gate.
   decisively, **`type_widths`** — the very target annotated
   `verifies: REQ-2qa5r5, LLR-xv7auy`. The claim is evidence-bearing at this
   unit's own gate, through its own carrier.
+  *(Note 2026-10-05, review round 3, finding-13: the annotation now reads
+  `verifies: REQ-2qa5r5, REQ-54txzh, LLR-xv7auy`; REQ-54txzh supersedes
+  REQ-2qa5r5, which the test still verifies under its earlier name.)*
 
 * **LLR-z8rrkr — "as one value", and the mutation round 4 offered for it was
   the wrong one.** Round 4 re-typed `parse_revive_event` to return

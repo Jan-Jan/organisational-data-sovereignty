@@ -77,7 +77,7 @@ for one item, it is that one.
 together with the vocabulary in which every refusal is reported — a typed
 variant per rejection path **on the receive-and-commit path**, so a caller can
 state *why* a change was refused rather than only that it was.
-traces: REQ-gju89b, REQ-9g6as6, REQ-bcxz96, REQ-y7tsft
+traces: REQ-gju89b, REQ-9g6as6, REQ-bcxz96, REQ-y7tsft, REQ-8jb4ny, REQ-ech45n
 
 *Amended 2026-10-05 by the org-node type-safety change, which re-homed its
 value types here at its merge of this file.* The item also owns
@@ -101,6 +101,22 @@ sits under this item in `2026-10-04-type-safety.md`, because four of its five
 clauses constrain `OrgPublicKey` in `types.rs`; its cache clause is named by
 SDD-pa6p7w. It had been placed under SDD-pa6p7w, whose section claimed
 `types.rs` for it.)*
+
+*(Note 2026-10-05, at the merge of master `1feb608` into
+`worktree-person-shared-types`; reworded the same day by
+docs/plans/2026-10-05-switch-trim.md: on that branch `types.rs` also holds
+`OrgPrivateKey`, and `OrgPublicKey` is an X25519 key. LLR-mmdu38 and
+LLR-ayrdr8 are amended in place, in `2026-10-04-type-safety.md`. LLR-322xfu
+(`OrgPrivateKey`), LLR-3jjgtw (`OrgPublicKey`'s parse) and LLR-sj7cd5
+(`ensure_distinct_from`) also constrain `types.rs`. These three are in
+`2026-10-05-unsigned-envelope.md`, LLR-3jjgtw under SDD-sxp8hb, which
+builds the Organisation's key pair.)*
+
+*(Re-traced 2026-10-05 by review round 3, finding-9, change
+`worktree-person-shared-types`: `types.rs` holds `OrgPublicKey`, whose parse
+refuses a key that is not a valid X25519 key, and `OrgPrivateKey`, so the item
+traces REQ-8jb4ny and REQ-ech45n. LLR-322xfu sits under this item in
+`2026-10-05-unsigned-envelope.md`; it is derived since that round.)*
 
 *Qualified 2026-10-04 by review round 3, with LLR-z8fubr below and for the same
 measurement: "one typed variant per rejection path" is true of
@@ -153,11 +169,28 @@ satisfies: REQ-9g6as6
 
 `org-node/src/keys.rs`
 
-**SDD-sxp8hb**: the ed25519 keypair a node holds, and the two roles one
-verifying key plays — the `P2pMemberKey` that signs a change to membership, and
-the `P2pDeviceKey` that is both the node's leaf in the trie and its transport
-identity.
-traces: REQ-ag6kqm, REQ-xa6smf, REQ-ztdza4, REQ-y7tsft
+**SDD-sxp8hb**: the key pairs a node holds and how each is made from its
+secret: the ed25519 device keypair, whose verifying key is the node's
+DevicePublicKey in the trie and its transport identity, and the X25519 key
+pairs behind a Member-as-a-group key and behind the Organisation public key,
+each from its own secret (the member seed and the Organisation private key).
+The Organisation public key a node publishes is built from its key pair only
+through `OrgPublicKey`'s parse, `person`'s X25519 validity check. No key here
+signs or verifies anything.
+traces: REQ-ag6kqm, REQ-8jb4ny, REQ-ech45n, REQ-y7tsft
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item described one ed25519 keypair whose verifying key both signed changes to
+membership as the `P2pMemberKey` and served as the `P2pDeviceKey`. Nothing
+signs now, and a Member-as-a-group key is an X25519 key from its own seed.
+LLR-3jjgtw and LLR-98ufry also constrain this item; they are in
+`2026-10-05-unsigned-envelope.md`. *(Corrected 2026-10-05 by review round 3,
+finding-9: this also named LLR-sj7cd5 and LLR-322xfu, which constrain
+`create_organisation` (SDD-89es4z) and `types.rs` (SDD-swtd3w) and sit under
+those items.)* LLR-56hc77 and LLR-bwb9pu,
+amended in place, are in `2026-10-04-type-safety.md`.
 
 *Amended 2026-10-05 by the org-node type-safety change:* a keypair is built
 from a seed only through the typed seeds `MemberSeed` and `DeviceSeed`, and
@@ -169,11 +202,18 @@ also constrained by LLR-bwb9pu, under SDD-af5vnt — `SigningKeypair`'s `Debug`
 shows none of its seed, through ed25519-dalek's `SigningKey` — so the item
 traces REQ-y7tsft too.)*
 
-**LLR-e58j8m**: a keypair rebuilt from the seed it hands back — as either
-role, `member_seed().signing_keypair()` or `device_seed().signing_keypair()`
-— produces the same verifying key and the same signature over the same message
-as the keypair it came from.
-satisfies: REQ-ag6kqm
+**LLR-e58j8m**: a keypair rebuilt from its persisted seed has the same public
+key as the keypair it came from: for a `SigningKeypair`, the same verifying
+key and the same DevicePublicKey; for an `X25519Keypair`, the same X25519
+public key.
+satisfies: derived
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item also required the same signature over the same message. Nothing in
+org-node signs. It is derived now, since no requirement asks for a signature;
+it is assessed in `org-node/docs/risk/2026-10-05-envelope-authenticity.md`.
 
 *(Amended 2026-10-05 by the org-node type-safety change: this read "a keypair
 rebuilt from `to_seed`". That change removed `to_seed` and `from_seed`
@@ -181,57 +221,136 @@ rebuilt from `to_seed`". That change removed `to_seed` and `from_seed`
 a `MemberSeed` or a `DeviceSeed`. `a_keypair_rebuilt_from_its_seed_signs_identically`
 checks both roles.)*
 
-**LLR-ctzkv7**: `member_key()` and `device_key()` both wrap **this keypair's one
-verifying key**, so a node's trie identity and its signing identity cannot
-diverge.
+**LLR-ctzkv7**: a Persona's two public keys come from two seeds by two
+algorithms. `X25519Keypair::member_key` is the X25519 public key of the member
+seed (RFC 7748: the clamped seed times the base point) and is always a valid
+`PersonPublicKey`. `SigningKeypair::device_key` wraps the ed25519 verifying
+key of the device seed.
 satisfies: REQ-ztdza4, REQ-xa6smf
 
-**LLR-na7p4w**: `verify` returns true for a signature this keypair produced over
-the message it is checked against.
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item said `member_key()` and `device_key()` wrap one verifying key. A
+Member-as-a-group key is now an X25519 key from its own seed.
+
+*Parent stale, noted 2026-10-05 by review round 4 (finding-5).* Since the
+amendment of 2026-10-05, REQ-ztdza4 and REQ-xa6smf check nothing about a
+sender's keys, so neither implies this item, and `satisfies:` above names
+them only until it is re-traced. By owner ruling of 2026-10-05 the re-trace is
+left to chain-authority's change 1.
+
+**LLR-na7p4w**: `VerifyContext` holds the expected Organisation, the
+Sequence-number guard and the last committed epoch, and no key:
+`verify_envelope_against_chain` decides from the Envelope, that context and
+the chain reader alone.
 satisfies: REQ-ag6kqm
 
-**LLR-9fvb3y**: `verify` returns false for a signature produced by any other
-key over that same message.
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item stated that `verify` accepts a signature the keypair produced. org-node
+verifies no signature (REQ-ag6kqm); `keys::verify` is gone.
+
+**LLR-9fvb3y**: a genuine Envelope relayed by a device other than the one that
+built it is committed on both Receive operations when it verifies against the
+chain: the delivering device is not an input to verification.
 satisfies: REQ-ag6kqm
 
-## SDD-kk2y3e — The signed Envelope
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item stated that `verify` refuses a signature by any other key. Nothing is
+signed, and the device that delivers an Envelope decides nothing (REQ-ag6kqm,
+REQ-xa6smf, REQ-ztdza4).
+
+## SDD-kk2y3e — The Envelope
 
 `org-node/src/envelope.rs`
 
-**SDD-kk2y3e**: the authenticated wire form of a change to membership — the
-byte transcript that is signed, what that transcript binds together, and the
-two operations a receiver performs on it before anything else looks at the
-change itself.
+**SDD-kk2y3e**: the wire form of a change to membership. It binds the
+Organisation identifier, the Sequence number and the encoded Change set, and
+carries no signature. The item also owns the decode a receiver performs on it.
 traces: REQ-ag6kqm, REQ-gju89b, REQ-9g6as6
 
-**LLR-e7s4ye**: the signed transcript is exactly the Organisation identifier's
-twenty bytes, then the Sequence number as eight little-endian bytes, then the encoded
-delta, concatenated in that order and nothing else.
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item described a signed transcript and the signature check a receiver ran
+before anything else. (The section heading read "The signed Envelope".)
+
+**LLR-e7s4ye**: an Envelope's wire form is the postcard encoding of the
+Organisation identifier's twenty bytes, then the Sequence number, then the
+Change set bytes, in that order and nothing else; no transcript is signed.
 satisfies: REQ-ag6kqm
 
-**LLR-p8uu47**: `build` encodes the delta with postcard and signs the transcript
-taken over those encoded bytes, so what is signed is what is transmitted.
-satisfies: REQ-ag6kqm
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item described the signed transcript, which no longer exists. The three fields
+it bound are what the wire form carries.
+
+**LLR-p8uu47**: `Envelope::build` sets the Organisation identifier and the
+Sequence number it is given, and sets as the Change set bytes the postcard
+encoding of the delta. That encoding is canonical: decoding the transmitted
+bytes and encoding them again reproduces them exactly.
+satisfies: REQ-gju89b
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item said `build` signs the transcript over the encoded bytes. Nothing is
+signed.
 
 **LLR-v2y6sw**: `decode_delta` returns `MalformedDelta` for any byte string that
 is not a valid encoded delta, and does not panic.
 satisfies: REQ-9g6as6
 
-**LLR-ybn5pr**: altering the Organisation identifier of a built envelope makes
-its signature fail to verify.
+**LLR-ybn5pr**: an Envelope built for one Organisation is refused with
+`OrgIdMismatch` by a receiver expecting another, before its Change set is
+decoded.
 satisfies: REQ-ag6kqm, REQ-gju89b
 
-**LLR-cs4mpb**: altering the Sequence number of a built Envelope makes its signature
-fail to verify.
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item said altering the Organisation identifier breaks the signature. With no
+signature, the receiver's expected Organisation is what refuses it.
+
+**LLR-cs4mpb**: an Envelope whose Sequence number is at or below the
+receiver's mark is refused with `StaleSeq` before its Change set is decoded,
+and one whose Sequence number is above the mark but not the epoch of the chain
+state it is verified against is refused with `SeqNotEpoch`.
 satisfies: REQ-ag6kqm
 
-**LLR-9sknpa**: altering the delta bytes of a built envelope makes its signature
-fail to verify.
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item said altering the Sequence number breaks the signature. The mark
+(REQ-6yu72z) and the chain's epoch (REQ-txvtm9) refuse it now.
+
+**LLR-9sknpa**: Change set bytes that do not decode are refused with
+`MalformedDelta`, and a Change set that decodes but does not extend the
+receiver's record is refused with `DeltaBaseMismatch`.
 satisfies: REQ-ag6kqm
 
-**LLR-pzde8b**: `verify_signature` returns false when the envelope is checked
-against any key other than the one that signed it.
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item said altering the delta bytes breaks the signature. The decode and the
+base-root check refuse such bytes now, and the root match refuses any that
+survive both.
+
+**LLR-pzde8b**: an `Envelope` holds exactly the Organisation identifier, the
+Sequence number and the Change set bytes; it has no signature field and no
+`verify_signature`.
 satisfies: REQ-ag6kqm
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item stated that `verify_signature` refuses any key but the signer's. It is
+gone with the signature.
 
 ## SDD-d8ktxa — The replay watermark
 
@@ -265,19 +384,36 @@ satisfies: REQ-mr5abb
 **SDD-na9nc3**: the single decisive property of this unit — a received change
 is committed only if applying it to the local trie reproduces a root that
 independently matches the root the chain reports at an epoch newer than the
-last one committed. The item owns both the checks and **the order they run
-in**, which is itself security-critical: the cheap authenticity checks come
-first so that untrusted bytes are never decoded on behalf of an unauthenticated
-sender, and the watermark moves only after the decisive check has passed.
-traces: REQ-wp2nyc, REQ-bvh8v6, REQ-8gz8bu, REQ-gju89b, REQ-ag6kqm, REQ-6yu72z, REQ-mr5abb, REQ-nhe2zu, REQ-bcxz96
+last one committed, with the Sequence number equal to that epoch. The item
+owns both the checks and **the order they run in**, which is itself
+security-critical: the cheap checks on what the Envelope names and its
+Sequence number come first, so stale or misaddressed bytes are never decoded,
+and the watermark moves only after the decisive check has passed. Nothing
+about who delivered the Envelope is checked.
+traces: REQ-wp2nyc, REQ-bvh8v6, REQ-8gz8bu, REQ-gju89b, REQ-ag6kqm, REQ-6yu72z, REQ-mr5abb, REQ-nhe2zu, REQ-txvtm9, REQ-bcxz96
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item put an authenticity check first, on an unauthenticated sender. Nothing
+about the sender is checked (REQ-ag6kqm). LLR-9f5hmr, in
+`2026-10-05-unsigned-envelope.md`, also refines this item.
 
 **LLR-4fbuy8**: an envelope naming another Organisation is refused with
 `OrgIdMismatch` **before the Change set it carries is decoded**.
 satisfies: REQ-gju89b
 
-**LLR-mcdh85**: the signature is checked **before the delta bytes are decoded**,
-and an envelope that fails it is refused with `BadSignature`.
+**LLR-mcdh85**: `verify_envelope_against_chain` checks no signature and no
+sender: after the Organisation binding, the only check before the Change set
+bytes are decoded is the Sequence-number mark, and bytes that do not decode
+are refused with `MalformedDelta`.
 satisfies: REQ-ag6kqm
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item required the signature to be checked before the delta bytes are decoded,
+refusing with `BadSignature`.
 
 **LLR-xpbkp5**: the sequence check runs **before the delta bytes are decoded**,
 so a replayed envelope is refused without its Change set bytes being parsed.
@@ -300,7 +436,7 @@ satisfies: REQ-8gz8bu
 **LLR-8n95rf**: the candidate trie produced by applying the delta must verify
 against the root the chain reported, refused with `RootMismatch`; this is the
 **last** check, so no earlier step can have committed anything on its behalf.
-satisfies: REQ-wp2nyc, REQ-nhe2zu
+satisfies: REQ-wp2nyc, REQ-nhe2zu, REQ-txvtm9
 
 **LLR-d6kvbx**: a verification that succeeds returns a sequence guard whose
 mark is the envelope's sequence number, and a verification that fails returns
@@ -324,7 +460,7 @@ and `OrgStateCache` *(amended 2026-10-05, see below)*
 membership root and epoch are, as an interface rather than a client — the root
 returned here must come from a path the sender of a change does not control,
 and expressing it as a trait is what makes that substitutable and testable.
-traces: REQ-bvh8v6, REQ-nhe2zu
+traces: REQ-bvh8v6, REQ-nhe2zu, REQ-txvtm9, REQ-8jb4ny
 
 *Amended 2026-10-05 by the org-node type-safety change.* That change split the
 parse of a chain state and its cache out of `OnChainReader` into
@@ -341,6 +477,12 @@ also constrained by LLR-mmdu38, which now sits under SDD-swtd3w in
 Its last clause is this item's: `org_state_from_chain` applies the parse, and
 `OrgStateCache` serves no state after a fetched state the parse refuses. This
 item owns no part of `types.rs`.)*
+
+*(Re-traced 2026-10-05 by review round 3, finding-9, change
+`worktree-person-shared-types`: `OrgState::from_chain` in `chain.rs` and
+`org_state_from_chain` refuse an Organisation state whose Organisation public
+key is not a valid X25519 key, so the item traces REQ-8jb4ny. The parse itself
+is LLR-3jjgtw's, under SDD-sxp8hb.)*
 
 **LLR-rm9x4z**: `get_org_state` returns `None` for an Organisation with no
 on-chain slot and `Some` for one that has state, distinguishing **absence from
@@ -419,6 +561,14 @@ authenticated by the QUIC handshake, **never from the Wire message body**, so th
 sender identity a caller cross-checks cannot be chosen by the sender.
 satisfies: REQ-ztdza4, REQ-xa6smf
 
+*Note 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* No
+caller in org-node compares this key with anything since that ruling
+(REQ-xa6smf, REQ-ztdza4 as amended); the item still holds of the key
+`recv_one` returns, and "a caller cross-checks" names a use no receive path
+makes.
+
 **LLR-wwunf4**: in Loopback mode the endpoint binds only loopback addresses and
 offers a peer only loopback addresses for dialling.
 satisfies: REQ-db6s7q
@@ -456,7 +606,7 @@ decoder rather than by the read.*
 **SDD-af5vnt**: where every secret this node holds rests — the member and
 device seeds and the Organisation secret — and the form the file takes, which
 is ciphertext under a passphrase-derived key and nothing else.
-traces: REQ-hzm4kt, REQ-qn2erx, REQ-y7tsft
+traces: REQ-hzm4kt, REQ-qn2erx, REQ-y7tsft, REQ-ech45n
 
 *Amended 2026-10-05 by the org-node type-safety change:* the item also owns
 the store encryption key's type, the records the store holds — each field in
@@ -477,6 +627,18 @@ decode is named by SDD-vee2fq, the import operations by SDD-rx2yvy, and
 constrain code outside `store.rs`: LLR-g76zqd is named by SDD-vee2fq
 (`JoinRequest`) and SDD-89es4z (`create_persona`), and LLR-bwb9pu by
 SDD-kwncn7 (`WireMessage`) and SDD-sxp8hb (`SigningKeypair`).)*
+
+*(Note 2026-10-05, at the merge of master `1feb608` into
+`worktree-person-shared-types`; reworded the same day by
+docs/plans/2026-10-05-switch-trim.md: on that branch the store also holds the
+Organisation private key, in `OrgRecord.org_private_key` (LLR-3fwykc,
+LLR-2dvhz8, in `2026-10-05-unsigned-envelope.md`). LLR-bwb9pu and LLR-8bum44
+are amended in place, in `2026-10-04-type-safety.md`.)*
+
+*(Re-traced 2026-10-05 by review round 3, finding-9, change
+`worktree-person-shared-types`: the store keeps the Organisation private key,
+so the item traces REQ-ech45n. LLR-3fwykc and LLR-2dvhz8 sit under this item
+in `2026-10-05-unsigned-envelope.md`.)*
 
 **LLR-wusj89**: the store file is exactly a twenty-four byte nonce followed by
 the AEAD ciphertext of the encoded store, with no cleartext header.
@@ -520,9 +682,22 @@ This item is also constrained by it, for `decode_join_request`,
 for `JoinRequest`'s typed fields.)*
 
 **LLR-g9vmbx**: an Invite encoded and decoded yields an Invite equal to the
-original, carrying the Organisation identifier, its Published signing key, and the
-administrator's Member-as-a-group key, device key and dialling address.
+original. It carries the Organisation identifier, its Organisation public key,
+and the administrator's Member-as-a-group key, DevicePublicKey and dialling
+address.
 satisfies: REQ-xa6smf
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item said the Invite carries the Published signing key; the chain's key is the
+Organisation public key.
+
+*Parent stale, noted 2026-10-05 by review round 4 (finding-5).* Since the
+amendment of 2026-10-05, REQ-xa6smf requires no Invite, so it does not imply
+this item, and `satisfies:` above names it only until the item is re-traced.
+By owner ruling of 2026-10-05 the re-trace is left to chain-authority's
+change 1.
 
 **LLR-kkj64b**: a Join request encoded and decoded yields a Join request equal
 to the original.
@@ -545,11 +720,17 @@ satisfies: REQ-9g6as6
 **SDD-msb6xh**: the exact bytes that ask the contract to move an
 Organisation's Membership root forward — the one part of the write path that
 is pure, and therefore the one part a test can pin without a chain.
-traces: REQ-nhe2zu
+traces: REQ-nhe2zu, REQ-txvtm9
 
 **LLR-rv4vux**: `build_update_calldata` emits exactly one hundred bytes: the
-four-byte selector, then the new Membership root, then the new Published signing key, then the expected epoch, in that order.
+four-byte selector, then the new Membership root, then the Organisation public
+key, then the expected epoch, in that order.
 satisfies: derived
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* The
+third field was the Published signing key; it is the Organisation public key.
 
 **LLR-rc74nq**: `revive_update_runtime_call` builds the `Revive.call` runtime
 call by name: `dest` is the contract's twenty bytes, `value` is zero,
@@ -599,7 +780,7 @@ satisfies: derived
 Organisation's on-chain slot, and the choice between dispatching directly and
 dispatching through it — both pure, both mirroring a runtime pallet this unit
 does not contain.
-traces: REQ-nhe2zu
+traces: REQ-nhe2zu, REQ-txvtm9
 
 **LLR-463d89**: `multi_account_id` sorts the signers before hashing, so the
 account it derives does not depend on the order they were supplied in.
@@ -624,7 +805,7 @@ expressed as a trait rather than a client. It exists so the stories can be
 exercised in full without a chain, and it is the mechanism that makes
 SDD-rx2yvy, SDD-8cpyfa and SDD-72ddm6 verifiable items instead of parts of the
 I/O shell.
-traces: REQ-nhe2zu, REQ-bvh8v6
+traces: REQ-nhe2zu, REQ-txvtm9, REQ-bvh8v6
 
 **LLR-65py3d**: `ChainOps` presents reading an Organisation's state and
 submitting an update as asynchronous operations on a trait object, so a
@@ -653,7 +834,7 @@ it.*
 **SDD-89es4z**: how a node acquires an identity and how an Organisation comes
 into existence — two keypairs drawn once, a genesis trie, and the first
 on-chain slot.
-traces: REQ-hzm4kt, REQ-nhe2zu, REQ-d9g6nt, REQ-qn2erx
+traces: REQ-hzm4kt, REQ-nhe2zu, REQ-txvtm9, REQ-d9g6nt, REQ-qn2erx, REQ-ech45n
 
 *(Amended 2026-10-05 by the org-node type-safety change, review round 7:
 also constrained by LLR-g76zqd, under SDD-af5vnt in
@@ -661,14 +842,27 @@ also constrained by LLR-g76zqd, under SDD-af5vnt in
 surname as a parsed `Handle`, `Name` and `Surname`, so a Persona record is
 built only from parsed values. So the item traces REQ-qn2erx too.)*
 
+*(Re-traced 2026-10-05 by review round 3, finding-8 and finding-9, change
+`worktree-person-shared-types`: `create_organisation` draws the Organisation
+private key, publishes its X25519 public key with the genesis root and
+refuses one equal to a genesis key, so the item traces REQ-ech45n.
+LLR-sj7cd5, in `2026-10-05-unsigned-envelope.md`, refines it.)*
+
 **LLR-tev8h8**: `create_persona` draws an independent member keypair and device
 keypair from the caller's random source and persists their seeds rather than
 the keys.
 satisfies: derived
 
-**LLR-s7yu4k**: a persona's identifier is derived from its member verifying
-key, so two personas cannot share an identifier unless they share a key.
+**LLR-s7yu4k**: a Persona's identifier is the first sixteen bytes of its
+Member-as-a-group key, the X25519 public key of its member seed, written as
+thirty-two lowercase hexadecimal digits. Two Personas share an identifier only
+if their member keys share those bytes.
 satisfies: derived
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item derived the identifier from the member verifying key.
 
 **LLR-v82xds**: a newly created persona is recorded as Proposed, with no
 Organisation and no member identifier.
@@ -724,9 +918,15 @@ for the second-writer path, by
 `export_join_request`, `import_join_request`)
 
 **SDD-rx2yvy**: the administrator's side of letting someone in — minting the
-new member's leaf, moving the on-chain root forward, and handing the new member
-the signed change and everything they need to check it.
-traces: REQ-xa6smf, REQ-ztdza4, REQ-nhe2zu, REQ-d9g6nt, REQ-qn2erx
+new member's leaf, moving the on-chain root forward, and handing the new
+member the change, unsigned, with everything they need to check it.
+traces: REQ-xa6smf, REQ-ztdza4, REQ-nhe2zu, REQ-txvtm9, REQ-d9g6nt, REQ-qn2erx
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item handed the new member the signed change. LLR-8bum44, amended in place,
+still constrains it.
 
 *(Amended 2026-10-05 by the org-node type-safety change, review round 7:
 also constrained by LLR-8bum44, under SDD-af5vnt in
@@ -735,15 +935,29 @@ holding a value its type's parse refuses, with `InvalidField` naming the
 field, and `import_invite` stores no pending Invite whose keys are not curve
 points. So the item traces REQ-qn2erx too.)*
 
-**LLR-rb8r65**: `admit_member` adds the joiner to the trie, submits the new
-Membership root on-chain at the next epoch, and only then sends the signed
-change to the joiner, so the anchor a receiver will check against exists before
-the receiver is told about it.
+**LLR-rb8r65**: `admit_member` adds the joiner to the trie and submits the new
+Membership root on-chain at the next epoch. Only then does it send the joiner
+the Envelope carrying the change, so the anchor a receiver will check against
+exists before the receiver is told about it.
 satisfies: derived
 
-**LLR-ghja3x**: the envelope sent is signed by the administrator's Member-as-a-group key
-and carries the sequence number one greater than the record's last.
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item said the signed change.
+
+**LLR-ghja3x**: the Envelope `admit_member` sends names the Organisation the
+call names and carries as its Sequence number the epoch its own chain update
+produced, which is greater than the record's last. It carries no signature
+(LLR-pzde8b).
 satisfies: derived
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item said the Envelope is signed by the administrator's Member-as-a-group key
+and carries the record's last sequence number plus one. Nothing signs, and the
+Sequence number is the epoch the update produced (REQ-txvtm9).
 
 **LLR-bg3vsw**: the Wire message carries the member snapshots as they were **before**
 the addition, so a joiner holding no record of the Organisation can rebuild the
@@ -788,12 +1002,18 @@ key, so admitting the same Member-as-a-group key and device key twice yields two
 different identifiers and a deleted identifier is never reissued.
 satisfies: REQ-d9g6nt
 
-**LLR-vdyu65**: `admit_member` acts on the Organisation record the `org_id`
-argument names and signs with the administrator Persona of **that**
-Organisation, so a device holding more than one Organisation admits into the
-one the caller asked for and leaves every other record, and every other
-on-chain root, where it was.
+**LLR-vdyu65**: `admit_member` acts on the Organisation record that the
+`org_id` argument names. A device holding more than one Organisation therefore
+admits into the one the caller asked for, and leaves every other record, and
+every other on-chain root, where it was.
 satisfies: derived
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item also said `admit_member` signs with that Organisation's administrator
+Persona. Nothing is signed; the Persona it looks up names the endpoint to bind
+(LLR-cns6q6, PR-8qsnhx).
 
 *Added 2026-10-04 by review round 3, which found four record lookups —
 `find_org`, `find_org_mut`, `admin_persona_for_org` and
@@ -824,9 +1044,15 @@ SDD-vee2fq's and is refined there; what was missing is what these four
 functions do with them, and one of those is a trust root.*
 
 **LLR-zj88e6**: `export_invite` carries the device key of the administrator
-persona of the Organisation it names, so the joiner has a key to pin the first
-admission's sender against.
+persona of the Organisation it names.
 satisfies: derived
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item ended ", so the joiner has a key to pin the first admission's sender
+against". Nothing on the joiner's side compares that key with a sender since
+the owner's ruling.
 
 **LLR-qezw3n**: `export_invite` carries, as the administrator's dialling
 address, the address of the endpoint the service has bound, whichever Persona
@@ -844,9 +1070,21 @@ written by review round 9.*
 
 **LLR-9zfnmb**: `import_invite` records at most one pending invite per
 Organisation — replacing any earlier one rather than appending — and the store
-is written before it returns, so the cross-check LLR-j83kc8 performs has one
-answer and survives a restart.
+is written before it returns, so the Invite a first admission consumes is the
+latest one imported and survives a restart.
 satisfies: REQ-xa6smf
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item ended ", so the cross-check LLR-j83kc8 performs has one answer and
+survives a restart". The Invite is no longer a cross-check.
+
+*Parent stale, noted 2026-10-05 by review round 4 (finding-5).* Since the
+amendment of 2026-10-05, REQ-xa6smf requires no Invite, so it does not imply
+this item, and `satisfies:` above names it only until the item is re-traced.
+By owner ruling of 2026-10-05 the re-trace is left to chain-authority's
+change 1.
 
 **LLR-437fvx**: `export_join_request` carries the persona's Member-as-a-group key and its
 device key as two distinct keys, each derived from that persona's own seed.
@@ -864,11 +1102,18 @@ satisfies: derived
 `org-node/src/service.rs` (`receive_and_verify`, `ReceiveOutcome`,
 `first_admission_base` *(added 2026-10-05, see below)*)
 
-**SDD-8cpyfa**: the member's side — accept one Wire message, establish who sent it,
-verify it against the chain, and commit. This item owns the two sender
-cross-checks, which are the only place in the unit where the transport's
-authenticated identity is compared against the membership record.
-traces: REQ-xa6smf, REQ-ztdza4, REQ-nhe2zu, REQ-bvh8v6, REQ-d9g6nt, REQ-qn2erx
+**SDD-8cpyfa**: the member's side — accept one Wire message, verify it against
+the chain, and commit. It takes the sender from the connection and checks
+nothing about it, on a first admission and on every later update.
+traces: REQ-xa6smf, REQ-ztdza4, REQ-nhe2zu, REQ-txvtm9, REQ-bvh8v6, REQ-d9g6nt, REQ-qn2erx
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item owned the two sender cross-checks, the only place the transport's
+authenticated identity was compared with the membership record. Both are
+removed (REQ-xa6smf, REQ-ztdza4). LLR-rys5nx, in
+`2026-10-05-unsigned-envelope.md`, also refines this item.
 
 *(Amended 2026-10-05 by the org-node type-safety change, review round 7:
 `first_admission_base`, which only `receive_and_verify` calls and which no
@@ -882,21 +1127,41 @@ of is refused explicitly when the Wire message carries no snapshot of the Member
 record the change extends, rather than attempted against a reconstructed one.
 satisfies: REQ-d9g6nt
 
-**LLR-j83kc8**: on a first admission to an Organisation for which an invite has
-been imported, the device key authenticated by the connection must equal the
-administrator's device key that invite names, and otherwise the Wire message is
-refused with the record unchanged.
+**LLR-j83kc8**: on a first admission, the Wire message is committed when it
+verifies against the chain whichever Device key the connection authenticated,
+whether or not that key is the administrator's Device key an imported Invite
+names.
 satisfies: REQ-xa6smf
 
-**LLR-u6rq4s**: on a Wire message about an Organisation already held, the device key
-authenticated by the connection must be present in the trie its Envelope verified into — checked **after** verification and **before** the record is
-touched.
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item refused a first admission whose sender was not the Invite's administrator
+device.
+
+**LLR-u6rq4s**: on a Wire message about an Organisation already held, the
+Device key the connection authenticated is compared with no Membership record:
+an update that verifies against the chain is committed whether that key is in
+the record before the update, after it, or in neither.
 satisfies: REQ-ztdza4
 
-**LLR-37cj3n**: the author key the signature is verified under is the
-Published signing key read from the chain, never a value carried in the
-Wire message.
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item required that key to be in the trie the Envelope verified into, checked
+after verification.
+
+**LLR-37cj3n**: what `receive_and_verify` commits is decided by the
+Organisation state it reads from the chain itself and by its own record, never
+by a key or a value carried in the Wire message, and never by the device that
+delivered it.
 satisfies: REQ-nhe2zu
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item named the author key the signature was verified under. There is no author
+key.
 
 **LLR-3wb7th**: an Organisation the chain holds no state for is refused with
 `OrgNotOnChain` before any local record is consulted.
@@ -905,7 +1170,7 @@ satisfies: REQ-bvh8v6
 **LLR-cja9zv**: the record, the epoch, the sequence mark and the member
 snapshots are written together after verification succeeds, and the store is
 saved before the outcome is returned.
-satisfies: REQ-nhe2zu
+satisfies: REQ-nhe2zu, REQ-txvtm9
 
 *Annotated 2026-10-05 by review round 8.* This holds for a change that
 removes this node's own device key too: on this path that change is committed
@@ -914,10 +1179,17 @@ and not endorsed, and
 `pr_322qst_an_own_revocation_on_the_ordinary_path_is_committed_not_self_deleted`
 pins it and carries this requirement.
 
-**LLR-mbjfq8**: a first admission to an Organisation for which no invite has
-been imported is accepted on the chain anchor and the signature alone. The
-invite cross-check of LLR-j83kc8 applies only when an invite exists.
+**LLR-mbjfq8**: a first admission to an Organisation for which no Invite has
+been imported is committed on the chain anchor alone; the missing Invite is
+not a reason to refuse it.
 satisfies: derived
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item said such an admission rests on the chain anchor and the signature alone,
+and that the Invite cross-check applies when an Invite exists. There is no
+signature and no cross-check.
 
 *Added 2026-10-04 by review round 7, which measured that refusing such an
 admission left the gate green. It is stated as the code behaves, and
@@ -925,13 +1197,26 @@ admission left the gate green. It is stated as the code behaves, and
 The trade-off is assessed under RC-b6mydy in the hazard analysis and in the
 derived-requirements risk file.*
 
+*Abnormal case added 2026-10-05 by review round 4 (finding-4).* "On the chain
+anchor alone" cuts both ways: such an admission that does not reach the
+chain's Membership root is refused with `RootMismatch` and commits nothing,
+marks no Persona and writes nothing to disk.
+`a_first_admission_with_no_imported_invite_that_misses_the_chain_root_commits_nothing`
+pins it.
+
 **LLR-y2v8v2**: every record this path reads or writes is the one the received
 change's Organisation identifier names — the local Membership record it
-verifies against, the pending invite it cross-checks the sender against, the
-record it commits into and the invite it consumes — so a node holding more
-than one Organisation leaves every other Organisation's record and secret
-exactly as they were.
-satisfies: REQ-nhe2zu, REQ-xa6smf
+verifies against, the record it commits into and the invite it consumes —
+so a node holding more than one Organisation leaves every other
+Organisation's record and secret exactly as they were.
+satisfies: REQ-nhe2zu, REQ-txvtm9, REQ-xa6smf
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item also listed "the pending invite it cross-checks the sender against". The
+pending Invite is no longer compared with the sender; the one consumed is
+still the named Organisation's.
 
 *Narrowed 2026-10-04 by review round 5.* This requirement also claimed "the
 Persona it marks Active", and that clause was false. The Persona is chosen
@@ -943,10 +1228,24 @@ PR-mdv38y, pinned by
 is withdrawn here rather than left standing over a test that asserts its
 opposite. LLR-e5c9ud states what the selection does today.
 
-**LLR-xq9nrq**: on first admission the new Organisation record holds, as its administrator's Member-as-a-group
-key, the Published signing key read from the chain, never a value carried in
-the Wire message.
+**LLR-xq9nrq**: on a first admission for which no Invite has been imported,
+the new Organisation record holds, as its `admin_member_key`, the Organisation
+public key read from the chain in the same operation, as a `PersonPublicKey`,
+never a value carried in the Wire message. It names no administrator: the
+chain publishes none. When an Invite was imported, the field holds that
+Invite's administrator Member-as-a-group key instead (LLR-rys5nx).
 satisfies: derived
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item said the field holds the Published signing key, which was the
+administrator's Member-as-a-group key. The chain's key is now the Organisation
+public key, an X25519 key distinct from every member key (REQ-ech45n). A first
+admission no longer needs an Invite (REQ-xa6smf); by the owner's answer Q1 the
+field takes the imported Invite's administrator key when there is one, and the
+chain's key only when there is none. The field stays, as master left it, until
+chain-authority's change 1 removes every administrator field.
 
 **LLR-ckk5nz**: on first admission the Organisation secret the Wire message
 carries is stored in the new record. On a later update the stored secret is
@@ -955,12 +1254,23 @@ PR-xwek5e, whose intended behaviour is unruled, and it is stated rather than
 endorsed.
 satisfies: derived
 
-**LLR-e5c9ud**: the Persona marked Active is one whose device key is in the
-verified trie and is not the administrator's Member-as-a-group key, and it is given the
-member id of the member holding that device key and the received change's
-Organisation. Which Organisation that Persona was bound to before is not
-consulted. That is PR-mdv38y.
+**LLR-e5c9ud**: the Persona marked Active is one whose Member-as-a-group key
+is not the administrator's Member-as-a-group key the record names, and whose
+DevicePublicKey is in the verified trie. It is given the member id of the
+member holding that DevicePublicKey, and the received change's Organisation.
+Which Organisation that Persona was bound to before is not consulted. That is
+PR-mdv38y. When no Invite was imported, the key the record names is the
+chain's Organisation public key (LLR-xq9nrq), which names no administrator, so
+the comparison excludes only a Persona whose Member-as-a-group key equals it.
 satisfies: derived
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item compared the Persona's device key with the administrator's member key,
+correct only while both were one ed25519 key. The code compares the two
+Member-as-a-group keys. The last sentence follows the owner's answer Q1 on
+where the record's administrator key comes from.
 
 *LLR-xq9nrq, LLR-ckk5nz and LLR-e5c9ud were added 2026-10-04 by review round
 5, which found these writes stated by no requirement. Zeroing the administrator's
@@ -972,6 +1282,16 @@ among others. All three are now carried by
 administrator-key exclusion in LLR-e5c9ud is part of PR-mdv38y's site and is
 **not** evidenced: removing it leaves the gate green. It is stated so that the
 fix has something to keep.*
+
+*(Note 2026-10-05, review round 3, finding-15, change
+`worktree-person-shared-types`: the test named above is now
+`a_first_admission_records_the_invites_administrator_the_chains_key_the_secret_and_the_member`,
+renamed by review round 2. The administrator-key exclusion is evidenced since
+review round 1 of that change, by
+`the_administrators_own_persona_is_never_the_one_a_receive_marks`
+(`org-node/tests/admission_sender.rs`), which review round 3's mutation M14,
+removing the exclusion, turned red. PR-mdv38y, the unbound Persona selection, is
+unchanged.)*
 
 *Re-traced 2026-10-04 by review round 6. All three said `satisfies:
 REQ-xa6smf`, which states only the first-admission sender check against the
@@ -1009,8 +1329,16 @@ satisfies: REQ-xa6smf
 
 **SDD-72ddm6**: what a node does when the change it receives removes **it** —
 the one path where committing a verified change means deleting the record
-rather than updating it.
-traces: REQ-uxv2x2, REQ-nhe2zu
+rather than updating it. The item also owns the administrator's side that
+sends that change. Nothing about the sender is checked on this path.
+traces: REQ-uxv2x2, REQ-nhe2zu, REQ-txvtm9
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item did not name the administrator's side, which its interface
+(`revoke_member`) already held, and said nothing of the sender. The owner
+ruled that nothing about the sender is checked on any Receive operation.
 
 **LLR-vw2jn6**: the change is verified against the chain **before** anything is
 decided about the node's own membership.
@@ -1041,14 +1369,20 @@ satisfies: REQ-uxv2x2
 sequence-mark write from this branch left the gate green. "Committed as an
 ordinary update" covered it in words only.*
 
-**LLR-3q63zv**: this path does **not** cross-check the sender's authenticated
-device key against the trie, because a node being removed cannot be required to
-find the remover in a membership record it is no longer part of. On the branch
-where the node is **not** removed, that reason does not hold, and the missing
-check there is PR-u4c2vp's defect. It is stated here and not endorsed, and
-`pr_u4c2vp_an_update_relayed_by_a_non_member_is_committed_on_the_self_delete_path`
-pins it.
+**LLR-3q63zv**: `receive_and_self_delete_if_revoked` does not check the
+sender's authenticated Device key, on the branch that deletes the record and
+on the branch that updates it. A removal or an update relayed by any device is
+acted on when it verifies against the chain.
 satisfies: derived
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item said the path does not cross-check the sender because a node being
+removed cannot be required to find the remover in a record it is no longer
+part of, and booked the update branch's missing check as PR-u4c2vp. The owner
+ruled that nothing about the sender is checked on either branch, so PR-u4c2vp
+is resolved by that ruling.
 
 **LLR-6qmq2g**: a change that fails verification leaves the Organisation record
 in place.
@@ -1108,15 +1442,26 @@ half stated not one of them, and the gate could not see the absence, because
 there is no rule that convicts an interface for being partly refined.*
 
 **LLR-6dc598**: `revoke_member` removes the member from the trie and submits
-the new Membership root on-chain at the next epoch **before** the signed
-revocation is sent, so the anchor a receiver will check against exists before
-the receiver is told about it.
+the new Membership root on-chain at the next epoch **before** the revocation
+Envelope is sent. The anchor a receiver will check against therefore exists
+before the receiver is told about it.
 satisfies: derived
 
-**LLR-tax3pm**: the revocation envelope is signed by the administrator's Member-as-a-group
-key — not its device key — and carries the sequence number one greater than the
-administrator's record's last.
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item said the signed revocation.
+
+**LLR-tax3pm**: the revocation Envelope carries as its Sequence number the
+epoch the revocation's chain update produced, which is greater than the
+administrator's record's last. It carries no signature (LLR-pzde8b).
 satisfies: derived
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item said the revocation is signed by the administrator's Member-as-a-group
+key and carries the last sequence number plus one.
 
 **LLR-qg9utu**: the administrator's Organisation record is updated and the
 store written after the revocation has been sent, so the removal reaches the
@@ -1150,11 +1495,16 @@ PR-b9wab3, opened by this change, records that the check sits after
 refuses. The shipped test asserts the epoch advanced, pinning the defect so
 that correcting the order reddens it.*
 
-**LLR-8hdu9x**: the Wire message `revoke_member` sends carries the signed
-envelope, the member snapshots as they were **before** the removal, and no
+**LLR-8hdu9x**: the Wire message `revoke_member` sends carries the revocation
+Envelope, the member snapshots as they were **before** the removal, and no
 Organisation secret. A receiver on `receive_and_verify` stores that absence
 over the secret it held. That is PR-xwek5e, stated here and not endorsed.
 satisfies: derived
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item said the signed envelope.
 
 **LLR-drgdy8**: `revoke_member` submits the update with the pure-proxy
 account its Organisation record holds, as `admit_member` does (LLR-3v5nu9).
@@ -1240,7 +1590,7 @@ connection, building and signing an extrinsic, submitting it, driving block
 production, creating and rotating a pure proxy, running the genesis ceremony,
 and the operator-facing preflight checks. It is the unit's whole supplier-facing
 surface and it carries **no low-level requirements**.
-traces: REQ-nhe2zu, REQ-bvh8v6
+traces: REQ-nhe2zu, REQ-txvtm9, REQ-bvh8v6
 
 ## The item with no low-level requirements
 
@@ -1456,6 +1806,15 @@ construction while leaving the item's coverage complete. The pairs are:
 | LLR-jsx922 (still a member: update) | LLR-6p4pj2 (no longer a member: delete) |
 | LLR-6qmq2g (verification fails: record stands) | LLR-vw2jn6 (verification runs first) |
 | LLR-rm9x4z (absence from failure) | — the same LLR states both sides |
+
+*Amended 2026-10-05; reworded the same day by
+docs/plans/2026-10-05-switch-trim.md. The Envelope carries no signature
+(REQ-ag6kqm), so the first two rows above, and "SDD-sxp8hb's abnormal side is
+LLR-9fvb3y" below, describe texts since amended in place. LLR-9fvb3y, amended
+in place, now states that a relay by another device is not refused for that;
+LLR-ybn5pr, LLR-cs4mpb and LLR-9sknpa state the receiver's own refusals of an
+altered field. SDD-sxp8hb's abnormal side is LLR-3jjgtw's refusals, in
+`org-node/docs/architecture/2026-10-05-unsigned-envelope.md`.*
 
 **Items whose abnormal side is carried by another item.** SDD-na9nc3's ten
 LLRs are *all* refusals except LLR-8n95rf and LLR-d6kvbx; its normal case is

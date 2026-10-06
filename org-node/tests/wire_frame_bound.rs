@@ -6,16 +6,14 @@
 //! the two rejections are the abnormal-input cases.
 
 use org_node::ids::OrgId;
-use org_node::{MemberSeed, OrgSecret};
 use org_node::test_fixtures::admit_member_delta;
 use org_node::transport::wire::{decode_body, encode_frame, WireMessage};
 use org_node::transport::{TransportError, MAX_FRAME};
-use org_node::{SequenceNumber, SignedDeltaEnvelope};
+use org_node::{Envelope, MemberSeed, OrgSecret, SequenceNumber};
 
 fn sample_msg() -> WireMessage {
-    let admin = MemberSeed::from([1u8; 32]).signing_keypair();
-    let (delta, _) = admit_member_delta(&admin);
-    let env = SignedDeltaEnvelope::build(OrgId::new([5u8; 20]), SequenceNumber::new(2), &delta, &admin).unwrap();
+    let (delta, _) = admit_member_delta(&MemberSeed::from([1u8; 32]).x25519_keypair());
+    let env = Envelope::build(OrgId::new([5u8; 20]), SequenceNumber::new(2), &delta).unwrap();
     WireMessage { envelope: env, org_secret: Some(OrgSecret::from([9u8; 32])), genesis_snapshot: None }
 }
 
@@ -72,7 +70,12 @@ fn a_body_that_is_not_an_encoded_message_is_refused() {
 // verifies: REQ-eg5j8u, LLR-8kh3zf
 #[test]
 fn a_body_of_exactly_the_bound_is_not_refused_for_its_size() {
-    let at_bound = vec![0u8; MAX_FRAME];
+    // 0xff, not zero: since the Envelope lost its signature (merged
+    // 2026-10-05), an all-zero body IS a valid message — an empty envelope
+    // with no secret and no snapshot — because nothing in the wire form needs
+    // a non-zero length any more. Ten 0xff bytes after the Organisation
+    // identifier are a varint that overflows its u64, so this body is not.
+    let at_bound = vec![0xffu8; MAX_FRAME];
     // It is not a valid message, so it is refused — but as Malformed, which is
     // the decode verdict, never as FrameTooLarge, which is the size verdict.
     assert!(matches!(decode_body(&at_bound), Err(TransportError::Malformed)));

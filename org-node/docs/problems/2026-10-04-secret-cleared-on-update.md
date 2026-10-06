@@ -51,3 +51,8 @@ requirement follow from it, in a change of their own.
 *Annotated 2026-10-05 by review round 8.* The sending side is LLR-8hdu9x:
 `revoke_member`'s Wire message carries no secret. Whichever reading is ruled,
 the fix is on one side or the other, so both requirements are named.
+
+*Annotated 2026-10-05 by review round 1 of `worktree-worktree-person-shared-types`
+(finding-6); reworded the same day by docs/plans/2026-10-05-switch-trim.md.* The
+items the `affects:` line names are amended in place on that branch rather
+than superseded, so the line names them alone.

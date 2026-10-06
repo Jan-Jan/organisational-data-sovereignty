@@ -2,14 +2,16 @@
 
 ODS Phase 2 node logic — the trust brain that sits above `org-members`.
 
-This crate owns what `org-members` deliberately leaves to the caller: ed25519
-signing, the `SignedDeltaEnvelope` wire form, monotonic replay protection, and
-the **verify-against-chain** flow.
+This crate owns what `org-members` deliberately leaves to the caller: the
+`Envelope` wire form, the Organisation binding, monotonic replay protection,
+and the **verify-against-chain** flow. Nothing about the sender of an Envelope
+is checked (owner ruling, 2026-10-05): the on-chain root at a newer epoch is
+the sole authority.
 
 ## The one property
 
 `verify_envelope_against_chain` commits a received membership change only if,
-after checking org binding + signature + sequence, applying the delta to the
+after checking org binding + sequence, applying the delta to the
 local trie reproduces a root that **independently** matches the on-chain root
 (read via `ChainReader`) at a newer epoch. The delta and the trusted root must
 travel different trust paths.
@@ -22,10 +24,17 @@ writes), iroh transport, persona/org persistence, and the Tauri/Svelte shell.
 
 ## Layout
 
-- `keys.rs` — `SigningKeypair`; maps to `P2pMemberKey`/`P2pDeviceKey`.
+- `keys.rs` — `SigningKeypair` (the ed25519 device keypair, whose verifying
+  key is the `DevicePublicKey`) and `X25519Keypair` (the secret behind a
+  Member-as-a-group key `PersonPublicKey`, or the Organisation private key
+  behind the Organisation public key).
+- `types.rs` — the value types: the redacted secrets (`MemberSeed`,
+  `DeviceSeed`, `OrgSecret`, `OrgPrivateKey`), `OrgPublicKey` (parsed through
+  `person`'s X25519 rule), and the tags `ChainAccount`, `PersonaId`, `Epoch`,
+  `SequenceNumber`.
 - `ids.rs` — `OrgId` (= `h160_of(P)`).
 - `chain.rs` — `ChainReader`, `OrgState`, `MockChain`.
-- `envelope.rs` — `SignedDeltaEnvelope` (transcript = org_id ‖ parent_seq ‖ delta).
+- `envelope.rs` — `Envelope` (org_id, parent_seq, postcard(Delta); no signature).
 - `sequence.rs` — `SeqGuard`.
 - `verify.rs` — `verify_envelope_against_chain` + `VerifyContext`/`VerifiedUpdate`.
 
@@ -203,7 +212,7 @@ keeps all crates in the workspace compatible.
 `OrgEndpoint` wraps an iroh `Endpoint` to provide typed send/receive over the
 ODS protocol:
 
-- **Identity:** `EndpointId == P2pDeviceKey` — the iroh node key is the device
+- **Identity:** `EndpointId == DevicePublicKey` — the iroh node key is the device
   ed25519 key. Dialing a peer cryptographically proves device-secret custody;
   the TLS handshake is the authentication step.
 - **Relay disabled:** built with `presets::Minimal` + `RelayMode::Disabled` for direct/loopback
@@ -213,7 +222,7 @@ ODS protocol:
 
 ### Wire protocol
 
-Messages are typed as `WireMessage { envelope: SignedDeltaEnvelope, org_secret: Option<[u8; 32]> }`
+Messages are typed as `WireMessage { envelope: Envelope, org_secret: Option<[u8; 32]>, genesis_snapshot: Option<Vec<u8>> }`
 (the org secret is present only on admission).
 
 Framing is **length-prefixed**: a 4-byte little-endian `u32` body length precedes
@@ -225,15 +234,16 @@ bytes are decoded.
 
 | Function | Description |
 |---|---|
-| `OrgEndpoint::bind(keypair) -> Result<OrgEndpoint>` | Bind an iroh endpoint on an OS-assigned port, using the given device signing keypair as the iroh node key. |
+| `OrgEndpoint::bind(keypair) -> Result<OrgEndpoint>` | Bind an iroh endpoint on an OS-assigned port, using the given device keypair as the iroh node key. |
 | `send(endpoint, addr, msg) -> Result<()>` | Open a QUIC stream to `addr`, frame and send `msg`, then flush. |
-| `recv_one(endpoint) -> Result<(WireMessage, P2pDeviceKey)>` | Accept one inbound connection, decode the framed message, and return both the message and the **authenticated remote device key**. |
+| `recv_one(endpoint) -> Result<(DevicePublicKey, WireMessage)>` | Accept one inbound connection, decode the framed message, and return both the message and the **authenticated remote DevicePublicKey**. |
 
 **Security note:** `recv_one` returns the remote device key that was
 authenticated by the iroh/QUIC handshake (the key the peer proved ownership of
-via TLS). The caller **must still cross-check this key against the members trie**
-before trusting the sender — authentication proves key custody, but not
-membership.
+via TLS). Authentication proves key custody, not membership. org-node's
+receive paths do not compare this key with anything (owner ruling,
+2026-10-05): what they commit is decided by the on-chain root at a newer
+epoch, whoever delivered it.
 
 ### Two-node handshake test
 

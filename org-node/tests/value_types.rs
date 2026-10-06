@@ -58,7 +58,8 @@ fn org_id_debug_is_the_twenty_bytes_in_order_as_forty_lowercase_hex_digits() {
 fn every_rejection_variant_is_distinct_from_every_other() {
     let all = [
         OrgNodeError::OrgIdMismatch,
-        OrgNodeError::BadSignature,
+        // `InvalidOrgPublicKey` is the chain-state refusal REQ-8jb4ny added.
+        OrgNodeError::InvalidOrgPublicKey,
         OrgNodeError::StaleSeq { got: 1, last_seen: 2 },
         OrgNodeError::MalformedDelta,
         OrgNodeError::DeltaBaseMismatch,
@@ -67,6 +68,8 @@ fn every_rejection_variant_is_distinct_from_every_other() {
         OrgNodeError::StaleEpoch { got: 1, last: 2 },
         OrgNodeError::Chain("read failed".into()),
         OrgNodeError::Trie(org_members::OrgMembersError::DuplicateHandle),
+        // The Sequence number that is not the chain's epoch (REQ-txvtm9).
+        OrgNodeError::SeqNotEpoch { seq: 1, epoch: 2 },
     ];
     for (i, a) in all.iter().enumerate() {
         for (j, b) in all.iter().enumerate() {

@@ -13,15 +13,17 @@ from its own reading of them.
 
 Glossary of on-chain-client's internal vocabulary. Definitions only — no
 implementation details, no specs. Terms that cross a unit boundary
-(Organisation, Organisation state, Membership root, Change set, Finalised block,
-Member, Device key) live in the root `docs/CONTEXT.md` and are not repeated
-here.
+(Organisation, Organisation state, Organisation public key, Membership root,
+Change set, Finalised block, Member, DevicePublicKey) live in the root `docs/CONTEXT.md` and are not repeated
+here. org-node's terms that this unit's text uses (Organisation private key,
+Envelope, Sequence number) are defined in `org-node/docs/CONTEXT.md`
+(pointer added 2026-10-05 by review round 3, finding-14).
 
 **Organisation slot**:
 The storage an Organisation's Organisation state occupies in the registry
-contract: the three consecutive fields holding its Membership root, its signing
-key and its Epoch. One per Organisation, keyed on the Organisation admin, and
-absent until the Organisation is initialised.
+contract: the three consecutive fields holding its Membership root, its
+Organisation public key and its Epoch. One per Organisation, keyed on the
+Organisation admin, and absent until the Organisation is initialised.
 _Avoid_: org state slot, registry entry, record
 
 **Slot key**:

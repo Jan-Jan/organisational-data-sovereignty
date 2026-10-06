@@ -35,7 +35,7 @@ impl SeqGuard {
     }
 
     /// Commit `seq` as the new high-water mark. MUST be called only AFTER an
-    /// envelope has FULLY verified (signature, org binding, sequence check, AND
+    /// envelope has FULLY verified (org binding, sequence check, AND
     /// the on-chain root match). Calling it earlier — e.g. right after `check`
     /// but before the root match — would advance the replay watermark for an
     /// envelope that may still be rejected, creating a replay-protection bypass.

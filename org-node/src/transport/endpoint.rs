@@ -1,15 +1,16 @@
-//! OrgEndpoint: an iroh endpoint whose EndpointId is the device's P2pDeviceKey.
+//! OrgEndpoint: an iroh endpoint whose EndpointId is the device's DevicePublicKey.
 //!
 //! The QUIC handshake authenticates the remote endpoint's ed25519 key, so
-//! `recv_one` returns the CRYPTOGRAPHICALLY AUTHENTICATED remote `P2pDeviceKey`.
-//! The caller is responsible for cross-checking that key against the members trie.
+//! `recv_one` returns the CRYPTOGRAPHICALLY AUTHENTICATED remote `DevicePublicKey`.
+//! Authentication proves key custody, not membership; org-node's receive paths
+//! compare the key with nothing (owner ruling, 2026-10-05).
 use iroh::{
     EndpointAddr, EndpointId, RelayMode, TransportAddr,
     endpoint::{BindOpts, Connection, presets},
 };
 #[cfg(feature = "test-support")]
 use iroh::{RelayMap, address_lookup::MemoryLookup};
-use org_members::P2pDeviceKey;
+use org_members::DevicePublicKey;
 
 use crate::keys::SigningKeypair;
 use crate::transport::{
@@ -19,11 +20,11 @@ use crate::transport::{
 
 /// An iroh endpoint bound to a device's ed25519 key.
 ///
-/// Its `EndpointId` equals the device's `P2pDeviceKey`, so successfully
+/// Its `EndpointId` equals the device's `DevicePublicKey`, so successfully
 /// completing the QUIC handshake proves device-secret custody.
 pub struct OrgEndpoint {
     inner: iroh::Endpoint,
-    device_key: P2pDeviceKey,
+    device_key: DevicePublicKey,
 }
 
 impl OrgEndpoint {
@@ -160,7 +161,7 @@ impl OrgEndpoint {
         };
         Ok(Self {
             inner,
-            device_key: device.device_key(),
+            device_key: device.device_key().map_err(|e| TransportError::Bind(format!("DevicePublicKey: {e}")))?,
         })
     }
 
@@ -205,12 +206,12 @@ impl OrgEndpoint {
             .map_err(|e| TransportError::Bind(e.to_string()))?;
         Ok(Self {
             inner,
-            device_key: device.device_key(),
+            device_key: device.device_key().map_err(|e| TransportError::Bind(format!("DevicePublicKey: {e}")))?,
         })
     }
 
     /// This endpoint's device key (equal to its iroh `EndpointId`).
-    pub fn device_key(&self) -> P2pDeviceKey {
+    pub fn device_key(&self) -> DevicePublicKey {
         self.device_key
     }
 
@@ -310,7 +311,7 @@ impl OrgEndpoint {
     ///
     /// The remote key is extracted from the TLS certificate presented during
     /// the QUIC handshake — it is cryptographically bound to the peer's secret.
-    pub async fn recv_one(&self) -> Result<(P2pDeviceKey, WireMessage), TransportError> {
+    pub async fn recv_one(&self) -> Result<(DevicePublicKey, WireMessage), TransportError> {
         let incoming = self
             .inner
             .accept()
@@ -322,7 +323,7 @@ impl OrgEndpoint {
         let remote_id: EndpointId = conn.remote_id();
         let verifying = ed25519_dalek::VerifyingKey::from_bytes(remote_id.as_bytes())
             .map_err(|_| TransportError::Malformed)?;
-        let remote_key = P2pDeviceKey::new(verifying);
+        let remote_key = DevicePublicKey::try_from(verifying).map_err(|_| TransportError::Malformed)?;
 
         let (_send, mut recv) = conn
             .accept_bi()
@@ -339,4 +340,3 @@ impl OrgEndpoint {
         Ok((remote_key, msg))
     }
 }
-

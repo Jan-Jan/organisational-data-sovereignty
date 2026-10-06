@@ -7,14 +7,14 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
-use org_members::{Handle, MemberId, MemberLeaf, Name, P2pMemberKey, RootHash, Surname};
+use org_members::{Handle, MemberId, MemberLeaf, Name, PersonPublicKey, RootHash, Surname};
 use rand_core::{CryptoRng, RngCore};
 
 use crate::chain::OrgState;
-use crate::envelope::SignedDeltaEnvelope;
+use crate::envelope::Envelope;
 use crate::error::OrgNodeError;
 use crate::ids::OrgId;
-use crate::keys::SigningKeypair;
+use crate::keys::{SigningKeypair, X25519Keypair};
 use crate::sequence::SeqGuard;
 use crate::store::{
     MemberSnapshot, OrgRecord, PendingInvite, PersonaRecord, PersonaStatus, PersonaStore, RawMemberSnapshot,
@@ -560,8 +560,8 @@ impl OrgService {
     // Story precursor: create a persona (no chain, no network).
     // ----------------------------------------------------------
 
-    /// Generate a new persona with fresh ed25519 key material, persist it in
-    /// the store, and return the persona_id.
+    /// Generate a new persona with a fresh X25519 member seed and ed25519
+    /// device seed, persist it in the store, and return the persona_id.
     pub fn create_persona<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -569,10 +569,10 @@ impl OrgService {
         name: Name,
         surname: Surname,
     ) -> Result<PersonaId, OrgNodeError> {
-        let member_kp = SigningKeypair::generate(rng);
+        let member_kp = X25519Keypair::generate(rng);
         let device_kp = SigningKeypair::generate(rng);
-        // Derive a unique persona_id from the member public key bytes.
-        let persona_id = persona_id_for(&member_kp.member_key());
+        // Derive a unique persona_id from the Member-as-a-group key.
+        let persona_id = persona_id_for(&member_kp.member_key()?);
         let rec = PersonaRecord {
             persona_id: persona_id.clone(),
             org_id: None,
@@ -602,22 +602,30 @@ impl OrgService {
         persona_id: &PersonaId,
     ) -> Result<OrgId, OrgNodeError> {
         let (member_kp, device_kp, handle, name, surname) = self.persona_keys(persona_id)?;
+        let member_key = member_kp.member_key()?;
+        let device_key = device_kp.device_key()?;
 
         // Build genesis trie: admin = this persona.
         let admin_id = fresh_member_id(rng);
         let admin_leaf = MemberLeaf::new(
             admin_id,
             handle.clone(),
-            member_kp.member_key(),
+            member_key,
             name.clone(),
             surname.clone(),
-            vec![device_kp.device_key()],
+            vec![device_key],
         )
         .map_err(OrgNodeError::Trie)?;
         let trie = Trie::genesis(vec![admin_leaf]).map_err(OrgNodeError::Trie)?;
 
         let genesis_root = trie.root_hash().map_err(OrgNodeError::Trie)?;
-        let org_pub_key = OrgPublicKey::from(&member_kp.member_key());
+
+        // REQ-ech45n: the Organisation private key is drawn here, for this
+        // Organisation alone, and kept only in the encrypted store. Its public
+        // key may equal no key the genesis record holds.
+        let org_kp = X25519Keypair::generate(rng);
+        let org_pub_key = org_kp.org_public_key()?;
+        org_pub_key.ensure_distinct_from(&trie.members())?;
 
         // Submit genesis to chain (stub for headless test; real chain for production).
         // Returns the org_id AND the pure-proxy AccountId32 P (Some for SubxtChainOps,
@@ -631,8 +639,8 @@ impl OrgService {
             handle,
             name,
             surname,
-            member_key: member_kp.member_key(),
-            device_keys: vec![device_kp.device_key()],
+            member_key,
+            device_keys: vec![device_key],
         };
         let org_rec = OrgRecord {
             org_id,
@@ -641,12 +649,13 @@ impl OrgService {
             epoch: Epoch::new(1),
             org_secret: None,
             last_seq: SequenceNumber::new(0),
-            admin_member_key: member_kp.member_key(),
+            admin_member_key: member_key,
             trie_members: vec![admin_snap],
             // Persist the pure-proxy AccountId32 returned by submit_genesis so that
             // submit_update can find P even after a restart (fixes Gap 2).
             // None for MockChainOps; Some(p) for SubxtChainOps.
             proxy_account,
+            org_private_key: Some(org_kp.org_private_key()),
         };
         self.store.data_mut().orgs.push(org_rec);
 
@@ -680,16 +689,15 @@ impl OrgService {
             org_id,
             org_pub_key: org_rec.org_pub_key,
             admin_member_key: org_rec.admin_member_key,
-            admin_device_key: device_kp.device_key(),
+            admin_device_key: device_kp.device_key()?,
             admin_node_addr,
         };
         crate::blobs::encode(&inv)
     }
 
-    /// Decode and persist an incoming `Invite` blob.  Returns the decoded invite.
-    /// Stores a `PendingInvite` in the encrypted store so that
-    /// `receive_and_verify` can cross-check the authenticated sender against
-    /// the admin device key the invite asserts (Fix 1 — security hardening).
+    /// Decode and persist an incoming `Invite` blob. Its keys are parsed by their
+    /// own types, so an Invite holding an invalid key is refused whole and
+    /// nothing is stored (LLR-8bum44). Returns the decoded invite.
     pub fn import_invite<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -718,7 +726,7 @@ impl OrgService {
     pub fn export_join_request(&self, persona_id: &PersonaId) -> Result<String, OrgNodeError> {
         let persona = self.find_persona(persona_id)?;
         let device_kp = persona.device_seed.signing_keypair();
-        let member_kp = persona.member_seed.signing_keypair();
+        let member_kp = persona.member_seed.x25519_keypair();
         // Provide the iroh node address from the bound endpoint (if any).
         let node_addr = if let Some(ep) = &self.endpoint {
             let addr = ep.node_addr_for_dial();
@@ -731,8 +739,8 @@ impl OrgService {
             handle: persona.handle.clone(),
             name: persona.name.clone(),
             surname: persona.surname.clone(),
-            member_key: member_kp.member_key(),
-            device_key: device_kp.device_key(),
+            member_key: member_kp.member_key()?,
+            device_key: device_kp.device_key()?,
             node_addr,
         };
         crate::blobs::encode(&jr)
@@ -752,8 +760,8 @@ impl OrgService {
     // Story 3: admit_member — trie add + submit_update + iroh push.
     // ----------------------------------------------------------
 
-    /// Add a new member to the org trie, bump the on-chain epoch, build a
-    /// `SignedDeltaEnvelope`, and push it (+ `org_secret`) to the new member
+    /// Add a new member to the org trie, bump the on-chain epoch, build an
+    /// `Envelope`, and push it (+ `org_secret`) to the new member
     /// over iroh.
     ///
     /// The dial behaviour depends on the configured [`TransportMode`]:
@@ -775,20 +783,15 @@ impl OrgService {
         org_secret: Option<OrgSecret>,
     ) -> Result<MemberId, OrgNodeError> {
         // Rebuild local trie from stored snapshots.
-        let (trie, org_epoch, org_pub_key, admin_member_kp, last_seq, pre_add_snapshots, proxy_account) = {
+        let (trie, org_epoch, org_pub_key, pre_add_snapshots, proxy_account, admin_persona_id) = {
             let org_rec = self.find_org(org_id)?;
             let trie = trie_from_snapshots(&org_rec.trie_members)?;
-            let epoch = org_rec.epoch;
-            let pub_key = org_rec.org_pub_key;
-            let last_seq = org_rec.last_seq;
             // Capture pre-add snapshots so B can reconstruct the genesis trie.
             let snapshots = org_rec.trie_members.clone();
-            // Carry the persisted proxy_account so submit_update can use it after a restart.
-            let proxy = org_rec.proxy_account;
-            // Admin is the first member whose member key = admin_member_key.
-            let admin_persona = self.admin_persona_for_org(org_id)?;
-            let member_kp = admin_persona.member_seed.signing_keypair();
-            (trie, epoch, pub_key, member_kp, last_seq, snapshots, proxy)
+            // The admin persona's device is the endpoint the push leaves from;
+            // found before the chain write so a missing one changes nothing.
+            let admin_persona_id = self.admin_persona_for_org(org_id)?.persona_id.clone();
+            (trie, org_rec.epoch, org_rec.org_pub_key, snapshots, org_rec.proxy_account, admin_persona_id)
         };
 
         // Random, so a re-admission with the same keys gets a new id.
@@ -819,16 +822,15 @@ impl OrgService {
             .await?;
         let new_epoch = Epoch::new(org_epoch.get() + 1);
 
-        // Build the signed envelope.
-        let parent_seq = SequenceNumber::new(last_seq.get() + 1);
-        let envelope =
-            SignedDeltaEnvelope::build(org_id, parent_seq, &delta, &admin_member_kp)
-                .map_err(|_| OrgNodeError::MalformedDelta)?;
+        // The Envelope carries no signature: the receiver commits it on the
+        // chain's root alone (REQ-ag6kqm). Its Sequence number is the epoch
+        // this update produced (REQ-txvtm9).
+        let parent_seq = SequenceNumber::new(new_epoch.get());
+        let envelope = Envelope::build(org_id, parent_seq, &delta)?;
 
         // Push the WireMessage to the new member over iroh.
         // Use the lazily bound endpoint; bind from this persona's device seed if not yet bound.
         let msg = WireMessage { envelope, org_secret, genesis_snapshot };
-        let admin_persona_id = self.admin_persona_for_org(org_id)?.persona_id.clone();
         let mode = self.transport_mode;
         let ep = self.ensure_endpoint(&admin_persona_id).await?;
         match mode {
@@ -868,9 +870,9 @@ impl OrgService {
     // Story 4: receive_and_verify — recv envelope, verify, commit.
     // ----------------------------------------------------------
 
-    /// Accept one inbound `WireMessage`, cross-check the sender's device key
-    /// against the trie, verify the envelope against the chain, and commit
-    /// the new state.
+    /// Accept one inbound `WireMessage`, verify its envelope against the
+    /// chain, and commit the new state. Nothing about the sender is checked
+    /// (REQ-xa6smf, REQ-ztdza4).
     pub async fn receive_and_verify<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -885,146 +887,79 @@ impl OrgService {
             .persona_id
             .clone();
         let ep = self.ensure_endpoint(&first_persona_id).await?;
-        let (remote_device_key, msg) = ep
+        let (_sender, msg) = ep
             .recv_one()
             .await
             .map_err(|e| OrgNodeError::Chain(format!("iroh recv: {e}")))?;
 
         let org_id = msg.envelope.org_id;
 
-        // Look up the org by the envelope's org_id.  If we don't have it yet
-        // (first-time admission), we accept the envelope and store a new OrgRecord.
-        // The `admin_member_key` must be in the envelope's metadata — we take it
-        // from the verified trie after the chain check.
-        //
-        // First look for a matching pending OrgRecord (for an already-known org).
-        // For the admission case we may not have one yet; we create it.
-
-        // Find the admin member key from on-chain state is not possible without
-        // the trie.  For the PoC, we take a different approach:
-        //
-        //   1. Read the chain state to get the authoritative root + epoch.
-        //   2. We need the admin's member key to verify the signature.
-        //      On first admission, we don't have the org yet.  We use the
-        //      `org_pub_key` from the on-chain state — which the admin published
-        //      as part of genesis — as the author member key.  This matches
-        //      `create_organisation` which sets `org_pub_key = admin_member_vk_bytes`.
-
+        // The chain's Organisation state: what the Change set must reach
+        // (RC-6a2dke, RC-e5atck).
         let chain_state = self
             .chain
             .read_state(org_id)
             .await?
             .ok_or(OrgNodeError::OrgNotOnChain)?;
 
-        let author_vk = *chain_state.org_pub_key.verifying_key();
-
-        // Check whether we already have a local OrgRecord for this org.
-        let mut is_first_admission = false;
-        let (local_trie, last_seq, last_epoch) = {
-            if let Some(existing) = self
-                .store
-                .data()
-                .orgs
-                .iter()
-                .find(|o| o.org_id == org_id)
-                .cloned()
-            {
-                let trie = trie_from_snapshots(&existing.trie_members)?;
-                (trie, existing.last_seq, existing.epoch)
-            } else {
-                // Fresh admission: rebuild the pre-add record from the admin's
-                // `genesis_snapshot`, so `verify_envelope_against_chain` can
-                // check the envelope's `base_root` against it.
-                let trie = first_admission_base(msg.genesis_snapshot.as_deref())?;
-                is_first_admission = true;
-                (trie, SequenceNumber::new(0), Epoch::new(0))
-            }
-        };
-
-        // Security hardening — Fix 1: on FIRST ADMISSION, cross-check the
-        // authenticated remote device key against the admin_device_key recorded
-        // in the invite B imported for this org.  This prevents a rogue peer
-        // from successfully pushing an envelope even if the chain anchor and
-        // signature match (defense-in-depth — the invite is the explicit trust root).
-        if is_first_admission {
-            let pending = self
-                .store
-                .data()
-                .pending_invites
-                .iter()
-                .find(|p| p.org_id == org_id)
-                .cloned();
-            if let Some(inv) = pending {
-                if remote_device_key != inv.admin_device_key {
-                    return Err(OrgNodeError::BadSignature);
+        // The record this message extends. Nothing about the sender is
+        // checked and no Invite is required (REQ-xa6smf, REQ-ztdza4, owner
+        // ruling 2026-10-05): the chain decides.
+        let existing = self.store.data().orgs.iter().find(|o| o.org_id == org_id).cloned();
+        let (local_trie, last_seq, last_epoch, admin_member_key, is_first_admission) =
+            match existing {
+                Some(existing) => {
+                    let trie = trie_from_snapshots(&existing.trie_members)?;
+                    (trie, existing.last_seq, existing.epoch, existing.admin_member_key, false)
                 }
-            }
-            // If no invite was imported for this org, fall through to the chain/sig
-            // proof (existing behaviour) — log-worthy in production but not a hard fail.
-        }
+                None => {
+                    // The record a first admission extends (REQ-d9g6nt).
+                    let trie = first_admission_base(msg.genesis_snapshot.as_deref())?;
+                    // The administrator-key field: the imported Invite's
+                    // administrator Member-as-a-group key (LLR-rys5nx); with no
+                    // Invite, the Organisation public key read from the chain
+                    // in this operation, never a value from the Wire message
+                    // (LLR-xq9nrq).
+                    let invite_admin_key = self
+                        .store
+                        .data()
+                        .pending_invites
+                        .iter()
+                        .find(|p| p.org_id == org_id)
+                        .map(|invite| invite.admin_member_key);
+                    let admin_member_key = match invite_admin_key {
+                        Some(key) => key,
+                        None => PersonPublicKey::parse(chain_state.org_pub_key.as_bytes())?,
+                    };
+                    (trie, SequenceNumber::new(0), Epoch::new(0), admin_member_key, true)
+                }
+            };
 
-        let seq_guard = SeqGuard::from_last_seen(last_seq);
         let ctx = VerifyContext {
             expected_org_id: org_id,
-            author_member_key: &author_vk,
-            seq_guard,
+            seq_guard: SeqGuard::from_last_seen(last_seq),
             last_committed_epoch: last_epoch,
         };
-
-        // Use the `ChainReader`-compatible oracle backed by our `ChainOps`.
         let chain_reader = ChainOpsReader { state: chain_state };
-
         let verified = verify_envelope_against_chain(&local_trie, &msg.envelope, &ctx, &chain_reader)?;
+        let members = verified.trie.members();
 
-        // Cross-check: the sender's authenticated device key must be in the new trie.
-        // Skipped on first admission because B has not yet seen any member list;
-        // the invite device-key check + chain root match is already sufficient proof.
-        if !is_first_admission {
-            let sender_known = verified
-                .trie
-                .members()
-                .iter()
-                .any(|m| m.has_p2p_device(&remote_device_key));
-            if !sender_known {
-                return Err(OrgNodeError::BadSignature);
-            }
-        }
-
-        // Commit: update or create the OrgRecord.
-        let new_snapshots: Vec<MemberSnapshot> =
-            verified.trie.members().iter().map(snapshot_of).collect();
-
+        let new_snapshots: Vec<MemberSnapshot> = members.iter().map(snapshot_of).collect();
         let new_root = verified.trie.root_hash().map_err(OrgNodeError::Trie)?;
 
-        // The persona linked to this org — find by matching device keys in the trie.
-        // Our device key should be in the new trie.
-        let my_persona_id = self
-            .store
-            .data()
-            .personas
-            .iter()
-            .find(|p| {
-                let my_device_key = p.device_seed.signing_keypair().device_key();
-                verified.trie.members().iter().any(|m| {
-                    m.has_p2p_device(&my_device_key)
-                        && m.p2p_key().as_bytes() != chain_state.org_pub_key.as_bytes()
-                })
-            })
-            .map(|p| p.persona_id.clone());
-
-        // Find the member_id for our persona.
-        let my_member_id = if let Some(ref pid) = my_persona_id {
-            let persona = self.find_persona(pid)?;
-            let my_device_key = persona.device_seed.signing_keypair().device_key();
-            verified
-                .trie
-                .members()
+        // This node's persona: one whose DevicePublicKey is in the new record and
+        // whose Member-as-a-group key is not the record's `admin_member_key`
+        // (LLR-e5c9ud).
+        let my_member = self.store.data().personas.iter().find_map(|p| {
+            if p.member_seed.x25519_keypair().public_bytes() == *admin_member_key.as_bytes() {
+                return None;
+            }
+            let dk = p.device_seed.signing_keypair().device_key().ok()?;
+            members
                 .iter()
-                .find(|m| m.has_p2p_device(&my_device_key))
-                .map(|m| *m.id())
-        } else {
-            None
-        };
+                .find(|m| m.has_p2p_device(&dk))
+                .map(|m| (p.persona_id.clone(), *m.id()))
+        });
 
         {
             let data = self.store.data_mut();
@@ -1042,11 +977,11 @@ impl OrgService {
                     epoch: verified.epoch,
                     org_secret: msg.org_secret,
                     last_seq: verified.seq_guard.last_seen(),
-                    // The published signing key is the admin's Member key today (PR-szkat6).
-                    admin_member_key: P2pMemberKey::new(*chain_state.org_pub_key.verifying_key()),
+                    admin_member_key,
                     trie_members: new_snapshots,
                     // Member-side record: P is only known by the admin who created the org.
                     proxy_account: None,
+                    org_private_key: None,
                 });
             }
             // Consume the pending invite now that first admission has committed.
@@ -1056,22 +991,18 @@ impl OrgService {
         }
 
         // Mark persona as Active + set member_id.
-        if let Some(ref pid) = my_persona_id {
+        if let Some((pid, member_id)) = my_member {
             let personas = &mut self.store.data_mut().personas;
-            if let Some(p) = personas.iter_mut().find(|p| &p.persona_id == pid) {
+            if let Some(p) = personas.iter_mut().find(|p| p.persona_id == pid) {
                 p.status = PersonaStatus::Active;
                 p.org_id = Some(org_id);
-                p.member_id = my_member_id;
+                p.member_id = Some(member_id);
             }
         }
 
         self.store.save(rng)?;
 
-        Ok(ReceiveOutcome {
-            org_id,
-            epoch: verified.epoch,
-            root: new_root,
-        })
+        Ok(ReceiveOutcome { org_id, epoch: verified.epoch, root: new_root })
     }
 
     // ----------------------------------------------------------
@@ -1099,16 +1030,11 @@ impl OrgService {
         member_id: MemberId,
         peer_addr: Option<iroh::EndpointAddr>,
     ) -> Result<(), OrgNodeError> {
-        let (trie, org_epoch, org_pub_key, admin_member_kp, last_seq, proxy_account) = {
+        let (trie, org_epoch, org_pub_key, proxy_account, admin_persona_id) = {
             let org_rec = self.find_org(org_id)?;
             let trie = trie_from_snapshots(&org_rec.trie_members)?;
-            let epoch = org_rec.epoch;
-            let pub_key = org_rec.org_pub_key;
-            let last_seq = org_rec.last_seq;
-            let proxy = org_rec.proxy_account;
-            let admin_persona = self.admin_persona_for_org(org_id)?;
-            let member_kp = admin_persona.member_seed.signing_keypair();
-            (trie, epoch, pub_key, member_kp, last_seq, proxy)
+            let admin_persona_id = self.admin_persona_for_org(org_id)?.persona_id.clone();
+            (trie, org_rec.epoch, org_rec.org_pub_key, org_rec.proxy_account, admin_persona_id)
         };
 
         let (new_trie, delta) = trie
@@ -1129,18 +1055,16 @@ impl OrgService {
         self.chain.submit_update(org_id, new_root, org_pub_key, org_epoch, proxy_account).await?;
         let new_epoch = Epoch::new(org_epoch.get() + 1);
 
-        // Build the signed revocation envelope.
-        let parent_seq = SequenceNumber::new(last_seq.get() + 1);
-        let envelope =
-            SignedDeltaEnvelope::build(org_id, parent_seq, &delta, &admin_member_kp)
-                .map_err(|_| OrgNodeError::MalformedDelta)?;
+        // The revocation Envelope. The receiver checks nothing about this
+        // device; the chain decides (REQ-ztdza4). Its Sequence number is the epoch this update produced (REQ-txvtm9).
+        let parent_seq = SequenceNumber::new(new_epoch.get());
+        let envelope = Envelope::build(org_id, parent_seq, &delta)?;
 
         // Push to the revoked peer so they can self-delete.
         // Collect all data that borrows from `self` BEFORE calling ensure_endpoint
         // (which takes a &mut self borrow that overlaps with find_org / admin_persona_for_org).
-        let (admin_persona_id, networked_peer_id) = {
+        let networked_peer_id = {
             let org_rec = self.find_org(org_id)?;
-            let admin_persona_id = self.admin_persona_for_org(org_id)?.persona_id.clone();
             // Pre-compute the EndpointId for Networked mode from the snapshot (before
             // the snapshot is modified by the org update below).
             let networked_peer_id: Option<iroh::EndpointId> = if self.transport_mode == TransportMode::Networked {
@@ -1162,7 +1086,7 @@ impl OrgService {
             } else {
                 None
             };
-            (admin_persona_id, networked_peer_id)
+            networked_peer_id
         };
         let msg = WireMessage { envelope, org_secret: None, genesis_snapshot };
         // Use the lazily bound endpoint; bind from this persona's device seed if not yet bound.
@@ -1222,7 +1146,9 @@ impl OrgService {
             .persona_id
             .clone();
         let ep = self.ensure_endpoint(&first_persona_id).await?;
-        let (remote_device_key, msg) = ep
+        // The authenticated sender is not checked: the chain decides
+        // (REQ-ztdza4, LLR-3q63zv).
+        let (_sender, msg) = ep
             .recv_one()
             .await
             .map_err(|e| OrgNodeError::Chain(format!("iroh recv: {e}")))?;
@@ -1234,8 +1160,6 @@ impl OrgService {
             .read_state(org_id)
             .await?
             .ok_or(OrgNodeError::OrgNotOnChain)?;
-
-        let author_vk = *chain_state.org_pub_key.verifying_key();
 
         let (local_trie, last_seq, last_epoch) = {
             let existing = self
@@ -1250,17 +1174,16 @@ impl OrgService {
             (trie, existing.last_seq, existing.epoch)
         };
 
-        let seq_guard = SeqGuard::from_last_seen(last_seq);
         let ctx = VerifyContext {
             expected_org_id: org_id,
-            author_member_key: &author_vk,
-            seq_guard,
+            seq_guard: SeqGuard::from_last_seen(last_seq),
             last_committed_epoch: last_epoch,
         };
 
         let chain_reader = ChainOpsReader { state: chain_state };
         let verified =
             verify_envelope_against_chain(&local_trie, &msg.envelope, &ctx, &chain_reader)?;
+        let members = verified.trie.members();
 
         // Check whether OUR device is still in the new trie.
         let my_still_present = self
@@ -1270,16 +1193,15 @@ impl OrgService {
             .iter()
             .filter(|p| p.org_id == Some(org_id))
             .any(|p| {
-                let my_device_key = p.device_seed.signing_keypair().device_key();
-                verified.trie.members().iter().any(|m| m.has_p2p_device(&my_device_key))
+                p.device_seed
+                    .signing_keypair()
+                    .device_key()
+                    .is_ok_and(|my_dk| members.iter().any(|m| m.has_p2p_device(&my_dk)))
             });
-
-        let _ = remote_device_key; // authenticated but not cross-checked here (revocation path)
 
         if my_still_present {
             // Regular admit/update — commit the update normally.
-            let new_snaps: Vec<MemberSnapshot> =
-                verified.trie.members().iter().map(snapshot_of).collect();
+            let new_snaps: Vec<MemberSnapshot> = members.iter().map(snapshot_of).collect();
             let new_root = verified.trie.root_hash().map_err(OrgNodeError::Trie)?;
             {
                 let orgs = &mut self.store.data_mut().orgs;
@@ -1318,10 +1240,9 @@ impl OrgService {
     /// The invites imported but not yet consumed by a first admission.
     ///
     /// A read accessor alongside `list_personas` and `list_orgs`. It exists
-    /// because "leaving its record unchanged" on a rejected first admission
-    /// (REQ-xa6smf) includes the invite, and without a way to observe the
-    /// in-memory list a test can only see what reached the disk — which a
-    /// rejection never writes.
+    /// because a first admission refused at verification leaves the invite
+    /// pending (LLR-q8emds), and without a way to observe the in-memory list a
+    /// test can only see what reached the disk — which a refusal never writes.
     pub fn list_pending_invites(&self) -> &[PendingInvite] {
         &self.store.data().pending_invites
     }
@@ -1400,7 +1321,7 @@ impl OrgService {
             .personas
             .iter()
             .find(|p| {
-                p.member_seed.signing_keypair().member_key() == org_rec.admin_member_key
+                p.member_seed.x25519_keypair().member_key().is_ok_and(|k| k == org_rec.admin_member_key)
             })
             .ok_or_else(|| OrgNodeError::Chain("admin persona not found for org".into()))
     }
@@ -1408,10 +1329,10 @@ impl OrgService {
     fn persona_keys(
         &self,
         persona_id: &PersonaId,
-    ) -> Result<(SigningKeypair, SigningKeypair, Handle, Name, Surname), OrgNodeError> {
+    ) -> Result<(X25519Keypair, SigningKeypair, Handle, Name, Surname), OrgNodeError> {
         let p = self.find_persona(persona_id)?;
         Ok((
-            p.member_seed.signing_keypair(),
+            p.member_seed.x25519_keypair(),
             p.device_seed.signing_keypair(),
             p.handle.clone(),
             p.name.clone(),
@@ -1479,7 +1400,7 @@ impl crate::chain::ChainReader for ChainOpsReader {
 // ============================================================
 
 /// A Persona identifier from its Member key: the first 16 bytes, in hex.
-fn persona_id_for(member_key: &P2pMemberKey) -> PersonaId {
+fn persona_id_for(member_key: &PersonPublicKey) -> PersonaId {
     use std::fmt::Write as _;
     PersonaId::new(member_key.as_bytes().iter().take(16).fold(String::new(), |mut s, b| {
         let _ = write!(s, "{b:02x}");

@@ -1,11 +1,14 @@
-use ed25519_dalek::SigningKey;
+mod common;
+
+use common::{device_key, member_key};
 use org_members::hasher::{Blake3Hasher, TrieHasher};
 use org_members::trie::OrgTrie;
 use org_members::types::{
-    Handle, P2pDeviceKey, MemberId, Name, NodeHash, P2pMemberKey, MemberLeaf, RootHash, Surname,
+    Handle, DevicePublicKey, MemberId, Name, NodeHash, PersonPublicKey, MemberLeaf, RootHash, Surname,
     MAX_DEVICES, MAX_NAME_LEN,
 };
 use org_members::OrgMembersError;
+use person::DeviceTrieHasher;
 
 type TestTrie = OrgTrie<Blake3Hasher>;
 
@@ -15,19 +18,6 @@ fn member_id(seed: &str) -> MemberId {
     MemberId::new(hash)
 }
 
-fn member_key(seed: &str) -> P2pMemberKey {
-    let mut bytes = [0u8; 32];
-    let hash: [u8; 32] = blake3::hash(seed.as_bytes()).into();
-    bytes.copy_from_slice(&hash);
-    P2pMemberKey::new(SigningKey::from_bytes(&bytes).verifying_key())
-}
-
-fn device_key(seed: &str) -> P2pDeviceKey {
-    let mut bytes = [0u8; 32];
-    let hash: [u8; 32] = blake3::hash(seed.as_bytes()).into();
-    bytes.copy_from_slice(&hash);
-    P2pDeviceKey::new(SigningKey::from_bytes(&bytes).verifying_key())
-}
 
 fn h(s: &str) -> Handle {
     Handle::parse(s).unwrap()
@@ -1534,7 +1524,7 @@ fn member_key_rotation_through_delta() {
     let trie_b = TestTrie::genesis(starting_members).unwrap();
     assert_eq!(trie_a.root_hash().unwrap(), trie_b.root_hash().unwrap());
 
-    // Peer A rotates alice's P2pMemberKey (handle and id unchanged).
+    // Peer A rotates alice's PersonPublicKey (handle and id unchanged).
     let trie_a = trie_a
         .rotate_p2p_key(&member_id("alice-id"), member_key("alice-rotated"))
         .unwrap();
@@ -1612,8 +1602,8 @@ fn orgtrie_is_send_sync() {
     assert_send_sync::<OrgTrie<Blake3Hasher>>();
     assert_send_sync::<MemberLeaf>();
     assert_send_sync::<MemberId>();
-    assert_send_sync::<P2pMemberKey>();
-    assert_send_sync::<P2pDeviceKey>();
+    assert_send_sync::<PersonPublicKey>();
+    assert_send_sync::<DevicePublicKey>();
 }
 
 // --- Serde validation (C-1) ---
@@ -1635,17 +1625,17 @@ fn deserialize_rejects_invalid_handle() {
     struct EvilLeaf<'a> {
         id: MemberId,
         handle: &'a str,
-        p2p_key: P2pMemberKey,
+        p2p_key: PersonPublicKey,
         name: &'a str,
         surname: &'a str,
-        p2p_devices: org_members::types::P2pDeviceSlots,
+        p2p_devices: org_members::types::DeviceSlots,
     }
 
     let p2p_devices = {
         let leaf = alice();
         let dev_bytes = to_allocvec(&leaf).unwrap();
         let leaf2: MemberLeaf = from_bytes(&dev_bytes).unwrap();
-        org_members::types::P2pDeviceSlots::parse(leaf2.p2p_devices().to_vec()).unwrap()
+        org_members::types::DeviceSlots::parse(leaf2.p2p_devices().to_vec()).unwrap()
     };
 
     let evil = EvilLeaf {
@@ -1672,9 +1662,9 @@ fn deserialize_accepts_empty_device_list() {
     // produces a member with 0 devices, and that state must roundtrip through
     // delta sync. MemberLeaf::new still requires ≥1 for normal creation.
     use postcard::{from_bytes, to_allocvec};
-    let empty_devices: Vec<P2pDeviceKey> = vec![];
+    let empty_devices: Vec<DevicePublicKey> = vec![];
     let bytes = to_allocvec(&empty_devices).unwrap();
-    let result: Result<org_members::types::P2pDeviceSlots, _> = from_bytes(&bytes);
+    let result: Result<org_members::types::DeviceSlots, _> = from_bytes(&bytes);
     assert!(
         result.is_ok(),
         "deserialize must accept empty device list (for isolated members)"
@@ -1719,7 +1709,7 @@ fn field_too_long_error_displays_field_and_max() {
 #[test]
 fn member_leaf_new_rejects_oversized_name() {
     let long_name = "a".repeat(129);
-    let err = Name::parse(&long_name).and_then(|name| {
+    let err = Name::parse(&long_name).map_err(OrgMembersError::from).and_then(|name| {
         MemberLeaf::new(
             member_id("k"),
             h("alice"),
@@ -1739,7 +1729,7 @@ fn member_leaf_new_rejects_oversized_name() {
 #[test]
 fn member_leaf_new_rejects_oversized_surname() {
     let long_surname = "b".repeat(129);
-    let err = Surname::parse(&long_surname).and_then(|surname| {
+    let err = Surname::parse(&long_surname).map_err(OrgMembersError::from).and_then(|surname| {
         MemberLeaf::new(
             member_id("k"),
             h("alice"),
@@ -1776,16 +1766,16 @@ fn member_leaf_new_accepts_max_length_name_and_surname() {
 #[test]
 fn deserialize_rejects_oversized_name() {
     use postcard::{from_bytes, to_allocvec};
-    use org_members::types::P2pDeviceSlots;
+    use org_members::types::DeviceSlots;
 
     #[derive(serde::Serialize)]
     struct WireLeaf<'a> {
         id: MemberId,
         handle: &'a str,
-        p2p_key: P2pMemberKey,
+        p2p_key: PersonPublicKey,
         name: &'a str,
         surname: &'a str,
-        p2p_devices: P2pDeviceSlots,
+        p2p_devices: DeviceSlots,
     }
     let long_name = "a".repeat(200);
     let wire = WireLeaf {
@@ -1794,7 +1784,7 @@ fn deserialize_rejects_oversized_name() {
         p2p_key: member_key("k"),
         name: &long_name,
         surname: "B",
-        p2p_devices: P2pDeviceSlots::parse(vec![device_key("d")]).unwrap(),
+        p2p_devices: DeviceSlots::parse(vec![device_key("d")]).unwrap(),
     };
     let bytes = to_allocvec(&wire).unwrap();
     let result: Result<MemberLeaf, _> = from_bytes(&bytes);
@@ -1806,16 +1796,16 @@ fn deserialize_rejects_oversized_name() {
 #[test]
 fn deserialize_rejects_oversized_surname() {
     use postcard::{from_bytes, to_allocvec};
-    use org_members::types::P2pDeviceSlots;
+    use org_members::types::DeviceSlots;
 
     #[derive(serde::Serialize)]
     struct WireLeaf<'a> {
         id: MemberId,
         handle: &'a str,
-        p2p_key: P2pMemberKey,
+        p2p_key: PersonPublicKey,
         name: &'a str,
         surname: &'a str,
-        p2p_devices: P2pDeviceSlots,
+        p2p_devices: DeviceSlots,
     }
     let long_surname = "b".repeat(200);
     let wire = WireLeaf {
@@ -1824,7 +1814,7 @@ fn deserialize_rejects_oversized_surname() {
         p2p_key: member_key("k"),
         name: "A",
         surname: &long_surname,
-        p2p_devices: P2pDeviceSlots::parse(vec![device_key("d")]).unwrap(),
+        p2p_devices: DeviceSlots::parse(vec![device_key("d")]).unwrap(),
     };
     let bytes = to_allocvec(&wire).unwrap();
     let result: Result<MemberLeaf, _> = from_bytes(&bytes);
@@ -1840,6 +1830,7 @@ fn name_for_update_rejects_oversized() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
     let long_name = "a".repeat(129);
     let err = Name::parse(&long_name)
+        .map_err(OrgMembersError::from)
         .and_then(|name| trie.update_name_surname(&member_id("alice-id"), name, sn("Smith")));
     assert_eq!(
         err.unwrap_err(),
@@ -1856,6 +1847,7 @@ fn surname_for_update_rejects_oversized() {
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
     let long_surname = "b".repeat(129);
     let err = Surname::parse(&long_surname)
+        .map_err(OrgMembersError::from)
         .and_then(|surname| trie.update_name_surname(&member_id("alice-id"), nm("Alice"), surname));
     assert_eq!(
         err.unwrap_err(),
@@ -1863,7 +1855,17 @@ fn surname_for_update_rejects_oversized() {
     );
 }
 
-// --- H-2: P2pDeviceSlots deserialize rejects non-canonical wire form ---
+// --- H-2: DeviceSlots deserialize rejects non-canonical wire form ---
+
+/// postcard keeps no message, so the rule a refused set of DevicePublicKeys
+/// broke is read from serde_json, which keeps it.
+#[cfg(feature = "serde")]
+fn assert_device_set_refused(wire: &[DevicePublicKey], rule: &str) {
+    let json = serde_json::to_string(wire).unwrap();
+    let error = serde_json::from_str::<org_members::types::DeviceSlots>(&json).unwrap_err();
+    assert!(error.is_data(), "{error}");
+    assert!(error.to_string().starts_with(rule), "{error}");
+}
 
 #[cfg(feature = "serde")]
 /// verifies: REQ-shk82j, LLR-xyv6p9
@@ -1873,10 +1875,11 @@ fn deserialize_rejects_unsorted_devices() {
     let d1 = device_key("d1");
     let d2 = device_key("d2");
     let (lo, hi) = if d1.as_bytes() < d2.as_bytes() { (d1, d2) } else { (d2, d1) };
-    let unsorted_wire: Vec<P2pDeviceKey> = vec![hi, lo];
+    let unsorted_wire: Vec<DevicePublicKey> = vec![hi, lo];
     let bytes = to_allocvec(&unsorted_wire).unwrap();
-    let result: Result<org_members::types::P2pDeviceSlots, _> = from_bytes(&bytes);
-    assert!(result.is_err(), "deserialize must reject unsorted device list");
+    let result: Result<org_members::types::DeviceSlots, _> = from_bytes(&bytes);
+    assert_eq!(result, Err(postcard::Error::SerdeDeCustom), "deserialize must reject unsorted device list");
+    assert_device_set_refused(&unsorted_wire, "device slots must be strictly increasing");
 }
 
 #[cfg(feature = "serde")]
@@ -1885,10 +1888,11 @@ fn deserialize_rejects_unsorted_devices() {
 fn deserialize_rejects_duplicate_devices() {
     use postcard::{from_bytes, to_allocvec};
     let d = device_key("d1");
-    let dup_wire: Vec<P2pDeviceKey> = vec![d, d];
+    let dup_wire: Vec<DevicePublicKey> = vec![d, d];
     let bytes = to_allocvec(&dup_wire).unwrap();
-    let result: Result<org_members::types::P2pDeviceSlots, _> = from_bytes(&bytes);
-    assert!(result.is_err(), "deserialize must reject duplicate devices");
+    let result: Result<org_members::types::DeviceSlots, _> = from_bytes(&bytes);
+    assert_eq!(result, Err(postcard::Error::SerdeDeCustom), "deserialize must reject duplicate devices");
+    assert_device_set_refused(&dup_wire, "device slots must be strictly increasing");
 }
 
 #[cfg(feature = "serde")]
@@ -1896,13 +1900,14 @@ fn deserialize_rejects_duplicate_devices() {
 #[test]
 fn deserialize_rejects_too_many_devices() {
     use postcard::{from_bytes, to_allocvec};
-    let many: Vec<P2pDeviceKey> = (0..5).map(|i| device_key(&format!("d{}", i))).collect();
+    let many: Vec<DevicePublicKey> = (0..5).map(|i| device_key(&format!("d{}", i))).collect();
     // Sort so we hit the count check, not the order check.
     let mut sorted = many.clone();
     sorted.sort();
     let bytes = to_allocvec(&sorted).unwrap();
-    let result: Result<org_members::types::P2pDeviceSlots, _> = from_bytes(&bytes);
-    assert!(result.is_err(), "deserialize must reject more than MAX_DEVICES");
+    let result: Result<org_members::types::DeviceSlots, _> = from_bytes(&bytes);
+    assert_eq!(result, Err(postcard::Error::SerdeDeCustom), "deserialize must reject more than MAX_DEVICES");
+    assert_device_set_refused(&sorted, "device slots exceed MAX_DEVICES");
 }
 
 #[cfg(feature = "serde")]
@@ -1913,9 +1918,9 @@ fn deserialize_accepts_sorted_unique_devices() {
     let d1 = device_key("d1");
     let d2 = device_key("d2");
     let (lo, hi) = if d1.as_bytes() < d2.as_bytes() { (d1, d2) } else { (d2, d1) };
-    let canonical: Vec<P2pDeviceKey> = vec![lo, hi];
+    let canonical: Vec<DevicePublicKey> = vec![lo, hi];
     let bytes = to_allocvec(&canonical).unwrap();
-    let result: org_members::types::P2pDeviceSlots = from_bytes(&bytes).unwrap();
+    let result: org_members::types::DeviceSlots = from_bytes(&bytes).unwrap();
     assert_eq!(result.device_count(), 2);
 }
 
@@ -2394,6 +2399,41 @@ fn recalculate_accepts_a_mutated_trie_with_an_empty_change_set() {
 // cargo test skips") over the file it describes; the annotation it was written
 // to carry now sits on the existing test instead.
 
+/// True when `bytes` is the encoding of no DevicePublicKey: not 32 bytes long,
+/// or 32 bytes `DevicePublicKey::parse` refuses.
+fn encodes_no_device_public_key(bytes: &[u8]) -> bool {
+    match <[u8; 32]>::try_from(bytes) {
+        Ok(key_bytes) => {
+            DevicePublicKey::parse(&key_bytes) == Err(person::IdentityError::InvalidDeviceKey)
+        }
+        Err(_) => true,
+    }
+}
+
+/// verifies: LLR-jfj6pc
+///
+/// An empty device slot hashes the sentinel in the device-leaf domain, and an
+/// occupied one hashes its DevicePublicKey's bytes there; the sentinel being
+/// no DevicePublicKey's encoding keeps an empty slot from hashing as a device.
+#[test]
+fn the_device_empty_sentinel_encodes_no_device_public_key() {
+    let sentinel = <Blake3Hasher as DeviceTrieHasher>::DEVICE_EMPTY_SENTINEL;
+    assert!(encodes_no_device_public_key(sentinel), "the sentinel is a DevicePublicKey");
+}
+
+/// verifies: LLR-jfj6pc
+///
+/// The check discriminates: a DevicePublicKey's bytes fail it, 32 bytes that
+/// are no DevicePublicKey (the identity point) and a 31-byte string pass it.
+#[test]
+fn the_sentinel_check_tells_a_device_public_key_from_other_bytes() {
+    assert!(!encodes_no_device_public_key(device_key("d1").as_bytes()));
+    let mut identity = [0u8; 32];
+    identity[0] = 1;
+    assert!(encodes_no_device_public_key(&identity));
+    assert!(encodes_no_device_public_key(&device_key("d1").as_bytes()[..31]));
+}
+
 /// verifies: LLR-72p8bz
 ///
 /// The four hash domains are separated: the same bytes hashed as a member leaf,
@@ -2474,7 +2514,7 @@ fn device_slot_order_does_not_change_the_root() {
 /// reproduced under any device-key seeds.
 #[test]
 fn every_device_slot_reaches_the_root() {
-    // `P2pDeviceSlots` stores devices in sorted order, so which slot a key
+    // `DeviceSlots` stores devices in sorted order, so which slot a key
     // lands in is decided by its digest, not by the order it is written here.
     // Sort a pool of MAX_DEVICES + 1 keys and take the first MAX_DEVICES as
     // the base: `base[i]` is then the key in slot `i`, by construction rather
@@ -2483,13 +2523,13 @@ fn every_device_slot_reaches_the_root() {
     // substitution that can be invisible to a root that hashes fewer slots
     // than MAX_DEVICES. Picking an arbitrary replacement key instead makes the
     // detection depend on where that one digest happens to sort.
-    let mut pool: Vec<P2pDeviceKey> =
+    let mut pool: Vec<DevicePublicKey> =
         (0..=MAX_DEVICES).map(|i| device_key(&format!("dev-{i}"))).collect();
     pool.sort();
-    let base: Vec<P2pDeviceKey> = pool[..MAX_DEVICES].to_vec();
+    let base: Vec<DevicePublicKey> = pool[..MAX_DEVICES].to_vec();
     let spare = pool[MAX_DEVICES];
 
-    let root_of = |devices: Vec<P2pDeviceKey>| {
+    let root_of = |devices: Vec<DevicePublicKey>| {
         let leaf = MemberLeaf::new(
             member_id("m"),
             h("alice"),
@@ -2572,7 +2612,7 @@ fn add_then_delete_returns_to_the_empty_root() {
 // takes `&self` and returns `Result<Self, _>`, so an `Err` carries no trie.
 
 /// A leaf with a fixed name, for key-uniqueness fixtures.
-fn keyed_leaf(seed: &str, mk: P2pMemberKey, devices: Vec<P2pDeviceKey>) -> MemberLeaf {
+fn keyed_leaf(seed: &str, mk: PersonPublicKey, devices: Vec<DevicePublicKey>) -> MemberLeaf {
     MemberLeaf::new(member_id(&format!("{seed}-id")), h(seed), mk, nm("Key"), sn("Holder"), devices).unwrap()
 }
 
@@ -2912,7 +2952,7 @@ fn forged_delta(
 }
 
 /// `leaf` with its member key and devices replaced, everything else kept.
-fn rekeyed(leaf: &MemberLeaf, mk: P2pMemberKey, devices: Vec<P2pDeviceKey>) -> MemberLeaf {
+fn rekeyed(leaf: &MemberLeaf, mk: PersonPublicKey, devices: Vec<DevicePublicKey>) -> MemberLeaf {
     MemberLeaf::new(
         *leaf.id(),
         leaf.handle().clone(),

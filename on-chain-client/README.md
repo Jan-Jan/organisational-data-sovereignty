@@ -11,8 +11,10 @@ Each organisation has state in two places:
 1. **On-chain.** A single `OrgRegistry` contract on Asset Hub serves
    every org. It's a `mapping(address => OrgState)` keyed on the H160 of
    the org's pure proxy `P`. `OrgState` is `(rootHash, orgPubKey, epoch)`
-   — the SMT root from `org-members`, the org's signing key, and a
-   monotonic compare-and-swap counter that rejects stale updates.
+   — the SMT root from `org-members`, the org's X25519 public key (by
+   which members check the org private key shared with them; not a
+   signing key), and a monotonic compare-and-swap counter that rejects
+   stale updates.
 2. **Off-chain.** The full membership trie (in `org-members`). The
    on-chain root anchors what off-chain state is canonical at any moment.
 

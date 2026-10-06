@@ -7,10 +7,10 @@
 
 use std::path::PathBuf;
 
-use org_members::{Handle, Name, P2pMemberKey, RootHash, Surname};
+use org_members::{Handle, Name, RootHash, Surname};
 use org_node::ids::OrgId;
 use org_node::store::{OrgRecord, PersonaRecord, PersonaStatus, PersonaStore};
-use org_node::{DeviceSeed, Epoch, MemberSeed, OrgPublicKey, OrgSecret, PersonaId, SequenceNumber};
+use org_node::{DeviceSeed, Epoch, MemberSeed, OrgPrivateKey, OrgSecret, PersonaId, SequenceNumber};
 use rand::rngs::OsRng;
 
 /// A fresh, per-test file path under the OS temp dir (any stale file removed).
@@ -41,13 +41,14 @@ fn org_record(org_secret: Option<[u8; 32]>) -> OrgRecord {
     OrgRecord {
         org_id: OrgId::new([5u8; 20]),
         root_hash: RootHash::new([0x11u8; 32]),
-        org_pub_key: OrgPublicKey::parse(&[0u8; 32]).unwrap(),
+        org_pub_key: OrgPrivateKey::from([0x22u8; 32]).x25519_keypair().org_public_key().unwrap(),
         epoch: Epoch::new(3),
         org_secret: org_secret.map(OrgSecret::from),
         last_seq: SequenceNumber::new(2),
-        admin_member_key: P2pMemberKey::new(ed25519_dalek::SigningKey::from_bytes(&[0x33u8; 32]).verifying_key()),
+        admin_member_key: MemberSeed::from([0x33u8; 32]).x25519_keypair().member_key().unwrap(),
         trie_members: Vec::new(),
         proxy_account: None,
+        org_private_key: None,
     }
 }
 

@@ -28,6 +28,22 @@ two Personas and two Organisations, and injects no endpoint:
 The joiner holds nothing. The administrator's record and the chain both list
 it. Nothing is retried and no error reaches the administrator.
 
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* The
+joiner no longer refuses the second admission. It refused it with
+`BadSignature`, and then for a while on this branch because its receive path
+compared the authenticated sender with the Invite's device key; the owner
+ruled that nothing about the sender is checked, so the joiner commits a
+chain-valid admission whoever delivers it. The summary above ("the joiner
+refuses the push") and the observation above describe the defect as found.
+What remains of it is that the second Organisation's admission goes out under
+Persona 1's device key, and that is what
+`pr_8qsnhx_a_second_organisations_admission_goes_out_under_the_first_personas_key`
+now pins: a relay captures the push and sees Persona 1's key, and the joiner
+then commits the relayed admission. The report stays open for the endpoint
+bound once per service.
+
 ## Why the gate did not see it
 
 `a_second_organisation_is_admitted_into_without_touching_the_first` injects
@@ -75,5 +91,14 @@ change's edits to `service.rs`.) LLR-qezw3n states it. The Invite's device key i
 administrator Persona's, so with the endpoint bound from another Persona the
 Invite names two devices, as the join request does. The joiner's sender check
 uses the key, not the address, so this costs the dial-back only. Same cure.
+*(Amended 2026-10-05, docs/plans/2026-10-05-switch-trim.md: the joiner has no
+sender check since the owner's ruling of that day; it uses neither the key
+nor the address of the Invite to accept an admission, so this still costs the
+dial-back only.)*
 `pr_8qsnhx_an_invite_advertises_the_bound_endpoint_not_its_administrators`
 pins it (review round 9).
+
+*Annotated 2026-10-05 by review round 1 of `worktree-worktree-person-shared-types`
+(finding-6); reworded the same day by docs/plans/2026-10-05-switch-trim.md.* The
+items the `affects:` line names are amended in place on that branch rather
+than superseded, so the line names them alone.

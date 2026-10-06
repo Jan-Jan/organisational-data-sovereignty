@@ -31,6 +31,18 @@ Blake3 root of a fixed member set are pinned values: wrapping fields in
 newtypes changes neither the wire bytes nor the bytes a member leaf hashes.
 satisfies: derived
 
+(Amended 2026-10-05: the change that switches org-members to `person`'s
+identity types re-pinned both values once, when the member key became an
+X25519 `PersonPublicKey`: the old fixture's member key, an ed25519 encoding
+with its top bit set, is not a canonical X25519 key, so the fixture's member
+key input changed. Nothing else did. The move to `person`'s types was first
+shown byte-identical against the original values (task T8), and
+`the_record_differs_from_the_0f85cb9_record_only_in_its_member_key` shows the
+new record differs from the original only in those 32 bytes. Evidence:
+`org-members/tests/encoding_golden.rs`, its header, and
+`docs/plans/2026-10-04-person-shared-types-implementation.md`, the block
+"Steps 5, 6, 8 for org-members done (9e93bfc)".)
+
 **LLR-c5tzyp**: `Handle`, `Name` and `Surname` expose their stored NFC value,
 unredacted, through `as_str()`, `Display`, `From<_> for String` and their serde
 `Serialize` (which encodes the plain string — the wire form of the member

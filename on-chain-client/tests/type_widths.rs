@@ -121,7 +121,7 @@ fn word() -> [u8; ABI_WORD] {
     core::array::from_fn(|i| 0x40u8.wrapping_add(i as u8))
 }
 
-/// verifies: REQ-2qa5r5, LLR-xv7auy
+/// verifies: REQ-2qa5r5, REQ-54txzh, LLR-xv7auy
 ///
 /// Normal case, and the whole of the requirement: each public newtype is
 /// exactly as wide as the ABI field it wraps. Stated twice over for each —

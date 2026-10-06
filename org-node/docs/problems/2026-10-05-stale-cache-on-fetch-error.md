@@ -18,3 +18,8 @@ state afresh and abort on an error. By owner ruling (2026-10-05) this is
 recorded and left for its own change: whether a failed fetch should clear the
 cache, or keep it with an age bound, is a decision about availability against
 staleness that the type-safety change does not make.
+
+**2026-10-05, at the merge of master `1feb608` into
+`worktree-person-shared-types`.** LLR-mmdu38 is amended in place there
+(docs/plans/2026-10-05-switch-trim.md) and keeps its cache clause unchanged,
+so this report stands against it.

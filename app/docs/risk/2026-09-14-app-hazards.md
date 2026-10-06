@@ -524,6 +524,13 @@ table this hazard is about. A verification log that shows each result twice is
 a different way of being untrustworthy, and it would have been introduced by
 the fix had the fix not addressed it.
 
+*Amended 2026-10-05 (change `worktree-person-shared-types`).* The set of
+verdicts this control classifies changed when org-node dropped the Envelope
+signature: `BadSignature` is gone, and `SeqNotEpoch` is a new verdict.
+`InvalidOrgPublicKey` is a new receiver error. The rule and the list are in
+REQ-kn5rtx's rationale. The control's wording, its requirements and the
+residual below are unchanged.
+
 **Residual risk: S3 / P2. UNACCEPTABLE.** The ✗ state becomes reachable and
 derived. Probability falls from P3 to P2 rather than to P1 for a reason that has
 to be stated: **the app does not decide whether verification succeeded —
@@ -1155,6 +1162,20 @@ The one thing to watch is that `classify_receive_error` is total over
 `OrgNodeError` with no wildcard arm, which is deliberate — a variant added
 upstream must be classified explicitly rather than defaulting — and that
 totality is what a future `org-node` change will meet as a compile error.
+
+*Reassessed 2026-10-05 (change `worktree-person-shared-types`).* That
+compile error happened: org-node's unsigned Envelope added `SeqNotEpoch` and
+`InvalidOrgPublicKey` and removed `BadSignature`. Each is classified
+explicitly. Master's `InvalidKey`, a receiver error, is removed too: the chain
+key it refused is now refused as `InvalidOrgPublicKey`, also a receiver error,
+so that case keeps its class (*added 2026-10-05 by review round 3,
+finding-16*). This change also added and then removed `UnknownSender`,
+`NoImportedInvite` and `InviteOrgKeyMismatch` before merge
+(docs/plans/2026-10-05-switch-trim.md); none is in the classification. Neither new variant concerns the transport endpoint, so neither
+is terminal (REQ-jfxah3), and `a_refusal_this_change_added_does_not_stop_the_loop`
+pins that. A persistent invalid Organisation public key on chain is therefore
+reported as one receiver error per received message for that Organisation,
+and the loop goes on receiving for every other. No new hazard.
 
 assesses: REQ-kn5rtx, REQ-wu6z9p
 

@@ -11,16 +11,16 @@
 use org_members::delta::Delta;
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
-use org_members::{Handle, MemberId, MemberLeaf, Name, P2pDeviceKey, P2pMemberKey, Surname};
+use org_members::{DevicePublicKey, Handle, MemberId, MemberLeaf, Name, PersonPublicKey, Surname};
 
-use crate::keys::SigningKeypair;
-use crate::types::{DeviceSeed, MemberSeed};
+use crate::keys::{SigningKeypair, X25519Keypair};
+use crate::types::{DeviceSeed, MemberSeed, OrgPrivateKey, OrgPublicKey};
 
 pub type Trie = OrgTrie<Blake3Hasher>;
 
 /// Bundles a member's keys + a stable id for building leaves.
 pub struct NodeFixture {
-    pub keypair: SigningKeypair,
+    pub member: X25519Keypair,
     pub device: SigningKeypair,
     pub id: MemberId,
 }
@@ -30,18 +30,18 @@ pub fn member(fix: &NodeFixture, handle: &str) -> MemberLeaf {
     MemberLeaf::new(
         fix.id,
         Handle::parse(handle).unwrap(),
-        fix.keypair.member_key(),
+        fix.member.member_key().unwrap(),
         Name::parse("Test").unwrap(),
         Surname::parse("User").unwrap(),
-        vec![fix.device.device_key()],
+        vec![fix.device.device_key().unwrap()],
     )
     .unwrap()
 }
 
 /// A genesis trie containing a single admin member (id = [1u8;32]).
-pub fn genesis_trie(admin: &SigningKeypair, admin_device: &SigningKeypair) -> Trie {
+pub fn genesis_trie(admin: &X25519Keypair, admin_device: &SigningKeypair) -> Trie {
     let admin_fix = NodeFixture {
-        keypair: admin.clone(),
+        member: admin.member_seed().x25519_keypair(),
         device: admin_device.clone(),
         id: MemberId::new([1u8; 32]),
     };
@@ -49,37 +49,54 @@ pub fn genesis_trie(admin: &SigningKeypair, admin_device: &SigningKeypair) -> Tr
     Trie::genesis(vec![leaf]).unwrap()
 }
 
+/// Seed of the admin's device keypair. Distinct from every other seed the
+/// fixtures use ([1u8;32] admin member, [2u8;32] and [3u8;32] bob), because
+/// org-members refuses an organisation in which one key is held twice
+/// (`OrgMembersError::DuplicateKey`).
+pub const ADMIN_DEVICE_SEED: [u8; 32] = [4u8; 32];
+
 /// The admin's device keypair: a key of its own, never the admin's member key.
-/// Its seed ([4u8;32]) is distinct from every other seed the fixtures use
-/// ([1u8;32] admin member, [2u8;32] and [3u8;32] bob), because org-members
-/// refuses an organisation in which one key is held twice
-/// (`OrgMembersError::DuplicateKey`), a member key equal to its own device key
-/// included.
 pub fn admin_device() -> SigningKeypair {
-    DeviceSeed::from([4u8; 32]).signing_keypair()
+    DeviceSeed::from(ADMIN_DEVICE_SEED).signing_keypair()
+}
+
+/// Seed of bob's device keypair in [`admit_member_delta`].
+pub const BOB_DEVICE_SEED: [u8; 32] = [3u8; 32];
+
+/// Bob's device keypair: the device [`admit_member_delta`] enrols.
+pub fn bob_device() -> SigningKeypair {
+    DeviceSeed::from(BOB_DEVICE_SEED).signing_keypair()
 }
 
 /// Build the "admit member B (id=[2u8;32])" delta against a genesis trie
-/// authored by `admin`, whose device is [`admin_device`]. Returns
-/// (delta, new_trie).
-pub fn admit_member_delta(admin: &SigningKeypair) -> (Delta, Trie) {
+/// whose admin member key is `admin` and whose admin device is
+/// [`admin_device`]. Returns (delta, new_trie).
+pub fn admit_member_delta(admin: &X25519Keypair) -> (Delta, Trie) {
     let base = genesis_trie(admin, &admin_device());
-    let b_member = MemberSeed::from([2u8; 32]).signing_keypair();
-    let b_device = DeviceSeed::from([3u8; 32]).signing_keypair();
-    let b_fix = NodeFixture { keypair: b_member, device: b_device, id: MemberId::new([2u8; 32]) };
+    let b_fix = NodeFixture {
+        member: MemberSeed::from([2u8; 32]).x25519_keypair(),
+        device: bob_device(),
+        id: MemberId::new([2u8; 32]),
+    };
     let leaf = member(&b_fix, "bob");
     let (new_trie, delta) = base.add_member(leaf).unwrap().recalculate().unwrap();
     (delta, new_trie)
 }
 
-/// The Member key of the key pair whose seed is 32 bytes of `seed`.
-pub fn member_key(seed: u8) -> P2pMemberKey {
-    MemberSeed::from([seed; 32]).signing_keypair().member_key()
+/// A valid Organisation public key, for chain states in tests.
+pub fn org_public_key() -> OrgPublicKey {
+    OrgPrivateKey::from([9u8; 32]).x25519_keypair().org_public_key().unwrap()
 }
 
-/// The Device key of the key pair whose seed is 32 bytes of `seed`.
-pub fn device_key(seed: u8) -> P2pDeviceKey {
-    DeviceSeed::from([seed; 32]).signing_keypair().device_key()
+/// The Member-as-a-group key of the X25519 key pair whose member seed is 32
+/// bytes of `seed`.
+pub fn member_key(seed: u8) -> PersonPublicKey {
+    MemberSeed::from([seed; 32]).x25519_keypair().member_key().unwrap()
+}
+
+/// The DevicePublicKey of the key pair whose device seed is 32 bytes of `seed`.
+pub fn device_key(seed: u8) -> DevicePublicKey {
+    DeviceSeed::from([seed; 32]).signing_keypair().device_key().unwrap()
 }
 
 /// Answers at run time whether a type implements `Display` or `Copy`, so a

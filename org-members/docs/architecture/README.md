@@ -63,6 +63,12 @@ had to go back to the dated file; the items are defined in
 | SDD-55b2zj | the change set that crosses a process boundary — anchored to the record it was computed against, canonical in its encoding, usable only after its result is verified against an independently supplied root | `src/delta.rs`, and `apply_delta` / `calculate_delta` / the canonical-form check in `src/trie.rs` |
 | SDD-m9gs5g | the single typed error by which every rejection leaves the crate, and the lint posture that keeps a rejection from becoming a panic | `src/error.rs`, `src/lib.rs` |
 
+(Amended 2026-10-05: `src/device_trie.rs` no longer exists. The device
+sub-trie is `person/src/device_trie.rs`, and SDD-d6x85b is `src/hasher.rs`,
+which implements `person`'s `DeviceTrieHasher` with org-members' own device
+domain keys and sentinel; see the note under SDD-d6x85b in
+`2026-09-17-decomposition.md`.)
+
 The four conceptual lines map onto them as: *what a member is* (SDD-4yr9ge),
 *how the record is hashed* (SDD-d6x85b), *how it is stored and changed*
 (SDD-d9svdj, SDD-k5wa4n), *how a change crosses a process boundary*

@@ -9,20 +9,20 @@ description = "Immutable binary Sparse Merkle Tree for organisation membership m
 [features]
 default = ["std", "serde"]
 std = ["serde?/std", "postcard?/use-std", "blake3/std", "unicode-normalization/std", "unicode-security/std"]
-serde = ["dep:serde", "dep:postcard"]
+serde = ["dep:serde", "dep:postcard", "person/serde"]
 # Exposes `delta::test_support` mutators for integration tests. NEVER enable
 # in production. The integration test crate enables this via its dev-dependency
 # on the lib (self-referential, applied only when building tests).
 test-helpers = []
 
 [dependencies]
+person = { path = "../person", default-features = false }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"], optional = true }
 postcard = { version = "1", default-features = false, features = ["alloc"], optional = true }
 thiserror = { version = "2", default-features = false }
 unicode-normalization = { version = "0.1", default-features = false }
 unicode-security = { version = "0.1", default-features = false }
 blake3 = { version = "1", default-features = false }
-ed25519-dalek = { version = "2", default-features = false, features = ["alloc"] }
 # hashbrown: HashMap that works in no_std + alloc. The `default-hasher` feature
 # enables `foldhash` (no_std-compatible, NOT `ahash` which requires std).
 hashbrown = { version = "0.15", default-features = false, features = ["default-hasher", "inline-more"] }
@@ -30,6 +30,10 @@ hashbrown = { version = "0.15", default-features = false, features = ["default-h
 spin = { version = "0.9", default-features = false, features = ["once"] }
 
 [dev-dependencies]
+# Test fixtures only: ed25519 Device keys and the small-order and mixed-order
+# points tests/device_key_decoding.rs feeds person's parse. org-members/src
+# reaches ed25519-dalek only through person.
+ed25519-dalek = { version = "2", default-features = false, features = ["alloc"] }
 postcard = { version = "1", features = ["alloc"] }
 serde = { version = "1", features = ["derive"] }
 proptest = "1"

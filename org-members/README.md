@@ -15,6 +15,8 @@ The contract is one invariant, precisely:
 
 > **Corrected 2026-09-17 — this section used to claim byte uniqueness, and that claim is false.** It read "`d` is the unique postcard **byte string** …", and the review spec linked above still states it that way (with a dated note at its head). Two independent reviews of the architecture change measured otherwise, most recently with an explicit counterexample: with `name = "é"`, a `Delta` encodes to **141 bytes**; byte-patching the NFC name to its NFD form gives a distinct **142-byte** string; both decode, both are accepted by `apply_delta` on the same base trie, and both `verify_against` the same target root. The cause is that `MemberLeaf`'s `Deserialize` **normalises** — `handle`, `name` and `surname` decode through `parse`, which stores the NFC form — where `P2pDeviceSlots`' `Deserialize` **rejects**. So the postcard encoding is not injective, and canonical form constrains the decoded value only.
 >
+> (Amended 2026-10-05: `P2pDeviceSlots` is now `person`'s `DeviceSlots`, which org-members re-exports; its `Deserialize` still rejects a non-canonical device list rather than normalising it.)
+>
 > **What to key on instead.** Dedup, replay caches and any notion of "the same change" must key on the **decoded `Delta`**, or on the `(base_root, target_root)` pair — **never on the blob bytes**. A signature over the encoded bytes still authenticates *those bytes*, which is what a signature is for, but the signed bytes are not a canonical identifier for the transition and must not be used as one. See the `Delta` doc comment in `src/delta.rs` and the LLR-8jttpb assessment in `docs/risk/2026-09-17-design-derived.md`.
 >
 > No code was changed to close this. Making the encoding injective is a behaviour change owed its own red-first test.
@@ -26,7 +28,7 @@ Everything else is the caller's responsibility. This README enumerates what "eve
 ```
    ┌──────────────────────────────────────────────────────────┐
    │  Higher-level library                                    │
-   │   - signs deltas, verifies signatures                    │
+   │   - authenticates the sender of each delta               │
    │   - binds deltas to (org_id, sequence)                   │
    │   - decides authority / quorum / policy                  │
    │   - reconciles against the trusted root (e.g. on-chain)  │
@@ -67,37 +69,33 @@ let trie = candidate.verify_against(&expected)?;
 
 The crate cannot enforce this. `RootHash::new` accepts any 32 bytes; what matters is *where those bytes came from*.
 
-### 2. Authenticate the delta blob before applying
+### 2. Authenticate the sender before decoding
 
-The crate has no notion of "who sent this." Callers must:
+The crate has no notion of "who sent this." Before the bytes reach `postcard::from_bytes` or `apply_delta`, a caller must establish who sent them, against a key it already trusts and did not learn from the payload. Two ways do this:
 
-- Verify a signature over the postcard bytes of the `Delta` against a known admin / quorum public key.
-- Do this **before** calling `apply_delta` (so attacker-controlled bytes never reach the trie).
+- An authenticated connection: the transport has proved the peer holds the private key of a `DevicePublicKey` the caller already accepts as a sender.
+- A signature over the bytes, verified against a key the caller already trusts.
+
+org-node, this crate's consumer, does neither. By owner ruling of 2026-10-05 nothing about the sender of a change is checked there: the root it must reach, read from the chain at a newer epoch (check 1), is its sole authority (`org-node/docs/risk/2026-10-05-envelope-authenticity.md`). That is a caller's policy choice this crate leaves open; it rests every decision on check 1.
+
+Authenticating the sender does not make the change true. The root it must reach comes from check 1, and the epoch or sequence it belongs to from check 4: a sender the caller accepts can still relay a change the trusted source never published, and only check 1 refuses it.
+
 - **Do not key replay caches, dedup or change identity off the blob bytes.** This bullet used to say the opposite — "once you've verified one byte string for a given `(base_root, target_root)`, no other byte string with the same effect exists, so signatures, hashes, and replay caches all key cleanly off the blob bytes" — and it was **wrong**, corrected 2026-09-17. Several distinct postcard byte strings decode to one `Delta`, apply to the same base and produce the same root (the 141/142-byte NFC/NFD counterexample in "What this crate guarantees" above). A replay cache keyed on bytes, or a hash of the bytes used as a change identifier, will treat a re-encoding of a change already applied as a change it has never seen. Key on the **decoded `Delta`**, or on the `(base_root, target_root)` pair.
-- Signing the blob bytes remains correct and remains required: a signature authenticates the bytes the sender actually sent. What it does not do is identify the transition. Verify the signature over the bytes, then derive identity from the decoded value.
+- A signature over the bytes, where a caller uses one, authenticates the bytes the sender actually sent. It does not identify the transition: derive identity from the decoded value.
+
+(Amended 2026-10-05: this section used to require a signature over the bytes, "correct and required", and check 3 showed a `SignedDeltaEnvelope`. org-node, this crate's consumer, dropped the signature by owner ruling: the on-chain Organisation public key is an X25519 key-agreement key, so nothing verifies under it. By a further ruling the same day it checks nothing about the sender either; the chain's root decides.)
 
 ### 3. Bind the delta to its organisation
 
-`Delta` carries `base_root` and nothing else. Two distinct organisations whose tries happen to share a root would accept each other's deltas. Wrap every transmitted delta in an envelope:
-
-```rust
-struct SignedDeltaEnvelope {
-    org_id: [u8; 32],
-    parent_seq: u64,
-    delta_bytes: Vec<u8>,   // postcard(Delta)
-    signature: Signature,   // over (org_id || parent_seq || delta_bytes)
-}
-```
-
-Verify `org_id` matches your local org's identity before deserialising `delta_bytes`. The crate has no opinion on the envelope format — just don't let raw `Delta` blobs cross the network unwrapped.
+`Delta` carries `base_root` and nothing else. Two distinct organisations whose tries happen to share a root would accept each other's deltas. Send every delta inside an envelope that names its organisation and its sequence, and check, before deserialising the delta, that the organisation is the one you expected and that the sender is one you accept for it (check 2). The crate has no opinion on the envelope format; just don't let raw `Delta` blobs cross the network unwrapped.
 
 ### 4. Replay protection across time
 
 `base_root` alone provides natural protection while the trie keeps moving forward — a delta for v1→v2 is rejected by `apply_delta` once the trie has advanced past v2. But if the trie's history ever revisits a prior root (e.g. add-then-remove the same member), a stale delta becomes applicable again. Defend at the envelope level with a monotonic `parent_seq` and reject envelopes whose `parent_seq` you have already observed.
 
-### 5. Authorise the signer for the proposed change
+### 5. Authorise the sender for the proposed change
 
-A canonical, correctly-signed delta is not the same as an authorised delta. The crate accepts any well-formed change; whether the signer is *allowed* to remove a particular member, isolate a particular member, or rotate a particular key is a policy decision the higher layer owns. Examples of policy the caller should encode:
+A canonical delta from an authenticated sender is not the same as an authorised delta. The crate accepts any well-formed change; whether the sender is *allowed* to remove a particular member, isolate a particular member, or rotate a particular key is a policy decision the higher layer owns. Examples of policy the caller should encode:
 
 - Quorum requirements (N-of-M admin signatures for any delta that changes membership count).
 - Role-based veto (no single admin can `emergency_isolate_member` themselves).
@@ -155,7 +153,7 @@ For completeness, what the caller does **not** need to re-do:
 
 - Handle validation (UTS#39, NFC, lowercase, single-script, no `.`, length-capped) is re-run on every wire-format `MemberLeaf` deserialise.
 - Confusable/homoglyph collision is re-checked in `apply_delta` for both newly-upserted and renamed members.
-- ed25519 keys (`P2pMemberKey`, `P2pDeviceKey`) are re-validated on deserialise via `VerifyingKey::from_bytes`.
+- Keys are re-validated on deserialise through `person`'s `parse`: a `DevicePublicKey` must be a canonically encoded, prime-order ed25519 point, a `PersonPublicKey` a canonical, non-small-order X25519 key.
 - Device-slot constraints (≤ `MAX_DEVICES`, no duplicates, sorted) are enforced on deserialise (after the H-2 fix) — non-canonical wire forms are rejected, not normalised.
 - `Delta` canonical form (sorted-unique-disjoint, no stale removals, no no-op upserts) is enforced in `apply_delta` (after the H-1 fix).
 - Every key held in the organisation is held in one place — refused with `DuplicateKey` on every path, `apply_delta` included (security check 11 says what this does not cover: a key no longer held).

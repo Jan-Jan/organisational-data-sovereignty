@@ -26,9 +26,11 @@ fn sn(s: &str) -> Surname {
     Surname::parse(s).unwrap()
 }
 
-/// An Organisation public key for the mock's state: any curve point will do.
+/// A valid Organisation public key: `OrgPublicKey` is built only through
+/// `parse` (REQ-8jb4ny). Was the bytes `[2u8; 32]` before the merge of
+/// 2026-10-05.
 fn org_key() -> OrgPublicKey {
-    OrgPublicKey::parse(&[0u8; 32]).unwrap()
+    org_node::OrgPrivateKey::from([2u8; 32]).x25519_keypair().org_public_key().unwrap()
 }
 
 fn store_at(tag: &str) -> (PersonaStore, std::path::PathBuf) {
@@ -58,12 +60,13 @@ fn a_new_persona_is_proposed_with_an_id_derived_from_its_member_key() {
     assert_eq!(rec.org_id, None);
     assert_eq!(rec.member_id, None);
 
-    // The identifier is derived from the member verifying key, so it is
-    // reproducible from the stored seed rather than drawn independently.
-    let member_kp = rec.member_seed.signing_keypair();
+    // The identifier is derived from the member key, so it is reproducible
+    // from the stored seed rather than drawn independently. On this branch
+    // the member key is the X25519 public key of the member seed (merged
+    // 2026-10-05; master derived it from an ed25519 verifying key).
+    let member_kp = rec.member_seed.x25519_keypair();
     let expected: String = member_kp
-        .verifying_key()
-        .as_bytes()
+        .public_bytes()
         .iter()
         .take(16)
         .map(|b| format!("{b:02x}"))
@@ -179,7 +182,7 @@ async fn the_seam_is_a_trait_object_a_substitute_can_stand_in_for() {
 // endpoint was bound: removing the `if self.endpoint.is_none()` guard left
 // this test green. The bound socket addresses are what distinguishes one
 // endpoint from two — a second bind takes a fresh ephemeral port.
-// verifies: REQ-ztdza4, LLR-6zjzn2
+// verifies: LLR-6zjzn2
 #[tokio::test]
 async fn the_endpoint_is_bound_once_and_the_same_one_is_returned_after() {
     let (store, _) = store_at("endpoint");
@@ -188,7 +191,7 @@ async fn the_endpoint_is_bound_once_and_the_same_one_is_returned_after() {
     let pid = svc.create_persona(&mut OsRng, h("ep"), nm("Ep"), sn("User")).unwrap();
 
     let device_seed = svc.list_personas()[0].device_seed.clone();
-    let expected = device_seed.signing_keypair().device_key();
+    let expected = device_seed.signing_keypair().device_key().unwrap();
 
     let first_ep = svc.ensure_endpoint(&pid).await.unwrap();
     let first_key = first_ep.device_key();
@@ -213,7 +216,7 @@ async fn the_endpoint_is_bound_once_and_the_same_one_is_returned_after() {
 // `find_persona(persona_id)` with "the first persona in the store" left the
 // whole gate green. The clause that matters is that a device holding more
 // than one persona binds the transport identity the caller asked for.
-// verifies: REQ-ztdza4, LLR-cns6q6
+// verifies: LLR-cns6q6
 #[tokio::test]
 async fn the_endpoint_binds_the_named_personas_device_not_the_first_personas() {
     let (store, _) = store_at("endpoint-named");
@@ -227,8 +230,8 @@ async fn the_endpoint_binds_the_named_personas_device_not_the_first_personas() {
     let first_seed = svc.list_personas()[0].device_seed.clone();
     let second_seed = svc.list_personas()[1].device_seed.clone();
     assert_ne!(first_seed, second_seed, "two personas must hold distinct device seeds");
-    let first_key = first_seed.signing_keypair().device_key();
-    let second_key = second_seed.signing_keypair().device_key();
+    let first_key = first_seed.signing_keypair().device_key().unwrap();
+    let second_key = second_seed.signing_keypair().device_key().unwrap();
 
     // Bind for the SECOND persona, which is not the first in the store.
     assert_ne!(second_pid, first_pid);

@@ -4,7 +4,6 @@
 extern crate alloc;
 
 pub mod delta;
-pub mod device_trie;
 pub mod error;
 pub mod hasher;
 pub mod node;
@@ -17,5 +16,6 @@ pub use error::OrgMembersError;
 pub use hasher::TrieHasher;
 pub use trie::OrgTrie;
 pub use types::{
-    Handle, MemberId, MemberLeaf, Name, P2pDeviceKey, P2pMemberKey, RootHash, Surname,
+    DevicePublicKey, DeviceSlots, Handle, MemberId, MemberLeaf, Name, PersonPublicKey, RootHash,
+    Surname,
 };

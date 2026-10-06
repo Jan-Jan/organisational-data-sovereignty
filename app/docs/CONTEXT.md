@@ -12,8 +12,21 @@ human can catch what the software got wrong.
 
 Glossary of app's internal vocabulary. Definitions only — no implementation
 details, no specs. Terms that cross a unit boundary (Organisation, Organisation
-state, Membership root, Change set, Finalised block, Member, Device key,
-Persona, Epoch) live in the root `docs/CONTEXT.md` and are not repeated here.
+state, Organisation public key, Membership root, Change set, Finalised block,
+Member, DevicePublicKey) live in the root `docs/CONTEXT.md` and are not
+repeated here. org-node's terms that this unit's text uses (Persona, Invite,
+Envelope, Sequence number) are defined in `org-node/docs/CONTEXT.md`, and Epoch in
+`on-chain-client/docs/CONTEXT.md`.
+
+*Corrected 2026-10-05 by review round 3 (finding-14), change
+`worktree-person-shared-types`.* The list named Device key, which the root
+glossary no longer defines (it says DevicePublicKey), and Persona and Epoch,
+which it never defined.
+
+**Device key**:
+The name text written before 2026-10-05 uses for a DevicePublicKey (root
+`docs/CONTEXT.md`). Text written from 2026-10-05 on says DevicePublicKey.
+_Avoid_: using it in new text; DevicePublicKey is the term
 
 **Operator**:
 The person using this application, in whichever of the two roles the moment
@@ -53,14 +66,14 @@ _Avoid_: receiver flag, running flag, started
 
 **Transport mode**:
 Which of the two ways this installation reaches other nodes: Networked, where a
-peer is found by discovery from its Device key, or Loopback, where a peer must
+peer is found by discovery from its DevicePublicKey, or Loopback, where a peer must
 be dialled at an address supplied alongside the request. It is fixed at startup
 and it decides whether a peer address is required — which is why it has to be
 reported to the frontend rather than assumed there.
 _Avoid_: network mode, iroh mode, connectivity
 
 **Peer address**:
-The dialling information for one node, as distinct from its Device key. Required
+The dialling information for one node, as distinct from its DevicePublicKey. Required
 in Loopback, absent by design in Networked, and optional in every request that
 takes one.
 _Avoid_: node addr, endpoint addr, peer blob

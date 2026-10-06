@@ -12,7 +12,7 @@ default = []
 # On-chain reads (via on-chain-client) + writes (via subxt). Pulls a large
 # async stack; the Phase 2.1 core builds and tests without it.
 chain = ["dep:subxt", "dep:subxt-signer", "dep:tokio", "dep:on-chain-client", "dep:blake2", "dep:parity-scale-codec", "dep:async-trait", "dep:hex"]
-# Device-to-device transport over iroh QUIC (NodeId = P2pDeviceKey).
+# Device-to-device transport over iroh QUIC (EndpointId = DevicePublicKey).
 transport = ["dep:iroh", "dep:tokio"]
 # Full node-app integration: chain + transport + encrypted persistence + out-of-band blobs.
 app = ["chain", "transport", "dep:chacha20poly1305", "dep:argon2", "dep:base64"]
@@ -25,7 +25,18 @@ test-support = ["transport", "iroh/test-utils"]
 
 [dependencies]
 org-members = { path = "../org-members", default-features = false, features = ["std", "serde"] }
+# The X25519 validity rule for the Organisation public key (REQ-8jb4ny):
+# person::x25519::is_valid_public_key, the rule PersonPublicKey applies.
+person = { path = "../person", default-features = false }
 ed25519-dalek = { version = "2", default-features = false, features = ["alloc", "rand_core", "zeroize"] }
+# X25519 public keys for Member-as-a-group keys and the Organisation public key:
+# MontgomeryPoint::mul_base_clamped (RFC 7748). Same 4.1.3 the lockfile
+# already resolves through ed25519-dalek.
+curve25519-dalek = "4"
+# Wipes an X25519 secret (a member seed, an Organisation private key) when
+# its `X25519Keypair` is dropped (LLR-98ufry). Same 1.9.0 the lockfile
+# already resolves through ed25519-dalek's `zeroize` feature.
+zeroize = "1.9"
 postcard = { version = "1", features = ["alloc", "use-std"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = { version = "2", default-features = false }
@@ -236,3 +247,10 @@ required-features = ["chain", "test-support"]
 name = "service_lifecycle"
 path = "tests/service_lifecycle.rs"
 required-features = ["app"]
+
+# The Organisation public and private key: a fresh X25519 secret per created Organisation
+# (REQ-ech45n) and the validity of the key read from the chain (REQ-8jb4ny).
+[[test]]
+name = "organisation_key"
+path = "tests/organisation_key.rs"
+required-features = ["app", "test-support"]

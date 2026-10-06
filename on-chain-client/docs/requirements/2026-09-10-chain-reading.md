@@ -16,15 +16,23 @@ Terms: *Organisation slot*, *Slot key*, *Emitting contract*, *Event signature*,
 *Best-block observation*, *Reorg notification*, *Runtime spec version*,
 *Epoch* and *Organisation admin* are defined in
 `on-chain-client/docs/CONTEXT.md`; *Organisation*, *Organisation state*,
-*Membership root* and *Finalised block* in the root `docs/CONTEXT.md`. An
-Organisation's *signing key* has no entry of its own in either: it is the field
-both glossaries name inside their definitions — the root's *Organisation state*
-and this unit's *Organisation slot* — and REQ-2qa5r5 uses it in that sense and
-no other. ("Organisation public key", which that requirement said until review
-round 2 (finding-13), is defined nowhere and is not used here. *Finalised
-observation* was listed here until review round 3 (finding-1) and is used by no
-requirement below — the best/finalised distinction is stated by no requirement
-of this ledger, for the reason given under "What these requirements do not say".)
+*Membership root*, *Finalised block* and *Organisation public key* in the root
+`docs/CONTEXT.md`. The Organisation public key is the second field of an
+Organisation state: the Organisation's X25519 key-agreement key, never a
+signing key (owner ruling, 2026-10-04). Both glossaries name the field by that
+term, and REQ-54txzh, in `2026-10-05-organisation-public-key.md`, uses it.
+
+History, kept as the record of REQ-2qa5r5, which REQ-54txzh supersedes: until
+2026-10-05 neither glossary defined *Organisation public key*, and both named
+the field the Organisation's *signing key* inside their definitions — the
+root's *Organisation state* and this unit's *Organisation slot*. REQ-2qa5r5
+uses *signing key* in that sense and no other. It had said "Organisation
+public key" until review round 2 (finding-13), which found that term defined
+nowhere at the time.
+
+*Finalised observation* was listed here until review round 3 (finding-1) and is used by no requirement below — the best/finalised
+distinction is stated by no requirement of this ledger, for the reason given
+under "What these requirements do not say".
 
 Every requirement below is verified by at least one test in
 `on-chain-client/tests` carrying `verifies:` with its identifier, and every one
@@ -49,6 +57,13 @@ REQ-88fp2h, REQ-twdu84, REQ-axcxf7 and REQ-sx5b6g state and evidence beside it.
 Neither gap is closed by inventing a case, and both are argued at the
 corresponding entries of the risk file's derived-requirements assessment (review
 round 2, finding-5).
+
+*(Note 2026-10-05, review round 3, finding-13, change
+`worktree-person-shared-types`: REQ-2qa5r5 is superseded by REQ-54txzh
+(`2026-10-05-organisation-public-key.md`), which states the same widths and
+calls the thirty-two-byte key field the Organisation public key. What is
+said here of REQ-2qa5r5 holds for REQ-54txzh, which carries this exemption
+and this evidence; REQ-2qa5r5 is named as the record of the earlier text.)*
 
 ## Whose log it is
 
@@ -162,6 +177,7 @@ whose width is the width the contract's ABI gives that field: thirty-two bytes
 for a Membership root, thirty-two for the Organisation's signing key, eight for
 an Epoch, and twenty for an Organisation admin. (implements: RC-sxjnx9)
 satisfies: derived
+superseded-by: REQ-54txzh
 
 **REQ-4astjb**: The software shall decode an Organisation state only from
 exactly the expected width of storage bytes, and shall refuse any other width —

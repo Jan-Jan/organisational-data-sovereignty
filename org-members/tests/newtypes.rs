@@ -1,5 +1,9 @@
-use org_members::types::{Handle, Name, Surname, MAX_HANDLE_LEN, MAX_NAME_LEN, MAX_SURNAME_LEN};
+mod common;
+
+use common::member_key;
+use org_members::types::{Handle, Name, PersonPublicKey, Surname, MAX_HANDLE_LEN, MAX_NAME_LEN, MAX_SURNAME_LEN};
 use org_members::OrgMembersError;
+
 
 /// verifies: LLR-xzqs9r
 #[test]
@@ -33,11 +37,11 @@ fn name_and_surname_parse_nfc_and_bound() {
     let over = "a".repeat(MAX_NAME_LEN + 1);
     assert_eq!(
         Name::parse(&over),
-        Err(OrgMembersError::FieldTooLong { field: "name", max: 128 })
+        Err(person::IdentityError::FieldTooLong { field: "name", max: 128 })
     );
     assert_eq!(
         Surname::parse(&over),
-        Err(OrgMembersError::FieldTooLong { field: "surname", max: 128 })
+        Err(person::IdentityError::FieldTooLong { field: "surname", max: 128 })
     );
     assert!(Name::parse(&"a".repeat(MAX_NAME_LEN)).is_ok());
 }
@@ -108,25 +112,25 @@ fn decode_parses_newtype_fields() {
 #[test]
 fn decode_member_record_stores_nfc_fields() {
     use ed25519_dalek::SigningKey;
-    use org_members::types::{MemberId, MemberLeaf, P2pDeviceKey, P2pDeviceSlots, P2pMemberKey};
+    use org_members::types::{MemberId, MemberLeaf, DevicePublicKey, DeviceSlots};
 
     #[derive(serde::Serialize)]
     struct WireLeaf<'a> {
         id: MemberId,
         handle: &'a str,
-        p2p_key: P2pMemberKey,
+        p2p_key: PersonPublicKey,
         name: &'a str,
         surname: &'a str,
-        p2p_devices: P2pDeviceSlots,
+        p2p_devices: DeviceSlots,
     }
-    let device = P2pDeviceKey::new(SigningKey::from_bytes(&[9; 32]).verifying_key());
+    let device = DevicePublicKey::try_from(SigningKey::from_bytes(&[9; 32]).verifying_key()).expect("prime-order key");
     let wire = WireLeaf {
         id: MemberId::new([7; 32]),
         handle: "jose\u{0301}",
-        p2p_key: P2pMemberKey::new(SigningKey::from_bytes(&[8; 32]).verifying_key()),
+        p2p_key: member_key("member"),
         name: "Jose\u{0301}",
         surname: "Smith",
-        p2p_devices: P2pDeviceSlots::parse(vec![device]).unwrap(),
+        p2p_devices: DeviceSlots::parse(vec![device]).unwrap(),
     };
     let decoded: MemberLeaf = postcard::from_bytes(&postcard::to_allocvec(&wire).unwrap()).unwrap();
 
@@ -197,15 +201,15 @@ fn newtype_debug_redacts_at_the_bound_and_beyond_ascii() {
 #[test]
 fn decoded_member_record_debug_redacts_pii() {
     use ed25519_dalek::SigningKey;
-    use org_members::types::{MemberId, MemberLeaf, P2pDeviceKey, P2pMemberKey};
+    use org_members::types::{MemberId, MemberLeaf, DevicePublicKey};
 
     let built = MemberLeaf::new(
         MemberId::new([7; 32]),
         Handle::parse("zelda").unwrap(),
-        P2pMemberKey::new(SigningKey::from_bytes(&[8; 32]).verifying_key()),
+        member_key("member"),
         Name::parse("Zoltan").unwrap(),
         Surname::parse("Quixote").unwrap(),
-        vec![P2pDeviceKey::new(SigningKey::from_bytes(&[9; 32]).verifying_key())],
+        vec![DevicePublicKey::try_from(SigningKey::from_bytes(&[9; 32]).verifying_key()).expect("prime-order key")],
     )
     .unwrap();
     let decoded: MemberLeaf = postcard::from_bytes(&postcard::to_allocvec(&built).unwrap()).unwrap();
@@ -234,10 +238,10 @@ fn name_and_surname_try_from_match_parse() {
     assert_eq!(Surname::try_from(String::from(nfd)).unwrap(), surname);
 
     let over = "a".repeat(MAX_NAME_LEN + 1);
-    let name_err = Err(OrgMembersError::FieldTooLong { field: "name", max: 128 });
+    let name_err = Err(person::IdentityError::FieldTooLong { field: "name", max: 128 });
     assert_eq!(Name::try_from(over.as_str()), name_err);
     assert_eq!(Name::try_from(over.clone()), name_err);
-    let surname_err = Err(OrgMembersError::FieldTooLong { field: "surname", max: 128 });
+    let surname_err = Err(person::IdentityError::FieldTooLong { field: "surname", max: 128 });
     assert_eq!(Surname::try_from(over.as_str()), surname_err);
     assert_eq!(Surname::try_from(over), surname_err);
 }
@@ -297,103 +301,131 @@ fn length_bounds_apply_after_nfc() {
     assert!(matches!(Handle::parse(&over), Err(OrgMembersError::InvalidHandle(_))));
     assert_eq!(
         Name::parse(&over),
-        Err(OrgMembersError::FieldTooLong { field: "name", max: MAX_NAME_LEN })
+        Err(person::IdentityError::FieldTooLong { field: "name", max: MAX_NAME_LEN })
     );
     assert_eq!(
         Surname::parse(&over),
-        Err(OrgMembersError::FieldTooLong { field: "surname", max: MAX_SURNAME_LEN })
+        Err(person::IdentityError::FieldTooLong { field: "surname", max: MAX_SURNAME_LEN })
     );
 }
 
-fn curve_key(seed: u8) -> [u8; 32] {
-    *ed25519_dalek::SigningKey::from_bytes(&[seed; 32]).verifying_key().as_bytes()
+fn slot_device(seed: u8) -> org_members::types::DevicePublicKey {
+    common::device_key(&format!("slot-{seed}"))
 }
 
-/// y = 0: a point of small order (a weak key). Decompresses.
-fn weak_key() -> [u8; 32] {
-    [0u8; 32]
+// Master's LLR-k6dhz7 and LLR-t3p9zk tests, carried over to `person`'s types
+// on the person-shared-types branch. LLR-k6dhz7 is amended in place:
+// the constructors still accept exactly what decoding accepts, but decoding
+// now refuses small-order and non-canonical keys (LLR-z954wj, LLR-a645bx), so
+// "a weak key is accepted" became "a weak key is refused by both". LLR-t3p9zk
+// is superseded by LLR-st6j2r, which names `person::DeviceSlots` in place of
+// `P2pDeviceSlots`.
+
+/// y = 2 as an ed25519 encoding (off the curve) and u = 2 as an X25519 one (on
+/// the twist, accepted).
+fn y_or_u_is_two() -> [u8; 32] {
+    let mut bytes = [0u8; 32];
+    bytes[0] = 2;
+    bytes
 }
 
-/// y = p + 1 (≡ 1 mod p): a non-canonical encoding of the identity point.
-/// Decompresses.
-fn non_canonical_key() -> [u8; 32] {
-    let mut b = [0xffu8; 32];
-    b[0] = 0xee;
-    b[31] = 0x7f;
-    b
-}
-
-/// y = 2: no x satisfies the curve equation, so these bytes decompress to
-/// nothing.
-fn off_curve_key() -> [u8; 32] {
-    let mut b = [0u8; 32];
-    b[0] = 2;
-    b
+/// 2^255 − 18 = p + 1: a non-canonical encoding as either key.
+fn p_plus_one() -> [u8; 32] {
+    let mut bytes = [0xffu8; 32];
+    bytes[0] = 0xee;
+    bytes[31] = 0x7f;
+    bytes
 }
 
 /// verifies: LLR-k6dhz7
 #[test]
 fn key_parse_accepts_exactly_what_decoding_accepts() {
-    use org_members::types::{P2pDeviceKey, P2pMemberKey};
-    // A key from a signing key, a weak key and a non-canonical encoding all
-    // decompress, so all three are accepted, bytes unchanged (owner ruling
-    // 2026-10-04; refusing the last two is PR-b7khyw).
-    for bytes in [curve_key(7), weak_key(), non_canonical_key()] {
+    use org_members::types::DevicePublicKey;
+    // A valid key, y = 0 / u = 0 (small order), p + 1 (non-canonical) and 2
+    // (off the curve for a DevicePublicKey, on the twist for a
+    // PersonPublicKey): each constructor and its decode agree on every one.
+    let cases = [common::dual_key_bytes("k"), [0u8; 32], p_plus_one(), y_or_u_is_two()];
+    for bytes in cases {
         let encoded = postcard::to_allocvec(&bytes).unwrap();
-        let member = P2pMemberKey::parse(&bytes).unwrap();
-        assert_eq!(member.as_bytes(), &bytes, "parse keeps the bytes as given");
-        assert_eq!(P2pMemberKey::try_from(bytes).unwrap(), member);
-        assert_eq!(postcard::from_bytes::<P2pMemberKey>(&encoded).unwrap(), member);
-        let device = P2pDeviceKey::parse(&bytes).unwrap();
-        assert_eq!(device.as_bytes(), &bytes);
-        assert_eq!(P2pDeviceKey::try_from(bytes).unwrap(), device);
-        assert_eq!(postcard::from_bytes::<P2pDeviceKey>(&encoded).unwrap(), device);
+        let member = PersonPublicKey::parse(&bytes);
+        assert_eq!(PersonPublicKey::try_from(bytes), member);
+        assert_eq!(postcard::from_bytes::<PersonPublicKey>(&encoded).ok(), member.clone().ok());
+        if let Ok(key) = member {
+            assert_eq!(key.as_bytes(), &bytes, "parse keeps the bytes as given");
+        }
+        let device = DevicePublicKey::parse(&bytes);
+        assert_eq!(DevicePublicKey::try_from(bytes), device);
+        assert_eq!(postcard::from_bytes::<DevicePublicKey>(&encoded).ok(), device.clone().ok());
+        if let Ok(key) = device {
+            assert_eq!(key.as_bytes(), &bytes, "parse keeps the bytes as given");
+        }
     }
+    assert!(PersonPublicKey::parse(&cases[0]).is_ok() && DevicePublicKey::parse(&cases[0]).is_ok());
+    assert!(PersonPublicKey::parse(&cases[3]).is_ok(), "a twist u-coordinate is accepted");
 }
 
 /// verifies: LLR-k6dhz7
 #[test]
 fn key_parse_refuses_bytes_off_the_curve() {
-    use org_members::types::{P2pDeviceKey, P2pMemberKey};
-    let bytes = off_curve_key();
+    use org_members::types::DevicePublicKey;
+    use person::IdentityError;
+    let bytes = y_or_u_is_two();
     let encoded = postcard::to_allocvec(&bytes).unwrap();
-    assert_eq!(P2pMemberKey::parse(&bytes), Err(OrgMembersError::InvalidKey));
-    assert_eq!(P2pMemberKey::try_from(bytes), Err(OrgMembersError::InvalidKey));
-    assert!(postcard::from_bytes::<P2pMemberKey>(&encoded).is_err());
-    assert_eq!(P2pDeviceKey::parse(&bytes), Err(OrgMembersError::InvalidKey));
-    assert_eq!(P2pDeviceKey::try_from(bytes), Err(OrgMembersError::InvalidKey));
-    assert!(postcard::from_bytes::<P2pDeviceKey>(&encoded).is_err());
+    assert_eq!(DevicePublicKey::parse(&bytes), Err(IdentityError::InvalidDeviceKey));
+    assert_eq!(DevicePublicKey::try_from(bytes), Err(IdentityError::InvalidDeviceKey));
+    assert_eq!(
+        DevicePublicKey::parse(&bytes).map_err(OrgMembersError::from),
+        Err(OrgMembersError::InvalidDeviceKey)
+    );
+    assert_eq!(
+        postcard::from_bytes::<DevicePublicKey>(&encoded),
+        Err(postcard::Error::SerdeDeCustom)
+    );
+    for refused in [[0u8; 32], p_plus_one()] {
+        assert_eq!(PersonPublicKey::parse(&refused), Err(IdentityError::InvalidPersonKey));
+        assert_eq!(PersonPublicKey::try_from(refused), Err(IdentityError::InvalidPersonKey));
+        assert_eq!(
+            PersonPublicKey::parse(&refused).map_err(OrgMembersError::from),
+            Err(OrgMembersError::InvalidPersonKey)
+        );
+    }
 }
 
-fn slot_device(seed: u8) -> org_members::types::P2pDeviceKey {
-    org_members::types::P2pDeviceKey::parse(&curve_key(seed)).unwrap()
-}
-
-/// verifies: LLR-t3p9zk
+/// verifies: LLR-t3p9zk, LLR-st6j2r
 #[test]
 fn device_slots_parse_holds_keys_sorted() {
-    use org_members::types::{P2pDeviceKey, P2pDeviceSlots, MAX_DEVICES};
-    let keys: Vec<P2pDeviceKey> = (1..=MAX_DEVICES as u8).map(slot_device).collect();
+    use org_members::types::{DevicePublicKey, DeviceSlots, MAX_DEVICES};
+    let keys: Vec<DevicePublicKey> = (1..=MAX_DEVICES as u8).map(slot_device).collect();
     let mut sorted = keys.clone();
     sorted.sort();
-    let mut reversed = keys;
+    let mut reversed = sorted.clone();
     reversed.reverse();
-    let slots = P2pDeviceSlots::parse(reversed.clone()).unwrap();
+    let slots = DeviceSlots::parse(reversed.clone()).unwrap();
     assert_eq!(slots.devices(), sorted.as_slice(), "held sorted, at the MAX_DEVICES bound");
-    assert_eq!(P2pDeviceSlots::try_from(reversed).unwrap(), slots);
-    let empty = P2pDeviceSlots::parse(Vec::new()).unwrap();
+    assert_eq!(DeviceSlots::try_from(reversed).unwrap(), slots);
+    let empty = DeviceSlots::parse(Vec::new()).unwrap();
     assert_eq!(empty.device_count(), 0, "the empty list is the isolated state");
 }
 
-/// verifies: LLR-t3p9zk
+/// verifies: LLR-t3p9zk, LLR-st6j2r
 #[test]
 fn device_slots_parse_refuses_too_many_and_repeated_keys() {
-    use org_members::types::{P2pDeviceKey, P2pDeviceSlots, MAX_DEVICES};
-    let over: Vec<P2pDeviceKey> = (1..=MAX_DEVICES as u8 + 1).map(slot_device).collect();
-    assert_eq!(P2pDeviceSlots::parse(over.clone()), Err(OrgMembersError::DeviceSlotsFull));
-    assert_eq!(P2pDeviceSlots::try_from(over), Err(OrgMembersError::DeviceSlotsFull));
+    use org_members::types::{DevicePublicKey, DeviceSlots, MAX_DEVICES};
+    use person::IdentityError;
+    let over: Vec<DevicePublicKey> = (1..=MAX_DEVICES as u8 + 1).map(slot_device).collect();
+    assert_eq!(DeviceSlots::parse(over.clone()), Err(IdentityError::DeviceSlotsFull));
+    assert_eq!(DeviceSlots::try_from(over), Err(IdentityError::DeviceSlotsFull));
     assert_eq!(
-        P2pDeviceSlots::parse(vec![slot_device(1), slot_device(2), slot_device(1)]),
+        DeviceSlots::parse(vec![slot_device(1), slot_device(2), slot_device(1)]),
+        Err(IdentityError::DuplicateDevice)
+    );
+    assert_eq!(
+        DeviceSlots::try_from(vec![slot_device(1), slot_device(1)]).map_err(OrgMembersError::from),
         Err(OrgMembersError::DuplicateDevice)
+    );
+    let over: Vec<DevicePublicKey> = (1..=MAX_DEVICES as u8 + 1).map(slot_device).collect();
+    assert_eq!(
+        DeviceSlots::parse(over).map_err(OrgMembersError::from),
+        Err(OrgMembersError::DeviceSlotsFull)
     );
 }

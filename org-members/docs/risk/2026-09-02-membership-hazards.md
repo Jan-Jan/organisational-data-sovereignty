@@ -224,7 +224,18 @@ key. So a change set may upsert a leaf with one device removed and the key
 unchanged, which is this hazard by another route. That is the same shape of gap
 REQ-shk82j exists to close for handles, and it is unclosed for this pair.
 Recorded here and listed as a not-minted control rather than asserted away.
-(Corrected 2026-10-03: "an external caller must go through
+(Amended 2026-10-05: `P2pDeviceSlots` is gone; the device set is
+`person::DeviceSlots`, whose `add_device` and `remove_device` are public, so
+any caller can compute a device set with one device fewer. The claim now rests
+on installing that set, not computing it: `MemberLeaf::with_p2p_device_slots`
+is `pub(crate)` (`org-members/src/types.rs`), `MemberLeaf::p2p_device_slots` is
+`pub(crate)`, and the only public operations that give an existing member a
+new device set are `add_p2p_device`, `delete_p2p_device` (which always applies
+the replacement key) and `emergency_isolate_member`. `add_member` refuses an
+identifier already present with `DuplicateId`, so a leaf built with
+`MemberLeaf::new` cannot replace an existing member's. The direct-API route
+through `delete_member` and `add_member` is the one the next correction
+names.) (Corrected 2026-10-03: "an external caller must go through
 `delete_p2p_device`" is too strong. `delete_member` followed by `add_member`
 with the same key and one device fewer reaches the same state on the direct
 API — PR-fzu25w, resolved by owner ruling the same day: a deleted `MemberId`
@@ -337,7 +348,15 @@ then a strictly-increasing envelope sequence number, then decodes the delta,
 then requires the chain epoch to be strictly newer than the last committed one,
 and only then requires the recomputed root to equal the root obtained from a
 `ChainReader` independent of the envelope. That order is deliberate and it is
-correct. Two qualifications, both of which an earlier draft got wrong:
+correct. (Amended 2026-10-05: org-node no longer checks an author's signature.
+The owner dropped the Envelope signature, because the on-chain Organisation
+public key is an X25519 key-agreement key and no signature verifies under it.
+Nothing replaces it: by the owner's ruling of the same day nothing about the
+sender is checked (`org-node/docs/risk/2026-10-05-envelope-authenticity.md`),
+and the root and epoch read from the chain at a newer epoch are the sole
+authority for what is committed. The rest of the order stands. A sender check
+written in its place was withdrawn the same day, before it merged.) Two
+qualifications, both of which an earlier draft got wrong:
 
 - **It is tested in-tree and run by nothing.** Seven unit tests and two fuzz
   targets exist for this path. `org-node` appears in no `verify_commands`, no
@@ -473,6 +492,13 @@ and in its CI step — see org-node's risk analysis
 ledger (`org-node/docs/requirements/2026-09-09-verify-and-commit.md`). The
 clause that remains true is the empty seed corpus, whose directory holds only
 a `.gitkeep`; the libFuzzer lane for long runs is absent too.)
+(Amended 2026-10-05: the names in this paragraph are older than the switch to
+`person`'s identity types. The envelope the target decodes is now org-node's
+unsigned `Envelope`, not a `SignedDeltaEnvelope`, and the device set decodes
+through `person::DeviceSlots::deserialize`, re-exported by org-members, not
+`P2pDeviceSlots::deserialize`; the validation surface is the same, with each
+DevicePublicKey now refused unless it is a prime-order point
+(`2026-10-05-device-and-member-key-validity.md`).)
 
 ### The record altered under what was decided against it
 

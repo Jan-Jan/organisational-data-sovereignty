@@ -330,7 +330,8 @@ What is actually true:
   `MemberLeaf`, give one `Delta` value and produce one root. Several wire forms
   map to one value; that is exactly what injectivity forbids. (`P2pDeviceSlots`
   is the contrasting case — its `Deserialize` genuinely refuses non-canonical
-  slot vectors.)
+  slot vectors.) (Amended 2026-10-05: `P2pDeviceSlots` is now `person`'s
+  `DeviceSlots`, and its `Deserialize` still refuses them.)
 
 **What `org-node` must therefore do.** Any property keyed on the bytes has to be
 established by `org-node` itself and cannot be imported from here:
@@ -648,6 +649,15 @@ functions together and that is not a curiosity:
 - `device_trie.rs::compute_device_root` builds its leaves as `[_; 4]`, the
   literal.
 
+(Amended 2026-10-05: `compute_device_root` moved to `person/src/device_trie.rs`
+and `to_fixed_slots` to `person/src/slots.rs`, and the two are now coupled by
+the compiler. `to_fixed_slots` returns `[Option<DevicePublicKey>; MAX_DEVICES]`
+and `compute_device_root` destructures it with a four-element pattern, so a
+`MAX_DEVICES` other than 4 no longer compiles. Of the two further sites below,
+the `DeviceSlotsFull` message is now `person/src/error.rs`'s "device slots full
+(max 4)", and the doc comment is `add_p2p_device`'s in `org-members/src/trie.rs`,
+still uncoupled.)
+
 **Two further sites restate the number and are equally uncoupled** (named
 2026-09-17, independent review finding-3; the ledger had mentioned only the two
 above):
@@ -730,6 +740,17 @@ bound only as a crash. A crash in that position is also RC-c4truv's territory �
 "no input, however malformed or hostile, causes a panic" — reachable only if the
 bound check were removed, which is why it is recorded here beside the coupling
 rather than raised as a defect.
+
+(Amended 2026-10-05: the names in this section are older than the switch to
+`person`'s identity types. `P2pDeviceSlots` is `person::DeviceSlots`;
+`device_trie.rs` is `person/src/device_trie.rs`; and the four-slot encoding
+the fifth device panicked in, `types.rs:421` here, is `DeviceSlots`'
+`to_fixed_slots` in `person/src/slots.rs`. That function now zips the
+devices into an array of `MAX_DEVICES` slots instead of indexing it, so with
+the bound check removed a fifth device would no longer panic: it would be left
+out of the root without a sound, and `add_p2p_device_rejects_when_full` would
+fail on its own assertion. The bound check is `person`'s
+`DeviceSlots::add_device`, outside this unit.)
 
 ## Measured negatives from T1 and T3–T8
 

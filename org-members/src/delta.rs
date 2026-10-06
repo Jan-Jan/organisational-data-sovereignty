@@ -38,7 +38,7 @@ use crate::types::{Handle, HandleSkeleton, MemberId, MemberLeaf, RootHash};
 /// an NFD-encoded leaf and its NFC equivalent are two distinct postcard byte
 /// strings that decode to the same `MemberLeaf` and produce the same root. The
 /// encoding is therefore **not injective** on the deserialisation path.
-/// (Contrast `P2pDeviceSlots`, whose `Deserialize` genuinely rejects
+/// (Contrast `DeviceSlots`, whose `Deserialize` genuinely rejects
 /// non-canonical forms.)
 ///
 /// Anything upstream that needs byte-level identity — dedup by encoded bytes,
@@ -53,17 +53,20 @@ use crate::types::{Handle, HandleSkeleton, MemberId, MemberLeaf, RootHash};
 /// `Delta` is scoped only by `base_root`. The following are the caller's
 /// responsibility and MUST be enforced upstream of `apply_delta`:
 ///
-/// - **Authentication** — verify a signature over `postcard(Delta)` bytes
-///   against an admin/quorum key before applying.
-/// - **Organisation binding** — wrap deltas in `(org_id, postcard(Delta),
-///   signature)` envelopes; the lib has no notion of which organisation a
-///   delta belongs to.
+/// - **Authentication** — establish who sent the `postcard(Delta)` bytes
+///   before applying (a signature over them, or a connection-authenticated
+///   sender checked against known devices), or, as org-node does by owner
+///   ruling, rest every decision on a trusted root read independently of
+///   the sender.
+/// - **Organisation binding** — wrap deltas in `(org_id, seq,
+///   postcard(Delta))` envelopes; the lib has no notion of which
+///   organisation a delta belongs to.
 /// - **Replay protection across time** — `base_root` rejects deltas once the
 ///   trie has moved past their parent, but a trie that revisits a prior root
 ///   would accept a stale delta. Use a monotonic sequence number in the
 ///   envelope.
-/// - **Authority** — `apply_delta` accepts any well-formed change; whether the
-///   signer is allowed to make this change (quorum, role-based veto, rate
+/// - **Authority** — `apply_delta` accepts any well-formed change; whether
+///   its author is allowed to make this change (quorum, role-based veto, rate
 ///   limits) is policy that lives above this crate.
 /// - **Independent trusted root** — `CandidateTrie::verify_against`'s
 ///   `expected_root` argument must come from a path the attacker cannot

@@ -95,6 +95,13 @@ test_paths:
 #   startup_policy 13 + connection_status 10 + org_id_parsing 14
 #   + receiver_events 30 + receiver_guard 6 + ipc 33 + csp_policy 24
 #   + state_assembly 3 = 133 tests.
+# Merged 2026-10-06 with worktree-person-shared-types (the switch to person's
+# identity types, trimmed by docs/plans/2026-10-05-switch-trim.md): its
+# receiver_events changes replace tests of refusals org-node no longer raises;
+# Measured 2026-10-06 by that change's final gate: receiver_events 32, so
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 32 + receiver_guard 6 + ipc 33 + csp_policy 24
+#   + state_assembly 3 = 135 tests; vitest 36.
 #
 # `npm run check` is `svelte-kit sync && svelte-check`; it type-checks app/src
 # AND app/tests (measured 2026-09-14 — the generated .svelte-kit/tsconfig.json

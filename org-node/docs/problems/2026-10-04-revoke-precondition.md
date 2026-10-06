@@ -56,3 +56,8 @@ Move the `peer_addr` check above the trie delete and the chain write, under
 TDD: the reproduction is the existing test, inverted. It belongs in a change
 of its own — this one is an architecture ledger and must not alter production
 ordering under cover of documenting it.
+
+*Annotated 2026-10-05 by review round 1 of `worktree-worktree-person-shared-types`
+(finding-6); reworded the same day by docs/plans/2026-10-05-switch-trim.md.* The
+items the `affects:` line names are amended in place on that branch rather
+than superseded, so the line names them alone.

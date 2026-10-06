@@ -107,7 +107,7 @@ fn assert_error_names(err: &DecodeError, expected: usize, actual: usize) {
 // REQ-4astjb — exactly three slots, and nothing else
 // ---------------------------------------------------------------------------
 
-// verifies: REQ-4astjb, REQ-9wwenn, LLR-nq7nhg
+// verifies: REQ-4astjb, REQ-9wwenn, LLR-nq7nhg, LLR-hezpr7
 //
 // The normal case, and the one that pins every offset: 96 bytes decode, and
 // each of the three fields comes back from the slot it was written to.

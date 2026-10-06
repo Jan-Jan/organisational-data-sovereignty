@@ -36,6 +36,22 @@ This is correct for the PoC because:
 3. **Ed25519 fits in 32 bytes.** While Ed25519 is the only scheme in use,
    opaque `bytes32` storage is sufficient and self-describing schemes add
    cost without benefit.
+
+   **Note, 2026-10-05:** this point is out of date. The owner ruled
+   (2026-10-04) that `orgPubKey` holds the Organisation public key, which is
+   an X25519 key-agreement key and never an Ed25519 signing key (root
+   `docs/CONTEXT.md`). The argument still holds for X25519, which also fits
+   in 32 bytes. Read "Ed25519" in this point, and in "Ed25519 (the current
+   default)" under the `orgKeyType` item below, as X25519.
+
+   *Corrected 2026-10-05 by review round 3 (finding-16):* the swap does not
+   carry over to the rest of this document. The `orgKeyType` list (sr25519,
+   BLS12-381 G1, Dilithium, Falcon), the key sizes under "Switch `orgPubKey`
+   from `bytes32` to `bytes`" and the PQ-migration rows of the trade-off table
+   are signature schemes, chosen for a signing key. The Organisation public
+   key is a key-agreement key, so its post-quantum successor would be a key
+   encapsulation scheme, not a signature scheme. Those lists are left as
+   written and are to be redone when the V2 storage model is designed.
 4. **Migration is cheap when the population is small.** Moving a handful
    of test orgs to a successor contract is trivial; the calculus changes
    when dozens-to-hundreds of production orgs and downstream contracts

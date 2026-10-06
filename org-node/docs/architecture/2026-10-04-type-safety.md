@@ -100,28 +100,51 @@ describes, was stated by no requirement and checked by no test.
 since a Persona identifier, an epoch and a Sequence number are not secret and
 are short.)
 
-**LLR-ayrdr8**: the postcard encoding of a fixed Persona store plaintext
-(one Persona, one Organisation with an Organisation secret, a chain account
-and members, one pending Invite), of a fixed admission Wire message, the
-Base64 text of a fixed Invite and Join request, and the EVM calldata of a
-fixed genesis and update are pinned values: every type `types.rs` defines, and the
-org-members types org-node holds, serialise exactly as the plain values they
-replace.
+**LLR-ayrdr8**: the postcard encoding of a fixed Persona store plaintext (one
+Persona, one Organisation with an Organisation secret and no Organisation
+private key, a chain account and members, one pending Invite), of a fixed
+admission Wire message, the Base64 text of a fixed Invite and Join request,
+and the EVM calldata of a fixed genesis and update are the values pinned in
+`org-node/tests/encoding_golden.rs`: every type `types.rs` defines, and the
+org-members and `person` types org-node holds, serialise exactly as the plain
+values they replace. Two pinned values differ from master's, each by one of
+this branch's two format changes and by nothing else. The store plaintext has
+one more byte, `00`, after the Organisation record's chain account: the
+`org_private_key: None` that REQ-ech45n adds (LLR-3fwykc). The Wire message
+has lost the Envelope's signature, the 65 bytes after its Change set bytes
+(LLR-e7s4ye).
 satisfies: derived
 
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* The
+pinned values were master's; two changed, each by one of the format changes
+this item names. The two new values were derived from master's bytes, not
+captured from the code; `encoding_golden.rs` records master's values beside
+them.
+
 **LLR-mmdu38**: `OrgPublicKey::parse(&[u8; 32])` and `TryFrom<[u8; 32]>`
-accept exactly the bytes that decompress to an Edwards point and refuse any
-other with `OrgNodeError::InvalidKey`; its `Deserialize` applies the same
-check; `From<&P2pMemberKey>` builds one from a member key (the genesis value
-today, PR-szkat6); `as_bytes` returns the 32 bytes unchanged; under `Debug` it
-renders as `OrgPublicKey(` followed by its first four bytes in lower-case hex
-and `..)` — `OrgPublicKey(d75a9801..)` — never its full 32 bytes. A chain state
+accept a value exactly when `person::x25519::is_valid_public_key` accepts it,
+and refuse any other with `OrgNodeError::InvalidOrgPublicKey`. Its
+`Deserialize` applies the same parse, and a value the parse refuses fails the
+decode. No conversion builds one from a Member-as-a-group key: a node obtains
+its own Organisation public key from its Organisation private key
+(`X25519Keypair::org_public_key`, LLR-322xfu). `as_bytes` returns the 32 bytes
+unchanged. Under `Debug` it renders as `OrgPublicKey(` followed by its first
+four bytes in lower-case hex and `..)`, never its full 32 bytes. A chain state
 whose Organisation public key the parse refuses leaves no cached state:
-`OnChainReader::refresh` (through `chain_read::OrgStateCache::store_fetched`)
-clears the cached state and returns the error, so `get_org_state` returns
-`Ok(None)` — and verify-against-chain refuses with `OrgNotOnChain` — until a
-refresh succeeds.
+`OrgStateCache::store_fetched` clears the cached state and returns the error,
+so `get_org_state` returns `Ok(None)` until a refresh succeeds.
 satisfies: derived
+
+*Amended 2026-10-05 (owner answer Q4 of that day to
+docs/plans/2026-10-05-switch-trim.md; written by change
+`worktree-person-shared-types`).* This item stated the Edwards-point rule,
+`InvalidKey` and `From<&P2pMemberKey>`, which its own round-5 amendment below
+called interim until PR-szkat6 separated the two keys. This branch separates
+them (REQ-ech45n), so the X25519 rule of LLR-3jjgtw applies and the conversion
+is gone. The `Debug` and fail-closed cache clauses are this item's, unchanged.
+A replacement item that stated this text was withdrawn before merge.
 
 (Amended 2026-10-05 after independent review round 3: `refresh` returned on
 the parse failure before updating its cache, so `get_org_state` went on
@@ -154,13 +177,24 @@ checked by no test.)
 `org-node/src/keys.rs`: how a seed becomes the key pair this item holds, and
 how a key pair hands its seed back.
 
-**LLR-56hc77**: a signing key pair is obtained from a seed only through
-`MemberSeed::signing_keypair()` and `DeviceSeed::signing_keypair()`, and a
-new key pair's seed only as the matching seed type
-(`SigningKeypair::member_seed()` / `device_seed()`), so that no seed passes
-through a plain byte array inside org-node; `SigningKeypair::from_seed` and
-`to_seed` are removed.
+**LLR-56hc77**: a key pair is obtained from a secret only through the secret's
+own type, and hands its secret back only as that type, so no secret passes
+through a plain byte array inside org-node. `MemberSeed::x25519_keypair` and
+`OrgPrivateKey::x25519_keypair` yield an `X25519Keypair`, which hands its
+secret back through `member_seed` or `org_private_key`.
+`DeviceSeed::signing_keypair` yields a `SigningKeypair`, which hands its
+secret back through `device_seed`. A key pair rebuilt from the secret it
+handed back has the same public key. Neither key pair has a `from_seed` or a
+`to_seed`, and `SigningKeypair` has no `member_seed`.
 satisfies: derived
+
+*Amended 2026-10-05 (owner answer Q4 of that day to
+docs/plans/2026-10-05-switch-trim.md; written by change
+`worktree-person-shared-types`).* This item named
+`MemberSeed::signing_keypair` and `SigningKeypair::member_seed`. On this
+branch a member seed is the secret of an X25519 key (LLR-ctzkv7), so neither
+exists. The rule, a secret typed by its role at every step, is unchanged. A
+replacement item that stated this text was withdrawn before merge.
 
 ## SDD-pa6p7w — The chain as a read oracle
 
@@ -183,12 +217,33 @@ holding a secret may show, and the field-naming refusal (`parse_field`) that
 the store open, the Join request decode and the record-snapshot decode share.
 
 **LLR-bwb9pu**: the debug rendering of every org-node value that holds a
-secret — `PersonaRecord`, `OrgRecord`, `StoreData`, `WireMessage` and
-`SigningKeypair` — contains none of that secret's bytes in any form, because
-each holds the secret in its secret type (LLR-sz4xhc), or, for
-`SigningKeypair`, in ed25519-dalek's `SigningKey`, whose `Debug` omits it
-(soup.md), and none formats the bytes itself.
+secret contains none of that secret's bytes in any form. Those values are
+`PersonaRecord`, `OrgRecord`, `StoreData`, `WireMessage`, `SigningKeypair` and
+`X25519Keypair`. The records, the store plaintext and the Wire message hold
+each secret in its secret type: `MemberSeed`, `DeviceSeed`, `OrgSecret`
+(LLR-sz4xhc) or `OrgPrivateKey` (LLR-322xfu). `SigningKeypair` holds its seed
+in ed25519-dalek's `SigningKey`, whose `Debug` omits it (soup.md).
+`X25519Keypair` renders as `X25519Keypair(..)` (LLR-98ufry). None of them
+formats the bytes itself.
 satisfies: REQ-y7tsft
+
+*Amended 2026-10-05 (owner answer Q4 of that day to
+docs/plans/2026-10-05-switch-trim.md; written by change
+`worktree-person-shared-types`).* This item listed five values and called them
+every value that holds a secret. This branch adds `X25519Keypair` and
+`OrgPrivateKey`, so the list has six values and names the secret types they
+hold. A replacement item that stated this text was withdrawn before merge.
+
+*Parent checked 2026-10-05 by review round 3 (finding-8).* REQ-y7tsft names
+the member seed, the device seed, the Organisation secret and the store key,
+and the records, store and Wire message that hold them. It covers
+`X25519Keypair` where the key pair holds a member seed. It does not name the
+Organisation private key, so the clauses on `OrgPrivateKey` and on an
+`X25519Keypair` holding it go beyond REQ-y7tsft. Those clauses are stated by
+LLR-322xfu, LLR-98ufry and LLR-2dvhz8, all derived and assessed in
+`org-node/docs/risk/2026-10-05-envelope-authenticity.md`. This item keeps
+`satisfies: REQ-y7tsft` for the rest. *(Corrected 2026-10-05 by review round
+4, finding-3: this note placed LLR-2dvhz8 under REQ-ech45n; it is derived.)*
 
 (Amended 2026-10-04 after independent review: `SigningKeypair` holds a seed
 too and derives `Debug`, relying on ed25519-dalek 2.2.0's `SigningKey` not
@@ -227,16 +282,28 @@ that the parsed values are in NFC, although that is what is stored, listed
 and exported for a Persona whose details were given in another normal form;
 see "Observable changes".)
 
-**LLR-8bum44**: opening a Persona store, importing a Join request, or
-decoding a record snapshot (`first_admission_base`), whose decoded content
-holds a handle, name, surname or key that its type's parse refuses fails as a
-whole with `OrgNodeError::InvalidField` whose `field` names the field that
-failed (`persona.*`, `org.*`, `member.*`, `pending_invite.*`,
-`join_request.*`), and leaves nothing opened, imported or extended; importing
-an Invite whose Organisation public key, administrator Member key or
-administrator device key is not a curve point fails (`Chain("blob decode: …")`)
-and stores no pending Invite.
+**LLR-8bum44**: opening a Persona store, importing a Join request, or decoding
+a record snapshot (`first_admission_base`), whose decoded content holds a
+handle, name, surname or key that its type's parse refuses fails as a whole
+with `OrgNodeError::InvalidField`. Its `field` names the field that failed
+(`persona.*`, `org.*`, `member.*`, `pending_invite.*`, `join_request.*`), and
+nothing is opened, imported or extended. Each key is parsed by its own type: a
+Member-as-a-group key as a `PersonPublicKey` (X25519), a DevicePublicKey as a
+`DevicePublicKey`, and an Organisation public key as an `OrgPublicKey`
+(LLR-mmdu38). A member snapshot's DevicePublicKeys are held as a list of
+parsed keys, so a repeated key or more than four is not refused here;
+org-members refuses them, as a `Trie` error, when the members are rebuilt.
+Importing an Invite whose Organisation public key, administrator's
+Member-as-a-group key or administrator's DevicePublicKey is not a valid key of
+its kind fails (`Chain("blob decode: …")`) and stores no pending Invite.
 satisfies: REQ-qn2erx
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+item said 'curve point' for every key; the keys now have three kinds, each
+parsed by its own type. REQ-qn2erx still says "not a curve point", master's
+wording; this item reads it as "not a valid key of its kind".
 
 (Amended 2026-10-04 after independent review: the record snapshot decoded by
 `first_admission_base` and the Invite import were refused by the code but not

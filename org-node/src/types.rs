@@ -1,12 +1,11 @@
 //! The value types org-node defines for what it holds that org-members does
 //! not (SDD-swtd3w): the secrets (LLR-sz4xhc), the Organisation public key
-//! (LLR-mmdu38), and the tag types for the chain account, the Persona
+//! (LLR-3jjgtw), and the tag types for the chain account, the Persona
 //! identifier, the epoch and the Sequence number (LLR-s7whrn). Seed to key
 //! pair conversion lives in `keys.rs` (LLR-56hc77).
 use core::fmt;
 
-use ed25519_dalek::VerifyingKey;
-use org_members::P2pMemberKey;
+use org_members::MemberLeaf;
 use serde::{Deserialize, Serialize};
 
 use crate::error::OrgNodeError;
@@ -46,13 +45,13 @@ macro_rules! secret_type {
 }
 
 secret_type!(
-    /// The seed of a Member's signing key pair: the secret half of the
-    /// Member-as-a-group key.
+    /// The secret of a Member's X25519 key pair: the secret half of the
+    /// Member-as-a-group key (LLR-56hc77).
     MemberSeed
 );
 secret_type!(
-    /// The seed of a device's signing key pair: the secret half of its Device
-    /// key and of its iroh identity.
+    /// The seed of a device's signing key pair: the secret half of its
+    /// DevicePublicKey and of its iroh identity (LLR-56hc77).
     DeviceSeed
 );
 secret_type!(
@@ -60,27 +59,48 @@ secret_type!(
     OrgSecret
 );
 
-/// The Organisation public key, parsed as a curve point (LLR-mmdu38). The
-/// published signing key today (PR-szkat6).
+secret_type!(
+    /// The Organisation's X25519 private key, generated fresh when the
+    /// Organisation is created and held only in the creating node's
+    /// Organisation record (REQ-ech45n, LLR-3fwykc). Its in-memory key pair
+    /// is `keys::X25519Keypair` (LLR-98ufry).
+    OrgPrivateKey
+);
+
+/// The Organisation public key: the X25519 key-agreement key the chain
+/// records for an Organisation (root `docs/CONTEXT.md`). Constructed only
+/// through `parse`, which applies `person`'s exported X25519 validity rule
+/// (REQ-8jb4ny, LLR-3jjgtw). It authenticates nothing the node receives.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct OrgPublicKey(VerifyingKey);
+pub struct OrgPublicKey([u8; 32]);
 
 impl OrgPublicKey {
-    /// Accepts exactly the 32 bytes that decompress to an Edwards point;
-    /// refuses any other with `InvalidKey`.
+    /// Accepts a canonical, non-small-order X25519 public key; refuses any
+    /// other with `InvalidOrgPublicKey` (REQ-8jb4ny, LLR-3jjgtw).
     pub fn parse(bytes: &[u8; 32]) -> Result<Self, OrgNodeError> {
-        VerifyingKey::from_bytes(bytes)
-            .map(Self)
-            .map_err(|_| OrgNodeError::InvalidKey)
+        if person::x25519::is_valid_public_key(bytes) {
+            Ok(Self(*bytes))
+        } else {
+            Err(OrgNodeError::InvalidOrgPublicKey)
+        }
     }
 
     /// The 32 bytes as given to `parse`.
     pub fn as_bytes(&self) -> &[u8; 32] {
-        self.0.as_bytes()
+        &self.0
     }
 
-    pub fn verifying_key(&self) -> &VerifyingKey {
-        &self.0
+    /// Refuses, with `DuplicateKey`, a key equal to any Member-as-a-group
+    /// key or any DevicePublicKey of `members` (REQ-ech45n, LLR-sj7cd5).
+    pub fn ensure_distinct_from(&self, members: &[MemberLeaf]) -> Result<(), OrgNodeError> {
+        let held = members.iter().any(|m| {
+            m.p2p_key().as_bytes() == &self.0 || m.p2p_devices().iter().any(|d| d.as_bytes() == &self.0)
+        });
+        if held {
+            Err(OrgNodeError::Trie(org_members::OrgMembersError::DuplicateKey))
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -89,14 +109,6 @@ impl TryFrom<[u8; 32]> for OrgPublicKey {
 
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
         Self::parse(&bytes)
-    }
-}
-
-/// The genesis value today: the founding administrator's Member key
-/// (PR-szkat6).
-impl From<&P2pMemberKey> for OrgPublicKey {
-    fn from(key: &P2pMemberKey) -> Self {
-        Self(*key.verifying_key())
     }
 }
 
@@ -113,6 +125,7 @@ impl Serialize for OrgPublicKey {
     }
 }
 
+/// Decoding (the store, an Invite) goes through `parse` too.
 impl<'de> Deserialize<'de> for OrgPublicKey {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let bytes = <[u8; 32]>::deserialize(d)?;

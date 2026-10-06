@@ -47,11 +47,23 @@ satisfies: REQ-m8aexh
 `MAX_DEVICES` is 4 because the device sub-trie is a fixed depth-2 binary tree
 of four slots. satisfies: REQ-xdx2c2
 
+(Amended 2026-10-04, corrected 2026-10-05 in review round 3: realised
+through `person`'s `DeviceSlots` and `MAX_DEVICES`, which org-members
+re-exports, under person's exported REQ-4szc22. The bound is still 4 and the
+sub-trie still four slots, now in `person/src/slots.rs` and
+`person/src/device_trie.rs`.)
+
 **LLR-w5nkbu**: `Name::parse` and `Surname::parse` (and their `TryFrom`
 impls) are the only constructors of a `Name` and a `Surname`; each stores the
 NFC form, bounded at 128 bytes after normalisation, and a field exceeding its
 bound is rejected as `FieldTooLong { field, max }` naming which field and which
 limit. satisfies: derived
+
+(Amended 2026-10-04, corrected 2026-10-05 in review round 3: realised
+through `person`'s `Name` and `Surname`, which org-members re-exports, under
+person's exported REQ-r7mytp. Their `parse` returns `person::IdentityError`,
+whose `FieldTooLong { field, max }` `From` maps to org-members' variant of the
+same name and fields.)
 
 **LLR-paxj7b**: `MemberLeaf::new` rejects a member constructed with no device
 key, so that the zero-device state is reachable only through the isolation
@@ -64,6 +76,13 @@ the name and the surname, and the `Debug` rendering of a `Handle`, `Name` or
 **LLR-xyv6p9**: deserialising a device key set accepts only a strictly
 increasing, duplicate-free list within `MAX_DEVICES`, and accepts the empty
 list. satisfies: REQ-shk82j, REQ-xdx2c2
+
+(Amended 2026-10-05: realised through `person`'s `DeviceSlots` `Deserialize`,
+which org-members re-exports, under person's exported REQ-tq4ms4. A refusal
+is the decoder's error, raised through serde's custom error with the message
+"device slots must be strictly increasing (sorted, no duplicates)" or "device
+slots exceed MAX_DEVICES"; each element decodes through
+`DevicePublicKey::parse` (LLR-z954wj).)
 
 **LLR-68tka5**: deserialising a member record decodes its handle, name and
 surname through `Handle::parse`, `Name::parse` and `Surname::parse`, so a
@@ -108,6 +127,15 @@ written for it".
 
 `org-members/src/hasher.rs`, `org-members/src/device_trie.rs`
 
+(Amended 2026-10-05: `org-members/src/device_trie.rs` no longer exists. The
+device sub-trie moved to `person::device_trie` (`person/src/device_trie.rs`,
+`compute_device_root` and the `DeviceTrieHasher` trait), and
+`org-members/src/hasher.rs` implements `DeviceTrieHasher` for `Blake3Hasher`
+with org-members' own device domain keys and sentinel; `org-members/src/smt.rs`
+calls `person::compute_device_root`. The item is now `hasher.rs` and its use of
+`person::device_trie`. Where this file names `device_trie.rs` below, read
+`person/src/device_trie.rs`.)
+
 **SDD-d6x85b**: the hash interface the membership record is committed
 through — four separated domains, and the fixed-shape device sub-trie whose
 root enters the member leaf hash. traces: REQ-xdx2c2
@@ -116,10 +144,25 @@ root enters the member leaf hash. traces: REQ-xdx2c2
 leaf, member node, device leaf, device node — such that the same input hashed
 in two domains yields two different values. satisfies: derived
 
+(Amended 2026-10-04, corrected 2026-10-05 in review round 3: the four
+domains are still `Blake3Hasher`'s, in `org-members/src/hasher.rs`. The two
+member domains are org-members' own, through `TrieHasher`; the two device
+domains are the implementation of `person`'s `DeviceTrieHasher`, which
+`TrieHasher` extends, keyed as before, so every hash is unchanged. `person`'s
+exported REQ-aj6x3n states the device-root half of the separation, a
+different device root under a different domain.)
+
 **LLR-kdhd2v**: the device sub-trie is a fixed depth-2 binary tree of four
 slots whose unoccupied slots hash a device empty sentinel, and device keys are
 held sorted so that construction order does not change the record's hash.
 satisfies: REQ-xdx2c2
+
+(Amended 2026-10-04, corrected 2026-10-05 in review round 3: realised
+through `person`'s `compute_device_root` and `DeviceSlots`, under person's
+exported REQ-mu3qgz (the device root) and REQ-4szc22 (keys held sorted). The
+sentinel is org-members' own, `Blake3Hasher::DEVICE_EMPTY_SENTINEL`, unchanged,
+so every hash is unchanged; LLR-jfj6pc requires it to encode no
+DevicePublicKey.)
 
 Both items here are carried on one side only, and stay that way (2026-09-17).
 
@@ -131,7 +174,8 @@ has no invalid input — every byte string is in the domain — so there is no
 further abnormal input to supply.
 
 For LLR-kdhd2v the out-of-range case never reaches the item. A fifth device is
-refused by `P2pDeviceSlots`, in `new()` and in the `Deserialize` impl, before
+refused by `P2pDeviceSlots` (*`person::DeviceSlots` since 2026-10-05, in
+`parse` and in its `Deserialize`; review round 3 finding-16*), in `new()` and in the `Deserialize` impl, before
 `compute_device_root` is ever called, so the abnormal-input evidence for the
 four-slot shape sits under LLR-pys2ek and LLR-xyv6p9 where those refusals and
 their mutations already live. The degenerate case — a record with zero or only
@@ -140,7 +184,9 @@ some slots filled — is *executed* by several tests
 isolation tests fill none) and asserted by none that a mutation of
 `device_trie.rs` could discriminate: each of them compares two roots, and a
 change to the sentinel or to the tree's shape moves both sides of that
-comparison together. Annotating one would buy a name and no evidence.
+comparison together. Annotating one would buy a name and no evidence. (Amended
+2026-10-05: the file is now `person/src/device_trie.rs`; see the note under
+the item's heading.)
 
 ## SDD-d9svdj — Sparse Merkle trie store
 
@@ -428,6 +474,12 @@ injective**. `P2pDeviceSlots`' `Deserialize` is the contrasting case: it
 genuinely refuses out-of-order, duplicate-bearing and oversized slot vectors
 rather than repairing them, and says so in its own comment.
 
+*(Note 2026-10-05, review round 3 finding-16, change
+`worktree-person-shared-types`: `P2pDeviceSlots` is deleted. Its place is
+taken by `person::DeviceSlots`, which org-members re-exports, and whose
+`Deserialize` refuses the same three cases, so the contrast holds under that
+name (LLR-st6j2r).)*
+
 No code was changed to make this paragraph true. Correcting a false claim is
 the fix; making the encoding injective — by rejecting non-NFC leaf fields the
 way the device slots are rejected — is a **behaviour change**, it needs its own
@@ -521,7 +573,9 @@ the requirement without any single LLR being the place it is refined.
 
 **Two removals from SDD-d6x85b — both strays, both removed.** The item is
 `hasher.rs` and `device_trie.rs`: four separated hash domains and the
-fixed-shape device sub-trie.
+fixed-shape device sub-trie. (Amended 2026-10-05: `device_trie.rs` is now
+`person/src/device_trie.rs`, which `hasher.rs` serves through
+`DeviceTrieHasher`.)
 
 - **REQ-avmu3j** ("shall not report a membership root value for a record whose
   hashes have not been computed since its last modification, reporting an error

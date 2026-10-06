@@ -27,6 +27,13 @@ with a device removed and the key unchanged), and the same rule would close
 both — relate a leaf's device set to its key across a change, not only within
 one operation.
 
+(Amended 2026-10-05: `P2pDeviceSlots::remove_device` no longer exists. Its
+successor, `person::DeviceSlots::remove_device`, is public; what keeps an
+external caller from installing a smaller device set on an existing member is
+now that `MemberLeaf::with_p2p_device_slots` is `pub(crate)` and `add_member`
+refuses an identifier already present (`DuplicateId`). The route this report
+describes is unchanged by the move.)
+
 Not fixed in the change that found it: that change resolves PR-zz4exm, whose
 scope is the replacement key the two device-removal operations accept. Whether
 `add_member` should refuse a key the identifier last held, or whether

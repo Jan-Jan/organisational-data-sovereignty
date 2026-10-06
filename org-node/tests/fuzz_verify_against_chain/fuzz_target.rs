@@ -14,15 +14,17 @@
 //! the envelope is fuzz-controlled.
 //!
 //! **Two shapes per input, added 2026-10-04.** The original target offered the
-//! fuzz bytes as a whole postcard-encoded `SignedDeltaEnvelope`. Almost every
+//! fuzz bytes as a whole postcard-encoded envelope (then `SignedDeltaEnvelope`). Almost every
 //! such input that decodes at all carries a random `org_id`, so
 //! `verify_envelope_against_chain` returned `OrgIdMismatch` at its first check
 //! and the remaining seven were never reached: a mutation turning
 //! `local_trie.apply_delta(&delta)?` into `.unwrap()` — a panic on any delta
 //! that fails to apply — left this target green, and LLR-hs7g6j therefore
 //! rested on evidence that only ever exercised step 1. The second shape wraps
-//! the fuzz bytes as the **delta** of a correctly signed envelope for the
-//! expected Organisation at an acceptable sequence number, so every input
+//! the fuzz bytes as the **delta** of a well-formed envelope for the
+//! expected Organisation at an acceptable sequence number (the envelope
+//! carries no signature and its sender is not checked since 2026-10-05,
+//! REQ-ag6kqm), so every input
 //! reaches the decode, and a decodable-but-inapplicable delta reaches the
 //! base-root check and `apply_delta`.
 //!
@@ -40,47 +42,35 @@ use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
 use org_members::{Handle, MemberId, MemberLeaf, Name, Surname};
 use org_node::chain::{ChainReader, MockChain, OrgState};
-use org_node::envelope::SignedDeltaEnvelope;
+use org_node::envelope::Envelope;
 use org_node::ids::OrgId;
-use org_node::keys::SigningKeypair;
+use org_node::keys::{SigningKeypair, X25519Keypair};
 use org_node::sequence::SeqGuard;
 use org_node::verify::{verify_envelope_against_chain, VerifyContext};
-use org_node::{DeviceSeed, Epoch, MemberSeed, OrgPublicKey, SequenceNumber};
+use org_node::{DeviceSeed, Epoch, MemberSeed, OrgPrivateKey, SequenceNumber};
 
 // The admin's device is a keypair of its own: org-members refuses a leaf whose
 // member key is also an enrolled device key (`DuplicateKey`).
-fn fixed_trie(admin: &SigningKeypair, admin_device: &SigningKeypair) -> OrgTrie<Blake3Hasher> {
+fn fixed_trie(admin: &X25519Keypair, admin_device: &SigningKeypair) -> OrgTrie<Blake3Hasher> {
     let leaf = MemberLeaf::new(
         MemberId::new([1u8; 32]),
         Handle::parse("admin").unwrap(),
-        admin.member_key(),
+        admin.member_key().expect("valid key"),
         Name::parse("T").unwrap(),
         Surname::parse("U").unwrap(),
-        vec![admin_device.device_key()],
+        vec![admin_device.device_key().unwrap()],
     )
     .unwrap();
     OrgTrie::<Blake3Hasher>::genesis(vec![leaf]).unwrap()
 }
 
-/// The transcript `SignedDeltaEnvelope::build` signs: org_id ‖ seq (LE) ‖ delta.
-/// Rebuilt here because the crate's own `transcript` is private.
-fn transcript(org: OrgId, seq: SequenceNumber, delta_bytes: &[u8]) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(20 + 8 + delta_bytes.len());
-    buf.extend_from_slice(org.as_bytes());
-    buf.extend_from_slice(&seq.get().to_le_bytes());
-    buf.extend_from_slice(delta_bytes);
-    buf
-}
-
 fn main() {
-    let admin = MemberSeed::from([1u8; 32]).signing_keypair();
-    // Same seed as `test_fixtures::admin_device`; this target builds
+    // Same seed as `test_fixtures::ADMIN_DEVICE_SEED`; this target builds
     // without `test-support`, so it cannot import it.
     let admin_device = DeviceSeed::from([4u8; 32]).signing_keypair();
-    let local = fixed_trie(&admin, &admin_device);
+    let member = MemberSeed::from([1u8; 32]).x25519_keypair();
+    let local = fixed_trie(&member, &admin_device);
     let org = OrgId::new([5u8; 20]);
-    let vk = admin.verifying_key();
-
     // An HONEST delta against `local`, encoded once. Shape 3 perturbs a copy
     // of these bytes, which is the only way to reach the checks past the
     // decode: a delta's `base_root` is thirty-two bytes that must equal the
@@ -88,16 +78,16 @@ fn main() {
     // Added 2026-10-04 after review round 3 measured that no input reached
     // check 5 — a `panic!()` immediately after the decode left this target
     // passing after 2 479 iterations.
-    let joiner = MemberSeed::from([7u8; 32]).signing_keypair();
+    let joiner = MemberSeed::from([7u8; 32]).x25519_keypair();
     let joiner_device = DeviceSeed::from([8u8; 32]).signing_keypair();
     let (honest_root, honest_bytes) = {
         let leaf = MemberLeaf::new(
             MemberId::new([2u8; 32]),
             Handle::parse("joiner").unwrap(),
-            joiner.member_key(),
+            joiner.member_key().unwrap(),
             Name::parse("J").unwrap(),
             Surname::parse("R").unwrap(),
-            vec![joiner_device.device_key()],
+            vec![joiner_device.device_key().unwrap()],
         )
         .unwrap();
         let (new_trie, delta) =
@@ -108,13 +98,13 @@ fn main() {
     // The chain says the Organisation's root is the one the honest delta
     // produces, so an unperturbed shape-3 input is ACCEPTED and the
     // `assert_eq!` below runs; a perturbed one that still applies yields a
-    // different root and must be refused at check 8.
+    // different root and must be refused at the root match (check 7).
     let mut chain = MockChain::new();
     chain.set(
         org,
         OrgState {
             root_hash: honest_root,
-            org_pub_key: OrgPublicKey::parse(&[0u8; 32]).unwrap(),
+            org_pub_key: OrgPrivateKey::from([9u8; 32]).x25519_keypair().org_public_key().unwrap(),
             epoch: Epoch::new(9),
         },
     );
@@ -122,7 +112,7 @@ fn main() {
     // bolero wraps each iteration in `catch_unwind`, which requires the
     // closure's captures to be `RefUnwindSafe`. `OrgTrie` contains a
     // `spin::Once` (interior mutability), so wrap the captures.
-    // None of local/chain/org/vk can actually be left inconsistent by an unwind
+    // None of local/chain/org can actually be left inconsistent by an unwind
     // because the closure never mutates them — asserting safety is correct.
     let local = AssertUnwindSafe(local);
     let chain = AssertUnwindSafe(chain);
@@ -130,11 +120,10 @@ fn main() {
     check!().for_each(move |bytes: &[u8]| {
         let ctx = || VerifyContext {
             expected_org_id: org,
-            author_member_key: &vk,
             seq_guard: SeqGuard::from_last_seen(SequenceNumber::new(0)),
             last_committed_epoch: Epoch::new(0),
         };
-        let run = |env: &SignedDeltaEnvelope| {
+        let run = |env: &Envelope| {
             if let Ok(out) = verify_envelope_against_chain(&*local, env, &ctx(), &*chain) {
                 // Any accepted update must equal the chain root it verified against.
                 assert_eq!(
@@ -144,28 +133,24 @@ fn main() {
             }
         };
 
-        // Shape 1 — the bytes are the whole envelope. Exercises the postcard
-        // decode ATTEMPT on `SignedDeltaEnvelope`, which reaches the
-        // hand-written `sig_bytes` visitor (a `panic!()` there reddens this
-        // target). The `if let Ok(env)` body below is another matter: review
-        // round 4 measured that no fuzz input assembles a whole envelope, in
-        // this target or in `fuzz_envelope_decode`, so it is never entered.
-        // Shapes 2 and 3 build their envelopes rather than hope for one.
-        if let Ok(env) = postcard::from_bytes::<SignedDeltaEnvelope>(bytes) {
+        // Shape 1 — the bytes are the whole envelope: the postcard decode
+        // ATTEMPT on `Envelope`. Review round 4 measured (on the signed
+        // envelope of the time) that no fuzz input assembled a whole
+        // envelope; the unsigned `Envelope` needs only 22 bytes, and whether
+        // the body is now entered has not been re-measured. Shapes 2 and 3
+        // build their envelopes rather than hope for one.
+        if let Ok(env) = postcard::from_bytes::<Envelope>(bytes) {
             run(&env);
         }
 
-        // A well-formed envelope around `delta`: right Organisation, an
-        // acceptable sequence number, and a genuine signature over those exact
-        // bytes, so checks 1 to 3 always pass and the decode is always
-        // reached.
-        let seq = SequenceNumber::new(1);
-        let envelope_around = |delta: Vec<u8>| SignedDeltaEnvelope {
-            org_id: org,
-            parent_seq: seq,
-            signature: admin.sign(&transcript(org, seq, &delta)).to_bytes(),
-            delta_bytes: delta,
-        };
+        // A well-formed envelope around `delta`: right Organisation and an
+        // acceptable sequence number, so checks 1 and 2 always pass and the
+        // decode is always reached. The number is the
+        // chain's epoch (9), as REQ-txvtm9 requires since 2026-10-05, so the
+        // unperturbed shape-3 input is still accepted.
+        let seq = SequenceNumber::new(9);
+        let envelope_around =
+            |delta: Vec<u8>| Envelope { org_id: org, parent_seq: seq, delta_bytes: delta };
 
         // Shape 2 — the bytes ARE the delta. Reaches the delta decode on every
         // input, which is the untrusted-input surface REQ-bcxz96 is about.
@@ -174,8 +159,8 @@ fn main() {
         // Shape 3 — the bytes PERTURB an honest delta: one byte of a valid
         // encoding is overwritten at a fuzz-chosen offset with a fuzz-chosen
         // value. Most results still decode, so the base-root comparison
-        // (check 5), `apply_delta` (check 6), the chain read (check 7) and the
-        // decisive root match (check 8) are reached — none of which any input
+        // (check 4), `apply_delta` (check 5), the chain read (check 6) and the
+        // decisive root match (check 7) are reached — none of which any input
         // reached before this shape existed. An unperturbed delta — the chosen
         // value happens to match what was there, one input in 256 — is
         // accepted, because the chain holds the honest root; that is the path

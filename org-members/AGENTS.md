@@ -34,14 +34,16 @@ main worktree, not always in feature worktrees).
   PII; redacted in Debug.
 - **MemberId** -- 32-byte immutable identifier; SMT key. Caller-generated,
   effectively random.
-- **P2pMemberKey** -- ed25519 VerifyingKey for peer-to-peer use. Used by the
-  local-first software as the "member-as-a-group" key: when an Organisation
-  grants access to a member, the grant is encoded against this key, and
+- **PersonPublicKey** (from `person`, re-exported) -- X25519 public key; the
+  "member-as-a-group" key (`MemberLeaf::p2p_key`). When an Organisation
+  grants access to a member, the grant is encoded against this key, and the
   member's devices derive their access from it. Rotatable. Future versions
   will add a separate on-chain key (`ChainKey` or similar -- name TBD).
-- **P2pDeviceKey** -- ed25519 VerifyingKey for a member's device. Stored sorted.
-- **P2pDeviceSlots** -- fixed depth-2 sub-trie holding 0..4 P2pDeviceKeys per
-  member. Zero devices represents the *isolated* state (see below).
+- **DevicePublicKey** (from `person`, re-exported) -- ed25519 public key of a
+  member's device, prime-order and canonically encoded. Stored sorted.
+- **DeviceSlots** (from `person`, re-exported) -- 0..4 DevicePublicKeys per
+  member, hashed as a fixed depth-2 sub-trie. Zero devices represents the
+  *isolated* state (see below).
 - **Isolated member** -- a member with zero p2p devices. Reached via
   `emergency_isolate_member` or by `delete_p2p_device` of the last device.
   The member stays in the trie; un-isolate by adding a device back.
@@ -69,18 +71,15 @@ Why: `../docs/adr/2026-10-04-parse-at-the-system-edge.md`.
   system** -- user input, serde decoding, chain reads -- and parsed there,
   once. Every other signature, public or internal, takes and returns the
   newtype. No naked `[u8; 32]`/`String` for a domain value anywhere else.
-- **Validated type** (has an invariant: `Handle`, `Name`, `Surname`,
-  `P2pDeviceSlots`, keys from bytes): private field, `parse` + `TryFrom`
-  delegating to it, `type Error = OrgMembersError`. `parse` may canonicalize
-  (NFC). Exported. No unchecked constructor.
-  **Status (2026-10-04):** `P2pDeviceSlots::parse` and `P2pMemberKey::parse` /
-  `P2pDeviceKey::parse` (with `TryFrom`) bring the device set and the key
-  types under the rule (LLR-t3p9zk, LLR-k6dhz7). Key parse accepts exactly
-  what deserialisation accepts; refusing weak and non-canonical keys is
-  PR-b7khyw.
+- **Validated type** (has an invariant: `Handle`, and `person`'s `Name`,
+  `Surname`, `DeviceSlots`, `DevicePublicKey`, `PersonPublicKey`): private
+  field, `parse` + `TryFrom` delegating to it. `parse` may canonicalize
+  (NFC). Exported. No unchecked constructor. org-members' own types use
+  `type Error = OrgMembersError`; `person`'s return `person::IdentityError`,
+  which converts with `From`.
 - **Tag type** (any value is valid): public `MemberId`, `NodeHash`,
   `RootHash` have infallible `new` + `From<[u8; 32]>`. Crate-internal ones
-  take no raw bytes: `HeldKey` only `From` a member/device key,
+  take no raw bytes: `HeldKey` only `From` a PersonPublicKey/DevicePublicKey,
   `HandleSkeleton` only `HandleSkeleton::of(&Handle)`. No `parse`, no `Result`.
   Promote to validated when an invariant appears (Poseidon hashes must be
   canonical field elements).
@@ -181,7 +180,7 @@ extending an existing one. Test each domain operation independently in
    - Ignores stale removals (doesn't underflow `member_count`).
    - Re-checks confusable handles for both new and renamed members.
 5. Wire-format leaves decode through each field's validating `Deserialize`
-   (`Handle`/`Name`/`Surname` via `serde(try_from)`, `P2pDeviceSlots`, keys).
+   (`Handle`/`Name`/`Surname` via `serde(try_from)`, `DeviceSlots`, keys).
    `derive(Deserialize)` on `MemberLeaf` is safe only because every field
    validates; never derive it on a validated type itself.
 6. `Node`, `MemberLeaf`, `OrgTrie<H>` are `Send + Sync` for downstream parallel
@@ -228,7 +227,8 @@ Test count varies by commit; `cargo test` is the source of truth.
 ## Where to look first
 
 - `src/lib.rs` -- crate root, re-exports
-- `src/types.rs` -- MemberId, keys, Handle/Name/Surname, MemberLeaf, RootHash
+- `src/types.rs` -- MemberId, Handle, MemberLeaf, RootHash; re-exports `person`'s
+  keys, Name/Surname, DeviceSlots and NodeHash
 - `src/trie.rs` -- `OrgTrie` public API
 - `src/smt.rs` -- low-level SMT operations (path copying, recalculate)
 - `src/delta.rs` -- Delta, CandidateTrie

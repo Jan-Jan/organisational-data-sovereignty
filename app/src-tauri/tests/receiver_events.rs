@@ -359,11 +359,11 @@ fn verify_failure_carries_null_organisation_when_unknown() {
 fn verify_failure_carries_the_message() {
     let out = events::emissions_for(&ReceiverOutcome::VerifyFailed {
         org_id: None,
-        message: "signature does not verify".to_string(),
+        message: "recomputed root does not match the on-chain root".to_string(),
     });
     assert_eq!(
         out[0].payload["message"],
-        serde_json::json!("signature does not verify")
+        serde_json::json!("recomputed root does not match the on-chain root")
     );
 }
 
@@ -438,12 +438,14 @@ use org_node::OrgNodeError;
 fn verification_verdicts() -> Vec<OrgNodeError> {
     vec![
         OrgNodeError::OrgIdMismatch,
-        OrgNodeError::BadSignature,
         OrgNodeError::StaleSeq { got: 3, last_seen: 7 },
         OrgNodeError::MalformedDelta,
         OrgNodeError::DeltaBaseMismatch,
         OrgNodeError::RootMismatch,
         OrgNodeError::StaleEpoch { got: 2, last: 9 },
+        // Added 2026-10-05: a Sequence number that is not the chain's epoch
+        // (an org-node commit rule) refuses the received update itself.
+        OrgNodeError::SeqNotEpoch { seq: 9, epoch: 3 },
     ]
 }
 
@@ -531,6 +533,28 @@ fn a_chain_failure_emits_no_verification_event_for_any_message() {
 }
 
 // verifies: LLR-usxk57
+#[test]
+fn an_invalid_organisation_public_key_is_classified_as_a_receiver_error() {
+    // org-node refuses an Organisation state whose key is not a valid X25519
+    // key when it reads the chain, before verifying anything against it:
+    // nothing failed to verify, so no verdict may be claimed.
+    let e = OrgNodeError::InvalidOrgPublicKey;
+    let outcome = events::classify_receive_error(&e);
+    assert_eq!(
+        outcome,
+        ReceiverOutcome::ReceiveError {
+            message: e.to_string()
+        }
+    );
+    let out = events::emissions_for(&outcome);
+    assert_eq!(names(&out), vec!["receiver-error"]);
+    assert!(
+        !names(&out).contains(&"verification-failed"),
+        "an unreadable Organisation state is not a verification failure"
+    );
+}
+
+// verifies: REQ-kn5rtx
 #[test]
 fn the_receiver_error_payload_carries_a_message_and_no_verification_state() {
     // A receiver error has no organisation, no epoch, no root and no verdict.
@@ -657,9 +681,9 @@ fn a_non_terminal_failure_does_not_stop_the_loop() {
             "Chain({inner:?}) is not terminal and must not stop the loop"
         );
     }
-    // …and neither is a verdict on an update: a bad signature is a reason to
+    // …and neither is a verdict on an update: a root mismatch is a reason to
     // reject that envelope, not a reason to stop receiving.
-    let verdict = OrgNodeError::BadSignature;
+    let verdict = OrgNodeError::RootMismatch;
     assert_eq!(
         events::outcomes_for_receive_error(&verdict),
         vec![ReceiverOutcome::VerifyFailed {
@@ -739,11 +763,14 @@ fn locally_reachable_variants_are_classified_as_receiver_errors() {
 #[test]
 fn a_refused_key_or_field_is_classified_as_a_receiver_error() {
     // Neither is a verdict on an update: an Organisation public key the chain
-    // holds that is not a curve point, or a received or stored record holding
+    // holds that is not a valid key, or a received or stored record holding
     // a value its type refuses. Before org-node parsed these they surfaced as
     // `Chain(..)` or `Trie(..)`, both receiver errors; the class is unchanged.
+    // Merged 2026-10-05 into worktree-person-shared-types: master's
+    // `InvalidKey` (an Organisation public key off the Edwards curve) is
+    // `InvalidOrgPublicKey` here (an invalid X25519 key).
     let cases = [
-        OrgNodeError::InvalidKey,
+        OrgNodeError::InvalidOrgPublicKey,
         OrgNodeError::InvalidField {
             field: "member.handle",
             reason: "invalid handle: handle must be lowercase".to_string(),
@@ -756,4 +783,37 @@ fn a_refused_key_or_field_is_classified_as_a_receiver_error() {
             "{e:?} must be a receiver error"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Review round 3a of worktree-person-shared-types (2026-10-05): whether each
+// refusal this change added stops the loop
+// ---------------------------------------------------------------------------
+
+// Finding-12. REQ-jfxah3's loop stops only when it cannot continue: the
+// transport endpoint is gone (`TERMINAL_ERRORS`). None of these refusals is
+// about the endpoint. An Organisation public key on chain that is not a valid
+// X25519 key is refused on every read of that Organisation for as long as the
+// chain holds it, but it concerns that one Organisation: the endpoint still
+// receives for every other, so the loop goes on and reports each refusal as
+// one receiver error. The same holds for a Sequence number that is not the
+// chain's epoch, a verdict on one update.
+// Each produces exactly one outcome, of its class, and no stop.
+// verifies: REQ-jfxah3, REQ-kn5rtx
+#[test]
+fn a_refusal_this_change_added_does_not_stop_the_loop() {
+    let receiver_errors = [OrgNodeError::InvalidOrgPublicKey];
+    for e in receiver_errors {
+        assert_eq!(
+            events::outcomes_for_receive_error(&e),
+            vec![ReceiverOutcome::ReceiveError { message: e.to_string() }],
+            "{e:?} is one receiver error and must not stop the loop"
+        );
+    }
+    let verdict = OrgNodeError::SeqNotEpoch { seq: 9, epoch: 3 };
+    assert_eq!(
+        events::outcomes_for_receive_error(&verdict),
+        vec![ReceiverOutcome::VerifyFailed { org_id: None, message: verdict.to_string() }],
+        "a Sequence number other than the chain's epoch refuses one update and must not stop the loop"
+    );
 }

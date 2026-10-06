@@ -10,8 +10,8 @@ use crate::hasher::TrieHasher;
 use crate::node::Node;
 use crate::smt::{self, DefaultHashes};
 use crate::types::{
-    Handle, HandleSkeleton, HeldKey, MemberId, MemberLeaf, Name, P2pDeviceKey,
-    P2pDeviceSlots, P2pMemberKey, RootHash, Surname,
+    DevicePublicKey, DeviceSlots, Handle, HandleSkeleton, HeldKey, MemberId, MemberLeaf, Name,
+    PersonPublicKey, RootHash, Surname,
 };
 
 /// An immutable binary Sparse Merkle Tree for organisation membership.
@@ -259,7 +259,7 @@ impl<H: TrieHasher> OrgTrie<H> {
     pub fn rotate_p2p_key(
         &self,
         id: &MemberId,
-        new_p2p_key: P2pMemberKey,
+        new_p2p_key: PersonPublicKey,
     ) -> Result<Self, OrgMembersError> {
         let existing = smt::get_member(&self.root, id).ok_or(OrgMembersError::IdNotFound)?;
         if existing.p2p_key() == &new_p2p_key {
@@ -283,7 +283,7 @@ impl<H: TrieHasher> OrgTrie<H> {
     pub fn add_p2p_device(
         &self,
         id: &MemberId,
-        device: P2pDeviceKey,
+        device: DevicePublicKey,
     ) -> Result<Self, OrgMembersError> {
         let existing = smt::get_member(&self.root, id).ok_or(OrgMembersError::IdNotFound)?;
         let new_slots = existing.p2p_device_slots().add_device(device)?;
@@ -317,8 +317,8 @@ impl<H: TrieHasher> OrgTrie<H> {
     pub fn delete_p2p_device(
         &self,
         id: &MemberId,
-        device: &P2pDeviceKey,
-        new_p2p_key: P2pMemberKey,
+        device: &DevicePublicKey,
+        new_p2p_key: PersonPublicKey,
     ) -> Result<Self, OrgMembersError> {
         let existing = smt::get_member(&self.root, id).ok_or(OrgMembersError::IdNotFound)?;
         let new_slots = existing.p2p_device_slots().remove_device(device)?;
@@ -358,7 +358,7 @@ impl<H: TrieHasher> OrgTrie<H> {
     pub fn emergency_isolate_member(
         &self,
         id: &MemberId,
-        new_p2p_key: P2pMemberKey,
+        new_p2p_key: PersonPublicKey,
     ) -> Result<Self, OrgMembersError> {
         let existing = smt::get_member(&self.root, id).ok_or(OrgMembersError::IdNotFound)?;
         if existing.p2p_key() == &new_p2p_key {
@@ -367,7 +367,7 @@ impl<H: TrieHasher> OrgTrie<H> {
         // Checked against the record before the operation, so the removed
         // devices' keys count as held.
         self.refuse_held_key(HeldKey::from(&new_p2p_key))?;
-        let empty_slots = P2pDeviceSlots::parse(Vec::new())?;
+        let empty_slots = DeviceSlots::parse(Vec::new())?;
         let new_leaf = existing
             .with_p2p_device_slots(empty_slots)
             .with_p2p_key(new_p2p_key);
@@ -660,7 +660,7 @@ impl<H: TrieHasher> OrgTrie<H> {
     /// bytes, an NFC name and its NFD form) that both decode, both apply here,
     /// and both verify against the same target root. `MemberLeaf`'s
     /// `Deserialize` normalises `name`, `surname` and `handle` instead of
-    /// rejecting non-canonical forms, where `P2pDeviceSlots`' `Deserialize`
+    /// rejecting non-canonical forms, where `DeviceSlots`' `Deserialize`
     /// rejects. Callers keying dedup, replay caches or change identity on
     /// bytes must key on the decoded `Delta`, or on the
     /// `(base_root, target_root)` pair, instead.

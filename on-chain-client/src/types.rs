@@ -22,9 +22,17 @@ pub struct OrgAdmin(pub [u8; 20]);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct OnChainRootHash(pub [u8; 32]);
 
-/// The org's public key as stored on-chain. Opaque 32 bytes; the scheme
-/// (Ed25519 today; sr25519 / BLS / PQ on the V2 roadmap — see
-/// `on-chain/POST_POC.md`) is conveyed off-chain by the trie.
+/// The Organisation public key as stored on-chain: the org's X25519
+/// key-agreement key, by which a member checks the org private key shared
+/// with them. Not a signing key. Opaque 32 bytes here: this crate never
+/// checks that they are a valid X25519 key.
+///
+/// Where the check happens, and where it does not: org-node checks the key
+/// when it reads Organisation state (`OrgState::from_chain`, in
+/// `org-node/src/chain.rs`). The `GenesisInitialized` and `RootUpdated`
+/// events also carry an `OrgPubKey`, and those bytes reach their reader
+/// unchecked. Nothing reads them today; a consumer that starts to must parse
+/// them first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct OrgPubKey(pub [u8; 32]);
 

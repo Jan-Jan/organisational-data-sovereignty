@@ -56,7 +56,7 @@ module membership {
 
   /// The device-list error a member record is refused with when it is built,
   /// or "" when its device list is acceptable. Mirrors `MemberLeaf::new`
-  /// (empty list) and `P2pDeviceSlots::parse` (over the cap).
+  /// (empty list) and `DeviceSlots::parse` (over the cap).
   pure def leafDeviceError(l: Leaf): str =
     if (l.devices.size() == 0) "EmptyDeviceList"
     else if (l.devices.size() > MAX_DEVICES) "DeviceSlotsFull"

@@ -166,12 +166,19 @@ message, its sender, or a value the sender can influence, and a Change set for
 an Organisation the chain does not know is rejected. mitigates: HAZ-tawvm2
 
 **RC-pm9kmx**: before a received Change set is decoded, the node requires the
-envelope to name the Organisation the node expected and to carry a valid
-signature over the Organisation identifier, the sequence number and the Change
-set bytes by the Organisation's published signing key — the key recorded in
-the Organisation state on the chain — and rejects an envelope failing either
-check with a typed error and without decoding the Change set. mitigates:
-HAZ-tawvm2
+Envelope to name the Organisation the node expected, and rejects one that
+does not with a typed error and without decoding the Change set; it checks
+no signature and no key of the sender, and leaves authority over the Change
+set to the Membership root and epoch it reads from the chain (RC-6a2dke,
+RC-e5atck). mitigates: HAZ-tawvm2
+
+*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`;
+text written by change `worktree-person-shared-types`, which merges first).*
+This control first also required a valid signature over the Organisation
+identifier, the Sequence number and the Change set bytes by the published
+signing key. The right to change an Organisation's data lies in its on-chain
+multisig proxy, so the Envelope carries no signature and the chain is the
+sole authority.
 
 **RC-e5atck**: the node commits a Change set only when the epoch of the
 Organisation state it verified against is strictly greater than the epoch of
@@ -179,7 +186,8 @@ its last commit for that Organisation, so that a chain state older than one
 already acted on is never the basis of a commit. mitigates: HAZ-tawvm2
 
 How the three sit in the code. `verify_envelope_against_chain`
-(`org-node/src/verify.rs:47-88`) checks Organisation binding, then the
+(`org-node/src/verify.rs:45-88`, *re-resolved 2026-10-05 after the trim (docs/plans/2026-10-05-switch-trim.md), review round 3 finding-16; it read `:53-100` after the merge of master `1feb608`, `:52-99` on this
+branch before it and `:47-88` on master*) checks Organisation binding, then the
 signature, then the sequence number, then decodes the Change set, then
 requires its declared base to be the local root, applies it, reads the
 Organisation state through the `ChainReader` it was handed, requires the epoch
@@ -201,6 +209,14 @@ and `receive_and_verify` reaches its store only after it returns `Ok`
 (the commit block at the end of `receive_and_verify` in
 `org-node/src/service.rs`), so a rejected envelope leaves nothing
 behind but a consumed connection.
+
+*Amended 2026-10-05 (RC-pm9kmx amended in place).* Step 2 of the order
+above, the signature check, is gone, and nothing replaces it: nothing about
+the sender is checked. The order of the rest is unchanged: the cheap checks
+still run before any attacker-chosen bytes are decoded, and RC-6a2dke and
+RC-e5atck still decide. There is no author key, and `author_vk` no longer
+exists: the chain's `org_pub_key` is the Organisation public key, an X25519
+key that authenticates nothing the node receives.
 
 The base-root check at step 5 is org-members' rule (REQ-4umsuz, exported) and
 is not re-minted here; it is what makes a Change set applicable to exactly one
@@ -256,6 +272,14 @@ Organisation and there is no admin role, quorum or rotation for it. Whoever
 holds that seed and the chain account authors membership. That is the
 admin-authority hazard in prose below.
 
+*(Note 2026-10-05, review round 3 finding-16, change
+`worktree-person-shared-types`: this paragraph no longer holds. `org_pub_key`
+is the Organisation public key, the X25519 public half of a secret drawn for
+the Organisation alone and distinct from every genesis key (REQ-ech45n), and
+no Envelope is signed (REQ-ag6kqm, RC-pm9kmx amended in place). Who may move
+the membership root is decided on-chain by the Organisation's multisig proxy;
+the paragraph is kept as the assessment made of the signing design.)*
+
 ### A superseded envelope applied again
 
 **HAZ-p4gfv9**: the Organisation's committed root can return to a value it
@@ -280,7 +304,7 @@ rejection, and never backwards. mitigates: HAZ-p4gfv9
 `SeqGuard::check` is step 3 of the verify order and does not mutate;
 `SeqGuard::advance` is called only after the root match and ignores a value
 not greater than the mark (`org-node/src/sequence.rs:28-47`,
-`org-node/src/verify.rs:62`, `:86`). The guard's own documentation states
+`org-node/src/verify.rs:56`, `:86`; *re-resolved 2026-10-05 after the trim, review round 3 finding-16; they read `:68`, `:98` after the merge of master `1feb608`, `:27-46`, `:67`, `:97` on this branch before it and `:28-47`, `:62`, `:86` on master*). The guard's own documentation states
 why the placement matters: advancing on `check` rather than on commit would
 move the watermark for an envelope still to be rejected, which is a replay
 bypass. The mark persists as `OrgRecord.last_seq` and is reloaded on the next
@@ -373,14 +397,14 @@ bolero's generative engine for one second each at the merge gate, which finds
 shallow crashes and nothing deep; libFuzzer runs are a separate manual
 invocation with an empty seed corpus. And the bound is on the frame only: the
 base64 blobs of the invite and join-request exchange have no size limit
-(`org-node/src/blobs.rs:63-76`), the envelope's own Change set bytes are
+(`org-node/src/blobs.rs:64-78`, *re-resolved 2026-10-05 at the merge of master `1feb608`; it read `:36-50` on this branch and `:63-76` on master*), the envelope's own Change set bytes are
 bounded only by the frame that carries them, and there is no rate limit,
 allowlist or read timeout at the accept boundary — an **unauthorised**
 stranger, one the record does not name, obtains a chain read, a record rebuild
 and a signature check per connection. The handshake does authenticate the
 peer's Device key (`org-node/src/transport/endpoint.rs:3-5`, `:322-323`); what
 it does not do is decide whether that key belongs to a member before the work
-is spent (`org-node/src/transport/endpoint.rs:313-342`, *these two citations
+is spent (`org-node/src/transport/endpoint.rs:313-339`, *re-resolved 2026-10-05 from `:313-342`; these two citations
 re-resolved 2026-10-04 by the org-node architecture change's review round 5;
 they read `:288-291` and `:279-306`, which that change's own edits to
 `endpoint.rs` had moved onto `send_conn`*; in
@@ -390,7 +414,9 @@ record rebuilt from the administrator's snapshot by `first_admission_base` —
 and the signature check inside `verify_envelope_against_chain`). (Amended
 2026-10-03, REQ-d9g6nt: on a first admission that carries no snapshot,
 `first_admission_base` refuses the message after the chain read and before any
-rebuild or signature check.) Those are
+rebuild or signature check.) *(Amended 2026-10-05: there is no signature check and no sender check. A
+stranger obtains per connection a chain read, a record rebuild and, on a
+first admission, the decode of the snapshot it sent.)* Those are
 not-minted controls below.
 And the structural half of the control is unchecked: no gate runs clippy on
 org-node, so the panic-freedom denial the paragraph above cites is a claim
@@ -412,16 +438,38 @@ S3. Probability: P2.
 P2: relaying is what a network does, and the receiving device on first
 admission has no record yet to check the sender against.
 
-**RC-b6mydy**: the node acts on a received Wire message only if the Device
-key the connection authenticated is, on the node's first admission to an
-Organisation for which it imported an invite, the administrator's Device key
-that invite names, and, for every later Wire message about that Organisation
-received through the Receive operation that admits the node or updates its
-record — as distinct from the Receive operation that acts on the node's own
-removal — a Device key present in the Membership record the Wire message was
-verified into; a Wire message from any other device is rejected after
-verification and before the record is touched.
+**RC-b6mydy**: the node commits a received Wire message only through the
+checks of RC-pm9kmx, RC-6a2dke, RC-e5atck, RC-m4r75s and RC-95dgg8, and
+checks nothing about the Device key the connection authenticated: not on a
+first admission, with or without an imported Invite, and not on a later
+update, whether or not that key is in the Membership record before or after
+it. A chain-valid update is committed whoever delivers it; one the chain has
+not published is refused whoever delivers it.
 mitigates: HAZ-ep6uzs, HAZ-vxabf9
+
+*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`;
+text written by change `worktree-person-shared-types`, which merges first).*
+This control first required the Device key the connection authenticated to be,
+on a first admission for which an Invite was imported, the administrator's
+Device key that Invite names (the invite cross-check), and, for every later
+Wire message through the Receive operation that admits or updates, a Device
+key present in the Membership record the message was verified into (the
+post-verification membership check). The owner ruled that nothing about the
+sender is checked: authority is the chain's, and a chain-valid update
+delivered by any peer matches the chain.
+
+**Residual risk: not acceptable.** What the connection delivers beside the
+Change set is not covered: the Organisation secret (PR-ve9zw8) can now be
+substituted by any peer that relays a genuine admission or update, not only by
+a device in the record. Chain-authority's change 2 replaces the secret with the
+Organisation private key, checked on receipt against the chain's
+`org_pub_key`, and that is the control this hazard waits for. The owner's
+earlier ruling that the secret is replaced by CGKA keys a member verifies
+against the Organisation public key is recorded beside it, unranked: whether
+change 2's receipt check supersedes it was not ruled (Q2 of
+docs/plans/2026-10-05-switch-trim.md).
+
+*Before 2026-10-05:*
 
 The first clause is the invite cross-check (the `is_first_admission` block in
 `receive_and_verify`, `org-node/src/service.rs`):
@@ -462,7 +510,7 @@ peer identity from the Device key and so does bind it (the
 `TransportMode::Networked` arm). A join-request blob whose address was altered in transit hands
 the secret to whoever the altered address names, while the record admits the
 joiner's genuine keys. The blob is unsigned and unauthenticated by design
-(`org-node/src/blobs.rs:13-34`), so nothing upstream catches the alteration. *(Citations in this paragraph re-measured 2026-10-05 by the org-node type-safety change, review round 7, after that change's edits moved them.)*
+(`org-node/src/blobs.rs:12-36`, *re-resolved 2026-10-05 at the merge of master `1feb608`; it read `:11-34` on this branch and `:13-34` on master, re-measured there by the org-node type-safety change, review round 7*), so nothing upstream catches the alteration.
 
 ### A device removed from the record that keeps acting as a member
 
@@ -490,6 +538,9 @@ is the weakest kind. It is here because it is real, tested end to end (story
 worse — a device that learns of its own removal and carries on. The
 non-cooperative half is RC-b6mydy's second clause on every other device: once
 their records no longer list the removed Device key, its messages are refused.
+*(Amended 2026-10-05: RC-b6mydy no longer has that clause. Nothing about the
+sender is checked, so a removed device's messages are refused only when they
+do not match the chain, as anyone's are.)*
 
 Residual risk: **not acceptable**, on three counts, two of them outside this
 unit.
@@ -515,6 +566,15 @@ wire path, with nothing relating a leaf's device set to its Member-as-a-group
 key. That is what REQ-q92yac asks of org-members and is due 2026-12-05; until
 then a Change set that removes a Device key and leaves the key it held would
 be applied here.
+
+*Amended 2026-10-05 (review round 2, finding-12).* HAZ-vxabf9 has a further
+control, RC-95dgg8 (`org-node/docs/risk/2026-10-05-envelope-authenticity.md`):
+the node commits an Envelope only when its Sequence number is the epoch of
+the Organisation state it read from the chain itself. It closes one route to
+this hazard that the unsigned Envelope opened: any peer setting the Sequence
+number to `u64::MAX`, after which the receiver refused
+every later Envelope, its own removal included. The hazard is not re-scored:
+the three counts above are unchanged.
 
 ### Keys and record read from the device's storage
 
@@ -548,6 +608,17 @@ derived key are not zeroised. And the passphrase's strength is the user's;
 the store imposes none. The write is also not atomic — a crash between
 truncation and completion leaves no readable copy — which is the storage-loss
 hazard in prose below rather than a disclosure.
+
+*Amended 2026-10-05 (review round 2, finding-22).* "Not zeroised" now has
+one exception. `X25519Keypair`, which holds a member seed or an Organisation
+private key in memory, overwrites it with zeros when dropped and cannot be
+cloned (LLR-98ufry). Everything else stands: the decrypted store data, among
+it every persisted seed and `OrgRecord.org_private_key`, the Organisation
+private key, is not zeroised, and nor is the derived key. The residual verdict
+does not change. *(Amended at the merge of master `1feb608`: this said those
+were "plain `[u8; 32]` … (PR-hqwpg9)". Master resolved PR-hqwpg9; they are now
+held in redacted secret types (`MemberSeed`, `DeviceSeed`, `OrgPrivateKey`),
+which are `Clone` and not wiped on drop.)*
 
 ## Hazards introduced by these controls
 
@@ -678,6 +749,12 @@ review round 5; it read `:258`*, the check at
   imported — a second administrator does not exist today, but the check is
   what would refuse one — is rejected. No hazard at present; noted so the
   check is reconsidered when there is more than one author.
+  *(Amended 2026-10-05, owner ruling of that day, change
+  `worktree-org-node-chain-authority`; written by change
+  `worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md: the
+  invite cross-check is gone, RC-b6mydy being amended in place to check
+  nothing about the sender, so no such admission is rejected and this
+  hazard no longer arises.)*
 - **RC-wqgm2p (delete the record on one's own removal).** The presence test
   that decides whether the node is still a member filters the store's personas
   by their recorded Organisation (the `my_still_present` test in
@@ -790,11 +867,15 @@ of this file put it under the ordering controls where it does not belong. Such
 an envelope passes RC-m4r75s's sequence check (its Sequence number is higher,
 not lower, than the mark). It then fails at step 5 of `verify.rs`, the
 requirement that the Change set's declared base be the local root
-(`org-node/src/verify.rs:67-69`) — org-members' rule, exported as REQ-4umsuz,
+(`org-node/src/verify.rs:61-63`, *re-resolved 2026-10-05 after the trim, review round 3 finding-16; it read `:73-75` after the merge of master `1feb608`, `:72-74` on this branch before it and `:67-69` on master*) — org-members' rule, exported as REQ-4umsuz,
 and the correct answer for a Change set that cannot be applied to the record
 the node holds. RC-e5atck's epoch check is never reached: the chain is not read
-until step 7 (`:73-76`, the epoch comparison it feeds at `:77-79`), which is
+until step 7 (`:79-82`, the epoch comparison it feeds at `:83-85`; *re-resolved 2026-10-05 at the merge of master `1feb608`; they read `:78-81` and `:82-84` on this branch, `:73-76` and `:77-79` on master*), which is
 after the base-root comparison has already returned `DeltaBaseMismatch`.
+*(Re-resolved 2026-10-05 after the trim, review round 3 finding-16: with the
+signature step gone the code numbers the base-root check step 4 and the chain
+read step 6; they are at `verify.rs:61-63`, `:67-70` and `:71-73`. The order
+is unchanged.)*
 Neither ordering control rejects an out-of-order
 envelope — one passes it, the other is never consulted — and neither
 introduces this hazard. What org-node contributes is the handling of the
@@ -840,6 +921,17 @@ obligation with no software behind it and no document telling an operator
 so — org-members' register lists that document as its ninth not-minted
 control, and the write path that would honour a higher threshold is this
 unit's to build. Not minted.
+*Amended 2026-10-05 (owner ruling): the first sentence no longer
+holds. No key authors membership. The published `org_pub_key` is the
+Organisation public key, an X25519 key distinct from every member key
+(REQ-ech45n), and no Envelope is signed. Authority over membership is the
+chain account alone, through the Organisation's multisig proxy, and that is
+decided on-chain, not by org-node. A receiver accepts an Envelope from any
+peer, and commits it only if it reaches the published root. Whoever controls
+the chain account therefore still publishes any root, and any peer can deliver
+the matching Change set. The S3 / P1
+assessment and the remedy (key custody and a threshold of two or more) are
+unchanged.*
 
 **Admission delivered to an address the joiner did not prove.** Stated under
 HAZ-ep6uzs; filed as **PR-2dmjzj**. Assessed **S3 / P1** — it needs the
@@ -919,6 +1011,24 @@ controls and residual reasoning, in `2026-10-04-type-safety.md`. The count and
 the overall conclusion below are this analysis's as of 2026-09-09; with these
 two the unit counts fourteen distinct hazards, neither of the two is
 acceptable, and the overall verdict, UNACCEPTABLE, is unchanged.)
+
+*Amended 2026-10-05 (review round 2, finding-12 and finding-22).* HAZ-vxabf9
+is also mitigated by RC-95dgg8, which closes the Sequence-number jam the
+unsigned Envelope opened; its three counts stand. HAZ-45ucqx's "no zeroise"
+now excepts `X25519Keypair` in memory (LLR-98ufry); the persisted seeds and
+the Organisation private key in `OrgRecord` are still not zeroised. Neither
+verdict changes. *(Amended at the merge of master `1feb608`: this ended
+"(PR-hqwpg9)". Master resolved PR-hqwpg9, which is about `Debug` output, not
+zeroising; the persisted seeds and the Organisation private key are now held in
+redacted secret types (`MemberSeed`, `OrgPrivateKey`), which are not wiped on
+drop either — RC-jjsz97's residual.)*
+
+*Amended 2026-10-05.* Two rows above no longer match the code. For
+HAZ-tawvm2, "one author key" is gone: there is no author key, and nothing
+about the sender is checked; the decisive read is unchanged. For HAZ-ep6uzs,
+the sender checks are gone (RC-b6mydy amended in place); its residual is
+recorded there. PR-u4c2vp is resolved by the owner's ruling. PR-2dmjzj is
+still open. A re-scoring is the next risk analysis's job.
 
 And the seven prose hazards: publish before persist **not acceptable**
 (S3/P2, PR-vt244s); stale view **not acceptable** (S3/P2); secret retained
@@ -1002,6 +1112,13 @@ given an RC identifier until it does.
 4. **Cross-check the sender on the revocation receive path** (HAZ-ep6uzs,
    PR-u4c2vp). The `UpdatedNotRevoked` branch commits a record from a sender
    it did not check.
+
+   *(Amended 2026-10-05, owner ruling of that day, change
+   `worktree-org-node-chain-authority`; written by change
+   `worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md:
+   controls 3 and 4 are withdrawn by that ruling. No Invite is required for a
+   first admission, and nothing about the sender is checked on either Receive
+   operation; PR-u4c2vp is resolved as not a defect.)*
 5. **Fan out every Change set to every current device, or read the chain on a
    schedule** (stale-view hazard, HAZ-vxabf9). Either closes the window in
    which the remaining members still list a removed device; a stated maximum
@@ -1226,6 +1343,15 @@ and the revocation receive path performs neither clause, its
 distance was the only thing standing between the node and an arbitrary peer**,
 and the wildcard bind removed it. That does not change what is minted, and it
 does sharpen what the fix is worth.
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).*
+RC-b6mydy no longer rejects a Wire message from a Device key the record does
+not list: it is amended in place to check nothing about the sender, on every
+path. Distance now stands between the node and an arbitrary peer on every
+receive path, and what an arbitrary peer can deliver is what the chain
+already published, apart from the Organisation secret (PR-ve9zw8).
 
 **Probability: three P2 figures rest on a premise this defect falsified, and
 all three are owed a re-derivation.** An earlier draft of this paragraph

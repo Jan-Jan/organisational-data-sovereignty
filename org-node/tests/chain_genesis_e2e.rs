@@ -34,9 +34,10 @@ use org_node::chain_write::proxy::{proxied, BlockSink};
 use org_node::chain_write::calldata::revive_update_runtime_call;
 use org_node::chain_write::WriteError;
 use org_node::ceremony::genesis_ceremony;
-use org_node::{ChainReader, OrgId, SeqGuard, SignedDeltaEnvelope, SigningKeypair, verify_envelope_against_chain, VerifyContext};
+use org_node::{ChainReader, Envelope, OrgId, SeqGuard, SigningKeypair, verify_envelope_against_chain, VerifyContext};
+use org_node::keys::X25519Keypair;
 use org_node::OnChainReader;
-use org_node::{ChainAccount, Epoch, OrgPublicKey, SequenceNumber};
+use org_node::{ChainAccount, Epoch, OrgPrivateKey, SequenceNumber};
 use subxt_signer::sr25519::dev;
 
 type Trie = OrgTrie<Blake3Hasher>;
@@ -130,26 +131,26 @@ fn deploy_org_registry() -> [u8; 20] {
 // Trie helpers — mirrors test_fixtures.rs but in the integration test
 // ---------------------------------------------------------------------------
 
-fn admin_leaf(admin_kp: &SigningKeypair, admin_device: &SigningKeypair) -> MemberLeaf {
+fn admin_leaf(admin_kp: &X25519Keypair, admin_device: &SigningKeypair) -> MemberLeaf {
     MemberLeaf::new(
         MemberId::new([1u8; 32]),
         Handle::parse("admin").unwrap(),
-        admin_kp.member_key(),
+        admin_kp.member_key().expect("valid key"),
         Name::parse("Admin").unwrap(),
         Surname::parse("User").unwrap(),
-        vec![admin_device.device_key()],
+        vec![admin_device.device_key().expect("valid DevicePublicKey")],
     )
     .expect("valid admin leaf")
 }
 
-fn member_b_leaf(b_kp: &SigningKeypair, b_device: &SigningKeypair) -> MemberLeaf {
+fn member_b_leaf(b_kp: &X25519Keypair, b_device: &SigningKeypair) -> MemberLeaf {
     MemberLeaf::new(
         MemberId::new([2u8; 32]),
         Handle::parse("bob").unwrap(),
-        b_kp.member_key(),
+        b_kp.member_key().expect("valid key"),
         Name::parse("Bob").unwrap(),
         Surname::parse("Member").unwrap(),
-        vec![b_device.device_key()],
+        vec![b_device.device_key().expect("valid DevicePublicKey")],
     )
     .expect("valid member B leaf")
 }
@@ -199,9 +200,9 @@ async fn genesis_then_admit_verifies_against_chain() {
     // ------------------------------------------------------------------
     // 3. Build the genesis trie with one admin member leaf
     // ------------------------------------------------------------------
-    let admin_kp = MemberSeed::from([0xA1u8; 32]).signing_keypair();
+    let admin_kp = MemberSeed::from([0xA1u8; 32]).x25519_keypair();
     let admin_device = DeviceSeed::from([0xA2u8; 32]).signing_keypair();
-    let org_pub_key = OrgPublicKey::from(&admin_kp.member_key());
+    let org_pub_key = OrgPrivateKey::from([0xA3u8; 32]).x25519_keypair().org_public_key().unwrap();
 
     let leaf_a = admin_leaf(&admin_kp, &admin_device);
     let genesis_trie = Trie::genesis(vec![leaf_a]).expect("genesis trie");
@@ -253,7 +254,7 @@ async fn genesis_then_admit_verifies_against_chain() {
     // ------------------------------------------------------------------
     // 6. ADMIT: add member B, submit update(new_root, org_pub_key, 1)
     // ------------------------------------------------------------------
-    let b_kp = MemberSeed::from([0xB1u8; 32]).signing_keypair();
+    let b_kp = MemberSeed::from([0xB1u8; 32]).x25519_keypair();
     let b_device = DeviceSeed::from([0xB2u8; 32]).signing_keypair();
     let leaf_b = member_b_leaf(&b_kp, &b_device);
 
@@ -265,15 +266,9 @@ async fn genesis_then_admit_verifies_against_chain() {
     let new_root = new_trie.root_hash().expect("new root after admit");
     eprintln!("new root after admit: {:?}", new_root);
 
-    // Build the signed delta envelope: parent_seq = 2 (genesis is seq 0→1,
+    // Build the delta envelope: parent_seq = 2 (genesis is seq 0→1,
     // the first admin-authored update is seq 2 so it is > last_seen=1).
-    let env = SignedDeltaEnvelope::build(
-        org_id,
-        SequenceNumber::new(2), // parent_seq: strictly greater than last_seen=1
-        &admit_delta,
-        &admin_kp,
-    )
-    .expect("build signed delta envelope");
+    let env = Envelope::build(org_id, SequenceNumber::new(2), &admit_delta).expect("build envelope");
 
     // Submit the update: dispatch via proxied multisig. dispatch_org_call drives
     // the chain via the sink and waits for the extrinsic to finalize.
@@ -313,9 +308,8 @@ async fn genesis_then_admit_verifies_against_chain() {
     // ------------------------------------------------------------------
     let ctx = VerifyContext {
         expected_org_id: org_id,
-        author_member_key: &admin_kp.verifying_key(),
         seq_guard: SeqGuard::from_last_seen(SequenceNumber::new(1)), // last committed seq was 1
-        last_committed_epoch: Epoch::new(1),                // last committed epoch was 1
+        last_committed_epoch: Epoch::new(1),                         // last committed epoch was 1
     };
 
     let verified = verify_envelope_against_chain(
@@ -372,9 +366,9 @@ async fn single_admin_genesis_e2e() {
     // ------------------------------------------------------------------
     // 3. Build the genesis trie with one admin member leaf
     // ------------------------------------------------------------------
-    let admin_kp = MemberSeed::from([0xA1u8; 32]).signing_keypair();
+    let admin_kp = MemberSeed::from([0xA1u8; 32]).x25519_keypair();
     let admin_device = DeviceSeed::from([0xA2u8; 32]).signing_keypair();
-    let org_pub_key = OrgPublicKey::from(&admin_kp.member_key());
+    let org_pub_key = OrgPrivateKey::from([0xA3u8; 32]).x25519_keypair().org_public_key().unwrap();
 
     let leaf_a = admin_leaf(&admin_kp, &admin_device);
     let genesis_trie = Trie::genesis(vec![leaf_a]).expect("genesis trie");
@@ -429,7 +423,7 @@ async fn single_admin_genesis_e2e() {
     // 6. ADMIT: add member B, submit update(new_root, org_pub_key, 1)
     //    via dispatch_org_call with others = &[] (direct, no multisig)
     // ------------------------------------------------------------------
-    let b_kp = MemberSeed::from([0xB1u8; 32]).signing_keypair();
+    let b_kp = MemberSeed::from([0xB1u8; 32]).x25519_keypair();
     let b_device = DeviceSeed::from([0xB2u8; 32]).signing_keypair();
     let leaf_b = member_b_leaf(&b_kp, &b_device);
 
@@ -441,13 +435,7 @@ async fn single_admin_genesis_e2e() {
     let new_root = new_trie.root_hash().expect("new root after admit");
     eprintln!("[single_admin] new root after admit: {:?}", new_root);
 
-    let env = SignedDeltaEnvelope::build(
-        org_id,
-        SequenceNumber::new(2), // parent_seq: strictly greater than last_seen=1
-        &admit_delta,
-        &admin_kp,
-    )
-    .expect("build signed delta envelope");
+    let env = Envelope::build(org_id, SequenceNumber::new(2), &admit_delta).expect("build envelope");
 
     let update_call = revive_update_runtime_call(
         contract,
@@ -481,9 +469,8 @@ async fn single_admin_genesis_e2e() {
     // ------------------------------------------------------------------
     let ctx = VerifyContext {
         expected_org_id: org_id,
-        author_member_key: &admin_kp.verifying_key(),
-        seq_guard: SeqGuard::from_last_seen(SequenceNumber::new(1)),
-        last_committed_epoch: Epoch::new(1),
+        seq_guard: SeqGuard::from_last_seen(SequenceNumber::new(1)), // last committed seq was 1
+        last_committed_epoch: Epoch::new(1),                         // last committed epoch was 1
     };
 
     let verified = verify_envelope_against_chain(

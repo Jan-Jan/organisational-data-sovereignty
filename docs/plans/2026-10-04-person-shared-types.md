@@ -91,6 +91,10 @@ Today's code authenticates change-set envelopes against `orgPubKey`
 sites) and identifies the admin by `member key == orgPubKey`. Both are
 replaced by the admin-authority change; until then they stay as they are.
 
+(Superseded 2026-10-05: the change sets are not signed by an admin's own
+DevicePublicKey after all. See the dated note under "Order of the remaining
+work" below.)
+
 ## Order of the remaining work (owner, 2026-10-04, after T8)
 
 1. Finish `person`: PersonPublicKey validated as X25519.
@@ -99,6 +103,31 @@ replaced by the admin-authority change; until then they stay as they are.
    X25519 key).
 4. Finally fix org-node (X25519 persona and organisation keys; change sets
    signed by an admin's own DevicePublicKey).
+
+**Note, owner ruling 2026-10-05.** Step 4's "change sets signed by an admin's
+own DevicePublicKey", and the admin-signing bullet above, are superseded.
+Admin authority for on-chain updates is the multisig proxy, standard Polkadot
+practice and outside org-node. The Envelope signature is dropped: a change
+set's sender is authenticated by the DevicePublicKey of the connection it
+arrives on, checked before the change set is decoded, and its content is
+verified against the Organisation state read from the chain. The Sequence
+number equals that Organisation state's epoch (independent review round 1).
+Authenticating the Organisation shared secret a member is given is deferred to
+the CGKA, and recorded as PR-ve9zw8 (`org-node/docs/problems/2026-10-05-org-secret-unauthenticated.md`). See
+`docs/plans/2026-10-05-org-node-organisation-public-key.md`,
+`org-node/docs/requirements/2026-10-05-envelope-authenticity.md` and
+`org-node/docs/risk/2026-10-05-envelope-authenticity.md`.
+
+**Note, owner ruling 2026-10-05 (chain-authority rulings).** The sender check
+the note above describes ("authenticated by the DevicePublicKey of the
+connection it arrives on, checked before the change set is decoded") was
+removed by the trim the same day: by the owner's rulings for change
+`worktree-org-node-chain-authority`, nothing about the sender of an Envelope
+is checked, and the Organisation state read from the chain at a newer epoch is
+the sole authority.
+
+Trimmed 2026-10-05 to what chain-authority agrees with:
+docs/plans/2026-10-05-switch-trim.md.
 
 Steps 2–4 are merged together, after step 1 (`person`, merged alone at the
 owner's instruction): a change to org-members runs org-node's gates
@@ -136,3 +165,7 @@ Assessed in step 2, before it merges, against org-members' key-uniqueness rule
 - a PersonPublicKey accepts mixed-order points, so one X25519 key has up to 8
   byte-distinct accepted encodings with the same X25519 output, and the byte
   comparison does not see them as one key.
+
+Owner, 2026-10-05: both accepted, with the reasons recorded in
+`org-members/docs/risk/2026-10-03-key-uniqueness.md` ("After the switch to
+`person`'s key types"). No new check maps one encoding to another.

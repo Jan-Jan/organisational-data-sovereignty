@@ -72,12 +72,12 @@ pub mod test_support {
 }
 
 pub use chain::{ChainReader, OrgState};
-pub use envelope::SignedDeltaEnvelope;
+pub use envelope::Envelope;
 pub use error::OrgNodeError;
 pub use ids::OrgId;
 pub use keys::SigningKeypair;
 pub use sequence::SeqGuard;
-pub use types::{ChainAccount, DeviceSeed, Epoch, MemberSeed, OrgPublicKey, OrgSecret, PersonaId, SequenceNumber};
+pub use types::{ChainAccount, DeviceSeed, Epoch, MemberSeed, OrgPrivateKey, OrgPublicKey, OrgSecret, PersonaId, SequenceNumber};
 pub use verify::{verify_envelope_against_chain, VerifyContext, VerifiedUpdate};
 
 // org-members types that appear in org-node's public interface and that the

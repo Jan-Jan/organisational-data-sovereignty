@@ -30,3 +30,28 @@ only; no requirement yet covers their other exits, so the fix starts with a
 requirement (`grill-requirements`) and an `analyze-risks` pass. The fix is
 deferred to the org-node type-safety follow-up change, where the seeds and the
 Organisation secret get a secret newtype whose `Debug` is redacted.
+
+**2026-10-05, at the merge of master `1feb608` into
+`worktree-worktree-person-shared-types`.** That branch (REQ-ech45n) adds
+`OrgRecord.org_private_key`, the Organisation private key, which is not the
+Organisation secret (`org_secret`). It is held in `OrgPrivateKey`, a secret
+type of the same pattern as the three above, so `OrgRecord`'s derived `Debug`
+renders it as `OrgPrivateKey([REDACTED])` and none of its bytes (LLR-2dvhz8;
+`the_organisation_private_key_is_not_in_the_record_debug_output`,
+`org-node/tests/organisation_key.rs`, and
+`records_and_wire_messages_never_render_secret_bytes`). On that branch a member
+seed becomes an `X25519Keypair` (`MemberSeed::x25519_keypair`), which is not
+`Clone` and is wiped on drop (LLR-98ufry); the persisted secret types are
+`Clone` and not wiped (RC-jjsz97's residual), which this report never covered.
+(The branch's two earlier notes here, which said the Organisation secret and
+the seeds still printed in clear, were dropped at this merge: no longer true.)
+
+**2026-10-05, a second note at the same merge.** The resolution above names
+`MemberSeed`/`DeviceSeed::signing_keypair`. On that branch only
+`DeviceSeed::signing_keypair` exists: a member seed becomes an `X25519Keypair`
+through `MemberSeed::x25519_keypair`, and the Organisation private key through
+`OrgPrivateKey::x25519_keypair`. LLR-56hc77, amended in place, states
+this; LLR-bwb9pu, amended in place, adds `X25519Keypair` and
+`OrgPrivateKey` to the values whose debug rendering shows no secret
+(docs/plans/2026-10-05-switch-trim.md). The
+resolution stands.

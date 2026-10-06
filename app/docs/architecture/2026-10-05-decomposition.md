@@ -465,12 +465,22 @@ terminal condition. Until then, `is_terminal_error` matches substrings of
 messages org-node formats.
 
 **LLR-7bk6qh**: `classify_receive_error` classifies the seven verdict variants
-(`OrgIdMismatch`, `BadSignature`, `StaleSeq`, `MalformedDelta`,
-`DeltaBaseMismatch`, `RootMismatch`, `StaleEpoch`) as `VerifyFailed`, carrying
+(`OrgIdMismatch`, `StaleSeq`, `MalformedDelta`, `DeltaBaseMismatch`,
+`RootMismatch`, `StaleEpoch`, `SeqNotEpoch`) as `VerifyFailed`, carrying
 the error's message and no organisation. It classifies every other variant
-(`Chain`, `OrgNotOnChain`, `Trie`, `InvalidKey`, `InvalidField`) as
+(`Chain`, `OrgNotOnChain`, `Trie`, `InvalidOrgPublicKey`, `InvalidField`) as
 `ReceiveError`, carrying the error's message.
 satisfies: REQ-kn5rtx
+
+*Amended 2026-10-06 (merge of master `d8b9f9b` into
+`worktree-worktree-person-shared-types`):* this item was written against
+org-node's error set before that change. org-node no longer has
+`BadSignature` (the Envelope carries no signature) or `InvalidKey` (an
+Organisation public key that fails its X25519 parse is `InvalidOrgPublicKey`),
+and gained `SeqNotEpoch` (a Sequence number other than the chain's epoch, a
+refusal of the delivered update). The variant lists now name the set
+`classify_receive_error` matches; the classification rule and the tests below
+are unchanged.
 
 Normal: `every_verification_verdict_is_classified_as_a_verification_failure`,
 `a_verification_verdict_carries_its_own_message_and_no_invented_organisation`,

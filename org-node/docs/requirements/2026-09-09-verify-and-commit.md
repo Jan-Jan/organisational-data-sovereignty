@@ -9,11 +9,13 @@ of how the node was built, not because a system-needs document asked for it —
 and is assessed in that risk file.
 
 Terms: *Envelope*, *Wire message*, *Sequence number*, *Published signing
-key*, *Persona*, *Organisation secret*, *Invite*, *Persona store* and
-*Receive operation* are defined in `org-node/docs/CONTEXT.md`;
+key*, *Persona*, *Organisation secret*, *Invite*, *Persona store*,
+*Receive operation* and *Device key* are defined in `org-node/docs/CONTEXT.md`;
 *Organisation*, *Change set*, *Membership record*, *Membership root*,
-*Organisation state*, *Device key* and *Member-as-a-group key* in the root
-`docs/CONTEXT.md`.
+*Organisation state* and *Member-as-a-group key* in the root
+`docs/CONTEXT.md`. (*Amended 2026-10-05:* *Device key* is the name the items
+below use for what the root glossary calls a DevicePublicKey; org-node's
+glossary says so.)
 
 Every requirement below is verified by a test in `org-node/tests` carrying
 `verifies:` with its ID. The verify-path tests were relocated there from unit
@@ -37,11 +39,19 @@ Organisation other than the one it expected, before decoding the Change set
 the Envelope carries. (implements: RC-pm9kmx)
 satisfies: derived
 
-**REQ-ag6kqm**: The software shall reject an Envelope whose signature over the
-Organisation identifier, the Sequence number and the Change set bytes does not
-verify under the published signing key, before decoding the Change set.
-(implements: RC-pm9kmx)
+**REQ-ag6kqm**: The software shall decide whether to commit a received
+Envelope from the Organisation it names, its Sequence number, its Change set
+and the Organisation state on the chain alone, and shall check no signature
+and no Member's or device's key in doing so. (implements: RC-pm9kmx)
 satisfies: derived
+
+*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
+This item first required the Envelope's signature to verify under the
+Published signing key before decoding. The right to change an Organisation's
+data lies in its on-chain multisig proxy, and org-node has no concept of an
+administrator, so an Envelope carries no signature and the on-chain Membership
+root at a newer epoch is the sole authority. The item keeps its ID and states
+the rule that replaced it; retiring it is not expressible in the trace gate.
 
 **REQ-8gz8bu**: The software shall reject a received Change set, leaving its
 record unchanged, when the epoch of the Organisation state it verified against
@@ -50,13 +60,17 @@ is not greater than the epoch of its last commit for that Organisation.
 satisfies: derived
 
 **REQ-nhe2zu**: The software shall, when an Envelope names the expected
-Organisation, carries a valid signature under the published signing key,
-carries a Sequence number greater than the highest committed, and carries a
-Change set whose recomputed Membership root equals the root of an Organisation
-state with an epoch greater than the last committed, commit the applied Change
-set as its record together with that epoch and that Sequence number as the new
-high-water mark. (implements: RC-6a2dke, RC-e5atck, RC-m4r75s)
+Organisation, carries a Sequence number greater than the highest committed,
+and carries a Change set whose recomputed Membership root equals the root of
+an Organisation state with an epoch greater than the last committed, commit
+the applied Change set as its record together with that epoch and that
+Sequence number as the new high-water mark.
+(implements: RC-6a2dke, RC-e5atck, RC-m4r75s)
 satisfies: derived
+
+*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`):*
+the clause "carries a valid signature under the published signing key" is
+removed, with REQ-ag6kqm's amendment.
 
 ## Replay
 
@@ -92,21 +106,26 @@ satisfies: derived
 
 ## Who the Wire message came from
 
-**REQ-xa6smf**: The software shall, on its first admission to an Organisation
-for which it has imported an Invite, reject a received Wire message, leaving
-its record unchanged, when the Device key authenticated by the connection
-differs from the administrator's Device key that Invite names.
+**REQ-xa6smf**: The software shall commit a first admission to an Organisation
+that verifies against the chain whichever Device key the connection
+authenticated, and shall require no Invite to have been imported for it.
 (implements: RC-b6mydy)
 satisfies: derived
 
-**REQ-ztdza4**: The software shall, for a Wire message accepted through the
-Receive operation that admits it to an Organisation or updates its record of
-one — as distinct from the Receive operation that acts on its own removal —
-and about an Organisation it already holds a record of, reject the Wire
-message after verification and before touching its record when the Device key
-authenticated by the connection is not present in the Membership record the
-Wire message was verified into. (implements: RC-b6mydy)
+**REQ-ztdza4**: The software shall commit an update to an Organisation it holds
+a record of that verifies against the chain whichever Device key the
+connection authenticated, whether or not that key is in the Membership record
+before or after the update. (implements: RC-b6mydy)
 satisfies: derived
+
+*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
+REQ-xa6smf first required a first admission's sender to be the administrator's
+Device key named by an imported Invite; REQ-ztdza4 required an update's sender
+to be in the verified Membership record. The owner ruled that nothing about the
+sender is checked: authority is the chain's, Invites leave org-node for the
+app, and org-node has no administrator. A chain-valid update delivered by any
+peer is harmless because it matches the chain. Both items keep their IDs and
+state the rule that replaced them.
 
 ## Acting on one's own removal
 
@@ -153,3 +172,10 @@ exercised by the verify requirements as the seam the chain read arrives
 through, without a requirement of its own. Their requirements,
 and the low-level requirements of the whole unit, are tooth 4 of
 `docs/plans/2026-09-05-ratchet-gap-analysis.md`.
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* "The
+sender cross-check" in the list above is no longer a behaviour any requirement
+here states: REQ-xa6smf and REQ-ztdza4 are amended in place to say that
+nothing about the sender is checked.

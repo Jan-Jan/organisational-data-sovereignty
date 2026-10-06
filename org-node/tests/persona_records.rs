@@ -17,7 +17,7 @@ use org_node::store::{
 };
 use org_node::test_fixtures::{device_key, member_key};
 use org_node::{
-    ChainAccount, DeviceSeed, Epoch, MemberSeed, MockChainOps, OrgNodeError, OrgPublicKey, OrgSecret, OrgService,
+    ChainAccount, DeviceSeed, Epoch, MemberSeed, MockChainOps, OrgNodeError, OrgPrivateKey, OrgPublicKey, OrgSecret, OrgService,
     PersonaId, SequenceNumber,
 };
 use rand::rngs::OsRng;
@@ -30,10 +30,14 @@ fn tmp_path(name: &str) -> PathBuf {
     path
 }
 
+/// Adapted at the merge of master `1feb608` into worktree-person-shared-types,
+/// which kept master's name: master used y = 2, off the Edwards curve. On this
+/// branch the Member-as-a-group key and the Organisation public key are X25519
+/// keys, for which u = 2 is a valid (twist) point, so the key every field
+/// refuses is u = y = 0: of small order under both rules (`person`'s
+/// DevicePublicKey and X25519 checks).
 fn off_curve_key() -> [u8; 32] {
-    let mut b = [0u8; 32];
-    b[0] = 2;
-    b
+    [0u8; 32]
 }
 
 /// The only construction site of a `PersonaRecord` in this file.
@@ -57,7 +61,7 @@ fn org_with_member() -> OrgRecord {
     OrgRecord {
         org_id: OrgId::new([5u8; 20]),
         root_hash: RootHash::new([0x11u8; 32]),
-        org_pub_key: OrgPublicKey::from(&member_key(0x31)),
+        org_pub_key: OrgPublicKey::parse(member_key(0x31).as_bytes()).unwrap(),
         epoch: Epoch::new(1),
         org_secret: None,
         last_seq: SequenceNumber::new(0),
@@ -71,6 +75,7 @@ fn org_with_member() -> OrgRecord {
             device_keys: vec![device_key(0x22)],
         }],
         proxy_account: None,
+        org_private_key: None,
     }
 }
 
@@ -237,6 +242,7 @@ struct WireOrg {
     admin_member_key: [u8; 32],
     trie_members: Vec<WireMember>,
     proxy_account: Option<ChainAccount>,
+    org_private_key: Option<OrgPrivateKey>,
 }
 
 #[derive(serde::Serialize)]
@@ -288,6 +294,7 @@ fn wire_store() -> WireStore {
                 device_keys: vec![*device_key(0x22).as_bytes()],
             }],
             proxy_account: None,
+            org_private_key: None,
         }],
         pending_invites: vec![WireInvite {
             org_id: OrgId::new([6u8; 20]),
@@ -316,14 +323,14 @@ fn a_store_with_every_record_kind_opens_with_every_field_parsed() {
     let opened = PersonaStore::open(sealed_wire_store("every-kind", &wire_store()), "pw").unwrap();
     let d = opened.data();
     assert_eq!((d.personas[0].handle.as_str(), d.personas[0].name.as_str(), d.personas[0].surname.as_str()), ("alice", "Alice", "Smith"));
-    assert_eq!(d.orgs[0].org_pub_key, OrgPublicKey::from(&member_key(0x32)));
+    assert_eq!(d.orgs[0].org_pub_key, OrgPublicKey::parse(member_key(0x32).as_bytes()).unwrap());
     assert_eq!(d.orgs[0].admin_member_key, member_key(0x31));
     let m = &d.orgs[0].trie_members[0];
     assert_eq!((m.handle.as_str(), m.name.as_str(), m.surname.as_str()), ("bob", "Bob", "Jones"));
     assert_eq!((m.member_key, m.device_keys.clone()), (member_key(0x21), vec![device_key(0x22)]));
     let i = &d.pending_invites[0];
     assert_eq!((i.admin_device_key, i.admin_member_key), (device_key(0x41), member_key(0x42)));
-    assert_eq!(i.org_pub_key, OrgPublicKey::from(&member_key(0x43)));
+    assert_eq!(i.org_pub_key, OrgPublicKey::parse(member_key(0x43).as_bytes()).unwrap());
 }
 
 /// Every field the store-open refusal names (design ledger, "Observable
@@ -497,6 +504,10 @@ fn a_valid_invite_imports_as_a_pending_invite() {
     assert_eq!(pending[0].admin_device_key, device_key(0x41));
 }
 
+/// An Invite whose Organisation public key, administrator's Member-as-a-group
+/// key or administrator's DevicePublicKey is not a valid key of its kind fails
+/// to decode, as master reports it (`Chain("blob decode…")`), and nothing is
+/// stored (LLR-8bum44 as amended 2026-10-05).
 /// verifies: LLR-8bum44
 #[test]
 fn an_invite_holding_a_key_that_is_not_a_curve_point_is_refused_and_nothing_stored() {

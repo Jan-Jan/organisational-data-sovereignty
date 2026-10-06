@@ -21,3 +21,16 @@ stand against it; the risk assessment of LLR-56hc77 records it as a residual. By
 (2026-10-04) role-typed key pairs (a `MemberKeypair` and a `DeviceKeypair`,
 each giving up only its own seed type) are a follow-up change, not part of
 the type-safety change.
+
+**2026-10-05, at the merge of master `1feb608` into
+`worktree-person-shared-types`.** Partly addressed on that branch, and still
+open. A Member's key pair is an `X25519Keypair` and a device's a
+`SigningKeypair`, two types, so a Member key pair can no longer be passed
+where a device key pair is meant, and `SigningKeypair` has no `member_seed()`.
+LLR-56hc77 is amended in place to say so (docs/plans/2026-10-05-switch-trim.md). The same shape remains one level down:
+`X25519Keypair` holds either a member seed or the Organisation private key,
+and both `member_seed()` and `org_private_key()` are public on it, so the
+Organisation key pair can hand its secret back as a `MemberSeed`, and the
+reverse. The residual is assessed under LLR-56hc77 in
+`org-node/docs/risk/2026-10-05-envelope-authenticity.md`. Role-typed X25519
+key pairs are the remaining fix.

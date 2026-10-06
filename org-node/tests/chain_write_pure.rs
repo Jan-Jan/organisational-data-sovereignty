@@ -129,7 +129,7 @@ fn update_call_names_every_field_and_constant_the_runtime_matches() {
     // address could not tell it from its reverse (review round 7).
     let contract: [u8; 20] = core::array::from_fn(|i| i as u8 + 1);
     let root = org_node::RootHash::new([0x11u8; 32]);
-    let key = org_node::OrgPublicKey::from(&org_node::MemberSeed::from([0x22u8; 32]).signing_keypair().member_key());
+    let key = org_node::OrgPrivateKey::from([0x22u8; 32]).x25519_keypair().org_public_key().unwrap();
     let epoch = org_node::Epoch::new(7);
 
     let expected = Value::variant(

@@ -169,7 +169,7 @@ Where: `org-node/src/service.rs`, the transport send in `admit_member`: the
 `TransportMode::Networked` branch, which derives the peer identity
 from `join_request.device_key` and so binds delivery to the key). The Join
 request is an unsigned, unauthenticated blob by design
-(`org-node/src/blobs.rs:13-34`, *re-measured 2026-10-05 by the org-node type-safety change, review round 7*), travelling out of band by copy and paste, so
+(`org-node/src/blobs.rs:12-36`, *re-resolved 2026-10-05 at the merge of master `1feb608` into worktree-person-shared-types; it read `:11-34` on that branch and `:13-34` on master, re-measured there by the org-node type-safety change, review round 7*), travelling out of band by copy and paste, so
 nothing upstream detects the alteration.
 
 Observable symptom: with a Join request carrying B's keys and C's address,
@@ -197,7 +197,14 @@ the membership cross-check afterwards, so a Change set relayed by a device
 the record does not name shapes the node's record.
 affects: RC-b6mydy, LLR-3q63zv
 opened: 2026-09-09
-status: open
+status: resolved
+resolution: not a defect, by owner ruling 2026-10-05 (change
+`worktree-org-node-chain-authority`): nothing about the sender of an Envelope
+is checked on either Receive operation, because authority is the chain's and
+a chain-valid update delivered by any peer matches the chain (REQ-ztdza4 as
+amended). LLR-3q63zv is amended in place to state it; test
+`pr_u4c2vp_an_update_relayed_by_a_non_member_is_committed_on_the_self_delete_path`
+(`org-node/tests/admission_sender.rs`).
 
 Where: `receive_and_self_delete_if_revoked` in `org-node/src/service.rs`
 discards the authenticated sender with the comment "authenticated but not

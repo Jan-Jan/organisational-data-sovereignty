@@ -1,5 +1,5 @@
 //! Device-to-device transport over iroh QUIC. The peer's authenticated
-//! EndpointId is its P2pDeviceKey, so a connection proves device-key custody.
+//! EndpointId is its DevicePublicKey, so a connection proves device-key custody.
 
 pub mod endpoint;
 pub mod wire;

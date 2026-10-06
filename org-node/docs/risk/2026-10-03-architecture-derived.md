@@ -105,6 +105,14 @@ the assessment above stands for the delete branch, and the update branch's
 risk is the one PR-u4c2vp carries. LLR-3q63zv now names the report, and a pin
 test reddens when it is fixed.*
 
+*Amended 2026-10-05.* The carve-out this section defends is
+now the rule on every path: the owner ruled that nothing about the sender is
+checked (REQ-xa6smf, REQ-ztdza4). LLR-3q63zv is amended in place to say so,
+and PR-u4c2vp is resolved by that ruling. The residual named above (any peer
+that can reach the endpoint and relay a genuine, chain-anchored envelope
+causes the node to act on it) is accepted by that ruling: the envelope
+matches the chain.
+
 ## LLR-gu6u53 — the Debug rendering of an Organisation identifier
 
 assesses: LLR-gu6u53
@@ -210,6 +218,13 @@ left this paragraph.*
 
 **Assessment.** No new hazard; no new control. HAZ-tawvm2 keeps S3/P2.
 
+*Amended 2026-10-05. The Change set is pushed unsigned (RC-pm9kmx
+amended in place). LLR-rv4vux, LLR-rb8r65 and LLR-ghja3x are amended in
+place: they drop the signing wording and name the Organisation public key in
+the calldata. The fail-closed argument above rests on RC-6a2dke, not on a
+signature, and it stands. The amended texts are assessed in
+`org-node/docs/risk/2026-10-05-envelope-authenticity.md`.*
+
 ### B. The chain-operations seam — LLR-65py3d, LLR-hg3xzf
 
 assesses: LLR-65py3d, LLR-hg3xzf
@@ -259,6 +274,10 @@ activate the Persona on genesis.
   random, never from a key, REQ-d9g6nt); the Persona identifier is local to one
   node's store and names a keypair the node holds, which is exactly what a
   key-derived handle should name. No cross-node identity rests on it.
+  *Amended 2026-10-05:* the member key is now the X25519 public key of the
+  member seed, not an ed25519 verifying key. LLR-s7yu4k is amended in
+  place to state the sixteen-byte prefix the code uses. The assessment
+  stands.
 - **LLR-v82xds** — a Persona wrongly recorded Active would claim a membership
   the trie does not grant. It is bounded: every access decision reads the
   Membership record, never the Persona's status, so the error is cosmetic at
@@ -350,6 +369,16 @@ integrity is lost.* Probability unchanged: the behaviour is in the code and alwa
 has been; what changed is that a mutation to it now reddens
 `a_revocation_reaches_the_administrators_disk`.
 
+*Amended 2026-10-05. The revocation is sent unsigned (RC-pm9kmx
+amended in place), and LLR-6dc598, LLR-tax3pm and LLR-8hdu9x are amended in
+place. Two sentences above no longer describe the code. "A revocation signed
+with the device key is one RC-b6mydy's author check will refuse": there is no
+author key, and nothing about the sender is checked. "Every subsequent change
+A signs" now reads "every subsequent change A sends". The failure mode is
+still a revocation that does not take effect, and the assessment stands. The
+amended texts are assessed in
+`org-node/docs/risk/2026-10-05-envelope-authenticity.md`.*
+
 ### E. The out-of-band blobs — LLR-zj88e6, LLR-437fvx, LLR-836z24
 
 assesses: LLR-zj88e6, LLR-437fvx, LLR-836z24
@@ -367,6 +396,15 @@ the design layer says the Invite must. If `export_invite` named the Member-as-a-
 instead, the cross-check would compare two things that are never equal and
 every first admission would be refused — fail-closed again, and loudly, which
 is why this is derived rather than a gap in the control.
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* There
+is no receiver-side cross-check any more: RC-b6mydy and REQ-xa6smf are
+amended in place, and nothing about the sender is checked. The administrator's
+device key the Invite names is compared with nothing; a wrong key there would
+refuse no admission. The assessment below (no new hazard, no new control)
+stands.
 
 The direction that would *not* be fail-closed — an Invite naming a key an
 attacker controls — is not reachable by changing this function: the Invite is
@@ -474,6 +512,14 @@ Probability unchanged today; the behaviour is in the code and always has been,
 and what changed is that a mutation to it now reddens
 `a_second_organisation_is_admitted_into_without_touching_the_first`.
 
+*Amended 2026-10-05. Nothing is signed now (RC-pm9kmx amended in
+place), and LLR-vdyu65 is amended in place to drop the clause "signs with that
+Organisation's administrator Persona". In the confused-deputy case above,
+org_1's receivers would accept the wrong admission on the on-chain root
+rather than on "a valid signature"; nothing about the sending device is
+checked. The root is correct for the change actually made. The conclusion is
+unchanged.*
+
 ### G. The revocation dial — LLR-pw369n
 
 assesses: LLR-pw369n
@@ -536,11 +582,12 @@ chain, never a value from the Wire message.
 
 **The hazard it bears on.** HAZ-tawvm2, a Change set accepted on its sender's
 word. The stored key is read by `admin_persona_for_org`
-(`org-node/src/service.rs:1403`), which decides whether this device
-administers the Organisation. `export_invite` reads it too (`:682`), but only
-after that lookup (`:667`) *(read `:1473`, `:697` and `:682` before the
-org-node type-safety change's edits to `service.rs`; corrected by its review
-round 7)*, so on a member's device it refuses with "admin
+(`org-node/src/service.rs:1357`), which decides whether this device
+administers the Organisation. `export_invite` reads it too (`:699`), but only
+after that lookup (`:684`) (*re-resolved 2026-10-05 at the merge of master
+`1feb608` into worktree-person-shared-types; they read `:1388`, `:719` and
+`:704` on that branch after its review round 2, and `:1403`, `:682` and `:667`
+on master after the org-node type-safety change's review round 7*), so on a member's device it refuses with "admin
 persona not found for org" and never hands an invite on. *Corrected
 2026-10-05 by review round 8, which measured that refusal: this said the key
 was read "when a member re-shares an invite".* A key taken from the Wire message would let a sender make a member believe it administers, or
@@ -550,7 +597,24 @@ independent source RC-6a2dke relies on.
 **Assessment.** No new hazard and no new control: the behaviour is the safe
 one, and is now evidenced. Zeroing the write was green until review round 5,
 and `a_first_admission_records_the_signing_key_the_secret_and_the_member`
-reddens it now.
+reddens it now. *(Note 2026-10-05, review round 3, finding-15: that test is
+now `a_first_admission_records_the_invites_administrator_the_chains_key_the_secret_and_the_member`
+(`org-node/tests/admission_sender.rs`), renamed by review round 2 when the
+key stopped being a signing key.)*
+
+*Amended 2026-10-05. The chain's key is now the Organisation public key, an
+X25519 key that is not the administrator's member key (REQ-ech45n). By the
+owner's answer Q1 (docs/plans/2026-10-05-switch-trim.md), on a first
+admission for which an Invite was imported the field holds the Invite's
+`admin_member_key` (LLR-rys5nx), and on one without an Invite, which now
+commits (REQ-xa6smf), it holds the chain's Organisation public key (LLR-xq9nrq,
+amended in place), which names no administrator. Neither is a value from the
+Wire message. Without an Invite, `admin_persona_for_org` on a member's node
+finds no administrator Persona, and LLR-e5c9ud's exclusion excludes only a
+Persona whose member key equals the chain's key. Both texts are assessed in
+`org-node/docs/risk/2026-10-05-envelope-authenticity.md`.
+The three line references above were re-resolved on the same day. They read
+`:1473`, `:697` and `:682`.*
 
 ### LLR-ckk5nz — the Organisation secret, stored and overwritten
 
@@ -573,6 +637,18 @@ and rotation is what `revokedExcludedFromOrgSecret` in
 `org-node/quint/protocol.qnt` points at. The control follows the owner's
 ruling.
 
+*Amended 2026-10-05 (review round 1 of `worktree-worktree-person-shared-types`,
+finding-4).* The secret this item stores is authenticated by nothing.
+`WireMessage.org_secret` was never covered by the Envelope's signature, and
+since the Envelope lost its signature and nothing about the sender is
+checked, any peer reaches this write (REQ-xa6smf, REQ-ztdza4). The owner ruled
+that the secret is to be replaced by CGKA keys verified against the
+Organisation public key; the chain-authority rulings make it the Organisation
+private key, checked on receipt against the chain's `org_pub_key`
+(chain-authority's change 2). Both are recorded, unranked. The assessment is in
+`org-node/docs/risk/2026-10-05-envelope-authenticity.md` ("The Organisation
+secret"), and the gap is booked as PR-ve9zw8.
+
 ### LLR-e5c9ud — which Persona a receive marks Active
 
 assesses: LLR-e5c9ud
@@ -594,6 +670,13 @@ owner decides the Persona-to-Organisation model. Probability is not
 re-estimated here. The precondition is an administrator enrolling a device key
 the member uses in another Organisation, or the member founding one, and that
 estimate belongs with the fix.
+
+*Amended 2026-10-05. LLR-e5c9ud is amended in place. The
+administrator is now excluded by comparing the two Member-as-a-group keys, not
+a DevicePublicKey against a member key, which were one key only while both were
+ed25519. Without an imported Invite the key compared against is the chain's
+Organisation public key (LLR-xq9nrq), which names no administrator. The
+assessment stands.*
 
 ### LLR-rc74nq — the update call's names and constants
 
@@ -640,6 +723,11 @@ weakness were assessed on 2026-09-09. What changes is that the ledger now
 states it and a test pins it, so a future change that makes the invite
 mandatory reddens a named test instead of passing silently.
 
+*Amended 2026-10-05.* The opposite happened: the owner ruled that no
+Invite is required (REQ-xa6smf). LLR-mbjfq8 is amended in place to the
+chain-anchor rule without the signature. The first of the three places where
+RC-b6mydy was weaker than its wording is now its wording.
+
 ### LLR-379hnv — the self-delete path and a missing record
 
 assesses: LLR-379hnv
@@ -682,6 +770,10 @@ That is an availability loss on one path, already booked, with its intended
 behaviour unruled.
 
 **Assessment.** No new hazard and no new control.
+
+*Amended 2026-10-05: the envelope is unsigned (RC-pm9kmx amended in
+place). LLR-8hdu9x is amended in place to say "the revocation Envelope" where
+it said "the signed envelope". The assessment stands.*
 
 ### LLR-qezw3n — the Invite's dialling address
 
@@ -729,6 +821,13 @@ and the record's snapshots. A stale id is a display error on the PR-mdv38y
 path, which is already booked.
 
 **Assessment.** No new hazard and no new control.
+
+*Amended 2026-10-05 (owner ruling of that day, change
+`worktree-org-node-chain-authority`; written by change
+`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* The
+sender cross-checks this paragraph names are gone: nothing about the sender is
+checked. The self-delete decision and administration still use keys and the
+record's snapshots, so the assessment stands.
 
 ### LLR-ryzr8m — the mock chain's compare-and-swap
 

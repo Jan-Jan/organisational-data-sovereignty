@@ -47,22 +47,26 @@ when the Member is placed in the Membership record; identifiers in Membership
 records made before 2026-10-03 may equal key bytes and are opaque either way.
 _Avoid_: node id, member key
 
+**PersonPublicKey**:
+The key a grant is encoded against, and from which the holder's devices derive
+their own access: an X25519 public key resulting from group key agreement among
+those devices. A Member holds one in a Membership record; a Person holds one in
+their own definition; the two are never the same key, a rule no software
+enforces yet. Until group key agreement exists, org-node derives a Member's
+from a seed of the persona's own, a stand-in for it.
+_Avoid_: P2pMemberKey, P2pPersonKey, group key, p2p key, member key
+
 **Member-as-a-group key**:
-The key a grant is encoded against when an Organisation gives a Member access,
-and from which that Member's devices derive their own access. Rotatable, and
-rotated whenever a device key is removed.
+The PersonPublicKey a Membership record holds for a Member: what an
+Organisation's grants to that Member are encoded against. Rotatable, and
+rotated whenever a DevicePublicKey is removed.
 _Avoid_: group key, p2p key, member key
 
-**Device key**:
-The key identifying one of a Member's devices. A Member holds a bounded number
-of them.
-_Avoid_: device id, endpoint key
-
 **DevicePublicKey**:
-The ed25519 public key identifying one device. The name `person` gives a
-Device key; org-members adopts it when it switches to `person`'s types, and
-this entry then replaces Device key.
-_Avoid_: P2pDeviceKey, device id, endpoint key
+The ed25519 public key identifying one of a Member's devices. A Member holds a
+bounded number of them. One device is meant to hold a different
+DevicePublicKey in each record it appears in, a rule no software enforces yet.
+_Avoid_: device key, P2pDeviceKey, device id, endpoint key
 
 **Person**:
 An individual acting in their own capacity, apart from any Organisation. The
@@ -71,17 +75,10 @@ links their Person to those memberships except what the individual chooses to
 reveal.
 _Avoid_: user, account, individual member, profile
 
-**PersonPublicKey**:
-The key a grant is encoded against, and from which the holder's devices derive
-their own access: an X25519 public key resulting from group key agreement
-among those devices. Defined by `person`; when org-members switches to it, the
-Member-as-a-group key becomes a PersonPublicKey held in a Membership record.
-_Avoid_: P2pMemberKey, P2pPersonKey, group key, p2p key
-
 **Isolated member**:
-A Member holding zero device keys. Still a member of the Organisation, and able
-to be restored by adding a device key. The state an Organisation puts a Member
-into when that Member's devices are compromised.
+A Member holding zero DevicePublicKeys. Still a member of the Organisation,
+and able to be restored by adding a DevicePublicKey. The state an Organisation
+puts a Member into when that Member's devices are compromised.
 _Avoid_: revoked member, removed member, suspended member
 
 **Membership record**:
@@ -104,9 +101,18 @@ _Avoid_: delta, patch, diff
 
 **Organisation state**:
 The record an Organisation publishes on-chain: its current Membership root,
-its signing key, and the epoch counter that orders successive publications.
-The only thing about an Organisation the chain is asked.
+its Organisation public key, and the epoch counter that orders successive
+publications. The only thing about an Organisation the chain is asked.
 _Avoid_: org state, registry slot, on-chain record
+
+**Organisation public key**:
+The Organisation's X25519 public key, published in its Organisation state so
+that a member who is given the Organisation's private key can check it is the
+real one. It is a key-agreement key, not a signing key: it identifies no admin
+and authorises nothing. Today only the node that created the Organisation
+holds the private key; no software hands it to a member yet (org-node's
+*Organisation private key*).
+_Avoid_: signing key, org key, admin key
 
 **Finalised block**:
 A block the chain has committed to irrevocably, so that a value read from it

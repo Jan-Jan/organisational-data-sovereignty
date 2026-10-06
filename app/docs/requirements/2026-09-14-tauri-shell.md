@@ -226,6 +226,30 @@ now matches on the variant and carries **no wildcard arm**, so a new variant
 added upstream is a compile error here rather than a silent default into
 whichever class happens to be listed first.
 
+*(Amended 2026-10-05.)* The list of verdicts above describes the code before
+org-node dropped the Envelope signature; `classify_receive_error`
+(`app/src-tauri/src/events.rs`) is the current list. The rule is unchanged:
+a verdict is a refusal of what the sender delivered, judged against the
+chain or the node's own record, and each verdict is still produced only by
+`verify_envelope_against_chain`. The seven verdicts are `OrgIdMismatch`,
+`StaleSeq`, `MalformedDelta`, `DeltaBaseMismatch`, `RootMismatch`,
+`StaleEpoch` and `SeqNotEpoch` (a Sequence number other than the chain's
+epoch). `BadSignature` is gone with the signature, and nothing replaces it:
+org-node checks nothing about the sender (owner ruling 2026-10-05). The
+receiver errors are `Chain(_)`, `OrgNotOnChain`, `Trie(_)`,
+`InvalidOrgPublicKey` (the chain's Organisation state carries a key that is
+not a valid X25519 key, refused before anything is verified against it) and
+`InvalidField { .. }`. `StaleEpoch` stays a verdict for the reason given
+below.
+
+How `StaleEpoch` fits: it compares two things the sender did not deliver,
+the epoch the chain reports and the node's last committed epoch. It is still
+a verdict on the delivered update. An update is a change from the node's
+record to a newer chain state, and `StaleEpoch` says the chain holds no state
+newer than the node's record for this update to be the change to. That
+judges the update against the chain and the record, and no local fault
+produces it.
+
 REQ-wu6z9p is the frontend half and is separate because it fails separately: a
 correct classification still misleads if the consumer files both classes in one
 list. It is gated through `applyReceiverEvent`, extracted from `Membership.svelte`

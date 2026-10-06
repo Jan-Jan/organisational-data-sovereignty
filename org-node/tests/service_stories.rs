@@ -4,10 +4,9 @@
 //! Stories exercised:
 //!   1. A creates a persona and an organisation → epoch 1 in MockChain.
 //!   2. B creates a persona; exports a JoinRequest; A imports it.
-//!      A exports an Invite; B imports it (persists admin_device_key for cross-check).
+//!      A exports an Invite; B imports it (persists the administrator's keys).
 //!   3. A admits B (trie add → epoch 2 in MockChain; envelope pushed to B over iroh).
 //!   4. B receives and verifies the envelope → B's persona Active, OrgRecord stored.
-//!      Cross-check: B asserts sender's QUIC device key == invite's admin_device_key.
 //!   5. A revokes B (trie remove → epoch 3); B self-deletes its OrgRecord.
 //!
 //! The gate: `cargo test -p org-node --features app --test service_stories`
@@ -21,7 +20,7 @@ use org_node::keys::SigningKeypair;
 use org_node::service::{MockChainOps, OrgService, SelfDeleteOutcome};
 use org_node::store::{PersonaStatus, PersonaStore};
 use org_node::transport::endpoint::OrgEndpoint;
-use org_node::{DeviceSeed, Epoch, MemberSeed, OrgSecret, PersonaId, SequenceNumber};
+use org_node::{DeviceSeed, Epoch, OrgSecret, PersonaId, SequenceNumber};
 
 /// The Organisation secret every admission in this file hands over.
 fn org_secret() -> Option<OrgSecret> {
@@ -39,17 +38,21 @@ fn sn(s: &str) -> org_members::Surname {
 }
 
 // The proper end-to-end test that runs all 5 stories in one function.
-// `five_stories_headless` (stories 1-4 only, no invite cross-check) was
+// `five_stories_headless` (stories 1-4 only, no invite) was
 // deleted in the Fix 3 cleanup — `five_stories_full_e2e` is the canonical gate.
 //
 // Normal cases of three org-node requirements, over the service API: story 4
-// commits the applied Change set with the chain's epoch and root (REQ-nhe2zu)
-// and passes the first-admission invite cross-check with the genuine admin as
-// sender (REQ-xa6smf); story 5 is the self-delete on the device's own removal
+// commits the applied Change set with the chain's epoch and root (REQ-nhe2zu,
+// and REQ-txvtm9's epoch rule with it) as a first admission (REQ-xa6smf);
+// story 5 is the self-delete on the device's own removal
 // (REQ-uxv2x2). Further abnormal cases are in verify_against_chain.rs and
 // admission_sender.rs; REQ-uxv2x2's own abnormal-input case — a revocation
-// whose envelope fails verification — is the last test in this file.
-// verifies: REQ-nhe2zu, REQ-xa6smf, REQ-uxv2x2, LLR-rb8r65, LLR-ghja3x, LLR-bg3vsw, LLR-t4znbk, LLR-37cj3n, LLR-q8emds, LLR-68yd3j, LLR-6zjzn2, LLR-cns6q6, LLR-6p4pj2
+// from a device outside its record — is the last test in this file.
+// (Merged with master 05f6f04: LLR-ghja3x and LLR-37cj3n, which state that
+// the envelope is signed and verified under a signing key, are not carried —
+// the Envelope has no signature on this branch. *Amended 2026-10-05:*
+// LLR-rb8r65 is amended in place and carried here as amended.)
+// verifies: REQ-nhe2zu, REQ-txvtm9, REQ-xa6smf, REQ-uxv2x2, LLR-rb8r65, LLR-bg3vsw, LLR-t4znbk, LLR-q8emds, LLR-68yd3j, LLR-6zjzn2, LLR-cns6q6, LLR-6p4pj2
 #[tokio::test(flavor = "multi_thread")]
 async fn five_stories_full_e2e() {
     use rand::rngs::OsRng;
@@ -94,8 +97,8 @@ async fn five_stories_full_e2e() {
     assert_eq!(svc_a.list_personas()[0].status, PersonaStatus::Active);
 
     // Bind A's endpoint from the SAME device seed that `create_persona` generated.
-    // This ensures the QUIC-authenticated sender identity on B's side equals the
-    // `admin_device_key` that `export_invite` will encode — the cross-check gate.
+    // The QUIC-authenticated sender identity on B's side then equals the
+    // `admin_device_key` that `export_invite` will encode; nothing checks it.
     let a_device_kp = svc_a.list_personas()
         .iter()
         .find(|p| p.persona_id == pid_a)
@@ -110,7 +113,7 @@ async fn five_stories_full_e2e() {
 
     // A exports the invite (admin_device_key = A's persona device key).
     let invite_blob = svc_a.export_invite(org_id).unwrap();
-    // B imports and persists the invite — stores admin_device_key for the cross-check.
+    // B imports and persists the invite.
     let invite = svc_b.import_invite(&mut OsRng, &invite_blob).unwrap();
     assert_eq!(invite.org_id, org_id);
 
@@ -439,21 +442,24 @@ async fn revocation_of_another_member_is_committed_not_self_deleted() {
 }
 
 // Abnormal-input case of the self-delete rule: a revocation Change set that
-// removes this node's own Device key, but whose Envelope is signed by a key
-// that is NOT the Organisation's published signing key, must be rejected — and
-// the rejection must leave the OrgRecord exactly as it was. The node must never
-// delete its record of the Organisation on a message it refused to verify.
-// verifies: REQ-uxv2x2, LLR-6qmq2g, LLR-vw2jn6
+// removes this node's own DevicePublicKey, well formed and naming the right
+// Organisation, but never published on chain, delivered by a device in no
+// member's slots of the node's record. Nothing about the sender is checked
+// (LLR-3q63zv, amended 2026-10-05); the chain refuses it, and the refusal
+// leaves the OrgRecord exactly as it was. The node must never delete its
+// record of the Organisation on a message it refused.
+// verifies: REQ-uxv2x2, LLR-6qmq2g, LLR-vw2jn6, LLR-3q63zv
 #[tokio::test(flavor = "multi_thread")]
-async fn unverified_revocation_leaves_the_record_in_place() {
+async fn revocation_from_an_unknown_device_leaves_the_record_in_place() {
     use rand::rngs::OsRng;
 
     use org_members::hasher::Blake3Hasher;
     use org_members::trie::OrgTrie;
     use org_members::MemberLeaf;
-    use org_node::envelope::SignedDeltaEnvelope;
+    use org_node::envelope::Envelope;
     use org_node::error::OrgNodeError;
     use org_node::store::MemberSnapshot;
+    use org_node::keys::X25519Keypair;
     use org_node::transport::wire::WireMessage;
 
     type Trie = OrgTrie<Blake3Hasher>;
@@ -463,21 +469,21 @@ async fn unverified_revocation_leaves_the_record_in_place() {
     /// Fresh encrypted store under `temp_dir()`, unique per party and process.
     fn store_path(party: &str) -> std::path::PathBuf {
         let dir =
-            std::env::temp_dir().join(format!("ods-bad-sig-{party}-{}", std::process::id()));
+            std::env::temp_dir().join(format!("ods-unknown-sender-{party}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("store.bin")
     }
 
     /// The member and device keypairs of a persona, from its persisted seeds.
-    fn keys_of(svc: &OrgService, persona_id: &PersonaId) -> (SigningKeypair, SigningKeypair) {
+    fn keys_of(svc: &OrgService, persona_id: &PersonaId) -> (X25519Keypair, SigningKeypair) {
         let p = svc
             .list_personas()
             .iter()
             .find(|p| &p.persona_id == persona_id)
             .expect("persona not found");
         (
-            p.member_seed.signing_keypair(),
+            p.member_seed.x25519_keypair(),
             p.device_seed.signing_keypair(),
         )
     }
@@ -533,20 +539,20 @@ async fn unverified_revocation_leaves_the_record_in_place() {
     let (svc_b, r) = b_task.await.unwrap();
     r.expect("B's direct admission from A must verify");
 
-    // ---- Forge a revocation of B, signed by a key the chain does not name ----
+    // ---- Forge a revocation of B, sent from a device B's record does not hold ----
     // Rebuild B's committed trie from B's own snapshot. An integration test
     // cannot call the crate's private snapshot-to-trie helper, so the leaves
     // are rebuilt from the two personas' seeds and matched to the snapshot by
     // member key; the root assertion below proves the reconstruction faithful.
-    let (epoch_before, members_before, root_before, seq_before, org_pub_key) = {
+    let (epoch_before, members_before, root_before, seq_before) = {
         let rec = &svc_b.list_orgs()[0];
-        (rec.epoch, rec.trie_members.len(), rec.root_hash, rec.last_seq, rec.org_pub_key)
+        (rec.epoch, rec.trie_members.len(), rec.root_hash, rec.last_seq)
     };
 
     let leaf_of = |s: &MemberSnapshot| -> MemberLeaf {
-        let (member, device) = if s.member_key == a_member_kp.member_key() {
+        let (member, device) = if s.member_key == a_member_kp.member_key().expect("valid key") {
             (&a_member_kp, &a_device_kp)
-        } else if s.member_key == b_member_kp.member_key() {
+        } else if s.member_key == b_member_kp.member_key().expect("valid key") {
             (&b_member_kp, &b_device_kp)
         } else {
             panic!("snapshot member key belongs to neither A nor B");
@@ -554,10 +560,10 @@ async fn unverified_revocation_leaves_the_record_in_place() {
         MemberLeaf::new(
             s.id,
             s.handle.clone(),
-            member.member_key(),
+            member.member_key().expect("valid key"),
             s.name.clone(),
             s.surname.clone(),
-            vec![device.device_key()],
+            vec![device.device_key().unwrap()],
         )
         .unwrap()
     };
@@ -578,14 +584,18 @@ async fn unverified_revocation_leaves_the_record_in_place() {
         .recalculate()
         .unwrap();
 
-    // Signed by a keypair that is not the Organisation's published signing key.
-    let forger = MemberSeed::from([0x99u8; 32]).signing_keypair();
-    assert_ne!(
-        forger.member_key().as_bytes(),
-        org_pub_key.as_bytes(),
-        "the forging key must not be the Organisation's published signing key"
+    // No signature to forge any more, and the sender is not checked: only the
+    // chain gives it away. The forging device is in no member's slots of B's
+    // record.
+    let forger_device = DeviceSeed::from([0x77u8; 32]).signing_keypair();
+    assert!(
+        !svc_b.list_orgs()[0]
+            .trie_members
+            .iter()
+            .any(|m| m.device_keys.contains(&forger_device.device_key().unwrap())),
+        "the forging device must not be in B's record"
     );
-    let envelope = SignedDeltaEnvelope::build(org_id, SequenceNumber::new(seq_before.get() + 1), &delta, &forger).unwrap();
+    let envelope = Envelope::build(org_id, SequenceNumber::new(seq_before.get() + 1), &delta).unwrap();
     let msg = WireMessage { envelope, org_secret: None, genesis_snapshot: None };
 
     // ---- B receives the forged revocation ----
@@ -603,7 +613,6 @@ async fn unverified_revocation_leaves_the_record_in_place() {
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    let forger_device = DeviceSeed::from([0x77u8; 32]).signing_keypair();
     let ep_forger = OrgEndpoint::bind(&forger_device).await.unwrap();
     tokio::time::timeout(NET, ep_forger.send(b_addr, &msg))
         .await
@@ -613,10 +622,10 @@ async fn unverified_revocation_leaves_the_record_in_place() {
     let (svc_b_final, r) = b_task.await.unwrap();
 
     // The requirement: the message is rejected, and nothing is deleted.
-    let err = r.expect_err("a revocation whose envelope fails verification must be rejected");
+    let err = r.expect_err("a revocation the chain never published must be rejected");
     assert!(
-        matches!(err, OrgNodeError::BadSignature),
-        "expected BadSignature, got {err:?}"
+        matches!(err, OrgNodeError::StaleEpoch { .. }),
+        "expected StaleEpoch (the chain holds no newer state), got {err:?}"
     );
 
     assert_eq!(

@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use org_members::RootHash;
 
+use crate::error::OrgNodeError;
 use crate::ids::OrgId;
 use crate::types::{Epoch, OrgPublicKey};
 
@@ -14,6 +15,19 @@ pub struct OrgState {
     pub root_hash: RootHash,
     pub org_pub_key: OrgPublicKey,
     pub epoch: Epoch,
+}
+
+impl OrgState {
+    /// The edge where an Organisation state read from the chain enters the
+    /// node: its Organisation public key must be a valid X25519 public key,
+    /// or the state is refused (REQ-8jb4ny).
+    pub fn from_chain(root_hash: [u8; 32], org_pub_key: [u8; 32], epoch: u64) -> Result<Self, OrgNodeError> {
+        Ok(Self {
+            root_hash: RootHash::new(root_hash),
+            org_pub_key: OrgPublicKey::parse(&org_pub_key)?,
+            epoch: Epoch::new(epoch),
+        })
+    }
 }
 
 /// Read-only access to on-chain org state. The trusted-root oracle: the root
@@ -57,7 +71,7 @@ mod tests {
         let org = OrgId::new([1u8; 20]);
         assert_eq!(chain.get_org_state(&org).unwrap(), None);
 
-        let state = OrgState { root_hash: RootHash::new([9u8; 32]), org_pub_key: OrgPublicKey::parse(&[0u8; 32]).unwrap(), epoch: Epoch::new(1) };
+        let state = OrgState { root_hash: RootHash::new([9u8; 32]), org_pub_key: crate::test_fixtures::org_public_key(), epoch: Epoch::new(1) };
         chain.set(org, state);
         assert_eq!(chain.get_org_state(&org).unwrap(), Some(state));
     }

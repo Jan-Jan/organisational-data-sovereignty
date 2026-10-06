@@ -1,12 +1,12 @@
 //! The wire payload exchanged over the channel, with length-prefixed framing.
 use serde::{Deserialize, Serialize};
 
-use crate::envelope::SignedDeltaEnvelope;
+use crate::envelope::Envelope;
 use crate::types::OrgSecret;
 use crate::transport::{TransportError, MAX_FRAME};
 
-/// One message over the org-node channel: a signed delta, plus (on admission)
-/// the org secret key handed to a newly verified member.
+/// One message over the org-node channel: an Envelope carrying one delta,
+/// plus (on admission) the org secret key handed to a newly verified member.
 ///
 /// `genesis_snapshot` carries postcard-encoded `Vec<MemberSnapshot>` (from the
 /// `app` feature store module).  It is included in admission messages so the
@@ -15,7 +15,7 @@ use crate::transport::{TransportError, MAX_FRAME};
 /// `None` for non-admission messages (e.g. revocations).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WireMessage {
-    pub envelope: SignedDeltaEnvelope,
+    pub envelope: Envelope,
     /// The Organisation secret, redacted in `Debug`.
     pub org_secret: Option<OrgSecret>,
     /// postcard(Vec<MemberSnapshot>) — genesis members; None for non-admission.

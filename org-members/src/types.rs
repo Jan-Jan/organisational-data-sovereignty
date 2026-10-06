@@ -3,29 +3,22 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
 
-use ed25519_dalek::VerifyingKey;
 use unicode_security::GeneralSecurityProfile;
 use unicode_security::MixedScript;
 
 use crate::error::OrgMembersError;
 use crate::normalize::to_nfc;
 
-/// Maximum number of devices per member.
-pub const MAX_DEVICES: usize = 4;
+pub use person::{
+    DevicePublicKey, DeviceSlots, Name, NodeHash, PersonPublicKey, Surname, MAX_DEVICES,
+    MAX_NAME_LEN, MAX_SURNAME_LEN,
+};
 
 /// Maximum byte length of a handle (after NFC normalization). Caps memory
 /// exposure from adversarial wire-format inputs. Email local-parts are
 /// limited to 64 octets by RFC 5321; 128 leaves headroom for legitimate
 /// non-ASCII handles after NFC expansion.
 pub const MAX_HANDLE_LEN: usize = 128;
-
-/// Maximum byte length of `name` after NFC normalization. Matches
-/// `MAX_HANDLE_LEN` and is generous for typical names (KYC standards
-/// cap at 50–100 chars; 128 bytes accommodates non-ASCII expansion).
-pub const MAX_NAME_LEN: usize = 128;
-
-/// Maximum byte length of `surname` after NFC normalization. See `MAX_NAME_LEN`.
-pub const MAX_SURNAME_LEN: usize = 128;
 
 /// Immutable member identifier. Used as the SMT key and as a stable reference
 /// to a member regardless of changes to their handle or p2p key.
@@ -78,165 +71,19 @@ impl fmt::Debug for MemberId {
     }
 }
 
-/// A member's ed25519 public key. In the local-first collaboration layer this
-/// represents the member as a single principal (the "member-as-a-group" key):
-/// when an Organisation grants access to a member, that grant is encoded
-/// against this key, and the member's devices share access derived from it.
-/// Can change over time (e.g., upon device rotation or compromise) -- distinct
-/// from the immutable `MemberId`.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct P2pMemberKey(VerifyingKey);
-
-impl P2pMemberKey {
-    pub fn new(key: VerifyingKey) -> Self {
-        Self(key)
-    }
-
-    /// Parses 32 bytes as a member key. Accepts exactly the bytes that
-    /// decompress to an Edwards point — what `Deserialize`, which calls this,
-    /// accepts — and does not refuse small-order or non-canonical encodings
-    /// (owner ruling 2026-10-04; PR-b7khyw). LLR-k6dhz7.
-    pub fn parse(bytes: &[u8; 32]) -> Result<Self, OrgMembersError> {
-        VerifyingKey::from_bytes(bytes)
-            .map(Self)
-            .map_err(|_| OrgMembersError::InvalidKey)
-    }
-
-    pub fn verifying_key(&self) -> &VerifyingKey {
-        &self.0
-    }
-
-    pub fn as_bytes(&self) -> &[u8; 32] {
-        self.0.as_bytes()
-    }
-}
-
-impl PartialOrd for P2pMemberKey {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for P2pMemberKey {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.as_bytes().cmp(other.as_bytes())
-    }
-}
-
-impl fmt::Debug for P2pMemberKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let b = self.as_bytes();
-        write!(f, "P2pMemberKey({:02x}{:02x}{:02x}{:02x}..)", b[0], b[1], b[2], b[3])
-    }
-}
-
-#[cfg(feature = "serde")]
-impl serde::Serialize for P2pMemberKey {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        self.as_bytes().serialize(s)
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for P2pMemberKey {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let bytes = <[u8; 32]>::deserialize(d)?;
-        Self::parse(&bytes).map_err(serde::de::Error::custom)
-    }
-}
-
-impl TryFrom<[u8; 32]> for P2pMemberKey {
-    type Error = OrgMembersError;
-
-    fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
-        Self::parse(&bytes)
-    }
-}
-
-/// A device's ed25519 public key. Serves as both the device's identity and
-/// signing key. (For devices, key and id are the same thing.)
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct P2pDeviceKey(VerifyingKey);
-
-impl P2pDeviceKey {
-    pub fn new(key: VerifyingKey) -> Self {
-        Self(key)
-    }
-
-    /// Parses 32 bytes as a device key. Accepts exactly the bytes that
-    /// decompress to an Edwards point — what `Deserialize`, which calls this,
-    /// accepts — and does not refuse small-order or non-canonical encodings
-    /// (owner ruling 2026-10-04; PR-b7khyw). LLR-k6dhz7.
-    pub fn parse(bytes: &[u8; 32]) -> Result<Self, OrgMembersError> {
-        VerifyingKey::from_bytes(bytes)
-            .map(Self)
-            .map_err(|_| OrgMembersError::InvalidKey)
-    }
-
-    pub fn verifying_key(&self) -> &VerifyingKey {
-        &self.0
-    }
-
-    pub fn as_bytes(&self) -> &[u8; 32] {
-        self.0.as_bytes()
-    }
-}
-
-impl PartialOrd for P2pDeviceKey {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for P2pDeviceKey {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.as_bytes().cmp(other.as_bytes())
-    }
-}
-
-impl fmt::Debug for P2pDeviceKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let b = self.as_bytes();
-        write!(f, "P2pDeviceKey({:02x}{:02x}{:02x}{:02x}..)", b[0], b[1], b[2], b[3])
-    }
-}
-
-#[cfg(feature = "serde")]
-impl serde::Serialize for P2pDeviceKey {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        self.as_bytes().serialize(s)
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for P2pDeviceKey {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let bytes = <[u8; 32]>::deserialize(d)?;
-        Self::parse(&bytes).map_err(serde::de::Error::custom)
-    }
-}
-
-impl TryFrom<[u8; 32]> for P2pDeviceKey {
-    type Error = OrgMembersError;
-
-    fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
-        Self::parse(&bytes)
-    }
-}
-
 /// The 32 encoded bytes of a key held in the organisation -- member key or
 /// device key alike: the same bytes are the same key (LLR-v6gfc7). Tag type.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct HeldKey([u8; 32]);
 
-impl From<&P2pMemberKey> for HeldKey {
-    fn from(k: &P2pMemberKey) -> Self {
+impl From<&PersonPublicKey> for HeldKey {
+    fn from(k: &PersonPublicKey) -> Self {
         Self(*k.as_bytes())
     }
 }
 
-impl From<&P2pDeviceKey> for HeldKey {
-    fn from(k: &P2pDeviceKey) -> Self {
+impl From<&DevicePublicKey> for HeldKey {
+    fn from(k: &DevicePublicKey) -> Self {
         Self(*k.as_bytes())
     }
 }
@@ -251,54 +98,6 @@ impl HandleSkeleton {
         use unicode_security::confusable_detection::skeleton;
         Self(skeleton(handle.as_str()).collect())
     }
-}
-
-/// The impls shared by the validated string newtypes (`Handle`, `Name`,
-/// `Surname`): `as_str`, `TryFrom<&str>`/`TryFrom<String>` delegating to the
-/// type's own `parse`, `From<_> for String` (serde's `into`), `Display`, and a
-/// redacted `Debug` (PII).
-macro_rules! validated_string_impls {
-    ($ty:ident) => {
-        impl $ty {
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-        }
-
-        impl TryFrom<&str> for $ty {
-            type Error = OrgMembersError;
-
-            fn try_from(value: &str) -> Result<Self, Self::Error> {
-                Self::parse(value)
-            }
-        }
-
-        impl TryFrom<String> for $ty {
-            type Error = OrgMembersError;
-
-            fn try_from(value: String) -> Result<Self, Self::Error> {
-                Self::parse(&value)
-            }
-        }
-
-        impl From<$ty> for String {
-            fn from(value: $ty) -> Self {
-                value.0
-            }
-        }
-
-        impl fmt::Display for $ty {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str(&self.0)
-            }
-        }
-
-        impl fmt::Debug for $ty {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str(concat!(stringify!($ty), "([REDACTED])"))
-            }
-        }
-    };
 }
 
 /// A validated member handle (REQ-h5ret5): NFC, non-empty, at most
@@ -352,82 +151,45 @@ impl Handle {
         }
         Ok(Self(normalized))
     }
-}
 
-validated_string_impls!(Handle);
-
-/// NFC-normalizes `value` and bounds it at `max` bytes. LLR-w5nkbu.
-fn nfc_bounded(value: &str, field: &'static str, max: usize) -> Result<String, OrgMembersError> {
-    let nfc = to_nfc(value);
-    if nfc.len() > max {
-        return Err(OrgMembersError::FieldTooLong { field, max });
-    }
-    Ok(nfc)
-}
-
-/// A member's given name: NFC, at most `MAX_NAME_LEN` bytes. PII.
-#[derive(Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(try_from = "String", into = "String"))]
-pub struct Name(String);
-
-impl Name {
-    pub fn parse(value: &str) -> Result<Self, OrgMembersError> {
-        nfc_bounded(value, "name", MAX_NAME_LEN).map(Self)
-    }
-}
-
-validated_string_impls!(Name);
-
-/// A member's surname: NFC, at most `MAX_SURNAME_LEN` bytes. PII.
-#[derive(Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(try_from = "String", into = "String"))]
-pub struct Surname(String);
-
-impl Surname {
-    pub fn parse(value: &str) -> Result<Self, OrgMembersError> {
-        nfc_bounded(value, "surname", MAX_SURNAME_LEN).map(Self)
-    }
-}
-
-validated_string_impls!(Surname);
-
-/// A 32-byte hash output. The fundamental hash unit produced by the
-/// `TrieHasher` trait -- used for member leaf hashes, internal node hashes,
-/// device leaf hashes, and device internal node hashes.
-///
-/// Distinct from `RootHash` for type safety: a `NodeHash` is the hash of some
-/// subtree; a `RootHash` is the externally-meaningful root of the whole org
-/// trie. They share the same byte representation but the distinction prevents
-/// accidentally using an intermediate hash where a root hash is expected.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct NodeHash(pub(crate) [u8; 32]);
-
-impl NodeHash {
-    pub fn new(bytes: [u8; 32]) -> Self {
-        Self(bytes)
-    }
-
-    pub fn as_bytes(&self) -> &[u8; 32] {
+    pub fn as_str(&self) -> &str {
         &self.0
     }
 }
 
-impl From<[u8; 32]> for NodeHash {
-    fn from(bytes: [u8; 32]) -> Self {
-        Self(bytes)
+impl TryFrom<&str> for Handle {
+    type Error = OrgMembersError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::parse(value)
     }
 }
 
-impl fmt::Debug for NodeHash {
+impl TryFrom<String> for Handle {
+    type Error = OrgMembersError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::parse(&value)
+    }
+}
+
+/// serde's `into`.
+impl From<Handle> for String {
+    fn from(value: Handle) -> Self {
+        value.0
+    }
+}
+
+impl fmt::Display for Handle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "NodeHash({:02x}{:02x}{:02x}{:02x}..)",
-            self.0[0], self.0[1], self.0[2], self.0[3]
-        )
+        f.write_str(&self.0)
+    }
+}
+
+/// Redacted: a handle is PII.
+impl fmt::Debug for Handle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Handle([REDACTED])")
     }
 }
 
@@ -456,7 +218,7 @@ impl From<[u8; 32]> for RootHash {
 
 impl From<NodeHash> for RootHash {
     fn from(h: NodeHash) -> Self {
-        Self(h.0)
+        Self(*h.as_bytes())
     }
 }
 
@@ -467,132 +229,6 @@ impl fmt::Debug for RootHash {
             "RootHash({:02x}{:02x}{:02x}{:02x}..)",
             self.0[0], self.0[1], self.0[2], self.0[3]
         )
-    }
-}
-
-/// Device slots for a member. Fixed depth-2 sub-trie (max 4 devices).
-/// Devices are ed25519 public keys, stored sorted and deduplicated.
-/// The serde wire form is canonical (strictly increasing); non-canonical
-/// encodings are rejected on deserialize.
-#[derive(Clone, PartialEq, Eq)]
-pub struct P2pDeviceSlots {
-    slots: Vec<P2pDeviceKey>,
-}
-
-#[cfg(feature = "serde")]
-impl serde::Serialize for P2pDeviceSlots {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        self.slots.serialize(s)
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for P2pDeviceSlots {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let slots = Vec::<P2pDeviceKey>::deserialize(d)?;
-        // Reject (do not normalize) non-canonical wire forms so postcard bytes
-        // have a unique encoding per logical device set. See Hyperbridge S1-16
-        // (proof canonicality) and review finding H-2.
-        if slots.len() > MAX_DEVICES {
-            return Err(serde::de::Error::custom("device slots exceed MAX_DEVICES"));
-        }
-        for pair in slots.windows(2) {
-            if pair[0] >= pair[1] {
-                return Err(serde::de::Error::custom(
-                    "device slots must be strictly increasing (sorted, no duplicates)",
-                ));
-            }
-        }
-        // Empty is still allowed (isolated state).
-        Ok(Self { slots })
-    }
-}
-
-impl P2pDeviceSlots {
-    /// Holds `devices` sorted. Accepts 0..=MAX_DEVICES keys: the empty list
-    /// is the isolated state `emergency_isolate_member` produces;
-    /// `MemberLeaf::new` requires ≥1 of its own. Refuses more than
-    /// `MAX_DEVICES` keys with `DeviceSlotsFull` and a repeated key with
-    /// `DuplicateDevice`. LLR-t3p9zk.
-    pub fn parse(mut devices: Vec<P2pDeviceKey>) -> Result<Self, OrgMembersError> {
-        if devices.len() > MAX_DEVICES {
-            return Err(OrgMembersError::DeviceSlotsFull);
-        }
-        devices.sort();
-        for i in 1..devices.len() {
-            if devices[i] == devices[i - 1] {
-                return Err(OrgMembersError::DuplicateDevice);
-            }
-        }
-        Ok(Self { slots: devices })
-    }
-
-    pub fn devices(&self) -> &[P2pDeviceKey] {
-        &self.slots
-    }
-
-    pub fn has_device(&self, device: &P2pDeviceKey) -> bool {
-        self.slots.binary_search(device).is_ok()
-    }
-
-    pub fn device_count(&self) -> usize {
-        self.slots.len()
-    }
-
-    /// Adds a device. Crate-private because external code must go through
-    /// `OrgTrie::add_p2p_device`, which has the correct atomicity guarantees.
-    pub(crate) fn add_device(&self, device: P2pDeviceKey) -> Result<Self, OrgMembersError> {
-        if self.slots.len() >= MAX_DEVICES {
-            return Err(OrgMembersError::DeviceSlotsFull);
-        }
-        if self.has_device(&device) {
-            return Err(OrgMembersError::DuplicateDevice);
-        }
-        let mut new_slots = self.slots.clone();
-        new_slots.push(device);
-        new_slots.sort();
-        Ok(Self { slots: new_slots })
-    }
-
-    /// Removes a device. Crate-private because external code must go through
-    /// `OrgTrie::delete_p2p_device`, which requires a `new_p2p_key` to be
-    /// supplied in the same call (the deleted device had access to the old
-    /// key). Exposing this directly would let callers bypass the rotation.
-    pub(crate) fn remove_device(&self, device: &P2pDeviceKey) -> Result<Self, OrgMembersError> {
-        let idx = self
-            .slots
-            .binary_search(device)
-            .map_err(|_| OrgMembersError::DeviceNotFound)?;
-        let mut new_slots = self.slots.clone();
-        new_slots.remove(idx);
-        // Empty is allowed: removing the last device leaves the member in an
-        // isolated state (no devices). Callers that need to enforce ≥1 should
-        // check the result.
-        Ok(Self { slots: new_slots })
-    }
-
-    /// Internal helper: returns the slot array padded with None up to MAX_DEVICES.
-    /// Used by the device sub-trie hash computation.
-    pub(crate) fn to_fixed_slots(&self) -> [Option<P2pDeviceKey>; MAX_DEVICES] {
-        let mut fixed = [None; MAX_DEVICES];
-        for (i, device) in self.slots.iter().enumerate() {
-            fixed[i] = Some(*device);
-        }
-        fixed
-    }
-}
-
-impl TryFrom<Vec<P2pDeviceKey>> for P2pDeviceSlots {
-    type Error = OrgMembersError;
-
-    fn try_from(devices: Vec<P2pDeviceKey>) -> Result<Self, Self::Error> {
-        Self::parse(devices)
-    }
-}
-
-impl fmt::Debug for P2pDeviceSlots {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "P2pDeviceSlots({})", self.slots.len())
     }
 }
 
@@ -611,10 +247,10 @@ pub struct MemberLeaf {
     /// The member's peer-to-peer key -- the "member-as-a-group" key used by
     /// the local-first software to grant access at the member level. Can
     /// change over time. Future versions may also add an on-chain key.
-    p2p_key: P2pMemberKey,
+    p2p_key: PersonPublicKey,
     name: Name,
     surname: Surname,
-    p2p_devices: P2pDeviceSlots,
+    p2p_devices: DeviceSlots,
 }
 
 impl MemberLeaf {
@@ -627,15 +263,15 @@ impl MemberLeaf {
     pub fn new(
         id: MemberId,
         handle: Handle,
-        p2p_key: P2pMemberKey,
+        p2p_key: PersonPublicKey,
         name: Name,
         surname: Surname,
-        p2p_devices: Vec<P2pDeviceKey>,
+        p2p_devices: Vec<DevicePublicKey>,
     ) -> Result<Self, OrgMembersError> {
         if p2p_devices.is_empty() {
             return Err(OrgMembersError::EmptyDeviceList);
         }
-        let p2p_devices = P2pDeviceSlots::parse(p2p_devices)?;
+        let p2p_devices = DeviceSlots::parse(p2p_devices)?;
         Ok(Self { id, handle, p2p_key, name, surname, p2p_devices })
     }
 
@@ -659,12 +295,12 @@ impl MemberLeaf {
         self
     }
 
-    pub(crate) fn with_p2p_key(mut self, key: P2pMemberKey) -> Self {
+    pub(crate) fn with_p2p_key(mut self, key: PersonPublicKey) -> Self {
         self.p2p_key = key;
         self
     }
 
-    pub(crate) fn with_p2p_device_slots(mut self, slots: P2pDeviceSlots) -> Self {
+    pub(crate) fn with_p2p_device_slots(mut self, slots: DeviceSlots) -> Self {
         self.p2p_devices = slots;
         self
     }
@@ -673,7 +309,7 @@ impl MemberLeaf {
         &self.id
     }
 
-    pub fn p2p_key(&self) -> &P2pMemberKey {
+    pub fn p2p_key(&self) -> &PersonPublicKey {
         &self.p2p_key
     }
 
@@ -689,11 +325,11 @@ impl MemberLeaf {
         &self.surname
     }
 
-    pub fn p2p_devices(&self) -> &[P2pDeviceKey] {
+    pub fn p2p_devices(&self) -> &[DevicePublicKey] {
         self.p2p_devices.devices()
     }
 
-    pub fn has_p2p_device(&self, device: &P2pDeviceKey) -> bool {
+    pub fn has_p2p_device(&self, device: &DevicePublicKey) -> bool {
         self.p2p_devices.has_device(device)
     }
 
@@ -701,7 +337,7 @@ impl MemberLeaf {
         self.p2p_devices.device_count()
     }
 
-    pub(crate) fn p2p_device_slots(&self) -> &P2pDeviceSlots {
+    pub(crate) fn p2p_device_slots(&self) -> &DeviceSlots {
         &self.p2p_devices
     }
 

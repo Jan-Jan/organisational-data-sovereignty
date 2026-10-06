@@ -16,16 +16,18 @@
 //! NOT skip when either is missing: `quint_preflight` names the cause and the
 //! test fails (decision 9).
 
+mod common;
+
+use common::dual_key_bytes;
 use quint_connect::runner::{self, RunConfig, TestConfig};
 use quint_connect::*;
 use serde::Deserialize;
 
 use anyhow::anyhow;
-use ed25519_dalek::SigningKey;
 use org_members::delta::test_support;
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
-use org_members::types::{Handle, MemberId, MemberLeaf, Name, P2pDeviceKey, P2pMemberKey, Surname};
+use org_members::types::{Handle, MemberId, MemberLeaf, Name, DevicePublicKey, PersonPublicKey, Surname};
 use org_members::OrgMembersError;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
@@ -145,15 +147,14 @@ fn real_id(model_id: &str) -> MemberId {
 /// One derivation for member and device keys, so model key equality is real
 /// key equality: the model `Key { owner, gen }` used as a member key and as a
 /// device key is the same 32 bytes, exactly as the crate's key index sees it.
-fn real_key_bytes(k: &Key) -> ed25519_dalek::VerifyingKey {
-    let seed: [u8; 32] = blake3::hash(format!("k:{}:{}", k.owner, k.gen).as_bytes()).into();
-    SigningKey::from_bytes(&seed).verifying_key()
+fn real_key_bytes(k: &Key) -> [u8; 32] {
+    dual_key_bytes(&format!("k:{}:{}", k.owner, k.gen))
 }
-fn real_member_key(k: &Key) -> P2pMemberKey {
-    P2pMemberKey::new(real_key_bytes(k))
+fn real_member_key(k: &Key) -> PersonPublicKey {
+    PersonPublicKey::parse(&real_key_bytes(k)).expect("dual-valid bytes")
 }
-fn real_device_key(k: &Key) -> P2pDeviceKey {
-    P2pDeviceKey::new(real_key_bytes(k))
+fn real_device_key(k: &Key) -> DevicePublicKey {
+    DevicePublicKey::parse(&real_key_bytes(k)).expect("dual-valid bytes")
 }
 fn key(owner: &str, gen: i64) -> Key {
     Key {
@@ -216,7 +217,7 @@ fn all_model_keys() -> impl Iterator<Item = Key> {
         .flat_map(|o| GENS.iter().map(move |g| key(o, *g)))
 }
 fn model_key_of(bytes: &[u8; 32]) -> Option<Key> {
-    all_model_keys().find(|k| real_key_bytes(k).as_bytes() == bytes)
+    all_model_keys().find(|k| real_key_bytes(k) == *bytes)
 }
 
 fn model_leaf_of(m: &MemberLeaf) -> Result<Leaf> {

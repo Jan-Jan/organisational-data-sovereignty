@@ -34,10 +34,11 @@ pub enum OrgMembersError {
     #[error("key already held in this organisation")]
     DuplicateKey,
 
-    /// 32 bytes offered as a member or device key that do not decompress to
-    /// an Edwards point. LLR-k6dhz7.
-    #[error("invalid key: the bytes are not a point on the curve")]
-    InvalidKey,
+    #[error("invalid device public key")]
+    InvalidDeviceKey,
+
+    #[error("invalid person public key")]
+    InvalidPersonKey,
 
     #[error("device slots full (max 4)")]
     DeviceSlotsFull,
@@ -71,4 +72,18 @@ pub enum OrgMembersError {
 
     #[error("field too long: {field} exceeds {max} bytes after NFC normalization")]
     FieldTooLong { field: &'static str, max: usize },
+}
+
+impl From<person::IdentityError> for OrgMembersError {
+    fn from(e: person::IdentityError) -> Self {
+        use person::IdentityError as I;
+        match e {
+            I::FieldTooLong { field, max } => Self::FieldTooLong { field, max },
+            I::InvalidDeviceKey => Self::InvalidDeviceKey,
+            I::InvalidPersonKey => Self::InvalidPersonKey,
+            I::DeviceSlotsFull => Self::DeviceSlotsFull,
+            I::DuplicateDevice => Self::DuplicateDevice,
+            I::DeviceNotFound => Self::DeviceNotFound,
+        }
+    }
 }
