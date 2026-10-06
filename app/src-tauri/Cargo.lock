@@ -4792,6 +4792,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 name = "person"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "ed25519-dalek 2.2.0",
  "serde",
  "thiserror 2.0.20",

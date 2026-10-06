@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
 license = "GPL-3.0-only"
-description = "An individual's identity types: names, device keys, the PersonPublicKey, device slots and the device sub-trie"
+description = "An individual's identity types and Person definition: names, device keys, the PersonPublicKey, device slots, the device sub-trie and the Person hash"
 
 [features]
 default = ["serde"]
@@ -15,12 +15,20 @@ ed25519-dalek = { version = "2", default-features = false, features = ["alloc"] 
 unicode-normalization = { version = "0.1", default-features = false }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"], optional = true }
 thiserror = { version = "2", default-features = false }
+blake3 = { version = "1", default-features = false }
 
 [dev-dependencies]
-blake3 = "1"
 postcard = { version = "1", features = ["alloc"] }
 curve25519-dalek = "4"
 proptest = "1"
+serde_json = "1"
+bolero = "0.13"
 
 [lints]
 workspace = true
+
+[[test]]
+name = "fuzz_person_decode"
+path = "tests/fuzz_person_decode/fuzz_target.rs"
+harness = false
+required-features = ["serde"]

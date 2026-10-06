@@ -156,7 +156,13 @@ and `..)`, and with the `serde` feature it serialises as the 32 bytes.
 satisfies: derived
 
 **SDD-u9cddc**: Errors — the error type every constructor in the unit returns,
-and the no-panic discipline. traces: REQ-vxx8k3, REQ-bczz87
+and the no-panic discipline. traces: REQ-vxx8k3, REQ-bczz87, REQ-r4keha
+
+*Amended 2026-10-06 (Person definition):* `IdentityError` is also the error
+type of every Person operation — `Person::new`, the successor check, the
+encoding-version parse, the Person hash and its check — so the unit keeps one
+error type; the variants the Person definition adds are LLR-3n3kxx's, and
+REQ-r4keha is traced here for them.
 
 **LLR-eeq89n**: The in-process constructors above — each type's `parse`, the
 `TryFrom` impls that delegate to it, and `DeviceSlots::add_device` and
@@ -169,6 +175,14 @@ MAX_DEVICES` or `device slots must be strictly increasing (sorted, no
 duplicates)` for a `DeviceSlots`, and the expected form of LLR-5za6mp for a
 `DeviceSlots` decoded from anything other than a sequence.
 satisfies: REQ-bczz87
+
+*Amended 2026-10-06 (Person definition):* the Person definition adds five
+variants to `IdentityError` — `KeyWithoutDevice`, `MissingPersonKey`,
+`PersonKeyIsDeviceKey`, `PersonKeyNotRotated` and
+`UnsupportedEncodingVersion` — stated, with the operations that return them,
+in LLR-3n3kxx, whose tests verify them. The variants above are unchanged, and
+decoding a `Person` still rejects through the deserializer's error, with the
+`IdentityError` message.
 
 **LLR-64muuw**: The crate is `#![no_std]` with `alloc`, builds under the
 workspace lints that deny `unwrap`, `expect` and `panic`, and denies

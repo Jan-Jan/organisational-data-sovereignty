@@ -50,11 +50,15 @@ _Avoid_: node id, member key
 **PersonPublicKey**:
 The key a grant is encoded against, and from which the holder's devices derive
 their own access: an X25519 public key resulting from group key agreement among
-those devices. A Member holds one in a Membership record; a Person holds one in
-their own definition; the two are never the same key, a rule no software
-enforces yet. Until group key agreement exists, org-node derives a Member's
-from a seed of the persona's own, a stand-in for it.
-_Avoid_: P2pMemberKey, P2pPersonKey, group key, p2p key, member key
+those devices. A Member holds one in a Membership record. A Person holding at
+least one DevicePublicKey holds one in their own definition; a Person holding
+none holds no PersonPublicKey. A Member's and a Person's are never the same
+key, a rule no software enforces yet. Until group key agreement exists,
+org-node derives a Member's from a seed of the persona's own, a stand-in for
+it. In code it is named `person_key` (the field) and `group_key` (as in
+`check_group_key`); those identifiers stay, and the _Avoid_ list governs prose.
+_Avoid_: P2pMemberKey, P2pPersonKey, Person-as-a-group key, person key, group key,
+p2p key, member key
 
 **Member-as-a-group key**:
 The PersonPublicKey a Membership record holds for a Member: what an
@@ -63,8 +67,8 @@ rotated whenever a DevicePublicKey is removed.
 _Avoid_: group key, p2p key, member key
 
 **DevicePublicKey**:
-The ed25519 public key identifying one of a Member's devices. A Member holds a
-bounded number of them. One device is meant to hold a different
+The ed25519 public key identifying one of a Member's or a Person's devices.
+Each holds a bounded number of them. One device is meant to hold a different
 DevicePublicKey in each record it appears in, a rule no software enforces yet.
 _Avoid_: device key, P2pDeviceKey, device id, endpoint key
 
@@ -74,6 +78,26 @@ same individual may also be a Member of any number of Organisations; nothing
 links their Person to those memberships except what the individual chooses to
 reveal.
 _Avoid_: user, account, individual member, profile
+
+**Person definition**:
+The record a Person shares with the collaborators they choose: name, surname,
+DevicePublicKeys and, when it holds at least one DevicePublicKey, a
+PersonPublicKey. Kept private otherwise: its content is never published, only
+its Person hash and Encoding version, with the epoch they were set at.
+_Avoid_: person record, person data, profile
+
+**Person hash**:
+The value that commits to one Person definition under one Encoding version,
+published in the definition's place so that a collaborator who holds the
+definition can recognise it.
+_Avoid_: person root, fingerprint
+
+**Encoding version**:
+The number that fixes how a Person definition is encoded for computing its
+Person hash, and so which key types the definition holds. Published beside
+the Person hash, so that an encoding can change without every collaborator
+changing at once.
+_Avoid_: schema version, format version, hash version
 
 **Isolated member**:
 A Member holding zero DevicePublicKeys. Still a member of the Organisation,

@@ -66,6 +66,11 @@ fn every_rejection_is_a_distinct_named_variant() {
         IdentityError::DeviceSlotsFull,
         IdentityError::DuplicateDevice,
         IdentityError::DeviceNotFound,
+        IdentityError::KeyWithoutDevice,
+        IdentityError::MissingPersonKey,
+        IdentityError::PersonKeyIsDeviceKey,
+        IdentityError::PersonKeyNotRotated,
+        IdentityError::UnsupportedEncodingVersion(2),
     ];
     for (index, variant) in variants.iter().enumerate() {
         for other in &variants[index + 1..] {
@@ -73,4 +78,40 @@ fn every_rejection_is_a_distinct_named_variant() {
             assert_ne!(variant.to_string(), other.to_string());
         }
     }
+}
+
+/// The variants the Person operations add, one per rule, each with a message
+/// that names its rule.
+/// verifies: LLR-3n3kxx
+#[test]
+fn the_person_variants_name_their_rule() {
+    let messages = [
+        (
+            IdentityError::KeyWithoutDevice,
+            "person public key held with no device public key",
+        ),
+        (
+            IdentityError::MissingPersonKey,
+            "person public key missing: one or more device public keys are held",
+        ),
+        (
+            IdentityError::PersonKeyIsDeviceKey,
+            "person public key equals a device public key",
+        ),
+        (
+            IdentityError::PersonKeyNotRotated,
+            "person public key not rotated: the device public keys changed and it did not",
+        ),
+        (
+            IdentityError::UnsupportedEncodingVersion(7),
+            "unsupported encoding version 7",
+        ),
+    ];
+    for (variant, message) in messages {
+        assert_eq!(variant.to_string(), message);
+    }
+    assert_ne!(
+        IdentityError::UnsupportedEncodingVersion(2),
+        IdentityError::UnsupportedEncodingVersion(3)
+    );
 }

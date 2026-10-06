@@ -149,7 +149,19 @@ ON_CHAIN_CLIENT_REGIONS := 42
 # (cargo 1.101.0-nightly (f3865b2a4 2026-09-29), cargo-llvm-cov 0.9.0),
 # re-measured 2026-10-05 by the fourth review-findings task
 # (worktree-person-unit-findings4): 28 of 28 branches, 100% decision coverage.
+#
+# Re-measured 2026-10-06 by the Person definition change
+# (worktree-person-requirements), same toolchains, floors unchanged:
+#
+#   person                    100.00%    100.00%   (344 of 344 lines; 535 of 535 regions)
+#
+# and with nightly --branch: 36 of 36 branches, 100% decision coverage.
 # That figure is not enforced here — stable llvm-cov reports no branches.
+# The 344/344 and 535/535 figures are stable cargo 1.99.0, cargo-llvm-cov 0.9.0.
+# After a `cargo +nightly llvm-cov --branch` run, run a plain `cargo llvm-cov
+# clean` (not `--workspace`) before a stable `make coverage-person`: stale
+# nightly binaries in target/llvm-cov-target add instrumented lines and fail
+# the floor.
 PERSON_LINES := 99
 PERSON_REGIONS := 99
 
@@ -167,7 +179,8 @@ PERSON_REGIONS := 99
 coverage: coverage-org-members coverage-on-chain-client coverage-person
 
 # Scope note: this omits `mbt_conformance` (`newtypes` and `encoding_golden`,
-# added 2026-10-04, are measured), and the floors are calibrated against the reduced measurement — so
+# added 2026-10-04, and `person_error_mapping`, added 2026-10-06, are
+# measured), and the floors are calibrated against the reduced measurement — so
 # the gate is conservative relative to the crate's true coverage, but NOT
 # relative to its own floor. The reason for omitting it is that it shells out
 # to the quint CLI and, measured with quint off PATH, FAILS rather than skips
@@ -181,7 +194,7 @@ coverage: coverage-org-members coverage-on-chain-client coverage-person
 coverage-org-members:
 	cargo llvm-cov -p org-members \
 		--lib --test integration_test --test fuzz_tests \
-		--test newtypes --test encoding_golden \
+		--test newtypes --test encoding_golden --test person_error_mapping \
 		--summary-only \
 		--fail-under-lines $(ORG_MEMBERS_LINES) \
 		--fail-under-regions $(ORG_MEMBERS_REGIONS)

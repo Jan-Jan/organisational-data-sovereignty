@@ -74,6 +74,8 @@ pub enum OrgMembersError {
     FieldTooLong { field: &'static str, max: usize },
 }
 
+/// Exhaustive on purpose, with no wildcard arm: a variant `person` adds stops
+/// this crate compiling until its mapping is chosen. LLR-28ekrv.
 impl From<person::IdentityError> for OrgMembersError {
     fn from(e: person::IdentityError) -> Self {
         use person::IdentityError as I;
@@ -84,6 +86,13 @@ impl From<person::IdentityError> for OrgMembersError {
             I::DeviceSlotsFull => Self::DeviceSlotsFull,
             I::DuplicateDevice => Self::DuplicateDevice,
             I::DeviceNotFound => Self::DeviceNotFound,
+            // Only person's Person operations produce these, and org-members
+            // calls none of them. Provisional: see LLR-28ekrv.
+            I::KeyWithoutDevice
+            | I::MissingPersonKey
+            | I::PersonKeyIsDeviceKey
+            | I::PersonKeyNotRotated
+            | I::UnsupportedEncodingVersion(_) => Self::InvariantViolated,
         }
     }
 }

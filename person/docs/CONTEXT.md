@@ -2,8 +2,10 @@
 
 The `person` unit holds an individual's identity types: names, device keys,
 the PersonPublicKey, device slots, the device sub-trie and its root, and the
-X25519 public-key validity check. The Person definition built on these types,
-and the hash that commits to it, are added later.
+X25519 public-key validity check. On these types it defines the Person
+definition — the record a Person shares with collaborators in their individual
+capacity, apart from any Organisation — and computes and checks the hash that
+commits to it.
 
 ## Language
 

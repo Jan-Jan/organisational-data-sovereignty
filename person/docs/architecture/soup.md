@@ -7,7 +7,7 @@ whenever a dependency changes. Note functional/performance requirements the
 SOUP must meet and known anomalies relevant to safety.
 -->
 
-**As built at the merge (2026-10-05, after the torsion-free ruling)**, diffed against `person/Cargo.toml` and the workspace
+**As built at the merge (2026-10-05, after the torsion-free ruling; the `blake3` row and the dev-dependencies below as built by the Person definition change, 2026-10-06)**, diffed against `person/Cargo.toml` and the workspace
 `Cargo.lock`. org-members' inventory (`org-members/docs/architecture/soup.md`)
 contains the analysis of the uses the two units share; rows here state what is
 particular to `person`.
@@ -19,14 +19,21 @@ particular to `person`.
 | `unicode-normalization` | 0.1.25 | NFC normalisation of `Name` and `Surname`. | REQ-r7mytp (SDD-k5ee9x; LLR-ayu93n) | NFC is stable under Unicode's normalisation-stability policy. `default-features = false`. |
 | `serde` | 1.0.229 | Serialisation and deserialisation of the value types, every `Deserialize` impl routed through its validating constructor. Optional, behind the default `serde` feature. | REQ-r7mytp, REQ-4szc22, REQ-tq4ms4, REQ-q6xkna, REQ-3vqs9b (SDD-k5ee9x; LLR-ayu93n, LLR-sjrh7z, LLR-5za6mp) | A derived `Deserialize` on a validated type would bypass its constructor; the design items forbid it, and the decoding tests check each type. `default-features = false, features = ["derive", "alloc"]`. |
 | `thiserror` | 2.0.20 | Derives `IdentityError`. | REQ-bczz87 (SDD-u9cddc; LLR-eeq89n) | Compile-time only. `default-features = false`. |
+| `blake3` | 1.8.7 | The Person hash, `blake3::keyed_hash` of the `V1` encoding under `person::definition::v1__________` (SDD-v32mqh; LLR-4ebtn4), and the Person device sub-trie through `PersonDeviceHasher`, keyed under `person::device-leaf_____________` and `person::device-node_____________` (SDD-v32mqh; LLR-edn55h, over SDD-7r833z's LLR-6ezhw7). Each use has its own domain key, so no two share a hash domain, and none is org-members'. | REQ-9m5pq2, REQ-7n4g8b, REQ-wg7z4s (SDD-v32mqh; LLR-edn55h, LLR-4ebtn4, LLR-tf45kx) | **Safety-relevant.** The hash's collision and second-preimage resistance is what makes a match against a stored hash mean "this definition": a collaborator checks a definition against the hash published for a person (REQ-7n4g8b), and a different definition with the same hash would pass that check. Residual risk: that of the hash function itself, which this unit cannot reduce; it is the residual risk the risk file's assessment of REQ-9m5pq2 defers to this SOUP item. Outputs are pinned by `the_person_device_root_is_pinned` and `the_v1_hash_is_pinned`, and recomputed from `blake3::keyed_hash` directly by `the_root_is_the_depth_two_tree_under_the_person_domains` and `the_v1_hash_is_blake3_keyed_by_the_v1_domain_key`, so an upgrade that changed an output fails them. `default-features = false`. |
 
 X25519 validity (REQ-3vqs9b, REQ-7gz72r) needs no library: it is an exact
 byte comparison in `person/src/x25519.rs`. `curve25519-dalek` 4.1.3, besides
 being reached at runtime through `ed25519-dalek` (row above), is also a direct
 dev-dependency: the X25519 tests use it to generate keys and to confirm each
 entry of the small-order list with its x-only Montgomery ladder, and to build
-the mixed-order points whose u-coordinates the tests check. `blake3` 1.8.7 and
-`postcard` 1.1.3 are dev-dependencies too: `person` ships no hasher
-implementation and no wire format of its own. `proptest` 1.11.0 is a
+the mixed-order points whose u-coordinates the tests check. `postcard` 1.1.3
+is a dev-dependency too: `person` ships no wire format of its own. `blake3`,
+a dev-dependency until the Person definition, is now a normal dependency (row
+above); the device-trie tests also name it to build org-members' and a test
+domain's hashers. `serde_json` 1.0.151 is a dev-dependency because it keeps a
+custom decode error's message, which the Person decoding tests check (postcard
+maps every custom error to `SerdeDeCustom`). `bolero` 0.13.4 is a
+dev-dependency that drives the `fuzz_person_decode` target, as it drives
+org-node's and on-chain-client's fuzz targets. `proptest` 1.11.0 is a
 dev-dependency that generates the arbitrary inputs of the no-panic property
 tests (REQ-vxx8k3).
