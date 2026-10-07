@@ -22,7 +22,9 @@ and are not repeated here.
 The carrier of one Change set between devices: the Organisation it is for, its
 Sequence number and the Change set bytes. It carries no signature: the
 chain's root at a newer epoch decides, and nothing about the sender is
-checked.
+checked. *(2026-10-07, owner ruling R1: for an Organisation the node holds,
+the sender must be a Device its current record lists; a first admission
+still checks nothing about the sender.)*
 _Avoid_: message, packet, delta envelope
 
 **Provisional update**:

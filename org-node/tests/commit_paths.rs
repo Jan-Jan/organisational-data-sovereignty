@@ -106,7 +106,9 @@ async fn commit_genesis_creates_the_record_once_the_chain_carries_the_root() {
     assert_eq!(rec.proxy_account, Some(test_proxy()));
     assert_eq!(svc.proxy_account(org_id).unwrap(), Some(test_proxy()));
     let p = persona_of(&svc, &pid);
-    assert_eq!((p.status, p.org_id, p.member_id), (PersonaStatus::Active, Some(org_id), None));
+    // *Amended 2026-10-07 (PR-eqs4fs):* this pinned `member_id: None`, the
+    // defect; the founder is bound with the genesis leaf's MemberId.
+    assert_eq!((p.status, p.org_id, p.member_id), (PersonaStatus::Active, Some(org_id), Some(rec.trie_members[0].id)));
     assert!(svc.genesis_provisional_updates(&pid).is_empty(), "the update is consumed");
     assert!(svc.endpoint().is_none(), "a commit binds no endpoint");
     let disk = reopen_store("commit-genesis", "a", "pw_a");
@@ -194,6 +196,37 @@ async fn a_genesis_whose_members_do_not_rebuild_the_root_is_refused() {
     assert_eq!(svc.commit_genesis(&mut OsRng, &pid, org, test_proxy()).await.unwrap_err(), OrgNodeError::RootMismatch);
     assert!(svc.list_orgs().is_empty());
     assert_eq!(store_bytes("genesis-mismatch", "a"), before);
+}
+
+// Abnormal (review finding-2, 2026-10-07): a stored genesis update of the
+// named Persona whose members rebuild the chain's root but list no leaf with
+// that Persona's Device — here another Persona's genesis update, re-addressed
+// to Alice — is refused with NoProvisionalUpdate: no record, no binding, the
+// store unwritten.
+// verifies: LLR-wzqqg9
+#[tokio::test]
+async fn a_genesis_listing_no_leaf_with_the_personas_device_is_refused() {
+    let chain = MockChainOps::new();
+    let (mut svc, pid, own) = genesis_built("genesis-not-ours", &chain);
+    let pid_bob = svc.create_persona(&mut OsRng, h("bob"), nm("Bob"), sn("Jones")).unwrap();
+    let bobs = svc.create_organisation(&mut OsRng, &pid_bob).unwrap();
+    drop(svc);
+    let forged = ProvisionalUpdate { persona_id: pid.clone(), ..bobs };
+    let mut store = PersonaStore::open(store_dir("genesis-not-ours", "a").join("store.bin"), "pw_a").unwrap();
+    store.data_mut().insert_provisional(forged.clone()).unwrap();
+    store.save(&mut OsRng).unwrap();
+    let mut svc = OrgService::new(store, Box::new(chain.clone()));
+    let org = chain.apply_genesis(forged.resulting_root, forged.org_pub_key);
+    let before = store_bytes("genesis-not-ours", "a");
+    assert_eq!(
+        svc.commit_genesis(&mut OsRng, &pid, org, test_proxy()).await.unwrap_err(),
+        OrgNodeError::NoProvisionalUpdate
+    );
+    assert!(svc.list_orgs().is_empty(), "no record");
+    let p = persona_of(&svc, &pid);
+    assert_eq!((p.status, p.org_id, p.member_id), (PersonaStatus::Proposed, None, None), "no binding");
+    assert_eq!(svc.genesis_provisional_updates(&pid), vec![own, forged], "both updates stay");
+    assert_eq!(store_bytes("genesis-not-ours", "a"), before, "nothing written");
 }
 
 // Abnormal: a chain read that fails is refused as `Chain`, nothing written.
@@ -378,7 +411,7 @@ async fn commit_update_refuses_when_the_chain_fails_or_is_silent() {
 // Normal: a commit discards every provisional update for that Organisation
 // built on the old base and keeps other Organisations' — on the node's own
 // commit and on a received one.
-// verifies: REQ-uv3v5w, LLR-mkj4bz
+// verifies: REQ-uv3v5w, LLR-mkj4bz, LLR-2r2fha
 #[tokio::test(flavor = "multi_thread")]
 async fn a_commit_discards_the_provisional_updates_it_orphans() {
     let mut s = admit_b_directly(setup("orphans").await).await;
@@ -397,13 +430,21 @@ async fn a_commit_discards_the_provisional_updates_it_orphans() {
     assert!(s.svc_a.provisional_updates(s.org_id).is_empty(), "both built on the old base are gone");
     assert_eq!(s.svc_a.provisional_updates(org_2).len(), 1, "another Organisation's are kept");
     // B receives A's commit: its own provisional update is orphaned too.
-    let (b_addr, b_task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
     let info = WireMessage::OrgInformation {
         envelope: out.outgoing.envelope,
         record_snapshot: out.outgoing.record_snapshot,
         org_private_key: rec_of(&s.svc_a, s.org_id).org_private_key,
     };
+    // *Rewritten 2026-10-07 (S3 T12a):* from a relay B's record does not
+    // list, the commit is refused (LLR-2r2fha) and B's update is kept; from
+    // A's listed Device it is committed and B's update discarded.
+    let (b_addr, b_task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
     deliver(b_addr, &info).await;
+    let (svc_b, result) = b_task.await.unwrap();
+    assert_eq!(result.map(|_| ()), Err(OrgNodeError::SenderNotListed { org_id: s.org_id }));
+    assert_eq!(svc_b.provisional_updates(s.org_id).len(), 1, "a refused message discards nothing");
+    let (b_addr, b_task) = spawn_receive(svc_b, &s.b_device_kp).await;
+    deliver_from(device_seed_of(&s.svc_a, &s.pid_a), b_addr, &info).await;
     let (svc_b, result) = b_task.await.unwrap();
     result.unwrap();
     assert!(svc_b.provisional_updates(s.org_id).is_empty());
@@ -412,10 +453,11 @@ async fn a_commit_discards_the_provisional_updates_it_orphans() {
 // Normal: send_update chooses the kind from the node's record alone. A Device
 // the committed record lists receives Organisation information — the
 // committed Envelope, the record as it stood before the commit, the key the
-// record holds, none taken from the caller; any other Device a revocation,
-// the Envelope and nothing else. Sent under the first bound Persona's device,
-// to the full address in Loopback mode, writing nothing. After a removal the
-// removed Device is the one not listed, and the founder's is still listed.
+// record holds, none taken from the caller; a Device neither record lists is
+// refused, nothing sent. Sent under the first bound Persona's device, to the
+// full address in Loopback mode, writing nothing. After a removal the removed
+// Device receives its notice from the outcome and nothing else, and the
+// founder's is still listed.
 // verifies: LLR-6ymd6d, LLR-8hdu9x, LLR-bg3vsw, LLR-2xzys9, LLR-48jakr, LLR-jn5jeh, LLR-t4znbk, REQ-szq3ud, REQ-3dsweu
 #[tokio::test(flavor = "multi_thread")]
 async fn send_update_sends_organisation_information_to_a_listed_device_and_a_revocation_to_any_other() {
@@ -429,7 +471,7 @@ async fn send_update_sends_organisation_information_to_a_listed_device_and_a_rev
     let founder_device = first_bound.device_seed.signing_keypair().device_key().unwrap();
 
     let (sink_addr, sink) = spawn_recv_one(rand::random()).await;
-    a.send_update(&out.outgoing, joiner.device_key, Some(sink_addr)).await.unwrap();
+    a.send_update(&out, joiner.device_key, Some(sink_addr)).await.unwrap();
     let (_ep, sender, msg) = sink.await.unwrap();
     assert_eq!(
         msg,
@@ -441,13 +483,8 @@ async fn send_update_sends_organisation_information_to_a_listed_device_and_a_rev
         "the joiner's Device is listed"
     );
     assert_eq!(sender, founder_device);
-    let (sink_addr, sink) = spawn_recv_one(rand::random()).await;
-    a.send_update(&out.outgoing, device_key(0x7a), Some(sink_addr)).await.unwrap();
-    assert_eq!(
-        sink.await.unwrap().2,
-        WireMessage::Revocation { envelope: out.outgoing.envelope.clone() },
-        "a Device the record does not list"
-    );
+    let refused = a.send_update(&out, device_key(0x7a), Some(dead_addr([0x7a; 32]))).await;
+    assert_eq!(refused, Err(OrgNodeError::NoRevocationForRecipient { org_id: org }), "a Device neither record lists");
     assert_eq!(store_bytes("send", "a"), on_disk, "a send writes nothing");
 
     let joiner_id = rec.trie_members.iter().find(|m| m.member_key == joiner.member_key).unwrap().id;
@@ -455,14 +492,10 @@ async fn send_update_sends_organisation_information_to_a_listed_device_and_a_rev
     chain.apply_update(org, removal.resulting_root, removal.org_pub_key, Epoch::new(2)).unwrap();
     let out = a.commit_update(&mut OsRng, org).await.unwrap();
     let (sink_addr, sink) = spawn_recv_one(rand::random()).await;
-    a.send_update(&out.outgoing, joiner.device_key, Some(sink_addr)).await.unwrap();
-    assert_eq!(
-        sink.await.unwrap().2,
-        WireMessage::Revocation { envelope: out.outgoing.envelope.clone() },
-        "the removed Device"
-    );
+    a.send_update(&out, joiner.device_key, Some(sink_addr)).await.unwrap();
+    assert_eq!(sink.await.unwrap().2, WireMessage::Revocation(out.revocations[0].clone()), "the removed Device");
     let (sink_addr, sink) = spawn_recv_one(rand::random()).await;
-    a.send_update(&out.outgoing, founder_device, Some(sink_addr)).await.unwrap();
+    a.send_update(&out, founder_device, Some(sink_addr)).await.unwrap();
     assert!(matches!(sink.await.unwrap().2, WireMessage::OrgInformation { .. }), "a Device still listed");
 }
 
@@ -476,9 +509,9 @@ async fn send_update_refuses_without_a_bound_persona_or_a_loopback_address() {
     chain.apply_update(org, update.resulting_root, update.org_pub_key, Epoch::new(1)).unwrap();
     let out = a.commit_update(&mut OsRng, org).await.unwrap();
     let mut b = b; // holds no Persona bound to `org`
-    assert!(b.send_update(&out.outgoing, joiner.device_key, Some(dead_addr([0x6f; 32]))).await.is_err());
+    assert!(b.send_update(&out, joiner.device_key, Some(dead_addr([0x6f; 32]))).await.is_err());
     assert!(b.endpoint().is_none());
-    assert!(a.send_update(&out.outgoing, joiner.device_key, None).await.is_err());
+    assert!(a.send_update(&out, joiner.device_key, None).await.is_err());
     assert!(a.endpoint().is_none(), "refused before binding");
 }
 
@@ -495,8 +528,8 @@ async fn send_update_refuses_an_organisation_it_holds_no_record_of() {
     let update = a.admit_member(&mut OsRng, org, &joiner).unwrap();
     chain.apply_update(org, update.resulting_root, update.org_pub_key, Epoch::new(1)).unwrap();
     let out = a.commit_update(&mut OsRng, org).await.unwrap();
-    let mut unheld = out.outgoing.clone();
-    unheld.envelope.org_id = OrgId::new([0x99; 20]);
+    let mut unheld = out.clone();
+    unheld.outgoing.envelope.org_id = OrgId::new([0x99; 20]);
     let on_disk = store_bytes("send-unheld", "a");
     let err = a.send_update(&unheld, joiner.device_key, Some(dead_addr([0x6e; 32]))).await.unwrap_err();
     assert_eq!(err, OrgNodeError::OrgNotOnChain);
@@ -522,7 +555,7 @@ async fn a_joiner_that_missed_its_admission_rebuilds_from_the_next_updates_snaps
     let before = rec_of(&s.svc_a, s.org_id);
     s.chain.apply_update(s.org_id, update.resulting_root, update.org_pub_key, before.epoch).unwrap();
     let out = s.svc_a.commit_update(&mut OsRng, s.org_id).await.unwrap();
-    s.svc_a.send_update(&out.outgoing, joiner_b.device_key, Some(sink_addr)).await.unwrap();
+    s.svc_a.send_update(&out, joiner_b.device_key, Some(sink_addr)).await.unwrap();
     let to_b = sink.await.unwrap().2;
     assert!(matches!(to_b, WireMessage::OrgInformation { .. }), "B is listed");
 
@@ -735,15 +768,19 @@ async fn the_revoking_record_takes_the_removal_only_through_commit_update() {
     let out = a.commit_update(&mut OsRng, s.org_id).await.unwrap();
     assert!(!rec_of(&a, s.org_id).trie_members.iter().any(|m| m.id == b_id), "committed");
     let device = s.joiner_b.device_key;
-    assert!(a.send_update(&out.outgoing, device, Some(dead_addr([0x7f; 32]))).await.is_err());
+    assert!(a.send_update(&out, device, Some(dead_addr([0x7f; 32]))).await.is_err());
     assert!(!rec_of(&a, s.org_id).trie_members.iter().any(|m| m.id == b_id), "a failed send undoes nothing");
     assert_eq!(a.proxy_account(s.org_id).unwrap(), proxy_before);
 }
 
 // Normal (LLR-b27jr6 on commit_update): a node that commits its own removal
-// forgets the Organisation — record, provisional updates — and revokes its
-// Personas bound to it, in memory and on disk.
-// verifies: REQ-uxv2x2, LLR-b27jr6, LLR-6p4pj2
+// signs one acknowledgement per Persona bound to the Organisation, returned
+// in the outcome, then forgets the Organisation — record, provisional
+// updates and those Personas — in memory and on disk.
+// *Rewritten 2026-10-07 (S3 T9):* the Personas were marked Revoked and no
+// acknowledgement was signed; they are deleted through the one removal step
+// (LLR-23sfdh).
+// verifies: REQ-uxv2x2, LLR-b27jr6, LLR-6p4pj2, LLR-23sfdh
 #[tokio::test(flavor = "multi_thread")]
 async fn a_node_that_commits_its_own_removal_forgets_the_organisation() {
     let s = admit_b_directly(setup("own-removal").await).await;
@@ -752,13 +789,50 @@ async fn a_node_that_commits_its_own_removal_forgets_the_organisation() {
     b.admit_member(&mut OsRng, s.org_id, &joiner_from(0x61, "carol")).unwrap();
     let update = b.revoke_member(&mut OsRng, s.org_id, b_id).unwrap();
     s.chain.apply_update(s.org_id, update.resulting_root, update.org_pub_key, rec_of(&b, s.org_id).epoch).unwrap();
-    b.commit_update(&mut OsRng, s.org_id).await.unwrap();
+    let outcome = b.commit_update(&mut OsRng, s.org_id).await.unwrap();
+    assert_eq!(outcome.acknowledgements.iter().map(|ack| ack.member_id).collect::<Vec<_>>(), vec![b_id]);
+    let chain = s.chain.get(&s.org_id).unwrap();
+    assert_eq!((outcome.acknowledgements[0].epoch, outcome.acknowledgements[0].root), (chain.epoch, chain.root_hash));
     assert!(b.list_orgs().iter().all(|o| o.org_id != s.org_id), "the record is gone");
     assert!(b.provisional_updates(s.org_id).is_empty(), "and every provisional update for it");
-    assert_eq!(persona_of(&b, &s.pid_b).status, PersonaStatus::Revoked);
+    assert!(b.list_personas().iter().all(|p| p.persona_id != s.pid_b), "and the Persona");
     let disk = reopen_store("own-removal", "b", "pw_b");
     assert!(disk.data().orgs.iter().all(|o| o.org_id != s.org_id), "on disk too");
     assert!(disk.data().provisional_updates.iter().all(|u| u.org_id != Some(s.org_id)));
+    assert!(disk.data().personas.iter().all(|p| p.persona_id != s.pid_b));
+}
+
+// Normal (PR-eqs4fs, 2026-10-07): the founding Persona is bound with the
+// genesis record's MemberId, so a founder that commits its own removal signs
+// one acknowledgement for its MemberId with its Device, as every other bound
+// Persona does. Before the fix the founder's `member_id` stayed `None` after
+// `commit_genesis` and `sign_acknowledgements` skipped it silently: no
+// acknowledgement, the Organisation forgotten all the same.
+// verifies: REQ-y99c9w, LLR-hby4jr, LLR-b27jr6, PR-eqs4fs
+#[tokio::test(flavor = "multi_thread")]
+async fn a_founder_that_commits_its_own_removal_signs_its_acknowledgement() {
+    let s = admit_b_directly(setup("founder-removal").await).await;
+    let mut a = s.svc_a;
+    let genesis_founder = rec_of(&a, s.org_id).trie_members.iter().find(|m| m.handle == h("admin")).unwrap().id;
+    let bound_member_id = persona_of(&a, &s.pid_a).member_id;
+    let (_, founder_device) = a.persona_public_keys(&s.pid_a).unwrap();
+    let update = a.revoke_member(&mut OsRng, s.org_id, genesis_founder).unwrap();
+    s.chain.apply_update(s.org_id, update.resulting_root, update.org_pub_key, rec_of(&a, s.org_id).epoch).unwrap();
+    let outcome = a.commit_update(&mut OsRng, s.org_id).await.unwrap();
+    assert_eq!(
+        outcome.acknowledgements.iter().map(|ack| (ack.member_id, ack.device)).collect::<Vec<_>>(),
+        vec![(genesis_founder, founder_device)]
+    );
+    let ack = &outcome.acknowledgements[0];
+    let chain = s.chain.get(&s.org_id).unwrap();
+    assert_eq!((ack.org_id, ack.epoch, ack.root), (s.org_id, chain.epoch, chain.root_hash));
+    let signature = ed25519_dalek::Signature::from_bytes(&ack.signature.0);
+    ed25519_dalek::VerifyingKey::from_bytes(founder_device.as_bytes())
+        .unwrap()
+        .verify_strict(&ack.signed_bytes(), &signature)
+        .expect("signed by the founder's Device");
+    assert!(a.list_orgs().iter().all(|o| o.org_id != s.org_id), "the Organisation is forgotten");
+    assert_eq!(bound_member_id, Some(genesis_founder), "commit_genesis bound the founder with the genesis MemberId");
 }
 
 // Abnormal: a commit that keeps one of the node's Personas is an update,
@@ -826,4 +900,44 @@ async fn commit_genesis_refuses_a_persona_bound_to_another_organisation() {
     assert_eq!(persona_of(&svc, &pid).org_id, Some(org_1), "the binding stands");
     assert_eq!(svc.genesis_provisional_updates(&pid), vec![second], "the update stays");
     assert_eq!(store_bytes("genesis-bound", "a"), before, "nothing written");
+}
+
+/// verifies: LLR-d9778a, LLR-mkj4bz
+///
+/// Normal: genesis keeps none; a first admission keeps the Change set of the
+/// update that admitted the node (REQ-uv3v5w; amended 2026-10-07, review
+/// finding-1); each later commit keeps exactly the committed Envelope's
+/// Change set, replacing the earlier one, on disk too.
+#[tokio::test]
+async fn every_commit_keeps_the_change_set_that_produced_the_record() {
+    let s = setup("kept-cs").await;
+    assert_eq!(rec_of(&s.svc_a, s.org_id).kept_change_set, None, "genesis keeps none");
+    let mut s = admit_b_directly(s).await;
+    let first = rec_of(&s.svc_a, s.org_id).kept_change_set.expect("A keeps its admission's Change set");
+    assert_eq!(
+        rec_of(&s.svc_b, s.org_id).kept_change_set,
+        Some(first.clone()),
+        "a first admission keeps the admitting Change set"
+    );
+    assert_eq!(disk_rec_of(&reopen_store("kept-cs", "b", "pw_b"), s.org_id).kept_change_set, Some(first.clone()));
+    assert_eq!(disk_rec_of(&reopen_store("kept-cs", "a", "pw_a"), s.org_id).kept_change_set, Some(first.clone()));
+    let joiner_c = joiner_for_c(&mut s.svc_a);
+    let update = s.svc_a.admit_member(&mut OsRng, s.org_id, &joiner_c).unwrap();
+    s.chain.apply_update(s.org_id, update.resulting_root, update.org_pub_key, rec_of(&s.svc_a, s.org_id).epoch).unwrap();
+    let outcome = s.svc_a.commit_update(&mut OsRng, s.org_id).await.unwrap();
+    let kept = rec_of(&s.svc_a, s.org_id).kept_change_set.unwrap();
+    assert_eq!(kept, outcome.outgoing.envelope.delta_bytes);
+    assert_ne!(kept, first, "the earlier one is replaced");
+}
+
+/// verifies: LLR-mkj4bz
+///
+/// Abnormal: a refused commit keeps the earlier Change set.
+#[tokio::test]
+async fn a_refused_commit_keeps_the_earlier_change_set() {
+    let mut s = admit_b_directly(setup("kept-cs-refused").await).await;
+    let before = rec_of(&s.svc_a, s.org_id).kept_change_set;
+    assert!(before.is_some(), "the admission's commit kept its Change set");
+    assert!(s.svc_a.commit_update(&mut OsRng, s.org_id).await.is_err(), "nothing new on the chain");
+    assert_eq!(rec_of(&s.svc_a, s.org_id).kept_change_set, before);
 }

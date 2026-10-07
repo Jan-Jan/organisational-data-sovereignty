@@ -3,7 +3,10 @@
 //! The QUIC handshake authenticates the remote endpoint's ed25519 key, so
 //! `recv_one` returns the CRYPTOGRAPHICALLY AUTHENTICATED remote `DevicePublicKey`.
 //! Authentication proves key custody, not membership; org-node's receive paths
-//! compare the key with nothing (owner ruling, 2026-10-05).
+//! compare the key with the record (owner rulings of 2026-10-07): an update
+//! for a held Organisation and a revocation are acted on only from a Device
+//! the record lists (LLR-2r2fha, LLR-kzgjz8), an acknowledgement only from
+//! the Device it names (LLR-3aysup); a first admission from any sender.
 use iroh::{
     EndpointAddr, EndpointId, RelayMode, TransportAddr,
     endpoint::{BindOpts, Connection, presets},

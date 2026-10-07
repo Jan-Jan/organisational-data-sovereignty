@@ -74,6 +74,7 @@ fn org_with_member() -> OrgRecord {
         }],
         proxy_account: None,
         org_private_key: OrgPrivateKey::from([0x5d; 32]),
+        kept_change_set: None,
     }
 }
 
@@ -251,6 +252,7 @@ struct WireOrg {
     trie_members: Vec<WireMember>,
     proxy_account: Option<ChainAccount>,
     org_private_key: OrgPrivateKey,
+    kept_change_set: Option<Vec<u8>>,
 }
 
 #[derive(serde::Serialize)]
@@ -315,6 +317,7 @@ fn wire_store() -> WireStore {
             trie_members: vec![wire_bob()],
             proxy_account: None,
             org_private_key: OrgPrivateKey::from([0x5e; 32]),
+            kept_change_set: None,
         }],
         provisional_updates: vec![WireProvisional {
             org_id: None,
@@ -376,13 +379,15 @@ fn a_record_carries_its_organisation_private_key_and_a_store_without_one_is_refu
     };
     let plaintext = postcard::to_allocvec(&data).unwrap();
     let key = org_with_member().org_private_key;
-    // The record's last 32 bytes, before the two empty lists, are the key.
-    assert_eq!(&plaintext[plaintext.len() - 34..plaintext.len() - 2], key.expose_secret(), "no option tag");
+    // The key is the record's 32 bytes before its `kept_change_set: None`
+    // (`00`, LLR-d9778a; offsets shifted by one on 2026-10-07, S3 T2) and the
+    // two empty lists.
+    assert_eq!(&plaintext[plaintext.len() - 35..plaintext.len() - 3], key.expose_secret(), "no option tag");
     let path = tmp_path("with-key");
     store::seal_for_test(&path, "pw", &plaintext, &mut OsRng).unwrap();
     assert_eq!(PersonaStore::open(path, "pw").unwrap().data().orgs[0].org_private_key, key);
 
-    let mut legacy = plaintext[..plaintext.len() - 34].to_vec();
+    let mut legacy = plaintext[..plaintext.len() - 35].to_vec();
     legacy.extend_from_slice(&[0x00, 0x00, 0x00]); // `org_private_key: None`, then the two empty lists
     let path = tmp_path("without-key");
     store::seal_for_test(&path, "pw", &legacy, &mut OsRng).unwrap();

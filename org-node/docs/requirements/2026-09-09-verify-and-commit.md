@@ -113,9 +113,13 @@ authenticated, and shall require no Invite to have been imported for it.
 satisfies: derived
 
 **REQ-ztdza4**: The software shall commit an update to an Organisation it holds
-a record of that verifies against the chain whichever Device key the
-connection authenticated, whether or not that key is in the Membership record
-before or after the update. (implements: RC-b6mydy)
+a record of only when the Device key the connection authenticated is listed
+in a member snapshot of its current committed record of that Organisation and
+the update verifies against the chain — a key listed there and absent from
+the record after the update included — and shall refuse an update delivered
+under any other Device key with a typed error naming the Organisation, before
+it reads the chain, leaving the store unchanged.
+(implements: RC-b6mydy, RC-u7kdam)
 satisfies: derived
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
@@ -127,12 +131,49 @@ app, and org-node has no administrator. A chain-valid update delivered by any
 peer is harmless because it matches the chain. Both items keep their IDs and
 state the rule that replaced them.
 
+*Amended 2026-10-07 (owner ruling R1 at the S3a close-out residual review,
+change `worktree-org-io-commit-workflow`; decision 16 of
+`docs/plans/2026-10-06-org-io-commit-workflow.md`).* REQ-ztdza4 said the
+software commits such an update "whichever Device key the connection
+authenticated, whether or not that key is in the Membership record before or
+after the update". The owner reversed that for an Organisation the node
+already holds: "Using iroh a connection can only be established via mutually
+known public keys, but I agree with only accepting updates and revocations
+from members. Furthermore, these are checked to be well formed before acting
+on them, which gives us another layer of protection." The sender must be
+listed in the receiver's current committed record (RC-u7kdam); a Member
+relaying its own removal is still listed there and is accepted. The
+revocation half is REQ-ea4qs5. REQ-xa6smf is **not** changed: by the owner's
+amendments of the same day a new joiner accepts the admitting update from any
+sender, "to avoid scenarios where something happens to the admin's device
+during this window", and verifies it against the chain; "The invite id plays
+no role in the update"; "the new joiner has no org information to disclose,
+and they verify the org information they receive on-chain so the risk here
+is only a new joiner being DoS'ed which is acceptable". Acknowledgements
+have their own sender rule: the sending Device must be the acknowledgement's
+named, removed Device (REQ-b462sh as amended 2026-10-07). Tests are
+rewritten by plan task T12a.
+
 ## Acting on one's own removal
 
-**REQ-uxv2x2**: The software shall, on committing a Change set that removes
-its own Device key from an Organisation's record, delete its record of that
-Organisation and mark the Persona revoked. (implements: RC-wqgm2p)
+**REQ-uxv2x2**: The software shall, on committing a Membership record that no
+longer lists its own Device key, or on accepting a revocation of it
+(REQ-m2xh8q), delete in one sealed store image every piece of data it holds for that
+Organisation — its record, the Change set kept with it, the Organisation
+private key, the proxy account, every provisional update and every expected
+admission for it — and every Persona bound to that Organisation with its keys,
+leaving the data of every other Organisation and Persona unchanged.
+(implements: RC-wqgm2p, RC-44vvjp)
 satisfies: derived
+
+*Amended 2026-10-06 (owner rulings 3 and 4 on the sweep of `fdf4e77`,
+`docs/plans/2026-10-06-org-io-roadmap.md`; change
+`worktree-org-io-commit-workflow`).* This said the software deletes its
+record and marks the Persona revoked. A Persona marked revoked kept its
+Device and Member secret keys, and with them the means to act as the revoked
+Device; "delete everything" deletes the Persona. The acknowledgement the
+Device signs before that is REQ-y99c9w. The absence-proof path is new with
+stage S3.
 
 ## The store at rest
 
@@ -183,3 +224,8 @@ and the low-level requirements of the whole unit, are tooth 4 of
 sender cross-check" in the list above is no longer a behaviour any requirement
 here states: REQ-xa6smf and REQ-ztdza4 are amended in place to say that
 nothing about the sender is checked.
+
+*Amended 2026-10-07 (owner ruling R1, change
+`worktree-org-io-commit-workflow`).* The membership cross-check is back for
+an Organisation the node holds: REQ-ztdza4 as amended that day. A first
+admission still checks nothing about the sender (REQ-xa6smf).

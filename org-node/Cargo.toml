@@ -262,3 +262,18 @@ required-features = ["app", "test-support"]
 name = "commit_paths"
 path = "tests/commit_paths.rs"
 required-features = ["app", "test-support"]
+
+[[test]]
+name = "revocation"
+path = "tests/revocation.rs"
+required-features = ["app", "test-support"]
+
+[[test]]
+name = "reconcile"
+path = "tests/reconcile.rs"
+required-features = ["app", "test-support"]
+
+[[test]]
+name = "commit_workflow_errors"
+path = "tests/commit_workflow_errors.rs"
+required-features = ["app", "test-support"]

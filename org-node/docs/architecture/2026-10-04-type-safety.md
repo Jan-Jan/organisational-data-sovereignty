@@ -118,19 +118,41 @@ so nothing in org-node converts it.)
 Persona, one Organisation with its Organisation private key, a chain account
 and members, one change-set provisional update holding the private key of its
 Organisation key pair, and one expected admission naming an Organisation
-alone), of a fixed Organisation-information Wire message and of
-a fixed revocation Wire message, whose Envelopes carry no signature, are the
+alone), of a fixed Organisation-information Wire message, whose Envelope
+carries no signature, and of a fixed revocation Wire message, which holds a
+revocation notice (LLR-dc45ur) and no Envelope, are the
 values pinned in `org-node/tests/encoding_golden.rs`: every type `types.rs`
 defines, and the org-members and `person` types org-node holds, serialise
 exactly as the plain values they replace. In the store plaintext, the
 Organisation record has no Organisation-secret bytes after its epoch, and its
 chain account is followed by the 32 bytes of its Organisation private key
-with no option tag (LLR-byjvd9); the expected admission is the Organisation
+with no option tag (LLR-byjvd9), then by its kept Change set option
+(LLR-d9778a); the expected admission is the Organisation
 identifier's bytes alone. Each Wire message begins with its variant index (00
-for Organisation information, 01 for revocation), has no signature bytes
-after its Change set bytes (LLR-e7s4ye), and no invite identifier bytes
-(LLR-ms8njy).
+for Organisation information, 01 for revocation), and has no invite
+identifier bytes (LLR-ms8njy); the Organisation information has no signature
+bytes after its Change set bytes (LLR-e7s4ye).
 satisfies: derived
+
+*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, S3 T4;
+LLR-js9dsu and LLR-dc45ur as amended there).* The pinned revocation Wire
+message was `01` followed by the same Envelope as the Organisation
+information. Index `01` now precedes a revocation notice: the Organisation
+identifier, the Member identifier, the Device key and an org-members wire
+absence proof, in that order. The new value was derived from the notice's
+field order, not captured from the code; `encoding_golden.rs` records the
+previous value beside it. The acknowledgement (index `02`, LLR-378cj4) is not
+pinned here.
+
+*Amended 2026-10-07 (owner ruling 12 of
+docs/plans/2026-10-06-org-io-commit-workflow.md, change
+`worktree-org-io-commit-workflow`, S3 T2).* The Organisation record now ends
+with its kept Change set (LLR-d9778a) after its Organisation private key: an
+option, `None` (the byte `00`) in the pinned store. The owner accepted the
+layout change with a new golden pin and no migration; a store written before
+it does not load. The new store value was derived from the previous one by
+inserting that byte, not captured from the code; `encoding_golden.rs` records
+the previous value beside it.
 
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 This pinned an Organisation with an Organisation secret and no Organisation

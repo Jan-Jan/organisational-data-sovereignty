@@ -8,8 +8,9 @@
 
 use org_members::{Handle, Name, RootHash, Surname};
 use org_node::ids::OrgId;
+use org_node::revocation::{Acknowledgement, Signature64};
 use org_node::store::{self, OrgRecord, PersonaRecord, PersonaStatus, StoreData};
-use org_node::test_fixtures::{admit_member_delta, org_public_key};
+use org_node::test_fixtures::{admin_device, admit_member_delta, bob_absence_notice, genesis_trie, org_public_key};
 use org_node::transport::wire::WireMessage;
 use org_node::{
     DeviceSeed, Envelope, Epoch, MemberSeed, OrgPrivateKey, PersonaId, SequenceNumber,
@@ -90,6 +91,7 @@ fn org(private: [u8; 32]) -> OrgRecord {
         trie_members: vec![],
         proxy_account: None,
         org_private_key: OrgPrivateKey::from(private),
+        kept_change_set: None,
     }
 }
 
@@ -130,21 +132,42 @@ fn records_and_wire_messages_never_render_secret_bytes() {
     }
 }
 
+/// A revocation notice and an acknowledgement for Bob's Device, which the
+/// genesis trie does not list (S3 T4: neither holds an Envelope).
+fn revocation_and_acknowledgement() -> [WireMessage; 2] {
+    let notice = bob_absence_notice(OrgId::new([5u8; 20]));
+    let trie = genesis_trie(&MemberSeed::from([1u8; 32]).x25519_keypair(), &admin_device());
+    let acknowledgement = Acknowledgement {
+        org_id: notice.org_id,
+        member_id: notice.member_id,
+        device: notice.device,
+        epoch: Epoch::new(2),
+        root: trie.root_hash().unwrap(),
+        signature: Signature64([0x40; 64]),
+    };
+    [WireMessage::Revocation(notice), WireMessage::Acknowledgement(acknowledgement)]
+}
+
 // LLR-ecxc76: Organisation information renders its key as the redaction
-// marker and none of its bytes; a revocation holds no key and renders none.
+// marker and none of its bytes; a revocation or an acknowledgement holds no
+// key and renders none.
+// *Adapted 2026-10-07 (change worktree-org-io-commit-workflow, S3 T4):* the
+// revocation was the Organisation information's Envelope alone; it is a
+// notice now, and the acknowledgement is the third kind.
 /// verifies: LLR-ecxc76, LLR-bwb9pu
 #[test]
 fn a_wire_message_of_either_kind_never_renders_the_key() {
     for private in [sentinel(0x40), sentinel_down(0xff)] {
         let info = wire(private);
-        let revocation = WireMessage::Revocation { envelope: info.envelope().clone() };
         for rendered in [format!("{info:?}"), format!("{info:#?}")] {
             assert_not_rendered(&rendered, &private, "Organisation private key");
             assert!(rendered.contains("OrgPrivateKey([REDACTED])"), "{rendered}");
         }
-        for rendered in [format!("{revocation:?}"), format!("{revocation:#?}")] {
-            assert_not_rendered(&rendered, &private, "Organisation private key");
-            assert!(!rendered.contains("OrgPrivateKey"), "a revocation holds no key: {rendered}");
+        for keyless in revocation_and_acknowledgement() {
+            for rendered in [format!("{keyless:?}"), format!("{keyless:#?}")] {
+                assert_not_rendered(&rendered, &private, "Organisation private key");
+                assert!(!rendered.contains("OrgPrivateKey"), "holds no key: {rendered}");
+            }
         }
     }
 }

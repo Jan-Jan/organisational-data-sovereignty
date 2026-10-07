@@ -3,6 +3,8 @@
 Recorded 2026-10-07 by the independent review of change
 `worktree-org-node-org-key-pair` (round 1, the last round: every finding low).
 Neither fix is mechanical, so both stay open.
+*(Amended 2026-10-07: PR-q8r32t was fixed by change
+`worktree-org-io-commit-workflow`; see its resolution.)*
 
 **PR-gnh3j2**: `send_update` sends the Organisation private key the record
 holds when it runs, not the key of the epoch the outgoing Envelope reaches, so
@@ -29,7 +31,8 @@ revocation about an Organisation the node does not hold; no test can exercise
 them, and they read as further REQ-vxqc5g sites.
 affects: REQ-vxqc5g, LLR-38e2kn
 opened: 2026-10-07
-status: open
+status: resolved
+resolution: fixed 2026-10-07 (change `worktree-org-io-commit-workflow`): both unreachable `RevocationNotHeld` arms in `receive_and_verify` removed — a revocation now leaves the match on `WireMessage` at once through `receive_revocation` (whose unheld refusal is REQ-qrtsc9's, in `org-node/src/revocation.rs`), so neither the `(None, None)` arm nor the first-admission `let … else` exists; confirmed by `git grep -n "RevocationNotHeld\|(None, None)" -- org-node/src/service.rs`, which matches lines 783, 800 and 841 at the key-pair merge `1f52c36` and nothing on this change's tree, the variant now raised only in `org-node/src/revocation.rs`.
 
 Review finding-5, also noted and left alone by the change's deslop pass.
 Removing them means restructuring the receive path so the first-admission data

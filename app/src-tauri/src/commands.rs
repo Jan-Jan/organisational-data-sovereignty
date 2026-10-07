@@ -380,9 +380,19 @@ async fn next_outcomes<R: Runtime>(app: &AppHandle<R>) -> Vec<events::ReceiverOu
         // `epoch-changed` carrying a literal 0 — and 0 is genesis, a reachable
         // and meaningful epoch, so the UI could not tell "deleted" from "reset
         // to genesis" (HAZ-5ha5vv).
-        Ok(SelfDeleteOutcome::SelfDeleted { org_id }) => {
+        // S3: the acknowledgements are dropped until S3b-io sends them, which
+        // leaves the entry unacknowledged — an outcome ruling C allows.
+        Ok(SelfDeleteOutcome::SelfDeleted { org_id, .. }) => {
             vec![events::ReceiverOutcome::SelfDeleted {
                 org_id: hex::encode(org_id.as_bytes()),
+            }]
+        }
+
+        // A revoked Device's acknowledgement verified; org-io keeps it from
+        // S3b-io, and the UI is told nothing.
+        Ok(SelfDeleteOutcome::Acknowledged(verified)) => {
+            vec![events::ReceiverOutcome::AcknowledgementReceived {
+                org_id: hex::encode(verified.into_inner().org_id.as_bytes()),
             }]
         }
 

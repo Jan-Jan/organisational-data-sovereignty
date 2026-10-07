@@ -152,7 +152,9 @@ async fn delivers_and_verifies_admit_over_relay_by_id() {
         seq_guard: SeqGuard::from_last_seen(SequenceNumber::new(1)),
         last_committed_epoch: Epoch::new(1),
     };
-    let out = verify_envelope_against_chain(&genesis, got.envelope(), &ctx, &chain)
+    // The received message equals `msg` (2.), so its Envelope is `env`; only
+    // Organisation information holds one (LLR-js9dsu).
+    let out = verify_envelope_against_chain(&genesis, &env, &ctx, &chain)
         .expect("verify_envelope_against_chain must succeed");
     assert_eq!(out.trie.root_hash().unwrap(), new_root, "committed root mismatch");
     assert_eq!(out.epoch, Epoch::new(2), "committed epoch must be 2");

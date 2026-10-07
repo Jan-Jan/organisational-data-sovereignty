@@ -9,7 +9,7 @@
 use core::fmt;
 
 use curve25519_dalek::montgomery::MontgomeryPoint;
-use ed25519_dalek::{SigningKey, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use org_members::{DevicePublicKey, OrgMembersError, PersonPublicKey};
 use rand_core::{CryptoRng, RngCore};
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -56,6 +56,11 @@ impl SigningKeypair {
 
     pub fn verifying_key(&self) -> VerifyingKey {
         self.0.verifying_key()
+    }
+
+    /// The ed25519 signature of `message` under this key pair.
+    pub fn sign(&self, message: &[u8]) -> Signature {
+        self.0.sign(message)
     }
 
     /// As a DevicePublicKey for the trie / iroh identity, through `person`'s parse.

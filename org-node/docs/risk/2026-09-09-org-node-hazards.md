@@ -465,14 +465,37 @@ refuses any received key whose public half is not the chain's `org_pub_key`.
 A substituted key is refused; the 2026-10-05 window closes. Residual S3, P1,
 acceptable (`org-node/docs/risk/2026-10-07-org-key-pair.md`).
 
+*Owner ruling of 2026-10-07 (change `worktree-org-io-commit-workflow`):*
+residual accepted. Under owner ruling D of 2026-10-06 the README's matrix
+wins and S3 is unacceptable at every probability, so "acceptable" above is
+restated as S3/P1 — unacceptable under the matrix (ruling D); the owner
+accepted that residual on 2026-10-07, on the benefit-risk case in
+`org-node/docs/risk/2026-10-07-org-key-pair.md` (HAZ-ep6uzs, notes of this
+date).
+
 **RC-b6mydy**: the node commits a received Wire message only through the
-checks of RC-pm9kmx, RC-6a2dke, RC-e5atck, RC-m4r75s and RC-95dgg8, and
-checks nothing about the Device key the connection authenticated: not on a
+checks of RC-pm9kmx, RC-6a2dke, RC-e5atck, RC-m4r75s and RC-95dgg8. On a
+first admission it checks nothing about the Device key the connection
+authenticated; on a later update it first requires that key to be listed in
+its current committed record (RC-u7kdam), and then commits only what the
+chain has published, whichever listed Device delivers it.
+mitigates: HAZ-ep6uzs, HAZ-vxabf9
+
+*Amended 2026-10-07 (owner ruling R1 at the S3a close-out residual review,
+change `worktree-org-io-commit-workflow`; decision 16 of
+`docs/plans/2026-10-06-org-io-commit-workflow.md`).* This said the node
+"checks nothing about the Device key the connection authenticated: not on a
 first admission, with or without an imported Invite, and not on a later
 update, whether or not that key is in the Membership record before or after
-it. A chain-valid update is committed whoever delivers it; one the chain has
-not published is refused whoever delivers it.
-mitigates: HAZ-ep6uzs, HAZ-vxabf9
+it. A chain-valid update is committed whoever delivers it". The owner ruled
+that updates and revocations are accepted only from members — "Using iroh a
+connection can only be established via mutually known public keys, but I
+agree with only accepting updates and revocations from members" — and, the
+same day, that a new joiner's first admission stays open to any sender ("to
+avoid scenarios where something happens to the admin's device during this
+window"). The sender check is RC-u7kdam's
+(`org-node/docs/risk/2026-10-07-commit-workflow.md`);
+this control keeps the chain checks it always required.
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`;
 text written by change `worktree-person-shared-types`, which merges first).*
@@ -572,11 +595,43 @@ that only the new record's Devices receive, so a removed Device holds no key
 used after its removal (residual P1, acceptable)
 (`org-node/docs/risk/2026-10-07-org-key-pair.md`).
 
-**RC-wqgm2p**: on committing a Change set that removes its own Device key
-from the Organisation's record, the node deletes its record of that
-Organisation and marks the persona revoked, so that a cooperating device
+*Restated 2026-10-07 (change `worktree-org-io-commit-workflow`, at its merge
+of master `1f52c36`; owner ruling D of 2026-10-06 in
+`docs/plans/2026-10-06-org-io-roadmap.md`, section "Owner's rulings on the
+S2–S4 design drafts").* "Residual P1, acceptable" above follows the reading
+of the matrix that ruling D rejects: this hazard is S3, and S3 is
+unacceptable at every probability. The residual of the key a removed Device
+keeps — the Organisation private keys of the epochs up to its removal — is
+S3/P1 — unacceptable under the matrix (ruling D); owner ruling pending
+(flagged 2026-10-07). The owner reviews it individually (ruling of
+2026-10-07); the benefit-risk case put to the owner is in
+`org-node/docs/risk/2026-10-07-org-key-pair.md` (HAZ-vxabf9, note of this
+date). S3 also takes from a removed Device the Change set the key-pair
+change's revocation still carried (RC-r8bp43).
+
+*Owner ruling of 2026-10-07:* residual accepted for the key itself — the
+Organisation private keys of the epochs up to a Device's removal, S3/P1 as
+restated above — on the benefit-risk case in
+`org-node/docs/risk/2026-10-07-org-key-pair.md`. The CGKA boundary (forward
+and post-compromise secrecy across rotations) is recorded as ODS Phase 3's
+to address, not this stage's. The "owner ruling pending" above is settled by
+this ruling.
+
+**RC-wqgm2p**: on committing a Membership record that no longer lists its own
+Device key, or on accepting an absence proof of its removal checked against
+the current on-chain root, the node deletes every piece of data it holds for
+that Organisation and every Persona bound to it, so that a cooperating device
 stops acting on the Organisation from the moment it learns of its removal.
 mitigates: HAZ-vxabf9
+
+*Amended 2026-10-06 (owner rulings 3 and 4 on the sweep of `fdf4e77`,
+`docs/plans/2026-10-06-org-io-roadmap.md`; change
+`worktree-org-io-commit-workflow`).* This said the node deletes its record
+and marks the persona revoked, on a committed Change set only. The absence
+proof is the second verified path (stage S3), and the Persona, with its
+Device and Member secret keys, is now deleted rather than marked. The control
+is still cooperative; what S3 adds around it is assessed in
+`org-node/docs/risk/2026-10-07-commit-workflow.md`.
 
 RC-wqgm2p is minted with its weakness stated in its own text: it is a
 cooperative control, and a control that depends on the party being excluded
@@ -666,6 +721,31 @@ does not change. *(Amended at the merge of master `1feb608`: this said those
 were "plain `[u8; 32]` … (PR-hqwpg9)". Master resolved PR-hqwpg9; they are now
 held in redacted secret types (`MemberSeed`, `DeviceSeed`, `OrgPrivateKey`),
 which are `Clone` and not wiped on drop.)*
+
+*Interim limitation, stated 2026-10-07 (change
+`worktree-org-io-commit-workflow`, review round 1 finding-8).* Stage S3a
+gives the removal paths a Device secret key for one signing operation
+(REQ-y99c9w: keep no Device secret key it was given "in the store or anywhere
+else once the operation returns"), but until stage S4 that key is still a
+`DeviceSeed` read from the store, and copies of it outlive the operation in
+freed memory: `DeviceSeed` is not wiped on drop
+(`org-node/src/types.rs`, the `secret_type!` doc comment, "Wiping on drop is
+not done"); the service clones each bound Persona's seed for every removal
+path (`device_seeds_bound_to`, `org-node/src/service.rs`, called by
+`commit_update`, `reconcile`, `receive_revocation` and `remove_self`);
+`commit_step` clones the whole `StoreData` for a successor, and
+`OrgService::reconcile` clones the successor `StoreData` again into the
+store, seeds included. Only the ed25519 `SigningKey` derived from the seed is
+wiped on drop (ed25519-dalek's `zeroize` feature, `org-node/Cargo.toml`). So
+copies of Device secret keys may remain in freed process memory, where a
+crash dump, a swapped page or another process reading this one's memory can
+find them — this hazard's in-memory route, and REQ-y99c9w's "anywhere else"
+is not met in that sense until then. REQ-y99c9w's amendment of 2026-10-07
+defers the transient value's own type, move-only and zeroised, to S4, which
+takes the seed from the OS keychain rather than the store; **S4 is the stage
+that closes this limitation**. Until it merges, the residual above stands
+widened by these copies. This interim exposure has not been put to the
+owner and is not owner-accepted.
 
 ## Hazards introduced by these controls
 

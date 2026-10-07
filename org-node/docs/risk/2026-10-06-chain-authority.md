@@ -69,6 +69,64 @@ Membership root and next Sequence number, or an Organisation this node expects
 to join; the first is known to every Member, the second to the inviter.
 Severity S3, probability **P1**: acceptable under the matrix.
 
+*Note 2026-10-07 (S3a close-out residual review, change
+`worktree-org-io-commit-workflow`; owner rulings R1 and R6, decision 16 of
+`docs/plans/2026-10-06-org-io-commit-workflow.md`).* Under owner ruling D of
+2026-10-06 the README's matrix governs and S3 is unacceptable at every
+probability, so "acceptable under the matrix" above is restated as S3/P1 —
+unacceptable under the matrix (ruling D). A new control now stands beside
+RC-mj6gjq and RC-2ferct: RC-u7kdam (owner ruling R1) refuses, before any
+chain read and without writing, an update or a revocation for an
+Organisation the node holds whose sending Device — authenticated by the
+transport as its DevicePublicKey — is not listed in the node's current
+committed record. Residual with it in place: a stranger can no longer make a
+node that holds a record read the chain; only a listed Member Device can,
+and a Member's chain reads are what the node does anyway. What remains is the
+first admission, which by the owner's amendment of 2026-10-07 is accepted
+from any sender ("to avoid scenarios where something happens to the admin's
+device during this window"; "The invite id plays no role in the update"):
+a stranger can send a node that is waiting to join first-admission updates,
+each verified against the chain, and so occupy that one node until it is
+admitted. That node holds no Organisation information yet, so nothing of an
+Organisation's Members is exposed by it; the harm is a delayed admission (a
+denial of service to one joiner), and the S3 harm this hazard names — a
+removed device's holder keeping published material for longer — cannot
+arise on a node that is not yet a Member. Severity S3, probability P1 for
+the held-record part (a listed Member Device is needed); the first-admission
+part is a delay to one joiner. *Owner ruling R6 (2026-10-07): residual
+accepted.* The owner's words: "Strangers cannot make the node read the
+chain, because org updates come from other members (not strangers), even the
+new joiner knows the device key of the admin. Furthermore, member devices
+will be tracking the chain in any case for updates, so this hazard is
+irrelevant." And on the first admission, the same day: "the new joiner has
+no org information to disclose, and they verify the org information they
+receive on-chain so the risk here is only a new joiner being DoS'ed which is
+acceptable" — the denial of service to a new joiner by strangers sending
+first-admission updates is owner-accepted on 2026-10-07 on that reasoning.
+(Recorded for the owner's attention: the clause "even the new joiner knows
+the device key of the admin" predates the same day's amendment that lets a
+first admission come from any sender.)
+
+*Note 2026-10-07 on RC-2ferct (same review).* RC-2ferct and REQ-8amu2a
+above still state that the node reads the chain for a first admission only
+for an Organisation the app declared it expects; that is the code today and
+is not changed here. The owner's ruling on the update itself: "The invite id
+plays no role in the update." The acceptance of the first-admission residual
+above rests on the chain check and on the joiner having nothing to disclose,
+not on this control.
+
+*Owner ruling 2026-10-07 on RC-2ferct (the join gate; S3a close-out,
+change `worktree-org-io-commit-workflow`).* RC-2ferct and REQ-8amu2a are
+**kept**. The node reads the chain for a first admission only for an
+Organisation the app expects to join, because its user entered the Invite;
+any other first admission is refused without a chain read. The update
+itself is judged on the chain alone — "the invite id plays no role in the
+update" — so the gate decides only whether the node reads the chain, never
+whether a chain-valid update is accepted. Kept because it narrows the
+denial of service to a new joiner that the owner accepted above: a stranger
+can occupy only a node that is waiting to join, and only for the
+Organisation that node's user entered an Invite for.
+
 ## Derived requirements assessment
 
 **REQ-ag6kqm, REQ-nhe2zu** (amended: no signature; the chain alone decides):
@@ -79,6 +137,13 @@ loss of the cheap refusal is HAZ-bedm57.
 **REQ-xa6smf, REQ-ztdza4** (amended: commit whoever sent it): remove
 RC-b6mydy's two clauses, assessed above under HAZ-ep6uzs and HAZ-vxabf9.
 HAZ-ep6uzs's residual worsens until the key-pair change (owner-accepted).
+
+*Note 2026-10-07 (owner ruling R1, change
+`worktree-org-io-commit-workflow`).* REQ-ztdza4 is amended again: an update
+for an Organisation the node holds is committed only from a Device listed in
+its current record (RC-u7kdam); REQ-xa6smf is unchanged. The assessment of
+that amendment is in
+`org-node/docs/risk/2026-10-07-commit-workflow.md`.
 
 **REQ-d9g6nt** (amended: "founding Member") and **REQ-qn2erx** (amended:
 the Join request and Invite imports leave org-node): no hazard impact. The

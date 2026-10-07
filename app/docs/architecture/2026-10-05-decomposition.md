@@ -544,6 +544,33 @@ the error's message and no organisation. It classifies every other variant
 `ReceiveError`, carrying the error's message.
 satisfies: REQ-kn5rtx
 
+*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3, task
+T12a; owner rulings at the S3a close-out residual review).* org-node gains
+two more refusals, each classified as `ReceiveError`: a message for a held
+Organisation, or a revocation, from a Device the record does not list
+(`SenderNotListed`), and an acknowledgement not sent by the Device it names
+(`AcknowledgementNotFromItsDevice`). Both
+are refused before anything is verified — before the chain is read — so
+neither is a verdict on an update. The abnormal test
+`the_sender_refusals_are_classified_as_receiver_errors` lists the two.
+
+*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3).*
+org-node gains ten refusals (`OrgNotHeld`, `StaleChainState`,
+`ChainStateConflict`, `RevocationProofRefused`, the four
+`Acknowledgement*`, `DeviceSecretNotSupplied`, `NoRevocationForRecipient`),
+each classified as `ReceiveError`. None is produced by
+`verify_envelope_against_chain`, the rule for a verdict, and none is a
+verdict on an update: a `VerifyFailed` row is shown under "Verified Updates
+(chain root match)", and filing a refused revocation proof or acknowledgement
+there would claim an update failed a root match when no update was received
+— HAZ-9fmhm4's misrepresentation — while filing it as a receiver error is
+only less specific. `RevocationProofRefused` is the closest case, since it
+checks a proof against the chain's root; it stays a receiver error because
+what it refuses is a notice about this node, not a membership update, and
+`StaleChainState` is reachable from the node's own record alone. The
+abnormal test `the_commit_workflow_refusals_are_classified_as_receiver_errors`
+lists the ten.
+
 *Amended 2026-10-06 (change `worktree-org-node-org-key-pair`).* org-node
 gains four refusals of a received Wire message: one that does not decode
 (`MalformedMessage`), a revocation about an Organisation the node holds no
@@ -640,8 +667,17 @@ Abnormal: `record_unreadable_emits_no_membership_event`,
 
 **LLR-2vg79y**: a `SelfDeleted` outcome is announced as exactly one `revoked`
 event naming the organisation, whose payload carries no epoch key at any
-depth, whatever the organisation identifier.
+depth, whatever the organisation identifier. An `AcknowledgementReceived`
+outcome is announced by no event.
 satisfies: REQ-tw4cb5
+
+*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3).*
+org-node's self-delete path now also returns a verified acknowledgement from
+a revoked Device (`SelfDeleteOutcome::Acknowledged`); the receiver loop maps
+it to the new `AcknowledgementReceived { org_id }`, which emits nothing until
+org-io keeps acknowledgements (S3b-io). The acknowledgements a self-delete
+signs are dropped by the app until S3b-io sends them. Normal:
+`a_received_acknowledgement_emits_nothing` (receiver_events).
 
 Normal: `self_delete_emits_revoked_naming_the_organisation`,
 `self_delete_emits_no_epoch_event`, `self_delete_payload_carries_no_epoch_key_at_any_depth`,

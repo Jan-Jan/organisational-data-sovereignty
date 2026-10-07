@@ -461,3 +461,38 @@ fn verify_reads_the_chain_once_and_only_after_the_chain_free_checks() {
     verify_envelope_against_chain(&local, &env, &ctx(org), &chain).unwrap();
     assert_eq!(chain.reads.get(), 1, "a passing envelope reads the chain once");
 }
+
+// ---- normal cases of LLR-9sknpa and LLR-mcdh85 (S3 robustness, 2026-10-07) --
+
+// Normal: Change set bytes that decode and extend the receiver's record are
+// refused neither as malformed nor as built on another base, at any fresh
+// Sequence number, and at the chain's epoch they commit to the chain's root.
+// verifies: LLR-9sknpa
+#[test]
+fn a_change_set_that_decodes_and_extends_the_record_is_taken() {
+    let (org, local, env, new_root) = setup();
+    let decoded = env.decode_delta().unwrap();
+    assert_eq!(decoded.base_root(), &local.root_hash().unwrap(), "fixture: the Change set extends the record");
+    for seq in [2, 7] {
+        let fresh = Envelope { parent_seq: SequenceNumber::new(seq), ..env.clone() };
+        assert_eq!(check_chain_free(&local, &fresh, &ctx(org)), Ok(()), "Sequence number {seq}");
+    }
+    let verified = verify_envelope_against_chain(&local, &env, &ctx(org), &chain_at(org, new_root, Epoch::new(2))).unwrap();
+    assert_eq!(verified.trie.root_hash().unwrap(), new_root);
+}
+
+// Normal: an Envelope of exactly the Organisation, a Sequence number one past
+// the mark and decodable Change set bytes — no signature, no sender, and a
+// context that holds no key — is decoded and verified: nothing but the mark
+// stands between the binding and the decode, and the chain is read once.
+// verifies: LLR-mcdh85
+#[test]
+fn an_envelope_past_the_mark_is_decoded_and_verified_with_no_signature_or_sender() {
+    let (org, local, env, new_root) = setup();
+    let bare = Envelope { org_id: org, parent_seq: SequenceNumber::new(2), delta_bytes: env.delta_bytes.clone() };
+    let chain = Counting { inner: chain_at(org, new_root, Epoch::new(2)), reads: Cell::new(0) };
+    let verified = verify_envelope_against_chain(&local, &bare, &ctx(org), &chain).unwrap();
+    assert_eq!(chain.reads.get(), 1);
+    assert_eq!((verified.epoch, verified.seq_guard.last_seen()), (Epoch::new(2), SequenceNumber::new(2)));
+    assert_eq!(verified.trie.root_hash().unwrap(), new_root);
+}

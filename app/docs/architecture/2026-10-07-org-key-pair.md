@@ -31,6 +31,8 @@ sends the committed update to any other Device, whether of another Member
 or another Device of the same Member.
 satisfies: REQ-nfr3n2
 
+*Amended 2026-10-07 (S3): `send_update` takes the `CommitOutcome`; a revoked Device is sent its notice, and a Device neither record lists nothing.*
+
 This states the app's behaviour as it is, not as the ruling would have it
 broadly: the other Members' Devices, which the ruling says receive
 Organisation information whatever the change, are sent nothing by the app

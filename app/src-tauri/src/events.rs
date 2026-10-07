@@ -16,6 +16,9 @@ use std::sync::Arc;
 pub enum ReceiverOutcome {
     /// This persona was revoked and deleted itself.
     SelfDeleted { org_id: String },
+    /// A revoked Device's acknowledgement of its removal from this
+    /// organisation verified (S3, LLR-2vg79y). Nothing is announced.
+    AcknowledgementReceived { org_id: String },
     /// An update verified and the organisation record was read back.
     Updated { org_id: String, epoch: u64, root: String },
     /// REQ-2k7ys4 / REQ-dp95pv: an update verified and the record could NOT be
@@ -105,7 +108,18 @@ pub fn classify_receive_error(e: &OrgNodeError) -> ReceiverOutcome {
         // anything is verified; a key that is not the chain's
         // (`OrgKeyMismatch`) and a revocation that leaves this node listed
         // (`RevocationNotForThisDevice`) after it, on a rule about the key or
-        // this node.
+        // this node. The ten refusals of the commit workflow (S3) are not
+        // verdicts on an update either: reconcile's refusals concern a chain
+        // state read or the node's own record (`OrgNotHeld`,
+        // `StaleChainState`, `ChainStateConflict`); a revocation's proof and
+        // an acknowledgement are not updates (`RevocationProofRefused`, the
+        // four `Acknowledgement*`); and the last two concern what the caller
+        // supplied (`DeviceSecretNotSupplied`, `NoRevocationForRecipient`).
+        // The two sender refusals of the owner rulings of 2026-10-07 are
+        // made before anything is verified, before the chain is read: a
+        // message from a Device the record does not list (`SenderNotListed`)
+        // and an acknowledgement not sent by its own Device
+        // (`AcknowledgementNotFromItsDevice`).
         OrgNodeError::Chain(_)
         | OrgNodeError::OrgNotOnChain
         | OrgNodeError::Trie(_)
@@ -119,7 +133,19 @@ pub fn classify_receive_error(e: &OrgNodeError) -> ReceiverOutcome {
         | OrgNodeError::MalformedMessage
         | OrgNodeError::OrgKeyMismatch { .. }
         | OrgNodeError::RevocationNotHeld { .. }
-        | OrgNodeError::RevocationNotForThisDevice { .. } => ReceiverOutcome::ReceiveError {
+        | OrgNodeError::RevocationNotForThisDevice { .. }
+        | OrgNodeError::OrgNotHeld { .. }
+        | OrgNodeError::StaleChainState { .. }
+        | OrgNodeError::ChainStateConflict { .. }
+        | OrgNodeError::RevocationProofRefused { .. }
+        | OrgNodeError::AcknowledgementNotHeld { .. }
+        | OrgNodeError::AcknowledgementFromFuture { .. }
+        | OrgNodeError::AcknowledgementForListedDevice { .. }
+        | OrgNodeError::AcknowledgementSignatureInvalid { .. }
+        | OrgNodeError::DeviceSecretNotSupplied { .. }
+        | OrgNodeError::NoRevocationForRecipient { .. }
+        | OrgNodeError::SenderNotListed { .. }
+        | OrgNodeError::AcknowledgementNotFromItsDevice { .. } => ReceiverOutcome::ReceiveError {
             message: e.to_string(),
         },
     }
@@ -218,6 +244,10 @@ pub fn emissions_for(outcome: &ReceiverOutcome) -> Vec<Emission> {
             name: "revoked",
             payload: json(&OrgOnly { org_id }),
         }],
+
+        // LLR-2vg79y (amended in S3): nothing. org-io keeps a received
+        // acknowledgement from S3b-io; the UI has no use for it today.
+        ReceiverOutcome::AcknowledgementReceived { .. } => Vec::new(),
 
         ReceiverOutcome::Updated { org_id, epoch, root } => vec![
             Emission {

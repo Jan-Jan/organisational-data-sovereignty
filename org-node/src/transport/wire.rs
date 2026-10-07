@@ -2,16 +2,18 @@
 use serde::{Deserialize, Serialize};
 
 use crate::envelope::Envelope;
+use crate::ids::OrgId;
+use crate::revocation::{Acknowledgement, RevocationNotice};
 use crate::types::OrgPrivateKey;
 use crate::transport::{TransportError, MAX_FRAME};
 
-/// One message over the org-node channel, of one of two kinds (LLR-js9dsu).
-/// The kind follows the recipient, not the operation (REQ-3dsweu): a Device
-/// the sending node's committed record lists receives Organisation
-/// information, any other Device a revocation. Neither kind carries an
-/// invite identifier (LLR-ms8njy). `Debug` is derived: the only secret
-/// either kind holds is an `OrgPrivateKey`, whose own `Debug` redacts it
-/// (LLR-ecxc76).
+/// One message over the org-node channel, of one of three kinds
+/// (LLR-js9dsu). The kind follows the recipient, not the operation
+/// (REQ-3dsweu): a Device the sending node's committed record lists receives
+/// Organisation information, a Device it removed a revocation notice; a
+/// revoked Device answers with an acknowledgement. No kind carries an invite
+/// identifier (LLR-ms8njy). `Debug` is derived: the only secret any kind
+/// holds is an `OrgPrivateKey`, whose own `Debug` redacts it (LLR-ecxc76).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WireMessage {
     /// Index 0: the committed Envelope; the record it extends, postcard
@@ -21,15 +23,20 @@ pub enum WireMessage {
     /// reaches (REQ-szq3ud). A body without either does not decode
     /// (REQ-c29s93).
     OrgInformation { envelope: Envelope, record_snapshot: Vec<u8>, org_private_key: OrgPrivateKey },
-    /// Index 1: the committed Envelope alone — no snapshot, no key.
-    Revocation { envelope: Envelope },
+    /// Index 1: the revoked Device's identity and an absence proof, no
+    /// Envelope (LLR-dc45ur).
+    Revocation(RevocationNotice),
+    /// Index 2: a revoked Device's signed acknowledgement (LLR-378cj4).
+    Acknowledgement(Acknowledgement),
 }
 
 impl WireMessage {
-    /// The Envelope of either kind (LLR-js9dsu).
-    pub fn envelope(&self) -> &Envelope {
+    /// The Organisation any kind names (LLR-js9dsu).
+    pub fn org_id(&self) -> OrgId {
         match self {
-            Self::OrgInformation { envelope, .. } | Self::Revocation { envelope } => envelope,
+            Self::OrgInformation { envelope, .. } => envelope.org_id,
+            Self::Revocation(notice) => notice.org_id,
+            Self::Acknowledgement(acknowledgement) => acknowledgement.org_id,
         }
     }
 }
@@ -46,11 +53,15 @@ pub fn encode_frame(msg: &WireMessage) -> Result<Vec<u8>, TransportError> {
     Ok(framed)
 }
 
-/// Decode the postcard body (already de-framed) into a WireMessage.
+/// Decode the postcard body (already de-framed) into a WireMessage. A body
+/// with bytes left over after the message, of any kind, is `Malformed`
+/// (LLR-js9dsu, LLR-dc45ur, LLR-378cj4).
 pub fn decode_body(body: &[u8]) -> Result<WireMessage, TransportError> {
     if body.len() > MAX_FRAME {
         return Err(TransportError::FrameTooLarge(body.len()));
     }
-    postcard::from_bytes(body).map_err(|_| TransportError::Malformed)
+    match postcard::take_from_bytes(body) {
+        Ok((message, [])) => Ok(message),
+        _ => Err(TransportError::Malformed),
+    }
 }
-

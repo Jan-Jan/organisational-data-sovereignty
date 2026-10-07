@@ -105,11 +105,26 @@ satisfies: derived
 
 **REQ-3dsweu**: The software shall send a committed update as a Wire message
 of the Organisation-information kind only to a Device the committed Membership
-record lists, and to any other Device as a Wire message of the revocation
-kind, which carries no Organisation private key; and shall refuse with a typed
-error, leaving the store unchanged, a received revocation after whose verified
-Membership record the receiving Device is still listed.
+record lists, and to a Device the previous record listed and the committed one
+does not only the revocation of REQ-ps2gy2, which carries no Organisation
+private key, Envelope, Change set or record snapshot; it shall send nothing for
+that update to any other Device.
 satisfies: derived
+
+*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3 of
+`docs/plans/2026-10-06-org-io-roadmap.md`; owner ruling 2 on the sweep of
+`fdf4e77`: a revoked device receives only an absence proof).* This said a
+revocation is "a Wire message of the revocation kind, which carries no
+Organisation private key" — it carried the committed Envelope — sent "to any
+other Device", and that a received revocation is refused when the receiving
+Device is still listed after its verified Membership record. The revocation
+now holds only the revoked Device's identity and an absence proof
+(REQ-ps2gy2), and it goes only to a Device the update removed. The "still
+listed" refusal is REQ-m2xh8q's: an absence proof for a Device the chain's
+record lists does not verify, so a relay that relabels Organisation
+information as a revocation has nothing to relabel it into. "Any other
+Device" was narrowed because a Device neither record lists has no notice to
+receive.
 
 **REQ-vxqc5g**: The software shall refuse with a typed error, leaving the
 store unchanged, a received Wire message of the revocation kind about an

@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use org_members::{DevicePublicKey, Handle, MemberId, Name, PersonPublicKey, RootHash, Surname};
 
+use crate::chain::OrgState;
 use crate::ids::OrgId;
 use crate::types::{
     ChainAccount, DeviceSeed, Epoch, MemberSeed, OrgPrivateKey, OrgPublicKey, PersonaId,
@@ -130,6 +131,10 @@ pub struct OrgRecord {
     /// LLR-4kh9w9). It renders under `Debug` as its redacted secret type
     /// (LLR-2dvhz8).
     pub org_private_key: OrgPrivateKey,
+    /// The Change set bytes of the Envelope the last commit verified, `None`
+    /// on a record `commit_genesis` creates; a first admission keeps the
+    /// admitting Envelope's Change set (LLR-d9778a). Sent to nobody.
+    pub kept_change_set: Option<Vec<u8>>,
 }
 
 /// An `OrgRecord` as decoded, before parsing (LLR-8bum44).
@@ -143,6 +148,7 @@ pub(crate) struct RawOrgRecord {
     trie_members: Vec<RawMemberSnapshot>,
     proxy_account: Option<ChainAccount>,
     org_private_key: OrgPrivateKey,
+    kept_change_set: Option<Vec<u8>>,
 }
 
 impl TryFrom<RawOrgRecord> for OrgRecord {
@@ -162,6 +168,7 @@ impl TryFrom<RawOrgRecord> for OrgRecord {
                 .collect::<Result<_, _>>()?,
             proxy_account: raw.proxy_account,
             org_private_key: raw.org_private_key,
+            kept_change_set: raw.kept_change_set,
         })
     }
 }
@@ -357,6 +364,45 @@ impl StoreData {
             None => self.provisional_updates.push(update),
         }
         Ok(())
+    }
+
+    /// The stored provisional update for `org_id` whose resulting root and
+    /// Organisation public key `chain` holds: the update the chain carries,
+    /// if this node built it (LLR-cmdrp9, LLR-gr8x3r).
+    pub(crate) fn held_update_for(&self, org_id: OrgId, chain: &OrgState) -> Option<&ProvisionalUpdate> {
+        self.provisional_updates.iter().find(|update| {
+            update.org_id == Some(org_id)
+                && update.resulting_root == chain.root_hash
+                && update.org_pub_key == chain.org_pub_key
+        })
+    }
+
+    /// The store without anything of `org_id` (LLR-pba7yu): its record, its
+    /// provisional updates, its expectations, its Personas and the genesis
+    /// updates they built. Adds nothing in their place; everything else keeps
+    /// its order.
+    pub fn forget_organisation(&self, org_id: OrgId) -> StoreData {
+        let forgotten_personas: Vec<&PersonaId> = self
+            .personas
+            .iter()
+            .filter(|persona| persona.org_id == Some(org_id))
+            .map(|persona| &persona.persona_id)
+            .collect();
+        let keeps_update = |update: &&ProvisionalUpdate| match update.org_id {
+            Some(update_org_id) => update_org_id != org_id,
+            None => !forgotten_personas.contains(&&update.persona_id),
+        };
+        StoreData {
+            personas: self.personas.iter().filter(|persona| persona.org_id != Some(org_id)).cloned().collect(),
+            orgs: self.orgs.iter().filter(|record| record.org_id != org_id).cloned().collect(),
+            provisional_updates: self.provisional_updates.iter().filter(keeps_update).cloned().collect(),
+            expected_admissions: self
+                .expected_admissions
+                .iter()
+                .filter(|expectation| expectation.org_id != org_id)
+                .copied()
+                .collect(),
+        }
     }
 }
 

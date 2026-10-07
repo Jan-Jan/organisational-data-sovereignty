@@ -98,17 +98,36 @@ The types this change alters:
 
 `org-node/src/transport/wire.rs`.
 
-**LLR-js9dsu**: `WireMessage` is an enum with exactly two variants, encoded by
-postcard as the variant index followed by the variant's fields in order:
+**LLR-js9dsu**: `WireMessage` is an enum with exactly three variants, encoded
+by postcard as the variant index followed by the variant's fields in order:
 `OrgInformation { envelope: Envelope, record_snapshot: Vec<u8>,
-org_private_key: OrgPrivateKey }` (index 0) and `Revocation { envelope:
-Envelope }` (index 1). No field of either is optional, and neither carries an
-invite identifier or any other secret. `WireMessage::envelope(&self) ->
-&Envelope` returns the Envelope of either variant. `decode_body` refuses with
-`Malformed`, and does not panic, a body whose variant index is neither 0 nor
-1, and an `OrgInformation` body that ends before its record snapshot or before
-the 32 bytes of its Organisation private key.
+org_private_key: OrgPrivateKey }` (index 0), `Revocation(RevocationNotice)`
+(index 1, LLR-dc45ur) and `Acknowledgement(Acknowledgement)` (index 2,
+LLR-378cj4). No field of any is optional, and none carries an invite
+identifier or any other secret. `WireMessage::org_id(&self) -> OrgId` returns
+the Organisation identifier of any variant; there is no accessor for an
+Envelope, which only `OrgInformation` holds. `decode_body` refuses with
+`Malformed`, and does not panic, a body whose variant index is not 0, 1 or 2,
+an `OrgInformation` body that ends before its record snapshot or before
+the 32 bytes of its Organisation private key, and a body of any of the three
+kinds with bytes left over after its last field.
 satisfies: REQ-c29s93, REQ-3dsweu
+
+*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3;
+REQ-3dsweu as amended there, REQ-ps2gy2).* This had two variants, the second
+`Revocation { envelope: Envelope }`, and an accessor
+`WireMessage::envelope()` for either. The revocation now holds a
+`RevocationNotice` (the revoked Device's identity and an absence proof, no
+Envelope), and the acknowledgement a revoked Device signs is the third
+variant (`org-node/docs/architecture/2026-10-07-commit-workflow.md`).
+
+*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, review
+finding-3 of round 1).* `decode_body` refuses leftover bytes after the
+message for every kind (`postcard::take_from_bytes`), since S3 T4; this LLR
+did not say so for `OrgInformation`, and LLR-dc45ur and LLR-378cj4 state it
+only for the other two kinds. The last clause of the refusals ("a body of any
+of the three kinds with bytes left over after its last field") is added; the
+behaviour is unchanged.
 
 **LLR-ecxc76**: the `Debug` rendering of a `WireMessage` of either variant
 contains none of the bytes of the Organisation private key it holds, in any
@@ -130,9 +149,19 @@ is not the chain's Organisation public key (LLR-ba2ejp);
 `RevocationNotHeld { org_id: OrgId }`, whose `Display` names the
 Organisation, for a revocation about an Organisation the node holds no record
 of (LLR-38e2kn); and `RevocationNotForThisDevice { org_id: OrgId }`, whose
-`Display` names the Organisation, for a revocation after whose verified
-Membership record this node's Device is still listed (LLR-pt32fx).
-satisfies: REQ-c29s93, REQ-bwx7eg, REQ-vxqc5g, REQ-3dsweu
+`Display` names the Organisation, for a revocation whose MemberId and
+DevicePublicKey are not those of a Persona bound to that Organisation
+(LLR-r7zm39).
+satisfies: REQ-c29s93, REQ-bwx7eg, REQ-vxqc5g, REQ-3dsweu, REQ-qrtsc9
+
+*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3).*
+`RevocationNotForThisDevice` was "for a revocation after whose verified
+Membership record this node's Device is still listed". A revocation is no
+longer verified as an update: it names one Device, and is refused with this
+variant, before any chain state is used, when that Device is not one of this
+node's Personas (REQ-qrtsc9). A revocation for this node's Device that the
+chain's record still lists fails its absence proof and is refused with
+`RevocationProofRefused` (LLR-tx8ruv, REQ-m2xh8q).
 
 **LLR-qsjde3**: org-node defines no `OrgSecret` type and re-exports none: no
 record, store plaintext, Wire message, provisional update or `OrgService`
@@ -178,18 +207,29 @@ record's `org_pub_key` and `org_private_key` are not changed by building the
 update.
 satisfies: REQ-stx9v3
 
-**LLR-6ymd6d**: `send_update(outgoing, recipient, peer_addr)` looks up the
-node's record of `outgoing.envelope.org_id`, refusing with `OrgNotOnChain`
+**LLR-6ymd6d**: `send_update(outcome: &CommitOutcome, recipient, peer_addr)`
+looks up the node's record of `outcome.org_id`, refusing with `OrgNotOnChain`
 and sending nothing when it holds none, and chooses the kind from that record
-alone: when a member snapshot of the record lists `recipient` among its
-DevicePublicKeys it sends `WireMessage::OrgInformation` holding
-`outgoing.envelope`, `outgoing.record_snapshot` and the Organisation private
-key of the epoch the update reaches, as that record's `org_private_key` holds
-it (a clone; nothing is drawn); otherwise it sends `WireMessage::Revocation` holding
-`outgoing.envelope` only. Neither `ProvisionalUpdate`, `OutgoingUpdate` nor
-`CommitOutcome` holds a kind, a key or a recipient, and the kind does not
-depend on which operation built the update.
+and the outcome alone: when a member snapshot of the record lists `recipient`
+among its DevicePublicKeys it sends `WireMessage::OrgInformation` holding
+`outcome.outgoing.envelope`, `outcome.outgoing.record_snapshot` and the
+Organisation private key of the epoch the update reaches, as that record's
+`org_private_key` holds it (a clone; nothing is drawn); otherwise, when
+`outcome.revocations` holds a notice whose `device` is `recipient`, it sends
+`WireMessage::Revocation` holding that notice; otherwise it refuses with
+`NoRevocationForRecipient { org_id }` and sends nothing. Neither
+`ProvisionalUpdate` nor `OutgoingUpdate` holds a kind, a key or a recipient,
+and the kind does not depend on which operation built the update.
 satisfies: REQ-3dsweu, REQ-szq3ud
+
+*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3;
+REQ-3dsweu as amended there).* This took the `OutgoingUpdate` and sent any
+Device the record does not list `WireMessage::Revocation` holding the
+committed Envelope. The revoked Device now receives only its notice
+(LLR-a8z7r5, REQ-ps2gy2), which `send_update` takes from the outcome, and a
+Device neither record lists receives nothing. Until stages S2 and S4 move the
+send into org-io, org-node still sends; after S4, org-io sends the same
+messages and this item's kind rule moves with the send (S4's plan).
 
 The record consulted is the one the node holds when `send_update` runs, which
 is the committed record the outgoing update came from unless a later commit
@@ -223,8 +263,14 @@ has shown to be the public half of the stored `org_private_key`
 (LLR-ckk5nz), so the record never pairs a public key with a private key that
 is not its own half; a first admission creates the record with it
 (LLR-xq9nrq). A revocation never sets either key: it is either refused
-(LLR-pt32fx) or deletes the record (LLR-6p4pj2, LLR-b27jr6).
+or accepted, and an accepted one forgets the Organisation (LLR-pt32fx,
+LLR-r8qhky).
 satisfies: REQ-ju6vn2
+
+*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3).*
+This said an accepted revocation "deletes the record (LLR-6p4pj2,
+LLR-b27jr6)"; it is now decided by `revocation::accept` and forgets the
+Organisation through `forget_organisation`.
 
 **LLR-xn5pwc**: `receive_one` returns `OrgNodeError::MalformedMessage` when
 `recv_one` refuses the received body with `TransportError::Malformed`, so an
@@ -248,26 +294,50 @@ key and is not checked.
 satisfies: REQ-bwx7eg
 
 **LLR-38e2kn**: on a `Revocation` about an Organisation the node holds no
-record of, `receive_and_verify` refuses with `RevocationNotHeld { org_id }`
-before consulting the expected admissions and with no `read_state` call,
-creating no record, clearing no expectation and writing nothing; an
-expectation for that Organisation stays in place.
-`receive_and_self_delete_if_revoked` refuses such a message, as any message
-about an unheld Organisation, with `OrgNotOnChain` before any chain read
-(LLR-379hnv).
+record of, `receive_and_verify` and `receive_and_self_delete_if_revoked`
+refuse with `RevocationNotHeld { org_id }`, through `revocation::check_notice`
+(LLR-r7zm39), before consulting the expected admissions and with no
+`read_state` call, creating no record, clearing no expectation and writing
+nothing; an expectation for that Organisation stays in place.
 satisfies: REQ-vxqc5g
 
-**LLR-pt32fx**: on a `Revocation` about an Organisation the node holds a
-record of, `receive_and_verify` and `receive_and_self_delete_if_revoked`,
-once the message has verified against the chain state read by their one
-`read_state` call, and before any commit, record deletion, Persona change or
-provisional-update removal, decide from the verified Membership record alone:
-when it still lists the DevicePublicKey of any Persona bound to that
-Organisation (the test `still_member` makes), they refuse with
-`RevocationNotForThisDevice { org_id }`, leaving the record, its keys, the
-Personas and the provisional updates unchanged and writing nothing; otherwise
-the revocation is this node's own removal, and they delete the record and
-mark its Personas Revoked (LLR-6p4pj2, LLR-b27jr6). A revocation therefore
-never commits an update into a record the node keeps, and an
-Organisation-information message is never refused by this check.
-satisfies: REQ-3dsweu
+*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3).*
+`receive_and_self_delete_if_revoked` refused such a message with
+`OrgNotOnChain`, as any message about an unheld Organisation (LLR-379hnv). A
+revocation is now decided by `revocation::check_notice` on both paths, so
+both refuse it with `RevocationNotHeld`; LLR-379hnv still governs an
+Organisation-information message about an unheld Organisation.
+
+**LLR-pt32fx**: on a `Revocation(notice)`, `receive_and_verify` and
+`receive_and_self_delete_if_revoked` run `revocation::check_notice`
+(LLR-r7zm39) and return its refusal with no `read_state` call; otherwise they
+make their one `read_state` call and pass its state (`None` for an
+Organisation with no on-chain state), the notice, and the device seeds of the
+Personas bound to that Organisation to `revocation::accept` (LLR-tx8ruv).
+On a refusal they return it, leaving the record, its keys, the Personas and
+the provisional updates unchanged and writing nothing. On acceptance they
+adopt the successor store, save it, and return the acknowledgements:
+`receive_and_self_delete_if_revoked` as `SelfDeleteOutcome::SelfDeleted {
+org_id, acknowledgements }`, `receive_and_verify` in
+`ReceiveOutcome.acknowledgements` with the state's epoch and root. On an
+`Acknowledgement(ack)` both run `revocation::check_acknowledgement`
+(LLR-5azhry) with no `read_state` call and write nothing:
+they return its refusal, or, when it verifies,
+`receive_and_self_delete_if_revoked` returns
+`SelfDeleteOutcome::Acknowledged(verified)` and `receive_and_verify` returns
+it in `ReceiveOutcome.acknowledged`, with the record's epoch and root and no
+acknowledgements. A revocation never commits an update into a record the
+node keeps, and an Organisation-information message never reaches
+`revocation::accept`.
+satisfies: REQ-3dsweu, REQ-m2xh8q, REQ-b462sh
+
+*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3;
+REQ-3dsweu and REQ-m2xh8q).* This verified a revocation "as any update"
+against its Envelope and then, from the verified record, refused it with
+`RevocationNotForThisDevice` when a Persona bound to the Organisation was
+still listed, or deleted the record and marked the Personas Revoked. A
+revocation now holds an absence proof, checked against the chain's current
+root, and an accepted one forgets the Organisation and signs the
+acknowledgements first (REQ-uxv2x2, REQ-y99c9w). The device seeds come from
+the Personas `OrgService` holds until stage S4 moves the seed to the OS
+keychain; then org-io supplies them.

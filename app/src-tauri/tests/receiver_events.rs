@@ -210,6 +210,15 @@ fn self_delete_emits_no_epoch_event() {
     }
 }
 
+/// verifies: LLR-2vg79y
+///
+/// A received acknowledgement announces nothing to the UI (S3: org-io keeps
+/// it, from S3b-io).
+#[test]
+fn a_received_acknowledgement_emits_nothing() {
+    assert!(events::emissions_for(&ReceiverOutcome::AcknowledgementReceived { org_id: org() }).is_empty());
+}
+
 // verifies: LLR-2vg79y
 #[test]
 fn self_delete_emits_revoked_naming_the_organisation() {
@@ -725,6 +734,58 @@ fn the_stop_is_announced_after_the_failure_for_the_same_error() {
 // ---------------------------------------------------------------------------
 // REQ-kn5rtx — a variant reachable from a local condition is not a verdict
 // ---------------------------------------------------------------------------
+
+// verifies: LLR-7bk6qh
+#[test]
+fn the_commit_workflow_refusals_are_classified_as_receiver_errors() {
+    // The ten refusals org-node gained with the commit workflow (S3). None is
+    // a verdict of `verify_envelope_against_chain` on an update: the
+    // reconcile refusals are about a chain state read or the node's own
+    // record, a revocation's proof and an acknowledgement are not updates
+    // shown under "Verified Updates (chain root match)", and the device
+    // secret and the recipient refusals are about the caller. A misfiled
+    // verdict is the hazard (HAZ-9fmhm4), a misfiled receiver error merely
+    // less specific, so each is a receiver error.
+    let org_id = org_node::OrgId::new([1; 20]);
+    for e in [
+        OrgNodeError::OrgNotHeld { org_id },
+        OrgNodeError::StaleChainState {
+            org_id,
+            chain_epoch: org_node::Epoch::new(1),
+            record_epoch: org_node::Epoch::new(2),
+        },
+        OrgNodeError::ChainStateConflict { org_id },
+        OrgNodeError::RevocationProofRefused { org_id, cause: OrgMembersError::IdNotFound },
+        OrgNodeError::AcknowledgementNotHeld { org_id },
+        OrgNodeError::AcknowledgementFromFuture { org_id },
+        OrgNodeError::AcknowledgementForListedDevice { org_id },
+        OrgNodeError::AcknowledgementSignatureInvalid { org_id },
+        OrgNodeError::DeviceSecretNotSupplied { org_id },
+        OrgNodeError::NoRevocationForRecipient { org_id },
+    ] {
+        assert_eq!(
+            events::classify_receive_error(&e),
+            ReceiverOutcome::ReceiveError { message: e.to_string() },
+            "{e:?} must be a receiver error"
+        );
+    }
+}
+
+// verifies: LLR-7bk6qh
+#[test]
+fn the_sender_refusals_are_classified_as_receiver_errors() {
+    // Owner rulings of 2026-10-07: a message from a Device the record does
+    // not list, or an acknowledgement not sent by its own Device, is refused
+    // before anything is verified, so neither is a verdict on an update.
+    let org_id = org_node::OrgId::new([1; 20]);
+    for e in [OrgNodeError::SenderNotListed { org_id }, OrgNodeError::AcknowledgementNotFromItsDevice { org_id }] {
+        assert_eq!(
+            events::classify_receive_error(&e),
+            ReceiverOutcome::ReceiveError { message: e.to_string() },
+            "{e:?}"
+        );
+    }
+}
 
 // verifies: LLR-7bk6qh
 #[test]

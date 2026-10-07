@@ -9,9 +9,15 @@ stage S3 of that roadmap.
 the member snapshots as they were before the update, every member's record
 included, so a device removed from the Organisation — possibly a stolen
 one — receives the full membership on its way out.
-affects: LLR-8hdu9x, HAZ-vxabf9
+affects: LLR-8hdu9x, LLR-6ymd6d, LLR-js9dsu, HAZ-vxabf9
 opened: 2026-10-06
-status: open
+status: resolved
+resolution: 2026-10-07 (change `worktree-org-io-commit-workflow`, S3 T8) — a
+commit returns one revocation notice per removed Device, holding only that
+Device's identity and an absence proof (LLR-kr5t6f, LLR-a8z7r5), and
+`send_update` sends a removed Device its notice and nothing else (LLR-6ymd6d,
+LLR-8hdu9x as amended); reproduced by `a_revoked_device_receives_only_its_notice`
+(`org-node/tests/service_stories.rs`): red before, green after.
 
 Where: LLR-8hdu9x (`org-node/docs/architecture/2026-10-03-decomposition.md`)
 states that the Wire message `send_update` sends carries the member snapshots
@@ -40,3 +46,23 @@ LLR-6ymd6d as amended there; test
 The disclosure described above, every Member's record, no longer occurs. The
 item stays open for the owner's fix: the revoked Device receives an absence
 proof rather than the Envelope's Change set, in S3.
+
+*Note 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3, after
+its merge of master `1f52c36`).* What remains, and what S3 fixes: the
+revocation still carries the committed Envelope, whose Change set holds every
+leaf the update upserts. With today's batches of one that is at most the
+revoked Member's own leaf, but a provisional update is a batch (the key-pair
+change's ruling), and then the Change set carries other Members' leaves. The
+revoked Device also cannot act on it unless it holds the Change set's base
+record and the chain still holds that update's root. S3 replaces the
+Envelope with a notice holding only the Device's identity and an absence
+proof (REQ-ps2gy2, LLR-kr5t6f, LLR-dc45ur; REQ-3dsweu, LLR-js9dsu,
+LLR-6ymd6d and LLR-8hdu9x amended), verified against the chain's current
+root (REQ-m2xh8q). The reproducing test, written red first in S3, revokes one
+Device in a two-Member Organisation and asserts the message the revoked
+Device receives decodes to a revocation holding no Envelope, Change set,
+snapshot or key and no leaf of the other Member. Still open until S3 merges.
+
+*Resolved 2026-10-07 (change `worktree-org-io-commit-workflow`, plan task
+T12).* S3 T8 replaced the Envelope with the notice; see the `resolution:`
+line above.

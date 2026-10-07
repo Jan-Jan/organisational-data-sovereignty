@@ -195,7 +195,7 @@ async fn each_command_sends_once_to_one_device_and_the_kind_follows_the_record()
     tokio::time::sleep(Duration::from_millis(50)).await;
     revoke_and_send(&mut a, &writer, &mut OsRng, org, bob_id, Some(addr)).await.unwrap();
     let (sink, got) = task.await.unwrap();
-    assert!(matches!(got.unwrap().1, WireMessage::Revocation { .. }), "the removed Device is not listed");
+    assert!(matches!(got.unwrap().1, WireMessage::Revocation(_)), "the removed Device is not listed");
     assert!(
         tokio::time::timeout(Duration::from_secs(2), sink.recv_one()).await.is_err(),
         "nothing else is sent"

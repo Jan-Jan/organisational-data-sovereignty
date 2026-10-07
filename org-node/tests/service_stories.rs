@@ -12,20 +12,23 @@
 //! The gate: `cargo test -p org-node --features app --test service_stories`
 
 #![cfg(feature = "app")]
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod support;
 use support::{
-    admit, device_kp, found, h, joiner_of, nm, open_store, prepare_to_join, reopen_store, revoke, revoke_and_tell, sn,
-    spawn_receive, spawn_self_delete,
+    admit, admit_b_directly, captured_admission_of_c, dead_addr, deliver_from_to_receive, deliver_from_to_self_delete,
+    device_kp, found, h,
+    id_by_handle, joiner_for_c, joiner_of, nm, open_store, prepare_to_join, rec_of, reopen_store, revoke,
+    revoke_and_tell, setup, sn, spawn_receive, spawn_recv_one, spawn_self_delete,
 };
+use org_node::transport::wire::WireMessage;
 
 use std::time::Duration;
 
 use org_node::service::{MockChainOps, OrgService, SelfDeleteOutcome};
 use org_node::store::PersonaStatus;
 use org_node::transport::endpoint::OrgEndpoint;
-use org_node::{DeviceSeed, Epoch, SequenceNumber};
+use org_node::{DeviceSeed, Epoch};
 
 // The proper end-to-end test that runs all 5 stories in one function.
 // `five_stories_headless` (stories 1-4 only, no invite) was
@@ -184,14 +187,14 @@ async fn five_stories_full_e2e() {
     // Collect B's self-delete result.
     let (svc_b_final, delete_outcome) = revoke_recv_handle.await.unwrap();
 
-    match delete_outcome {
-        SelfDeleteOutcome::SelfDeleted { org_id: oid } => {
-            assert_eq!(oid, org_id, "self-deleted org_id must match");
-        }
-        SelfDeleteOutcome::UpdatedNotRevoked { .. } => {
-            panic!("expected SelfDeleted but got UpdatedNotRevoked");
-        }
-    }
+    // S3: B acts on its notice, signs one acknowledgement, and forgets the
+    // Organisation with its Persona (REQ-uxv2x2 as amended).
+    let SelfDeleteOutcome::SelfDeleted { org_id: oid, acknowledgements } = delete_outcome else {
+        panic!("expected SelfDeleted, got {delete_outcome:?}");
+    };
+    assert_eq!(oid, org_id, "self-deleted org_id must match");
+    assert_eq!(acknowledgements.len(), 1, "one acknowledgement, B's");
+    assert_eq!(acknowledgements[0].member_id, b_member_id);
 
     // B must no longer have the OrgRecord.
     assert_eq!(
@@ -200,11 +203,10 @@ async fn five_stories_full_e2e() {
         "B must have no OrgRecords after self-delete"
     );
 
-    // B's persona must be Revoked.
-    assert_eq!(
-        svc_b_final.list_personas().iter().find(|p| p.persona_id == pid_b).unwrap().status,
-        PersonaStatus::Revoked,
-        "B's persona must be Revoked after self-delete"
+    // B's persona is deleted with its keys (was: marked Revoked).
+    assert!(
+        svc_b_final.list_personas().iter().all(|p| p.persona_id != pid_b),
+        "B's persona must be gone after self-delete"
     );
 
     // A still has the org at epoch 3 with only its founding member in the trie.
@@ -218,8 +220,9 @@ async fn five_stories_full_e2e() {
 // Abnormal case of the self-delete rule: a revocation Change set that removes a
 // *different* member must be verified, committed as an ordinary update, and must
 // NOT trigger a self-delete. Story 5 above is the normal case (the device's own
-// removal); this is the other side of the same requirement.
-// verifies: REQ-uxv2x2, LLR-jsx922
+// removal); this is the other side of the same requirement. On both receive
+// paths B keeps the received Envelope's Change set (LLR-d9778a).
+// verifies: REQ-uxv2x2, LLR-jsx922, LLR-d9778a
 #[tokio::test(flavor = "multi_thread")]
 async fn revocation_of_another_member_is_committed_not_self_deleted() {
     use rand::rngs::OsRng;
@@ -277,6 +280,11 @@ async fn revocation_of_another_member_is_committed_not_self_deleted() {
     let outcome = r.expect("B must accept C's admission pushed by A's own device");
     assert_eq!(outcome.epoch, Epoch::new(3), "B must commit epoch 3");
     assert_eq!(svc_b.list_orgs()[0].trie_members.len(), 3, "A + B + C");
+    // B keeps the Change set of the Envelope it received — the one A
+    // committed and sent (LLR-d9778a).
+    let a_kept = svc_a.list_orgs()[0].kept_change_set.clone();
+    assert!(a_kept.is_some(), "A keeps the Change set it committed");
+    assert_eq!(svc_b.list_orgs()[0].kept_change_set, a_kept, "B keeps the received Envelope's Change set");
 
     // ---- A revokes C; B receives the revocation ----
     let (b_addr, b_task) = spawn_self_delete(svc_b, &b_device_kp).await;
@@ -297,9 +305,7 @@ async fn revocation_of_another_member_is_committed_not_self_deleted() {
         SelfDeleteOutcome::UpdatedNotRevoked { org_id: oid } => {
             assert_eq!(oid, org_id, "the updated org_id must match");
         }
-        SelfDeleteOutcome::SelfDeleted { .. } => {
-            panic!("B must not self-delete when a different member is revoked");
-        }
+        other => panic!("B must not self-delete when a different member is revoked, got {other:?}"),
     }
 
     // B's OrgRecord must still be there, advanced to epoch 4 without C.
@@ -317,6 +323,11 @@ async fn revocation_of_another_member_is_committed_not_self_deleted() {
         "B's committed root must match the on-chain root"
     );
     assert_eq!(rec_b.trie_members.len(), 2, "A + B only");
+    // The self-delete path keeps the received Envelope's Change set too,
+    // replacing the admission's (LLR-d9778a).
+    let a_kept = svc_a.list_orgs()[0].kept_change_set.clone();
+    assert!(a_kept.is_some(), "A keeps the revocation's Change set");
+    assert_eq!(rec_b.kept_change_set, a_kept, "B keeps the received revocation's Change set");
     assert!(
         !rec_b.trie_members.iter().any(|m| m.id == c_member_id),
         "C must be gone from B's trie snapshot"
@@ -335,14 +346,22 @@ async fn revocation_of_another_member_is_committed_not_self_deleted() {
     );
 }
 
-// Abnormal-input case of the self-delete rule: a revocation Change set that
-// removes this node's own DevicePublicKey, well formed and naming the right
-// Organisation, but never published on chain, delivered by a device in no
-// member's slots of the node's record. Nothing about the sender is checked
-// (LLR-3q63zv, amended 2026-10-05); the chain refuses it, and the refusal
-// leaves the OrgRecord exactly as it was. The node must never delete its
-// record of the Organisation on a message it refused.
-// verifies: REQ-uxv2x2, LLR-6qmq2g, LLR-vw2jn6, LLR-3q63zv
+// Abnormal-input case of the self-delete rule: a revocation of this node's
+// own DevicePublicKey, well formed and naming the right Organisation, whose
+// absence proof is genuine under a removal never published on chain,
+// delivered by a device in no member's slots of the node's record. The
+// member-sender rule refuses it with `SenderNotListed` (owner ruling R1 of
+// 2026-10-07, LLR-kzgjz8); the same notice from A's listed device reaches the
+// chain, which refuses it — the proof does not verify under its root. Each
+// refusal leaves the OrgRecord exactly as it was. The node must never delete
+// its record of the Organisation on a message it refused.
+// *Rewritten 2026-10-07 (S3 T9):* the forged message was a revocation
+// Envelope refused as `StaleEpoch`; a revocation now holds a notice, refused
+// as `RevocationProofRefused` (LLR-pt32fx, LLR-tx8ruv).
+// *Rewritten 2026-10-07 (S3 T12a):* split into the refusal from the forger
+// and the chain's refusal from a listed device (was: the forger reached the
+// chain, nothing about the sender being checked).
+// verifies: REQ-uxv2x2, LLR-6qmq2g, LLR-vw2jn6, LLR-3q63zv, LLR-pt32fx, LLR-kzgjz8, LLR-tx8ruv
 #[tokio::test(flavor = "multi_thread")]
 async fn revocation_from_an_unknown_device_leaves_the_record_in_place() {
     use rand::rngs::OsRng;
@@ -350,8 +369,8 @@ async fn revocation_from_an_unknown_device_leaves_the_record_in_place() {
     use org_members::hasher::Blake3Hasher;
     use org_members::trie::OrgTrie;
     use org_members::MemberLeaf;
-    use org_node::envelope::Envelope;
     use org_node::error::OrgNodeError;
+    use org_node::revocation::RevocationNotice;
     use org_node::store::MemberSnapshot;
     use org_node::keys::{SigningKeypair, X25519Keypair};
     use org_node::transport::wire::WireMessage;
@@ -439,17 +458,21 @@ async fn revocation_from_an_unknown_device_leaves_the_record_in_place() {
         "the rebuilt trie must reproduce B's committed root"
     );
 
-    // The Change set really does remove B's own Device key: were verification
-    // skipped or its error ignored, the self-delete branch would fire on it.
-    let (_after, delta) = b_trie
+    // The removal really does remove B's own Device key, and its absence
+    // proof is genuine — under a root the chain never published: were the
+    // proof not checked against the chain, the self-delete would fire on it.
+    let (after, _delta) = b_trie
         .delete_member(&b_member_id)
         .unwrap()
         .recalculate()
         .unwrap();
+    let b_device = b_device_kp.device_key().unwrap();
+    let proof = after.prove_absent(&b_member_id, &b_device).unwrap();
+    proof.verify::<Blake3Hasher>(&after.root_hash().unwrap(), &b_member_id, &b_device).unwrap();
 
-    // No signature to forge any more, and the sender is not checked: only the
-    // chain gives it away. The forging device is in no member's slots of B's
-    // record.
+    // No signature to forge any more. The forging device is in no member's
+    // slots of B's record, which the sender check catches; from a listed
+    // device, only the chain gives it away.
     let forger_device = DeviceSeed::from([0x77u8; 32]).signing_keypair();
     assert!(
         !svc_b.list_orgs()[0]
@@ -458,10 +481,29 @@ async fn revocation_from_an_unknown_device_leaves_the_record_in_place() {
             .any(|m| m.device_keys.contains(&forger_device.device_key().unwrap())),
         "the forging device must not be in B's record"
     );
-    let envelope = Envelope::build(org_id, SequenceNumber::new(seq_before.get() + 1), &delta).unwrap();
-    let msg = WireMessage::Revocation { envelope };
+    // S3: a revocation holds a notice — B's identity and the absence proof —
+    // not an Envelope (rewritten at T9 from a forged revocation Envelope).
+    let msg = WireMessage::Revocation(RevocationNotice { org_id, member_id: b_member_id, device: b_device, proof });
 
-    // ---- B receives the forged revocation ----
+    // Nothing is deleted after either refusal.
+    let assert_nothing_deleted = |svc: &OrgService| {
+        assert_eq!(svc.list_orgs().len(), 1, "B must still hold its OrgRecord after a rejected revocation");
+        let rec = &svc.list_orgs()[0];
+        assert_eq!(rec.org_id, org_id);
+        assert_eq!(rec.epoch, epoch_before, "the record's epoch must be unchanged");
+        assert_eq!(rec.root_hash, root_before, "the record's root must be unchanged");
+        assert_eq!(rec.last_seq, seq_before, "the high-water mark must not advance");
+        assert_eq!(rec.trie_members.len(), members_before, "the record's member count must be unchanged");
+        assert_eq!(
+            svc.list_personas().iter().find(|p| p.persona_id == pid_b).unwrap().status,
+            PersonaStatus::Active,
+            "B's persona must stay Active after a rejected revocation"
+        );
+    };
+
+    // ---- B receives the forged revocation from the forging device ----
+    // *Rewritten 2026-10-07 (S3 T12a):* the member-sender rule (owner ruling
+    // R1, LLR-kzgjz8) refuses it before the chain is read.
     let (b_addr, b_task) = spawn_self_delete(svc_b, &b_device_kp).await;
 
     let ep_forger = OrgEndpoint::bind(&forger_device).await.unwrap();
@@ -470,38 +512,163 @@ async fn revocation_from_an_unknown_device_leaves_the_record_in_place() {
         .expect("forged send timed out")
         .expect("forged send failed");
 
-    let (svc_b_final, r) = b_task.await.unwrap();
+    let (mut svc_b, r) = b_task.await.unwrap();
+    assert_eq!(r.map(|_| ()), Err(OrgNodeError::SenderNotListed { org_id }));
+    assert_nothing_deleted(&svc_b);
 
-    // The requirement: the message is rejected, and nothing is deleted.
-    let err = r.expect_err("a revocation the chain never published must be rejected");
+    // ---- The same forged notice from A's listed device ----
+    // The chain refuses it: the proof does not verify under its root.
+    let a_seed = *a_device_kp.device_seed().expose_secret();
+    let err = deliver_from_to_self_delete(&mut svc_b, a_seed, msg)
+        .await
+        .expect_err("a revocation the chain never published must be rejected");
     assert!(
-        matches!(err, OrgNodeError::StaleEpoch { .. }),
-        "expected StaleEpoch (the chain holds no newer state), got {err:?}"
+        matches!(err, OrgNodeError::RevocationProofRefused { org_id: refused, .. } if refused == org_id),
+        "expected RevocationProofRefused (the proof is not under the chain's root), got {err:?}"
     );
-
-    assert_eq!(
-        svc_b_final.list_orgs().len(),
-        1,
-        "B must still hold its OrgRecord after a rejected revocation"
-    );
-    let rec = &svc_b_final.list_orgs()[0];
-    assert_eq!(rec.org_id, org_id);
-    assert_eq!(rec.epoch, epoch_before, "the record's epoch must be unchanged");
-    assert_eq!(rec.root_hash, root_before, "the record's root must be unchanged");
-    assert_eq!(rec.last_seq, seq_before, "the high-water mark must not advance");
-    assert_eq!(
-        rec.trie_members.len(),
-        members_before,
-        "the record's member count must be unchanged"
-    );
-    assert_eq!(
-        svc_b_final
-            .list_personas()
-            .iter()
-            .find(|p| p.persona_id == pid_b)
-            .unwrap()
-            .status,
-        PersonaStatus::Active,
-        "B's persona must stay Active after a rejected revocation"
-    );
+    assert_nothing_deleted(&svc_b);
 }
+
+/// verifies: LLR-8hdu9x, LLR-6ymd6d, LLR-a8z7r5
+///
+/// PR-qmvj83: revoking B in a two-Member Organisation sends B's Device a
+/// revocation holding only B's identity and an absence proof that verifies
+/// against the chain's root — no Envelope, Change set, snapshot, key, or any
+/// leaf of A.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_revoked_device_receives_only_its_notice() {
+    use org_node::transport::wire::WireMessage;
+
+    let mut s = admit_b_directly(setup("pr-qmvj83").await).await;
+    let b_id = id_by_handle(&rec_of(&s.svc_a, s.org_id), "bob");
+    let (sink_addr, sink) = spawn_recv_one(*s.b_device_kp.device_seed().expose_secret()).await;
+    revoke(&mut s.svc_a, &s.chain, s.org_id, b_id, Some(sink_addr)).await.unwrap();
+    let (_endpoint, _sender, message) = sink.await.unwrap();
+    let WireMessage::Revocation(notice) = message else { panic!("a revocation") };
+    let b_device = s.b_device_kp.device_key().unwrap();
+    assert_eq!((notice.org_id, notice.member_id, notice.device), (s.org_id, b_id, b_device));
+    let root = s.chain.get(&s.org_id).unwrap().root_hash;
+    notice.proof.verify::<org_members::hasher::Blake3Hasher>(&root, &b_id, &b_device).unwrap();
+    let body = postcard::to_allocvec(&notice).unwrap();
+    let a_leaf = &rec_of(&s.svc_a, s.org_id).trie_members[0];
+    assert!(!body.windows(32).any(|window| window == a_leaf.member_key.as_bytes()), "no leaf of A");
+}
+
+/// verifies: LLR-6ymd6d, LLR-a8z7r5
+///
+/// An admission's outcome holds no notice; a revocation's holds exactly the
+/// removed pair; a Device neither record lists is sent nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn send_update_chooses_by_record_and_outcome() {
+    use org_node::error::OrgNodeError;
+    use org_node::test_fixtures::device_key;
+    use rand::rngs::OsRng;
+
+    let mut s = admit_b_directly(setup("send-choice").await).await;
+    let b_id = id_by_handle(&rec_of(&s.svc_a, s.org_id), "bob");
+    let update = s.svc_a.revoke_member(&mut OsRng, s.org_id, b_id).unwrap();
+    s.chain.apply_update(s.org_id, update.resulting_root, update.org_pub_key, rec_of(&s.svc_a, s.org_id).epoch).unwrap();
+    let outcome = s.svc_a.commit_update(&mut OsRng, s.org_id).await.unwrap();
+    let b_device = s.b_device_kp.device_key().unwrap();
+    assert_eq!(outcome.revocations.iter().map(|n| (n.member_id, n.device)).collect::<Vec<_>>(), vec![(b_id, b_device)]);
+    let stranger = device_key(42);
+    let refused = s.svc_a.send_update(&outcome, stranger, Some(dead_addr([42; 32]))).await;
+    assert!(matches!(refused, Err(OrgNodeError::NoRevocationForRecipient { org_id }) if org_id == s.org_id));
+    let joiner_c = joiner_for_c(&mut s.svc_a);
+    let admission = s.svc_a.admit_member(&mut OsRng, s.org_id, &joiner_c).unwrap();
+    s.chain.apply_update(s.org_id, admission.resulting_root, admission.org_pub_key, rec_of(&s.svc_a, s.org_id).epoch).unwrap();
+    assert!(s.svc_a.commit_update(&mut OsRng, s.org_id).await.unwrap().revocations.is_empty());
+}
+
+/// verifies: LLR-pt32fx, LLR-6p4pj2, LLR-23sfdh
+///
+/// Story 5: B receives its notice, accepts it against the chain, signs one
+/// acknowledgement, and forgets the Organisation and its Persona, on disk.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_revoked_node_acknowledges_then_forgets_everything() {
+    let mut s = admit_b_directly(setup("story5-s3").await).await;
+    let b_id = id_by_handle(&rec_of(&s.svc_a, s.org_id), "bob");
+    let (b_addr, b_task) = spawn_self_delete(s.svc_b, &s.b_device_kp).await;
+    revoke(&mut s.svc_a, &s.chain, s.org_id, b_id, Some(b_addr)).await.unwrap();
+    let (svc_b, outcome) = b_task.await.unwrap();
+    let SelfDeleteOutcome::SelfDeleted { org_id, acknowledgements } = outcome.unwrap() else { panic!("self-deleted") };
+    assert_eq!((org_id, acknowledgements.len()), (s.org_id, 1));
+    assert_eq!(acknowledgements[0].member_id, b_id);
+    let chain = s.chain.get(&s.org_id).unwrap();
+    assert_eq!((acknowledgements[0].epoch, acknowledgements[0].root), (chain.epoch, chain.root_hash));
+    assert!(svc_b.list_orgs().is_empty() && svc_b.list_personas().is_empty());
+    let disk = reopen_store("story5-s3", "b", "pw_b");
+    assert!(disk.data().orgs.is_empty() && disk.data().personas.is_empty());
+}
+
+/// verifies: LLR-b27jr6, LLR-jsx922, LLR-23sfdh
+///
+/// Organisation information about a commit that keeps B listed (C's
+/// admission) commits on `receive_and_verify` as an update with no
+/// acknowledgements. Organisation information about B's own removal —
+/// sent to A's listed Device and relayed to B — removes B through the one
+/// step: one acknowledgement under the chain's state, no record and no
+/// Persona, on disk.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_org_information_commit_that_removes_the_node_forgets_through_the_one_step() {
+    let mut s = admit_b_directly(setup("one-step").await).await;
+    let b_id = id_by_handle(&rec_of(&s.svc_a, s.org_id), "bob");
+
+    // Both messages come from A's Device, which B's record lists (owner
+    // ruling R1 of 2026-10-07, LLR-2r2fha; S3 T12a).
+    let a_seed = *device_kp(&s.svc_a, &s.pid_a).device_seed().expose_secret();
+    let admission = captured_admission_of_c(&mut s).await;
+    let kept = deliver_from_to_receive(&mut s.svc_b, a_seed, admission).await.unwrap();
+    assert_eq!(kept.epoch, Epoch::new(3));
+    assert!(kept.acknowledgements.is_empty() && kept.acknowledged.is_none());
+    assert_eq!(rec_of(&s.svc_b, s.org_id).trie_members.len(), 3, "A + B + C");
+
+    let a_device = device_kp(&s.svc_a, &s.pid_a).device_key().unwrap();
+    let (sink_addr, sink) = spawn_recv_one(rand::random()).await;
+    revoke_and_tell(&mut s.svc_a, &s.chain, s.org_id, b_id, a_device, sink_addr).await.unwrap();
+    let (_sink, _sender, removal) = sink.await.unwrap();
+    assert!(matches!(removal, WireMessage::OrgInformation { .. }), "A's Device is listed");
+    let removed = deliver_from_to_receive(&mut s.svc_b, a_seed, removal).await.unwrap();
+    let chain = s.chain.get(&s.org_id).unwrap();
+    assert_eq!((removed.org_id, removed.epoch, removed.root), (s.org_id, chain.epoch, chain.root_hash));
+    assert_eq!(removed.acknowledgements.len(), 1);
+    assert_eq!(removed.acknowledgements[0].member_id, b_id);
+    assert!(s.svc_b.list_orgs().is_empty() && s.svc_b.list_personas().is_empty());
+    let disk = reopen_store("one-step", "b", "pw_b");
+    assert!(disk.data().orgs.is_empty() && disk.data().personas.is_empty());
+}
+
+/// verifies: LLR-23sfdh
+///
+/// Abnormal (boundary of the one removal step): a commit that removes a
+/// Device, but not one of this node's, is no reason to forget. A commits C's
+/// removal and B receives it from A's listed Device: each still holds the
+/// Organisation and its Personas, in memory and on disk, and signs no
+/// acknowledgement.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_commit_that_removes_another_member_forgets_nothing() {
+    let mut s = admit_b_directly(setup("other-removed").await).await;
+    let a_seed = *device_kp(&s.svc_a, &s.pid_a).device_seed().expose_secret();
+    let admission = captured_admission_of_c(&mut s).await;
+    deliver_from_to_receive(&mut s.svc_b, a_seed, admission).await.unwrap();
+    let c_id = id_by_handle(&rec_of(&s.svc_a, s.org_id), "carol");
+    let a_personas = s.svc_a.list_personas().len();
+
+    let b_device = s.b_device_kp.device_key().unwrap();
+    let (sink_addr, sink) = spawn_recv_one(rand::random()).await;
+    revoke_and_tell(&mut s.svc_a, &s.chain, s.org_id, c_id, b_device, sink_addr).await.unwrap();
+    let (_sink, _sender, removal) = sink.await.unwrap();
+    assert_eq!(rec_of(&s.svc_a, s.org_id).trie_members.len(), 2, "A holds the record without C");
+    assert_eq!(s.svc_a.list_personas().len(), a_personas);
+
+    let received = deliver_from_to_receive(&mut s.svc_b, a_seed, removal).await.unwrap();
+    assert!(received.acknowledgements.is_empty());
+    assert_eq!((rec_of(&s.svc_b, s.org_id).epoch, rec_of(&s.svc_b, s.org_id).trie_members.len()), (Epoch::new(4), 2));
+    assert_eq!(s.svc_b.list_personas().len(), 1);
+    for (party, password) in [("a", "pw_a"), ("b", "pw_b")] {
+        let disk = reopen_store("other-removed", party, password);
+        assert_eq!(disk.data().orgs.len(), 1, "{party} keeps the Organisation on disk");
+        assert!(!disk.data().personas.is_empty());
+    }
+}
+

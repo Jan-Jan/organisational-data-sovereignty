@@ -21,10 +21,15 @@ pub use chain_read::OnChainReader;
 
 #[cfg(feature = "app")]
 pub mod store;
+// Under `transport`: the Wire message carries a notice or an acknowledgement.
+#[cfg(feature = "transport")]
+pub mod revocation;
 #[cfg(feature = "app")]
 pub mod service;
 #[cfg(feature = "app")]
 pub mod preflight;
+#[cfg(feature = "app")]
+pub mod reconcile;
 
 #[cfg(feature = "app")]
 pub use service::{

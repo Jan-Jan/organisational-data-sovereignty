@@ -131,6 +131,19 @@ provisional update while the chain has moved. By owner ruling (2026-10-05)
 this report stays open and is resolved in a later change; the citations below
 describe the code before that change.
 
+*Note 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3a, plan
+task T12).* The org-node half of the fix is done: every commit keeps the
+Change set that produced its record (`kept_change_set`, T7), and `reconcile`
+(T10, LLR-gr8x3r, LLR-fm38ww) compares the record with the chain after a
+crash and commits the kept provisional update the chain holds, or reports
+the node behind. What remains is org-io's (stage S3b-io, plan tasks
+T14–T15): the publish path that persists before it sends, and the startup
+reconcile that calls this. The item stays `open` for S3b-io and is not
+`accepted`. Its age on 2026-10-07 is 28 days against org-node's
+`problem_age_days` of 45, reached on 2026-10-24; if S3b-io cannot land by
+then, the limit is raised deliberately, by owner ruling, not this item's
+status.
+
 Where: `org-node/src/service.rs` — in `admit_member`, the chain write
 (`submit_update`) and the record update at the end of the function, with the
 transport send between them returning early on error; the same shape in
@@ -205,16 +218,44 @@ same commit as `receive_and_verify` — the record, the epoch and the
 high-water mark — with neither the invite cross-check on first admission nor
 the membership cross-check afterwards, so a Change set relayed by a device
 the record does not name shapes the node's record.
-affects: RC-b6mydy, LLR-3q63zv
+affects: RC-b6mydy, LLR-3q63zv, LLR-2r2fha
 opened: 2026-09-09
 status: resolved
-resolution: not a defect, by owner ruling 2026-10-05 (change
+resolution: fixed 2026-10-07 (change `worktree-org-io-commit-workflow`, plan
+task T12a, owner ruling R1): for an Organisation the node holds, both
+receive paths act on an update or a revocation only when the sending
+Device, as the transport authenticated it, is listed in the node's current
+committed record, checked before any chain read and refusing without
+writing (REQ-ztdza4 as amended, RC-u7kdam, LLR-2r2fha); test
+`pr_u4c2vp_an_update_relayed_by_a_non_member_is_refused_on_the_self_delete_path`
+(`org-node/tests/admission_sender.rs`): red before, green after.
+
+*The resolution of 2026-10-05, superseded by the fix above and kept as
+history:* not a defect, by owner ruling 2026-10-05 (change
 `worktree-org-node-chain-authority`): nothing about the sender of an Envelope
 is checked on either Receive operation, because authority is the chain's and
 a chain-valid update delivered by any peer matches the chain (REQ-ztdza4 as
 amended). LLR-3q63zv is amended in place to state it; test
 `pr_u4c2vp_an_update_relayed_by_a_non_member_is_committed_on_the_self_delete_path`
 (`org-node/tests/admission_sender.rs`).
+
+*Note 2026-10-07 (owner ruling R1 at the S3a close-out residual review,
+change `worktree-org-io-commit-workflow`; decision 16 of
+`docs/plans/2026-10-06-org-io-commit-workflow.md`).* The ruling this
+resolution rests on is reversed for an Organisation the node holds: "I agree
+with only accepting updates and revocations from members." The behaviour this
+item reported is a defect again, and the fix it outlined — the membership
+cross-check on this path — is now required, against the receiver's current
+record before any chain read (REQ-ztdza4 as amended, LLR-2r2fha,
+LLR-3q63zv as amended). Plan task T12a implements it and rewrites the test
+above as
+`pr_u4c2vp_an_update_relayed_by_a_non_member_is_refused_on_the_self_delete_path`;
+T12 then replaces the resolution line with that fix, its test and the date.
+The item keeps `status: resolved` meanwhile, because S3a merges only with
+T12a done; were T12a dropped, T12 must set it `open` instead.
+*Done 2026-10-07 (plan task T12):* T12a landed the fix (`c2bc250`); the
+`resolution:` line above names it, and the 2026-10-05 resolution is kept
+below it as history.
 
 Where: `receive_and_self_delete_if_revoked` in `org-node/src/service.rs`
 discards the authenticated sender with the comment "authenticated but not

@@ -1,5 +1,5 @@
 #![cfg(feature = "app")]
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Encrypted-at-rest evidence for `PersonaStore` (REQ-hzm4kt): the store
 //! round-trips through disk, a wrong passphrase yields an error rather than
 //! data, and neither a persona secret nor the Organisation private key appears in
@@ -7,10 +7,13 @@
 
 use std::path::PathBuf;
 
-use org_members::{Handle, Name, RootHash, Surname};
+use org_members::{Handle, MemberId, Name, RootHash, Surname};
 use org_node::ids::OrgId;
-use org_node::store::{OrgRecord, PersonaRecord, PersonaStatus, PersonaStore};
-use org_node::{DeviceSeed, Epoch, MemberSeed, OrgPrivateKey, PersonaId, SequenceNumber};
+use org_node::store::{
+    ExpectedAdmission, OrgRecord, PersonaRecord, PersonaStatus, PersonaStore, ProvisionalChange, ProvisionalUpdate,
+    StoreData,
+};
+use org_node::{DeviceSeed, Epoch, MemberSeed, OrgPrivateKey, OrgPublicKey, PersonaId, SequenceNumber};
 use rand::rngs::OsRng;
 
 /// A fresh, per-test file path under the OS temp dir (any stale file removed).
@@ -48,6 +51,7 @@ fn org_record(key: [u8; 32]) -> OrgRecord {
         trie_members: Vec::new(),
         proxy_account: None,
         org_private_key: OrgPrivateKey::from(key),
+        kept_change_set: None,
     }
 }
 
@@ -185,4 +189,130 @@ fn each_save_draws_a_fresh_nonce() {
     }
     // And none of them is the all-zero nonce a dropped draw would leave.
     assert!(nonces.iter().all(|n| n.iter().any(|b| *b != 0)));
+}
+
+// ---- added 2026-10-07 by stage S3 (docs/plans/2026-10-06-org-io-commit-workflow.md, T2)
+
+const ORG_1: [u8; 20] = [1; 20];
+const ORG_2: [u8; 20] = [2; 20];
+
+/// A valid Organisation public key; which one does not matter here.
+fn org_public_key() -> OrgPublicKey {
+    OrgPrivateKey::from([0x42; 32]).x25519_keypair().org_public_key().unwrap()
+}
+
+/// The postcard bytes of `value`. The store types hold secrets and so have no
+/// `PartialEq`; two values are compared by their encoding.
+fn encoded<T: serde::Serialize>(value: &T) -> Vec<u8> {
+    postcard::to_allocvec(value).unwrap()
+}
+
+/// Two Organisations, each with a bound Persona, a record, one Change-set
+/// provisional update and one expectation; plus an unbound genesis update
+/// built by org 1's Persona.
+fn two_organisation_store() -> StoreData {
+    let persona = |number: u8, org_id: OrgId| PersonaRecord {
+        persona_id: PersonaId::new(format!("p{number}")),
+        org_id: Some(org_id),
+        handle: Handle::parse(&format!("h{number}")).unwrap(),
+        name: Name::parse("N").unwrap(),
+        surname: Surname::parse("S").unwrap(),
+        member_seed: MemberSeed::from([number; 32]),
+        device_seed: DeviceSeed::from([number + 10; 32]),
+        member_id: Some(MemberId::new([number; 32])),
+        status: PersonaStatus::Active,
+    };
+    let record = |org_id: OrgId| OrgRecord {
+        org_id,
+        root_hash: RootHash::new([org_id.as_bytes()[0]; 32]),
+        org_pub_key: org_public_key(),
+        epoch: Epoch::new(4),
+        last_seq: SequenceNumber::new(4),
+        trie_members: vec![],
+        proxy_account: None,
+        org_private_key: OrgPrivateKey::from([org_id.as_bytes()[0]; 32]),
+        kept_change_set: Some(vec![org_id.as_bytes()[0]]),
+    };
+    let update = |org_id: Option<OrgId>, number: u8| ProvisionalUpdate {
+        org_id,
+        persona_id: PersonaId::new(format!("p{number}")),
+        base_root: org_id.map(|org| RootHash::new([org.as_bytes()[0]; 32])),
+        resulting_root: RootHash::new([number + 50; 32]),
+        seq: SequenceNumber::new(5),
+        org_pub_key: org_public_key(),
+        change: ProvisionalChange::ChangeSet {
+            change_set: vec![number],
+            org_private_key: OrgPrivateKey::from([number + 60; 32]),
+        },
+    };
+    let (org_1, org_2) = (OrgId::new(ORG_1), OrgId::new(ORG_2));
+    StoreData {
+        personas: vec![persona(1, org_1), persona(2, org_2)],
+        orgs: vec![record(org_1), record(org_2)],
+        provisional_updates: vec![update(Some(org_1), 1), update(None, 1), update(Some(org_2), 2)],
+        expected_admissions: vec![ExpectedAdmission { org_id: org_1 }, ExpectedAdmission { org_id: org_2 }],
+    }
+}
+
+/// verifies: LLR-pba7yu
+///
+/// Normal: forgetting org 1 removes its record, provisional updates (the
+/// genesis one its Persona built included), expectation and Persona with its
+/// keys; org 2's data is unchanged and in order; nothing names org 1.
+#[test]
+fn forget_organisation_removes_everything_of_one_organisation_and_nothing_else() {
+    let data = two_organisation_store();
+    let input_bytes = encoded(&data);
+    let after = data.forget_organisation(OrgId::new(ORG_1));
+    assert_eq!(encoded(&after.personas), encoded(&vec![data.personas[1].clone()]));
+    assert_eq!(encoded(&after.orgs), encoded(&vec![data.orgs[1].clone()]));
+    assert_eq!(after.provisional_updates, vec![data.provisional_updates[2].clone()]);
+    assert_eq!(after.expected_admissions, vec![ExpectedAdmission { org_id: OrgId::new(ORG_2) }]);
+    let after_bytes = encoded(&after);
+    assert!(!contains(&after_bytes, &ORG_1), "no tombstone, marker or copy names org 1");
+    for forgotten_key in [[1u8; 32], [11u8; 32]] {
+        assert!(!contains(&after_bytes, &forgotten_key), "the forgotten Persona's seeds are gone");
+    }
+    assert_eq!(encoded(&data), input_bytes, "the input is unchanged");
+}
+
+/// verifies: LLR-pba7yu
+///
+/// Abnormal: forgetting an Organisation the store does not hold returns an
+/// equal copy.
+#[test]
+fn forget_organisation_of_an_unheld_organisation_changes_nothing() {
+    let data = two_organisation_store();
+    assert_eq!(encoded(&data.forget_organisation(OrgId::new([9; 20]))), encoded(&data));
+}
+
+/// verifies: LLR-pba7yu
+///
+/// Boundary: forgetting the only Organisation of a store leaves an empty
+/// store; forgetting from an empty store is an empty store.
+#[test]
+fn forget_organisation_of_the_last_organisation_leaves_an_empty_store() {
+    let only_org_1 = two_organisation_store().forget_organisation(OrgId::new(ORG_2));
+    let empty = only_org_1.forget_organisation(OrgId::new(ORG_1));
+    assert_eq!(encoded(&empty), encoded(&StoreData::default()));
+    assert_eq!(encoded(&empty.forget_organisation(OrgId::new(ORG_1))), encoded(&StoreData::default()));
+}
+
+/// verifies: LLR-d9778a
+///
+/// `kept_change_set` round-trips through the sealed store, `None` and `Some`.
+#[test]
+fn kept_change_set_round_trips_through_the_store() {
+    for (index, kept) in [None, Some(vec![1u8, 2, 3])].into_iter().enumerate() {
+        let path = tmp_path(&format!("kept-change-set-{index}"));
+        let mut data = two_organisation_store();
+        data.orgs[0].kept_change_set = kept.clone();
+        let mut store = PersonaStore::open(path.clone(), "pw").unwrap();
+        *store.data_mut() = data;
+        store.save(&mut OsRng).unwrap();
+        let reopened = PersonaStore::open(path.clone(), "pw").unwrap();
+        assert_eq!(reopened.data().orgs[0].kept_change_set, kept);
+        assert_eq!(reopened.data().orgs[1].kept_change_set, Some(vec![2]));
+        let _ = std::fs::remove_file(&path);
+    }
 }

@@ -115,6 +115,14 @@ enum of two kinds; see
 `2026-10-07-org-key-pair.md` (finalised under its
 merge date) and the items amended below.
 
+*Note 2026-10-07 (change `worktree-org-io-commit-workflow`, plan task T12).*
+`CommitOutcome` gains two fields: `revocations: Vec<RevocationNotice>`
+(LLR-a8z7r5) and `acknowledgements: Vec<Acknowledgement>`, the
+acknowledgements a commit that removed this node signed (LLR-b27jr6), empty
+otherwise. See that change's design ledger
+(`2026-10-07-commit-workflow.md`, finalised under
+its merge date).
+
 ## SDD-swtd3w — Value types and the rejection vocabulary
 
 `org-node/src/error.rs`: the refusals the provisional-update and
@@ -328,8 +336,10 @@ state for `org_id` once (`OrgNotOnChain` for none, `Chain` for a failed read),
 selects the genesis provisional update the named Persona built whose
 `resulting_root` and `org_pub_key` equal the root and key read
 (`NoProvisionalUpdate` for none), refuses with `SeqNotEpoch { seq, epoch }` an
-epoch other than the update's Sequence number 1, and with `RootMismatch` a
-record rebuilt from its members whose root is not the root read, and only then
+epoch other than the update's Sequence number 1, with `RootMismatch` a
+record rebuilt from its members whose root is not the root read, and with
+`NoProvisionalUpdate` an update none of whose members lists the named
+Persona's DevicePublicKey in its `device_keys`, and only then
 creates the Organisation record — `org_id`, that root, the Organisation public
 key and epoch read, Sequence number 1, the members, the update's
 Organisation private key, and `proxy_account`
@@ -363,6 +373,20 @@ The record was created with "no Organisation secret" as well. `OrgSecret` and
 `OrgRecord.org_secret` are removed (LLR-qsjde3, LLR-byjvd9), so the clause
 goes; the record's required `org_private_key` is the genesis update's key, as
 before.
+
+*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, review
+finding-2 of round 1).* Since PR-eqs4fs's fix (task s3t12b) `commit_genesis`
+binds the Persona with the MemberId of the genesis leaf listing its Device
+(LLR-hby4jr), and refuses an update with no such leaf; this LLR did not list
+that refusal. It is added, after `RootMismatch`, with the error the code
+returns: `NoProvisionalUpdate`, because `create_organisation` builds the
+founder's leaf from the Persona, so a genesis update without it is not an
+update this Persona built and can commit — the same answer as for no
+selected update. It changes and writes nothing, like every refusal here
+(LLR-ewkg85). Only a stored update altered after `create_organisation`
+reaches it; `a_genesis_listing_no_leaf_with_the_personas_device_is_refused`
+drives it with another Persona's genesis update re-addressed to the named
+Persona.
 
 **LLR-6z5xya**: `create_organisation(rng, persona_id)` refuses with
 `PersonaAlreadyBound { persona_id }`, naming the Persona, a Persona whose
@@ -500,19 +524,32 @@ satisfies: REQ-tqap3r
 **LLR-mkj4bz**: whenever an update for an Organisation commits — through
 `receive_and_verify`, `receive_and_self_delete_if_revoked`, `commit_update`
 or `commit_genesis` — the record's previous root, epoch, Sequence number and
-members are replaced, and every stored provisional update for that
-Organisation whose `base_root` is not the new record's root is removed, in the
-same store save; provisional updates for every other Organisation are left as
-they were.
+members are replaced, the record's `kept_change_set` is set to the Change set
+of the Envelope that commit verified (`None` for `commit_genesis`,
+LLR-d9778a), replacing any earlier one, and every stored provisional update
+for that Organisation whose `base_root` is not the new record's root is
+removed, in the same store save; provisional updates for every other
+Organisation are left as they were.
 satisfies: REQ-uv3v5w
 
-**LLR-b27jr6**: when a commit on `receive_and_verify` or `commit_update`
-produces a Membership record that holds the DevicePublicKey of no Persona bound to
-that Organisation, the node deletes its record of that Organisation, removes
-every provisional update for it and marks every Persona bound to it Revoked,
-as `receive_and_self_delete_if_revoked` does (LLR-6p4pj2), instead of
-committing the update.
+*Amended 2026-10-06 (change `worktree-org-io-commit-workflow`; REQ-uv3v5w as
+amended there: no legacy trie, each device keeps the delta that produced its
+current trie).* The commit discarded the Change set it had just verified; the
+record now keeps it, and no earlier one.
+
+**LLR-b27jr6**: when a commit on `receive_and_verify`, `commit_update` or
+`reconcile` produces a Membership record that holds the DevicePublicKey of no
+Persona bound to that Organisation, the node, instead of committing the
+update, signs the acknowledgements and forgets the Organisation as
+`receive_and_self_delete_if_revoked` does (LLR-6p4pj2): the record, every
+provisional update and expected admission for it and every Persona bound to
+it are removed (LLR-pba7yu), and the acknowledgements are returned.
 satisfies: REQ-uxv2x2
+
+*Amended 2026-10-06 (change `worktree-org-io-commit-workflow`; REQ-uxv2x2 as
+amended there).* This said the node marks every Persona bound to the
+Organisation Revoked; it now deletes them with their keys, after signing, and
+the reconcile (LLR-fm38ww) is a third commit path it covers.
 
 **LLR-eyc4ud**: no commit path — `commit_genesis`, `commit_update`,
 `receive_and_verify`, `receive_and_self_delete_if_revoked` — changes the
@@ -532,9 +569,15 @@ Personas bound to other Organisations — is refused with
 `AdmissionNotOurs { org_id }` (LLR-3f5h7b), creating no record, marking no
 Persona, keeping every expectation and writing nothing. `commit_update` and
 `receive_and_self_delete_if_revoked` write no binding; forgetting an
-Organisation (LLR-b27jr6, LLR-6p4pj2) marks its Personas Revoked and leaves
-their `org_id` as it was.
+Organisation (LLR-b27jr6, LLR-6p4pj2) deletes the Personas bound to it, so no
+binding of a forgotten Organisation survives to be reused.
 satisfies: REQ-yp75u9
+
+*Amended 2026-10-06 (change `worktree-org-io-commit-workflow`).* The last
+sentence said forgetting an Organisation marks its Personas Revoked and leaves
+their `org_id` as it was; under REQ-uxv2x2 as amended the Personas are deleted
+(LLR-pba7yu). A returning person gets a new identity (owner ruling 5 on the
+sweep of `fdf4e77`).
 
 *Added 2026-10-06 (owner ruling: one Persona, one Organisation; independent
 review round 1, finding-1).* `commit_genesis` and both branches of

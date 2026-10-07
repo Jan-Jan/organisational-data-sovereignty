@@ -101,6 +101,18 @@ pub fn device_key(seed: u8) -> DevicePublicKey {
     DeviceSeed::from([seed; 32]).signing_keypair().device_key().unwrap()
 }
 
+/// A revocation notice for `org_id` naming Member `[2u8;32]` on Bob's
+/// Device, which the genesis trie does not list, with a proof of its absence
+/// from that trie.
+#[cfg(feature = "transport")]
+pub fn bob_absence_notice(org_id: crate::ids::OrgId) -> crate::revocation::RevocationNotice {
+    let trie = genesis_trie(&MemberSeed::from([1u8; 32]).x25519_keypair(), &admin_device());
+    let member_id = MemberId::new([2u8; 32]);
+    let device = bob_device().device_key().unwrap();
+    let proof = trie.prove_absent(&member_id, &device).unwrap();
+    crate::revocation::RevocationNotice { org_id, member_id, device, proof }
+}
+
 /// Answers at run time whether a type implements `Display` or `Copy`, so a
 /// test can assert that a secret type implements neither (LLR-sz4xhc,
 /// LLR-scgk5j). Autoref specialisation: the impl on `Probe<T>` applies when

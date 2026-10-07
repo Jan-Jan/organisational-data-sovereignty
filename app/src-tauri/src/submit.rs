@@ -135,7 +135,7 @@ pub async fn submit_commit_send<R: RngCore + CryptoRng + Send>(
         .await
         .map_err(|e| format!("chain write failed; nothing committed or sent: {e}"))?;
     let outcome = svc.commit_update(rng, org_id).await.map_err(|e| e.to_string())?;
-    svc.send_update(&outcome.outgoing, recipient, peer_addr)
+    svc.send_update(&outcome, recipient, peer_addr)
         .await
         .map_err(|e| format!("committed at epoch {}, but the send failed: {e}", outcome.epoch.get()))?;
     Ok(outcome)

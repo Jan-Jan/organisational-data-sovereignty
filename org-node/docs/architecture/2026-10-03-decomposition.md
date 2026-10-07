@@ -87,7 +87,13 @@ four chain-free checks run before the chain is read.
 together with the vocabulary in which every refusal is reported — a typed
 variant per rejection path **on the receive-and-commit path**, so a caller can
 state *why* a change was refused rather than only that it was.
-traces: REQ-gju89b, REQ-9g6as6, REQ-bcxz96, REQ-y7tsft, REQ-8jb4ny, REQ-ech45n, REQ-fwfku9, REQ-8amu2a, REQ-tqap3r, REQ-kt877x, REQ-yp75u9, REQ-c29s93, REQ-bwx7eg, REQ-vxqc5g, REQ-szq3ud, REQ-3dsweu
+traces: REQ-gju89b, REQ-9g6as6, REQ-bcxz96, REQ-y7tsft, REQ-8jb4ny, REQ-ech45n, REQ-fwfku9, REQ-8amu2a, REQ-tqap3r, REQ-kt877x, REQ-yp75u9, REQ-c29s93, REQ-bwx7eg, REQ-vxqc5g, REQ-szq3ud, REQ-3dsweu, REQ-m2xh8q, REQ-b462sh, REQ-tb4f8p
+
+*Amended 2026-10-06 (change `worktree-org-io-commit-workflow`, stage S3 of
+`docs/plans/2026-10-06-org-io-roadmap.md`).* Traces REQ-m2xh8q, REQ-b462sh and REQ-tb4f8p for the eight refusals of
+LLR-n67aw8, in `2026-10-07-commit-workflow.md`.
+*(Merged 2026-10-07 with the key-pair change's note below, at this branch's
+merge of master `1f52c36`: the trace list is the union of both.)*
 
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 `types.rs` loses `OrgSecret` and `InviteId` (LLR-qsjde3, LLR-ms8njy), so the
@@ -656,7 +662,16 @@ returned.)*
 **SDD-kwncn7**: the framing of one Wire message on the channel — what a frame is
 made of, the one-mebibyte ceiling on a body, and the refusal of anything over
 it on both the sending and the receiving side.
-traces: REQ-eg5j8u, REQ-9g6as6, REQ-y7tsft, REQ-8amu2a, REQ-c29s93, REQ-3dsweu
+traces: REQ-eg5j8u, REQ-9g6as6, REQ-y7tsft, REQ-8amu2a, REQ-c29s93, REQ-3dsweu, REQ-ps2gy2, REQ-qrtsc9, REQ-b462sh
+
+*Amended 2026-10-06 (change `worktree-org-io-commit-workflow`, stage S3 of
+`docs/plans/2026-10-06-org-io-roadmap.md`).* Traces REQ-ps2gy2, REQ-qrtsc9 and REQ-b462sh for the revocation notice
+and the acknowledgement on the wire (LLR-dc45ur, LLR-378cj4, in
+`2026-10-07-commit-workflow.md`). The revocation
+kind the key-pair change defines (note below) holds a revocation notice
+instead of an Envelope, and a third kind, the acknowledgement, is added.
+*(Merged 2026-10-07 with the key-pair change's note below, at this branch's
+merge of master `1f52c36`: the trace list is the union of both.)*
 
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 A frame carried one shape of Wire message, with an optional Organisation
@@ -781,7 +796,17 @@ decoder rather than by the read.*
 **SDD-af5vnt**: where every secret this node holds rests — the member and
 device seeds and the Organisation private key — and the form the file takes,
 which is ciphertext under a passphrase-derived key and nothing else.
-traces: REQ-hzm4kt, REQ-qn2erx, REQ-y7tsft, REQ-ech45n, REQ-xs4ab8, REQ-fwfku9, REQ-8amu2a, REQ-hhva9d, REQ-ju6vn2, REQ-stx9v3
+traces: REQ-hzm4kt, REQ-qn2erx, REQ-y7tsft, REQ-ech45n, REQ-xs4ab8, REQ-fwfku9, REQ-8amu2a, REQ-hhva9d, REQ-ju6vn2, REQ-stx9v3, REQ-uxv2x2, REQ-em28bq, REQ-uv3v5w
+
+*Amended 2026-10-06 (change `worktree-org-io-commit-workflow`, stage S3 of
+`docs/plans/2026-10-06-org-io-roadmap.md`).* Traces REQ-uxv2x2, REQ-em28bq and REQ-uv3v5w for forgetting an
+Organisation and for the kept Change set (LLR-pba7yu, LLR-d9778a, in
+`2026-10-07-commit-workflow.md`). Forgetting an
+Organisation removes its Organisation private key and every provisional
+update's key with it.
+*(Merged 2026-10-07 with the key-pair change's notes below, at this branch's
+merge of master `1f52c36`: the definition takes master's wording, "the
+Organisation private key", and the trace list is the union of both.)*
 
 *Amended 2026-10-06 (owner ruling on rotation, change
 `worktree-org-node-org-key-pair`):* traces REQ-stx9v3. Every provisional
@@ -1643,7 +1668,29 @@ node's own provisional updates, run every check that needs no chain, read the
 chain once, verify against it, and commit, discarding the provisional updates
 the commit orphans. A first admission is attempted only for an Organisation the
 app declared it expects. Nothing about the sender is checked.
-traces: REQ-xa6smf, REQ-ztdza4, REQ-nhe2zu, REQ-txvtm9, REQ-bvh8v6, REQ-d9g6nt, REQ-qn2erx, REQ-f2k4tr, REQ-8amu2a, REQ-tqap3r, REQ-uv3v5w, REQ-uxv2x2, REQ-kt877x, REQ-yp75u9, REQ-c29s93, REQ-bwx7eg, REQ-ju6vn2, REQ-3dsweu, REQ-vxqc5g, REQ-jy6ybw
+traces: REQ-xa6smf, REQ-ztdza4, REQ-nhe2zu, REQ-txvtm9, REQ-bvh8v6, REQ-d9g6nt, REQ-qn2erx, REQ-f2k4tr, REQ-8amu2a, REQ-tqap3r, REQ-uv3v5w, REQ-uxv2x2, REQ-kt877x, REQ-yp75u9, REQ-c29s93, REQ-bwx7eg, REQ-ju6vn2, REQ-3dsweu, REQ-vxqc5g, REQ-jy6ybw, REQ-tb4f8p, REQ-ps2gy2, REQ-ea4qs5, REQ-b462sh
+
+*Amended 2026-10-07 (owner rulings at the S3a close-out residual review, change
+`worktree-org-io-commit-workflow`; plan task T12a).* "Nothing about the sender
+is checked" above no longer holds for an Organisation the node holds: an
+update or a revocation from a Device the record does not list is refused
+before the chain read (LLR-2r2fha, LLR-kzgjz8; REQ-ztdza4 as amended,
+REQ-ea4qs5), and an acknowledgement is accepted only from the Device it names
+(LLR-3aysup, REQ-b462sh as amended). A first admission still checks nothing
+about the sender (REQ-xa6smf). Traces REQ-ea4qs5 and REQ-b462sh.
+
+*Amended 2026-10-06 (change `worktree-org-io-commit-workflow`, stage S3 of
+`docs/plans/2026-10-06-org-io-roadmap.md`).* Traces REQ-tb4f8p and REQ-ps2gy2 for the reconcile and the revocation
+notices a commit returns (LLR-gr8x3r, LLR-fm38ww, LLR-a8z7r5, in
+`2026-10-07-commit-workflow.md`). The reconcile
+selects a provisional update by root and Organisation public key, as the
+key-pair change's `commit_update` does (note below).
+*(Merged 2026-10-07 with the key-pair change's notes below, at this branch's
+merge of master `1f52c36`: the trace list is the union of both. The
+key-pair note's account of a received revocation — verified as an update,
+then refused or deleting the record — is superseded by LLR-pt32fx and
+LLR-38e2kn as amended on 2026-10-07: a revocation is decided by
+`revocation::accept`.)*
 
 *Amended 2026-10-06 (owner ruling on rotation, change
 `worktree-org-node-org-key-pair`):* traces REQ-jy6ybw. `commit_update`
@@ -1742,12 +1789,21 @@ none (LLR-3f5h7b), and this item states only that the sender is not what
 decides.
 
 **LLR-u6rq4s**: on a Wire message about an Organisation already held, the
-Device key the connection authenticated is compared with no Membership record:
-an Organisation-information update that verifies against the chain is
-committed whether that key is in the record before the update, after it, or in
-neither, and a revocation is accepted or refused (LLR-pt32fx) by the receiving
-node's own Device, never by the sender's.
+Device key the connection authenticated is compared only with the node's
+current committed record, before the update is verified (LLR-2r2fha,
+LLR-kzgjz8): an Organisation-information update from a key that record lists
+and that verifies against the chain is committed whether or not that key is
+in the record after the update, and a revocation from such a key is accepted
+or refused (LLR-pt32fx) by the receiving node's own Device. The verified
+record after the update is never consulted about the sender.
 satisfies: REQ-ztdza4
+
+*Amended 2026-10-07 (owner ruling R1 at the S3a close-out residual review,
+change `worktree-org-io-commit-workflow`; plan task T12a).* This said the key
+"is compared with no Membership record" and that an update is committed
+"whether that key is in the record before the update, after it, or in
+neither". The owner: "I agree with only accepting updates and revocations
+from members." The neither case is now refused as `SenderNotListed`.
 
 *Amended 2026-10-06 (owner ruling on relabelling, change
 `worktree-org-node-org-key-pair`).* This said "an update that verifies
@@ -2112,7 +2168,23 @@ Organisation (a second Invite) stays.
 the one path where committing a verified change means deleting the record
 rather than updating it. The item also owns the revoking side, `revoke_member`,
 which builds that change. Nothing about the sender is checked on this path.
-traces: REQ-uxv2x2, REQ-nhe2zu, REQ-txvtm9, REQ-xs4ab8, REQ-tqap3r, REQ-ztdza4, REQ-bwx7eg, REQ-ju6vn2, REQ-3dsweu, REQ-vxqc5g, REQ-stx9v3
+traces: REQ-uxv2x2, REQ-nhe2zu, REQ-txvtm9, REQ-xs4ab8, REQ-tqap3r, REQ-ztdza4, REQ-bwx7eg, REQ-ju6vn2, REQ-3dsweu, REQ-vxqc5g, REQ-stx9v3, REQ-em28bq, REQ-y99c9w, REQ-ea4qs5
+
+*Amended 2026-10-07 (owner ruling R1, change `worktree-org-io-commit-workflow`;
+plan task T12a).* "Nothing about the sender is checked on this path" no
+longer holds: an update or a revocation from a Device the record does not
+list is refused before the chain read (LLR-2r2fha, LLR-kzgjz8). Traces
+REQ-ea4qs5.
+
+*Amended 2026-10-06 (change `worktree-org-io-commit-workflow`, stage S3 of
+`docs/plans/2026-10-06-org-io-roadmap.md`).* Traces REQ-em28bq and REQ-y99c9w: the node's own removal deletes the
+Organisation's data and its Personas only through `forget_organisation`
+(LLR-23sfdh), after signing the acknowledgements (LLR-6p4pj2 as amended).
+*(Merged 2026-10-07 with the key-pair change's notes below, at this branch's
+merge of master `1f52c36`: the trace list is the union of both. Where the
+key-pair note says a received revocation is "verified" as an update and then
+deletes the record, S3 replaces that with the absence-proof decision of
+SDD-uck4tz; the key-pair text describes master's code until S3's code merges.)*
 
 *Amended 2026-10-06 (owner ruling on rotation, change
 `worktree-org-node-org-key-pair`):* traces REQ-stx9v3. `revoke_member` builds
@@ -2155,16 +2227,34 @@ decided about the node's own membership.
 satisfies: REQ-uxv2x2
 
 **LLR-6p4pj2**: when the node's own device key is absent from the verified
-trie, the Organisation record is deleted and every persona bound to that
-Organisation is marked revoked.
-satisfies: REQ-uxv2x2
+trie, the node first signs one acknowledgement for each Persona bound to that
+Organisation against the verified chain state (`revocation::sign_acknowledgements`,
+LLR-hby4jr), then replaces its store with `forget_organisation(org_id)`
+(LLR-pba7yu) — the record, its kept Change set and keys, the provisional
+updates, the expected admissions and every Persona bound to that
+Organisation removed — and returns the acknowledgements to its caller.
+satisfies: REQ-uxv2x2, REQ-y99c9w
+
+*Amended 2026-10-06 (change `worktree-org-io-commit-workflow`; REQ-uxv2x2 as
+amended there, owner rulings 3 and 4 on the sweep of `fdf4e77`).* This said
+the record is deleted and every Persona bound to the Organisation is marked
+revoked. A Persona marked revoked kept its Device and Member secret keys;
+"delete everything" deletes it, after it has signed its acknowledgement.
+
+*Note 2026-10-07 (robustness, N/A):* no abnormal test of a signing refusal on this path: `receive_and_self_delete_if_revoked` takes its seeds from the bound Personas' own stored `device_seed`, from which `persona_device` derives each Device, so every bound Persona's seed is supplied by construction and the refusal is reached only at `revocation::accept` (LLR-r8qhky) and `reconcile::reconcile` (LLR-b27jr6).
 
 **LLR-jsx922**: when the device key of a Persona bound to this Organisation is
 still present after an Organisation-information message, the change is
 committed as an ordinary update and reported as such, with nothing deleted;
-after a revocation it is refused with `RevocationNotForThisDevice`, nothing
-committed or deleted (LLR-pt32fx).
+a revocation never reaches this branch: it is decided by
+`revocation::accept`, whose absence proof does not verify for a Device the
+chain's record still lists, so it is refused with `RevocationProofRefused`,
+nothing committed or deleted (LLR-pt32fx, LLR-tx8ruv).
 satisfies: REQ-uxv2x2, REQ-3dsweu
+
+*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3).*
+This said that after a revocation the change is refused with
+`RevocationNotForThisDevice`; a revocation is no longer verified as a change.
 
 *Amended 2026-10-06 (owner ruling on relabelling, change
 `worktree-org-node-org-key-pair`).* This committed every verified change that
@@ -2188,11 +2278,22 @@ satisfies: REQ-uxv2x2
 sequence-mark write from this branch left the gate green. "Committed as an
 ordinary update" covered it in words only.*
 
-**LLR-3q63zv**: `receive_and_self_delete_if_revoked` does not check the
-sender's authenticated Device key, on the branch that deletes the record and
-on the branch that updates it. A removal or an update relayed by any device is
-acted on when it verifies against the chain.
+**LLR-3q63zv**: `receive_and_self_delete_if_revoked` checks the sender's
+authenticated Device key against its current committed record of the
+Organisation, and only that record, before it reads the chain, on the branch
+that deletes the record and on the branch that updates it alike (LLR-2r2fha,
+LLR-kzgjz8): a removal or an update delivered by a listed Device is acted on
+when it verifies against the chain; one delivered by any other Device is
+refused as `SenderNotListed`, nothing written.
 satisfies: REQ-ztdza4
+
+*Amended 2026-10-07 (owner ruling R1 at the S3a close-out residual review,
+change `worktree-org-io-commit-workflow`; plan task T12a).* This said the path
+"does not check the sender's authenticated Device key" and that "a removal or
+an update relayed by any device is acted on". The owner reversed that for an
+Organisation the node holds; PR-u4c2vp's proposed fix (the membership
+cross-check on this path) is what this now states, against the record before
+the update rather than the one the Envelope produced.
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
@@ -2237,14 +2338,21 @@ first admission cannot complete there.
 **LLR-jwhzh3**: this path acts only on the Organisation the received change
 names — the record it verifies against, the Personas whose binding names that
 Organisation (and only those) to decide whether the node is still a member,
-the record it deletes or updates, and the Personas it marks Revoked — so a node
+the record it deletes or updates, and the Personas it deletes — so a node
 revoked from one Organisation keeps every other Organisation's record,
 Organisation private key and Personas.
 satisfies: REQ-uxv2x2
 
+*Amended 2026-10-06 (change `worktree-org-io-commit-workflow`).* "The
+Personas it marks Revoked" reads "the Personas it deletes" (LLR-6p4pj2 as
+amended, LLR-pba7yu).
+
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 "secret" read the Organisation secret, which is removed; the record's
 Organisation private key takes its place.
+*(Merged 2026-10-07 at this branch's merge of master `1f52c36`: both
+amendments apply, so the item reads "the Personas it deletes" and
+"Organisation private key".)*
 
 *Narrowed 2026-10-04 by review round 5.* This ended "and a Persona bound to
 another Organisation cannot keep it in this one". That is true of this path
@@ -2359,16 +2467,26 @@ refuses. The shipped test asserts the epoch advanced, pinning the defect so
 that correcting the order reddens it.*
 
 **LLR-8hdu9x**: the Wire message `send_update` sends to the Device a
-committed revocation removed — which the node's committed record no longer
-lists — is a `Revocation` carrying the committed Envelope and nothing else:
-no member snapshot and no Organisation private key. Every Device the record
-still lists is sent an `OrgInformation` carrying the committed Envelope, the
-member snapshots as they were **before** the committed update, and the
-Organisation private key of the epoch the update reaches, as the node's
-record holds it (LLR-6ymd6d). A receiver accepts the revocation only as its
-own removal and deletes its record; one whose Device is still listed refuses
-it (LLR-pt32fx).
-satisfies: REQ-3dsweu, REQ-szq3ud
+committed update removed — which the previous record listed and the node's
+committed record no longer lists — is a `Revocation` holding that Device's
+notice from the commit outcome and nothing else: no Envelope, no Change set,
+no member snapshot and no Organisation private key (LLR-kr5t6f, LLR-dc45ur).
+Every Device the record still lists is sent an `OrgInformation` carrying the
+committed Envelope, the member snapshots as they were **before** the
+committed update, and the Organisation private key of the epoch the update
+reaches, as the node's record holds it (LLR-6ymd6d). A receiver accepts the
+revocation only when its absence proof verifies against the chain's current
+root for one of its own Personas (LLR-tx8ruv); a Device the chain's record
+still lists has no such proof.
+satisfies: REQ-3dsweu, REQ-szq3ud, REQ-ps2gy2
+
+*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3;
+REQ-3dsweu as amended there, REQ-ps2gy2; the fix of PR-qmvj83).* This said the
+`Revocation` carries the committed Envelope and that a receiver whose Device
+is still listed refuses it after verifying it as an update. The Envelope's
+Change set, with a batch of more than one change, carried the leaves of other
+Members; the revocation now carries only the revoked Device's identity and an
+absence proof.
 
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 This said the message carries exactly the Organisation secret the caller

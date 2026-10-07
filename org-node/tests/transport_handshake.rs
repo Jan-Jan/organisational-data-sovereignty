@@ -124,7 +124,9 @@ async fn delivers_and_verifies_admit_over_iroh() {
         seq_guard: SeqGuard::from_last_seen(SequenceNumber::new(1)),
         last_committed_epoch: Epoch::new(1),
     };
-    let out = verify_envelope_against_chain(&genesis, got.envelope(), &ctx, &chain)
+    // The received message equals `msg` (2.), so its Envelope is `env`; only
+    // Organisation information holds one (LLR-js9dsu).
+    let out = verify_envelope_against_chain(&genesis, &env, &ctx, &chain)
         .expect("verify_envelope_against_chain must succeed");
 
     assert_eq!(
@@ -395,7 +397,7 @@ async fn the_length_prefix_is_not_checked_against_the_body() {
     let admin = MemberSeed::from([1u8; 32]).x25519_keypair();
     let (delta, _) = admit_member_delta(&admin);
     let env = org_node::Envelope::build(org_node::OrgId::new([5u8; 20]), SequenceNumber::new(2), &delta).unwrap();
-    let msg = WireMessage::Revocation { envelope: env };
+    let msg = WireMessage::OrgInformation { envelope: env, record_snapshot: vec![], org_private_key: OrgPrivateKey::from([0xab; 32]) };
     let mut framed = encode_frame(&msg).unwrap();
     framed[0..4].copy_from_slice(&0u32.to_le_bytes());
 

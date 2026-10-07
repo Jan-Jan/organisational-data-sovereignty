@@ -232,7 +232,7 @@ pub async fn admit(
         .find(|m| m.member_key == joiner.member_key)
         .map(|m| m.id)
         .expect("the joiner is in the committed record");
-    tokio::time::timeout(NET, svc.send_update(&outcome.outgoing, joiner.device_key, Some(addr)))
+    tokio::time::timeout(NET, svc.send_update(&outcome, joiner.device_key, Some(addr)))
         .await
         .expect("send timed out")?;
     Ok(id)
@@ -283,7 +283,7 @@ async fn revoke_and_send(
     let update = svc.revoke_member(&mut OsRng, org_id, member_id)?;
     chain.apply_update(org_id, update.resulting_root, update.org_pub_key, rec_of(svc, org_id).epoch)?;
     let outcome = svc.commit_update(&mut OsRng, org_id).await?;
-    tokio::time::timeout(NET, svc.send_update(&outcome.outgoing, recipient, addr))
+    tokio::time::timeout(NET, svc.send_update(&outcome, recipient, addr))
         .await
         .expect("send timed out")
 }
@@ -296,7 +296,25 @@ pub fn with_envelope(msg: &WireMessage, envelope: org_node::Envelope) -> WireMes
             record_snapshot: record_snapshot.clone(),
             org_private_key: org_private_key.clone(),
         },
-        WireMessage::Revocation { .. } => WireMessage::Revocation { envelope },
+        WireMessage::Revocation(_) => panic!("a revocation carries no Envelope"),
+        WireMessage::Acknowledgement(_) => panic!("an acknowledgement carries no Envelope"),
+    }
+}
+
+/// Organisation information carrying `envelope`, an empty snapshot and a
+/// key no chain holds: for tests of the chain-free checks, which refuse the
+/// Envelope before the snapshot or the key is looked at. (Until S3 T4 those
+/// tests sent the Envelope as a revocation, which holds a notice now.)
+pub fn carrying(envelope: org_node::Envelope) -> WireMessage {
+    WireMessage::OrgInformation { envelope, record_snapshot: Vec::new(), org_private_key: OrgPrivateKey::from([0u8; 32]) }
+}
+
+/// The Envelope of the Organisation information `msg`; only that kind holds
+/// one (LLR-js9dsu).
+pub fn envelope_of(msg: &WireMessage) -> &org_node::Envelope {
+    match msg {
+        WireMessage::OrgInformation { envelope, .. } => envelope,
+        other => panic!("Organisation information, got {other:?}"),
     }
 }
 
@@ -308,7 +326,7 @@ pub fn with_snapshot(msg: &WireMessage, record_snapshot: Vec<u8>) -> WireMessage
             record_snapshot,
             org_private_key: org_private_key.clone(),
         },
-        WireMessage::Revocation { .. } => panic!("a revocation carries no snapshot"),
+        other => panic!("only Organisation information carries a snapshot, got {other:?}"),
     }
 }
 
@@ -321,7 +339,7 @@ pub fn with_key(msg: &WireMessage, org_private_key: OrgPrivateKey) -> WireMessag
             record_snapshot: record_snapshot.clone(),
             org_private_key,
         },
-        WireMessage::Revocation { .. } => panic!("a revocation carries no key"),
+        other => panic!("only Organisation information carries a key, got {other:?}"),
     }
 }
 
@@ -345,18 +363,20 @@ pub async fn setup(tag: &str) -> Setup {
 }
 
 pub async fn setup_with(tag: &str, prepare: bool) -> Setup {
-    setup_over(tag, prepare, |c| Box::new(c)).await
+    setup_over_both(tag, prepare, |c| Box::new(c), |c| Box::new(c)).await
 }
 
-/// `setup_with`, with B's service reading the chain through `b_chain(chain)`.
-pub async fn setup_over(
+/// `setup_with`, with A's service reading the chain through `a_chain(chain)`
+/// and B's through `b_chain(chain)`.
+pub async fn setup_over_both(
     tag: &str,
     prepare: bool,
+    a_chain: impl FnOnce(MockChainOps) -> Box<dyn ChainOps>,
     b_chain: impl FnOnce(MockChainOps) -> Box<dyn ChainOps>,
 ) -> Setup {
     let chain = MockChainOps::new();
 
-    let mut svc_a = OrgService::new(open_store(tag, "a", "pw_a"), Box::new(chain.clone()));
+    let mut svc_a = OrgService::new(open_store(tag, "a", "pw_a"), a_chain(chain.clone()));
     let mut svc_b = OrgService::new(open_store(tag, "b", "pw_b"), b_chain(chain.clone()));
 
     // Story 1: A creates persona + org.
@@ -428,10 +448,19 @@ pub async fn captured_admission_of_c(s: &mut Setup) -> WireMessage {
     captured_admission(s, &joiner_c).await
 }
 
-/// Send `msg` to `addr` from a relay device that is neither A nor B.
+/// Send `msg` to `addr` from a relay device that is neither A nor B. No
+/// record lists it, so since the owner rulings of 2026-10-07 (LLR-2r2fha,
+/// LLR-kzgjz8, LLR-3aysup) a held Organisation's receiver refuses what it
+/// sends: use it for first admissions and refusal cases, `deliver_from`
+/// otherwise.
 pub async fn deliver(addr: iroh::EndpointAddr, msg: &WireMessage) {
-    let relay = OrgEndpoint::bind(&DeviceSeed::from([0x5bu8; 32]).signing_keypair()).await.unwrap();
-    tokio::time::timeout(NET, relay.send(addr, msg)).await.expect("deliver timed out").expect("deliver failed");
+    deliver_from([0x5bu8; 32], addr, msg).await;
+}
+
+/// Send `msg` to `addr` from the Device of `sender_seed`.
+pub async fn deliver_from(sender_seed: [u8; 32], addr: iroh::EndpointAddr, msg: &WireMessage) {
+    let sender = OrgEndpoint::bind(&DeviceSeed::from(sender_seed).signing_keypair()).await.unwrap();
+    tokio::time::timeout(NET, sender.send(addr, msg)).await.expect("deliver timed out").expect("deliver failed");
 }
 
 /// Send `body`, framed as `encode_frame` frames a message, to `addr` from a
@@ -507,11 +536,112 @@ impl ChainOps for CountingChain {
 /// `setup`, with B reading the chain through a `CountingChain`.
 pub async fn setup_counted(tag: &str) -> (Setup, CountingChain) {
     let mut slot = None;
-    let s = setup_over(tag, true, |c| {
+    let s = setup_over_both(tag, true, |c| Box::new(c), |c| {
         let counting = CountingChain::over(c);
         slot = Some(counting.clone());
         Box::new(counting)
     })
     .await;
-    (s, slot.expect("setup_over calls its closure"))
+    (s, slot.expect("setup_over_both calls its closures"))
+}
+
+/// `setup`, with A and B both reading the chain through one `CountingChain`:
+/// its count is every chain read either node makes.
+pub async fn setup_counting(tag: &str) -> (Setup, CountingChain) {
+    let shared: Arc<Mutex<Option<CountingChain>>> = Default::default();
+    let counting_for = |shared: Arc<Mutex<Option<CountingChain>>>| {
+        move |c: MockChainOps| -> Box<dyn ChainOps> {
+            let mut slot = shared.lock().unwrap();
+            let counting = slot.get_or_insert_with(|| CountingChain::over(c)).clone();
+            Box::new(counting)
+        }
+    };
+    let s = setup_over_both(tag, true, counting_for(shared.clone()), counting_for(shared.clone())).await;
+    let counting = shared.lock().unwrap().clone().expect("setup_over_both calls both closures");
+    (s, counting)
+}
+
+/// The address `svc` receives on: its endpoint, bound from its first
+/// Persona when it has none yet.
+async fn receiving_addr(svc: &mut OrgService) -> iroh::EndpointAddr {
+    if svc.endpoint().is_none() {
+        let first = svc.list_personas()[0].persona_id.clone();
+        svc.ensure_endpoint(&first).await.unwrap();
+    }
+    svc.endpoint().expect("an endpoint").inner().addr()
+}
+
+/// Send `msg` from an endpoint bound from `sender_seed` to `addr`, once the
+/// receiver is waiting.
+async fn send_from(sender_seed: [u8; 32], addr: iroh::EndpointAddr, msg: &WireMessage) {
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    deliver_from(sender_seed, addr, msg).await;
+}
+
+/// Deliver `msg` to `svc`'s `receive_and_self_delete_if_revoked` from a
+/// random relay Device no record lists, and return its result. Since the
+/// owner rulings of 2026-10-07 (LLR-2r2fha, LLR-kzgjz8, LLR-3aysup) such a
+/// sender is refused for every message about a held Organisation: use this
+/// for the refusal cases, and `deliver_from_to_self_delete` from a listed
+/// Device otherwise.
+pub async fn deliver_to_self_delete(svc: &mut OrgService, msg: WireMessage) -> Result<SelfDeleteOutcome, OrgNodeError> {
+    deliver_from_to_self_delete(svc, rand::random(), msg).await
+}
+
+/// Deliver `msg` to `svc`'s `receive_and_verify` from a random relay Device
+/// no record lists, and return its result. Since the owner rulings of
+/// 2026-10-07 (LLR-2r2fha, LLR-kzgjz8, LLR-3aysup) such a sender is refused
+/// for every message about a held Organisation: use this for the refusal
+/// cases and first admissions, and `deliver_from_to_receive` from a listed
+/// Device otherwise.
+pub async fn deliver_to_receive(svc: &mut OrgService, msg: WireMessage) -> Result<ReceiveOutcome, OrgNodeError> {
+    deliver_from_to_receive(svc, rand::random(), msg).await
+}
+
+/// Deliver `msg` to `svc`'s `receive_and_self_delete_if_revoked` from the
+/// Device of `sender_seed`, and return its result.
+pub async fn deliver_from_to_self_delete(
+    svc: &mut OrgService,
+    sender_seed: [u8; 32],
+    msg: WireMessage,
+) -> Result<SelfDeleteOutcome, OrgNodeError> {
+    let addr = receiving_addr(svc).await;
+    let (result, ()) = tokio::join!(
+        async { tokio::time::timeout(NET, svc.receive_and_self_delete_if_revoked(&mut OsRng)).await.expect("receive timed out") },
+        send_from(sender_seed, addr, &msg)
+    );
+    result
+}
+
+/// Deliver `msg` to `svc`'s `receive_and_verify` from the Device of
+/// `sender_seed`, and return its result.
+pub async fn deliver_from_to_receive(
+    svc: &mut OrgService,
+    sender_seed: [u8; 32],
+    msg: WireMessage,
+) -> Result<ReceiveOutcome, OrgNodeError> {
+    let addr = receiving_addr(svc).await;
+    let (result, ()) = tokio::join!(
+        async { tokio::time::timeout(NET, svc.receive_and_verify(&mut OsRng)).await.expect("receive timed out") },
+        send_from(sender_seed, addr, &msg)
+    );
+    result
+}
+
+/// The device seed of `persona_id` in `svc`, as bytes: the Device a test
+/// sends from when the message must come from that Persona's Device.
+pub fn device_seed_of(svc: &OrgService, persona_id: &PersonaId) -> [u8; 32] {
+    *persona_of(svc, persona_id).device_seed.expose_secret()
+}
+
+/// A calculated trie of one Member that lists neither `member` nor `device`:
+/// an absence proof from it verifies under its root, not under any chain's.
+pub fn trie_without(member: MemberId, device: DevicePublicKey) -> org_node::test_fixtures::Trie {
+    use org_node::test_fixtures::{device_key, member_key};
+    let other = MemberId::new([0x5e; 32]);
+    assert_ne!(other, member);
+    assert_ne!(device_key(0x5f), device);
+    let leaf = org_members::MemberLeaf::new(other, h("elsewhere"), member_key(0x5e), nm("Else"), sn("Where"), vec![device_key(0x5f)])
+        .unwrap();
+    org_node::test_fixtures::Trie::genesis(vec![leaf]).unwrap()
 }

@@ -29,6 +29,17 @@ Owner rulings (2026-10-05):
 - Nothing about the sender of an Envelope is checked, on first admission or
   after: the check that a first admission's sender is the invite's device and
   the check that an update's sender is a Member's device are both removed.
+
+  *Note 2026-10-07 (owner ruling R1 at the S3a close-out residual review,
+  change `worktree-org-io-commit-workflow`).* Reversed in part: an update for
+  an Organisation the node holds, and a revocation, are acted on only when the
+  sending Device is listed in the receiver's current committed record
+  (REQ-ztdza4 as amended, REQ-ea4qs5, RC-u7kdam). A first admission is still
+  accepted from any sender and verified against the chain (owner amendment
+  the same day: "to avoid scenarios where something happens to the admin's
+  device during this window"; "The invite id plays no role in the update"),
+  and an acknowledgement is accepted only from the removed Device it names
+  (REQ-b462sh as amended). This bullet is kept as ruled on 2026-10-05.
 - Every administrator field leaves org-node: the Organisation record's and the
   Invite's administrator Member-as-a-group key and the Invite's administrator DevicePublicKey.
 - Genesis creates an X25519 Organisation key pair. `OrgPublicKey` is checked by
@@ -105,10 +116,20 @@ to the chain and without changing its record of the Organisation.
 satisfies: derived
 
 **REQ-uv3v5w**: The software shall, when an update for an Organisation commits
-— one it built or one it received — discard its previous record of that
-Organisation and every provisional update it holds for it whose base is no
-longer its record's Membership root.
+— one it built or one it received — replace its previous record of that
+Organisation with the new one, keep with the new record the Change set that
+produced it and no earlier one (a record created by genesis keeps none), and
+discard every provisional update it holds for it whose base is no longer its
+record's Membership root.
 satisfies: derived
+
+*Amended 2026-10-06 (owner ruling recorded in
+`docs/plans/2026-10-06-org-io-roadmap.md`: no legacy trie, each device keeps
+the delta that produced its current trie; change
+`worktree-org-io-commit-workflow`).* This said the software discards its
+previous record, which discarded the Change set just committed with it, so no
+device could answer a peer one epoch behind with that Change set (stage S6).
+LLR-mkj4bz is amended to match in this change's design.
 
 **REQ-fwfku9**: The software shall refuse, with a typed error naming the limit,
 to keep a provisional update that would bring the provisional updates it holds

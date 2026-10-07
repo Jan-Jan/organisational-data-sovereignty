@@ -3,7 +3,7 @@
 use thiserror::Error;
 
 use crate::ids::OrgId;
-use crate::types::PersonaId;
+use crate::types::{Epoch, PersonaId};
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum OrgNodeError {
@@ -97,6 +97,66 @@ pub enum OrgNodeError {
     /// Device is still listed (LLR-j5vbqj, LLR-pt32fx, REQ-3dsweu).
     #[error("revocation for organisation {org_id:?} leaves this node's device in the record")]
     RevocationNotForThisDevice { org_id: OrgId },
+
+    /// A reconcile for an Organisation of which this node holds no record
+    /// (LLR-n67aw8).
+    #[error("organisation {org_id:?} is not held by this node")]
+    OrgNotHeld { org_id: OrgId },
+
+    /// An Organisation state read from the chain older than the record
+    /// (LLR-n67aw8).
+    #[error(
+        "chain state for organisation {org_id:?} is at epoch {}, older than the record's epoch {}",
+        chain_epoch.get(),
+        record_epoch.get()
+    )]
+    StaleChainState { org_id: OrgId, chain_epoch: Epoch, record_epoch: Epoch },
+
+    /// An Organisation state at the record's epoch with a different root
+    /// (LLR-n67aw8).
+    #[error("chain state for organisation {org_id:?} is at the record's epoch with a different root")]
+    ChainStateConflict { org_id: OrgId },
+
+    /// A revocation whose absence proof does not verify (LLR-n67aw8).
+    #[error("revocation for organisation {org_id:?} refused: its absence proof does not verify ({cause})")]
+    RevocationProofRefused { org_id: OrgId, cause: org_members::OrgMembersError },
+
+    /// An acknowledgement about an Organisation of which this node holds no
+    /// record (LLR-n67aw8).
+    #[error("acknowledgement for organisation {org_id:?}, of which this node holds no record")]
+    AcknowledgementNotHeld { org_id: OrgId },
+
+    /// An acknowledgement naming an epoch after the record's (LLR-n67aw8).
+    #[error("acknowledgement for organisation {org_id:?} names an epoch after the record's")]
+    AcknowledgementFromFuture { org_id: OrgId },
+
+    /// An acknowledgement from a Device the record still lists (LLR-n67aw8).
+    #[error("acknowledgement for organisation {org_id:?} comes from a device the record still lists")]
+    AcknowledgementForListedDevice { org_id: OrgId },
+
+    /// An acknowledgement whose signature does not verify (LLR-n67aw8).
+    #[error("acknowledgement for organisation {org_id:?} carries a signature that does not verify")]
+    AcknowledgementSignatureInvalid { org_id: OrgId },
+
+    /// A Persona bound to the Organisation whose device seed the caller did
+    /// not supply (LLR-n67aw8, LLR-hby4jr).
+    #[error("device secret for organisation {org_id:?} was not supplied")]
+    DeviceSecretNotSupplied { org_id: OrgId },
+
+    /// `send_update` to a Device the record does not list and the outcome
+    /// holds no notice for (LLR-n67aw8, LLR-6ymd6d).
+    #[error("no revocation for organisation {org_id:?} is held for this recipient")]
+    NoRevocationForRecipient { org_id: OrgId },
+
+    /// An update for a held Organisation, or a revocation, from a Device the
+    /// record does not list (LLR-2r2fha, LLR-kzgjz8).
+    #[error("message for organisation {org_id:?} from a device its record does not list")]
+    SenderNotListed { org_id: OrgId },
+
+    /// An acknowledgement delivered by a Device other than the one it names
+    /// (LLR-5azhry, LLR-3aysup).
+    #[error("acknowledgement for organisation {org_id:?} was not sent by the device it names")]
+    AcknowledgementNotFromItsDevice { org_id: OrgId },
 }
 
 impl From<org_members::OrgMembersError> for OrgNodeError {

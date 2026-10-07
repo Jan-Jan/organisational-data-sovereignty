@@ -146,3 +146,215 @@ fn org_node_writes_nothing_to_the_chain() {
         assert!(!deps.lines().any(|l| l.trim_start().starts_with(dep)), "{dep} is not a dependency");
     }
 }
+
+// --- S3 (commit workflow): scans of the code, not of its comments ----------
+//
+// The scans below read code only: every `//` comment (doc comments included)
+// is cut before matching, so a comment may name what the code must not do.
+// Where a pattern can span lines, it is matched against the code with all
+// whitespace removed ("squeezed").
+
+/// `text` with every `//` comment cut to the end of its line.
+fn code_of(text: &str) -> String {
+    text.lines()
+        .map(|line| match line.find("//") {
+            Some(comment_start) => &line[..comment_start],
+            None => line,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `code` with all whitespace removed.
+fn squeezed(code: &str) -> String {
+    code.chars().filter(|character| !character.is_whitespace()).collect()
+}
+
+fn is_identifier_char(character: char) -> bool {
+    character.is_alphanumeric() || character == '_'
+}
+
+/// Byte offsets of `needle` in `haystack` where it starts a whole identifier:
+/// the character before it is not part of an identifier.
+fn identifier_occurrences(haystack: &str, needle: &str) -> Vec<usize> {
+    haystack
+        .match_indices(needle)
+        .map(|(offset, _)| offset)
+        .filter(|&offset| !haystack[..offset].chars().next_back().is_some_and(is_identifier_char))
+        .collect()
+}
+
+/// The expression that starts at `start` in squeezed code: up to the first
+/// `,` or `;` outside brackets, or the bracket that closes around it.
+fn expression_from(squeezed_code: &str, start: usize) -> &str {
+    let mut depth = 0i32;
+    for (offset, character) in squeezed_code[start..].char_indices() {
+        match character {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' if depth == 0 => return &squeezed_code[start..start + offset],
+            ')' | ']' | '}' => depth -= 1,
+            ',' | ';' if depth == 0 => return &squeezed_code[start..start + offset],
+            _ => {}
+        }
+    }
+    &squeezed_code[start..]
+}
+
+/// `code` without the item `fn <function_name>`: from its `fn` keyword to
+/// the brace that closes its body. Unchanged if there is no such function.
+fn without_function(code: &str, function_name: &str) -> String {
+    let Some(fn_start) = code.find(&format!("fn {function_name}(")) else {
+        return code.to_string();
+    };
+    let body_start = fn_start + code[fn_start..].find('{').unwrap();
+    let mut depth = 0i32;
+    for (offset, character) in code[body_start..].char_indices() {
+        match character {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    let body_end = body_start + offset + 1;
+                    return format!("{}{}", &code[..fn_start], &code[body_end..]);
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("fn {function_name} has no closing brace");
+}
+
+/// The name of the `fn` whose signature most recently precedes `offset` in
+/// `code`: the function a call at `offset` sits in.
+fn enclosing_function(code: &str, offset: usize) -> Option<String> {
+    code[..offset].lines().rev().find_map(|line| {
+        let mut signature = line.trim_start();
+        while let Some(rest) = ["pub(crate) ", "pub(super) ", "pub ", "async ", "const ", "unsafe "]
+            .iter()
+            .find_map(|qualifier| signature.strip_prefix(qualifier))
+        {
+            signature = rest;
+        }
+        let name: String = signature.strip_prefix("fn ")?.chars().take_while(|&character| is_identifier_char(character)).collect();
+        Some(name)
+    })
+}
+
+/// revocation.rs and reconcile.rs are values in, values out: no `async`, no
+/// chain seam, no transport, endpoint or file system, and no store taken by
+/// mutable reference (LLR-xgefn8).
+/// verifies: LLR-xgefn8
+#[test]
+fn revocation_and_reconcile_do_no_io() {
+    let forbidden_names = [
+        "async ",
+        ".await",
+        "impl Future",
+        "ChainOps",
+        "ChainReader",
+        "read_state",
+        "OrgEndpoint",
+        "crate::transport",
+        "iroh",
+        "tokio",
+        "std::fs",
+        "std::io",
+        "std::net",
+        "File::",
+        "Store::",
+        ".save(",
+    ];
+    for file in ["revocation.rs", "reconcile.rs"] {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(file);
+        let code = code_of(&std::fs::read_to_string(&path).unwrap());
+        for name in forbidden_names {
+            assert!(!code.contains(name), "{file} names `{name}` (LLR-xgefn8: no IO)");
+        }
+        let squeezed_code = squeezed(&code);
+        for borrow in ["&mutStoreData", "&mutself"] {
+            assert!(!squeezed_code.contains(borrow), "{file} takes `{borrow}` (LLR-xgefn8: the store is taken as &StoreData)");
+        }
+    }
+}
+
+/// No code in org-node removes an `OrgRecord` or a `PersonaRecord` except
+/// `StoreData::forget_organisation`: no removing method on `orgs` or
+/// `personas`, no rebuild of either through a filter, no reassignment to an
+/// empty list and no `mem::take`/`mem::replace` of either (LLR-23sfdh).
+/// verifies: LLR-23sfdh
+#[test]
+fn only_forget_organisation_removes_records_and_personas() {
+    let removing_methods =
+        ["retain(", "retain_mut(", "remove(", "swap_remove(", "clear()", "drain(", "truncate(", "pop()", "split_off(", "dedup"];
+    for (path, text) in sources() {
+        let mut code = code_of(&text);
+        if path.ends_with("store.rs") {
+            code = without_function(&code, "forget_organisation");
+        }
+        let squeezed_code = squeezed(&code);
+        let file = path.display();
+        for collection in ["orgs", "personas"] {
+            for method in removing_methods {
+                let call = format!("{collection}.{method}");
+                assert!(identifier_occurrences(&squeezed_code, &call).is_empty(), "{file} calls `{call}` (LLR-23sfdh)");
+            }
+            for binding in [format!("{collection}:"), format!("{collection}=")] {
+                for offset in identifier_occurrences(&squeezed_code, &binding) {
+                    let value = expression_from(&squeezed_code, offset + binding.len());
+                    if binding.ends_with('=') && value.starts_with('=') {
+                        continue; // a comparison, `==`
+                    }
+                    assert!(
+                        !value.contains(".filter(") && !value.contains(".retain"),
+                        "{file} rebuilds `{collection}` through a filter: `{binding}{value}` (LLR-23sfdh)"
+                    );
+                    if binding.ends_with('=') {
+                        for empty in ["Vec::new()", "vec![]", "Default::default()"] {
+                            assert!(!value.contains(empty), "{file} empties `{collection}`: `{binding}{value}` (LLR-23sfdh)");
+                        }
+                    }
+                }
+            }
+            for swap in ["mem::take(", "mem::replace("] {
+                for offset in squeezed_code.match_indices(swap).map(|(offset, _)| offset) {
+                    let argument = expression_from(&squeezed_code, offset + swap.len());
+                    assert!(!argument.ends_with(collection), "{file} takes `{collection}` out with `{swap}{argument}` (LLR-23sfdh)");
+                }
+            }
+        }
+    }
+}
+
+/// `forget_organisation` is defined once, in store.rs (`OrgService` has none
+/// of its own), and called from exactly two functions: `revocation::accept`
+/// and the commit paths' one removal step, `removal_step` in service.rs
+/// (LLR-23sfdh).
+/// verifies: LLR-23sfdh
+#[test]
+fn forget_organisation_is_defined_once_and_called_only_from_accept_and_the_removal_step() {
+    let mut definitions = Vec::new();
+    let mut callers = Vec::new();
+    for (path, text) in sources() {
+        let code = code_of(&text);
+        let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+        definitions.extend(identifier_occurrences(&code, "fn forget_organisation").iter().map(|_| file_name.clone()));
+        for (offset, _) in code.match_indices("forget_organisation") {
+            let preceding = code[..offset].trim_end();
+            if preceding.ends_with("fn") {
+                continue;
+            }
+            assert!(
+                !code[..offset].chars().next_back().is_some_and(is_identifier_char),
+                "{file_name} names an identifier ending in forget_organisation"
+            );
+            callers.push(format!("{file_name}::{}", enclosing_function(&code, offset).unwrap_or_default()));
+        }
+    }
+    assert_eq!(definitions, ["store.rs"], "forget_organisation is defined once, in store.rs (LLR-23sfdh)");
+    callers.sort();
+    assert_eq!(
+        callers,
+        ["revocation.rs::accept", "service.rs::removal_step"],
+        "forget_organisation is called from accept and the removal step only (LLR-23sfdh)"
+    );
+}
