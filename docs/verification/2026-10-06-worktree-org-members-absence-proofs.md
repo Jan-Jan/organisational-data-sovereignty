@@ -31,7 +31,7 @@ Measured on: `f041aba` (`git rev-parse HEAD`), tree `cde106eb1913811889edfcbba55
 | `check-trace.sh` (org-members, org-node, app) | exit 0. This change resolves PR-jq43gx (org-members) and opens PR-qmvj83 (org-node) |
 | `check-units.sh` | exit 0 |
 | Coverage, `make coverage-org-members` (stable) | lines 96.55%, regions 94.57%; floors 92 / 91 met. `absence_proofs` is now in the measured set |
-| Decision coverage, nightly `--branch` | 123 of 124 branches. Every branch in changed code is covered: proof.rs 16/16, smt.rs 20/20, types.rs 16/16. The one miss is trie.rs:449 (`update_leaf`), which this change did not touch |
+| Decision coverage, nightly `--branch` | 123 of 124 branches. Every branch in changed code is covered: proof.rs 16/16, smt.rs 20/20, types.rs 16/16. The one miss is trie.rs:449 (`update_leaf`), which this change did not touch *Corrected 2026-10-06 (worktree-guardrails-branch-coverage review): the miss is the `!old.is_calculated()` operand of `calculate_delta`'s guard, not `update_leaf`, which has no counted branch.* |
 | Working tree | clean |
 
 ## Red → green

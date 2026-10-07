@@ -4,17 +4,25 @@
 # the targets named by `coverage_command` in org-members/.guardrails/config.yaml,
 # on-chain-client/.guardrails/config.yaml and person/.guardrails/config.yaml
 # (per-unit configs since 2026-09-05; person's since 2026-10-04; `coverage`
-# runs all three and is what CI calls). Note what that does and does not mean: NO check
+# runs all three and is what CI calls). Since 2026-10-06 each of those configs
+# also names its `coverage-branch-<unit>` twin, the decision-coverage half, run
+# by `coverage-branch` and CI's job of the same name (nightly; see
+# BRANCH_TOOLCHAIN). Note what that does and does not mean: NO check
 # script reads `coverage_command` — `grep -rn coverage_command
 # .guardrails/scripts/` finds it only in lib.sh's schema key list. The gate is
 # an instruction to whoever runs `verify-before-merge` (step 5: run it and
-# judge the report against the class target), plus the `coverage` job in
-# .github/workflows/rust.yml, which is the part that is mechanical.
+# judge the report against the class target), plus the `coverage` and
+# `coverage-branch` jobs in .github/workflows/rust.yml, which are the part that
+# is mechanical.
 #
-# Requires: cargo-llvm-cov and the llvm-tools-preview component.
+# Requires: cargo-llvm-cov and the llvm-tools-preview component; the branch
+# targets also need jq and the pinned nightly with its own llvm-tools-preview.
 #   cargo install cargo-llvm-cov && rustup component add llvm-tools-preview
+#   rustup toolchain install $(BRANCH_TOOLCHAIN) --component llvm-tools-preview
 
-.PHONY: coverage coverage-org-members coverage-on-chain-client coverage-person
+.PHONY: coverage coverage-org-members coverage-on-chain-client coverage-person \
+	coverage-branch coverage-branch-org-members coverage-branch-on-chain-client \
+	coverage-branch-person
 
 # TWO metrics, because the STATEMENT-coverage half of the class target (class
 # C: statement AND decision) is measured two ways here and the two
@@ -144,8 +152,8 @@ ON_CHAIN_CLIENT_REGIONS := 42
 #
 #   person                    100.00%    100.00%   (215 of 215 lines; 331 of 331 regions)
 #
-# The decision half of the class C target is measured with the nightly
-# toolchain: `cargo +nightly llvm-cov -p person --branch --summary-only`
+# Historical (before the coverage-branch-* targets): the decision half was
+# measured by hand, `cargo +nightly llvm-cov -p person --branch --summary-only`
 # (cargo 1.101.0-nightly (f3865b2a4 2026-09-29), cargo-llvm-cov 0.9.0),
 # re-measured 2026-10-05 by the fourth review-findings task
 # (worktree-person-unit-findings4): 28 of 28 branches, 100% decision coverage.
@@ -156,14 +164,62 @@ ON_CHAIN_CLIENT_REGIONS := 42
 #   person                    100.00%    100.00%   (344 of 344 lines; 535 of 535 regions)
 #
 # and with nightly --branch: 36 of 36 branches, 100% decision coverage.
-# That figure is not enforced here — stable llvm-cov reports no branches.
+# Enforced since 2026-10-06 by `coverage-branch-person` (PERSON_BRANCHES below).
 # The 344/344 and 535/535 figures are stable cargo 1.99.0, cargo-llvm-cov 0.9.0.
-# After a `cargo +nightly llvm-cov --branch` run, run a plain `cargo llvm-cov
-# clean` (not `--workspace`) before a stable `make coverage-person`: stale
-# nightly binaries in target/llvm-cov-target add instrumented lines and fail
-# the floor.
+# For stale nightly binaries and `cargo llvm-cov clean`, see BRANCH_TARGET_DIR.
 PERSON_LINES := 99
 PERSON_REGIONS := 99
+
+# DECISION coverage, the other half of the class C target, added 2026-10-06
+# (worktree-guardrails-branch-coverage, docs/plans/2026-10-06-branch-coverage.md).
+# rustc's branch instrumentation is unstable (`-Z coverage-options=branch`), so
+# `cargo llvm-cov --branch` runs only on nightly. The nightly is PINNED, by the
+# date of its channel manifest, so a nightly regression cannot move the gate and
+# moving the pin is a reviewed edit. Install it once:
+#   rustup toolchain install $(BRANCH_TOOLCHAIN) --component llvm-tools-preview
+# Override it on the command line (`make coverage-branch BRANCH_TOOLCHAIN=nightly`)
+# only where the floating nightly is known to be the same build.
+#
+# What it counts: both outcomes of each `if`/`while` condition and of each `&&`
+# and `||` operand. rustc's support for `match` arms as branches is partial, so
+# match arms are guarded chiefly by the region floor above, not by this one.
+#
+# Floors are branch PERCENTAGES, one point below the measurement rounded down,
+# ratcheting upward only — the same rule as the line and region floors.
+# cargo-llvm-cov 0.9.0 has no --fail-under-branches, so the recipe exports the
+# JSON summary and `jq -e` judges it. A summary with no branches at all reads
+# 0% or null and fails either way: an instrumentation that counted nothing is
+# not a pass.
+#
+# Builds go to their own target directory, target/branch-coverage, so nightly
+# binaries never land in target/llvm-cov-target, where they fail the stable
+# floors. A HAND-RUN `cargo +nightly llvm-cov --branch` still lands there: run
+# a plain `cargo llvm-cov clean` (not `--workspace`) after one.
+#
+#   measured 2026-10-06        branches                   (lines, stable recipe)
+#   org-members                123 of 124   99.19%        96.55%
+#   on-chain-client             34 of  34  100.00%        41.75%
+#   person                      36 of  36  100.00%       100.00%
+#   (nightly-2026-10-03 = rustc 1.101.0-nightly 0abfedbc7 2026-10-02,
+#   cargo-llvm-cov 0.9.0, aarch64-darwin)
+#
+# READ THE DENOMINATOR. A branch inside a function that never ran is reported
+# as "[Folded - Ignored]" and is left out of the count, so this figure is the
+# decision coverage OF THE CODE THAT EXECUTED. Code that never ran is caught by
+# the line and region floors, not here. That is why on-chain-client reads 100%
+# beside 41.75% lines: client.rs's chain-facing async paths (its Revive event
+# filter, for one) never run in this suite, and their conditions are not
+# counted. on-chain-client's class C shortfall therefore stands; this floor
+# does not close it. The one uncovered org-members branch is the
+# `!old.is_calculated()` operand of `calculate_delta`'s guard in
+# org-members/src/trie.rs: no test has a calculated `self` with an
+# uncalculated `old`. It predates the absence-proofs change (S1).
+BRANCH_TOOLCHAIN := nightly-2026-10-03
+BRANCH_TARGET_DIR := $(CURDIR)/target/branch-coverage
+BRANCH_REPORT_DIR := $(BRANCH_TARGET_DIR)/reports
+ORG_MEMBERS_BRANCHES := 98
+ON_CHAIN_CLIENT_BRANCHES := 99
+PERSON_BRANCHES := 99
 
 # Per-crate, so a regression in the well-covered crate cannot hide behind the
 # poorly-covered one. Known limit, unfixable today: each floor is still an
@@ -192,11 +248,13 @@ coverage: coverage-org-members coverage-on-chain-client coverage-person
 # quint.yml's `mbt` job and the `test` job in rust.yml both RUN that lane with
 # quint installed, which keeps the conformance argument honest. Neither
 # measures its coverage contribution; that remains unknown.
+ORG_MEMBERS_COVERAGE_ARGS := -p org-members \
+	--lib --test integration_test --test fuzz_tests \
+	--test newtypes --test encoding_golden --test person_error_mapping \
+	--test absence_proofs
+
 coverage-org-members:
-	cargo llvm-cov -p org-members \
-		--lib --test integration_test --test fuzz_tests \
-		--test newtypes --test encoding_golden --test person_error_mapping \
-		--test absence_proofs \
+	cargo llvm-cov $(ORG_MEMBERS_COVERAGE_ARGS) \
 		--summary-only \
 		--fail-under-lines $(ORG_MEMBERS_LINES) \
 		--fail-under-regions $(ORG_MEMBERS_REGIONS)
@@ -228,22 +286,24 @@ coverage-org-members:
 # tests out of `#[cfg(test)]` modules inside on-chain-client/src, which drops the
 # `--lib`-only figure twice over (the relocated bodies were themselves covered
 # library lines, and the branches they exercised stop being reached at all).
+ON_CHAIN_CLIENT_COVERAGE_ARGS := --manifest-path on-chain-client/Cargo.toml \
+	--features test-support \
+	--lib \
+	--test fuzz_decode_org_state \
+	--test fuzz_parse_revive_event \
+	--test fuzz_event_round_trip \
+	--test contract_address_filter \
+	--test log_ownership \
+	--test decode_revive_event \
+	--test decode_org_state \
+	--test runtime_version_dispatch \
+	--test h160_mapping \
+	--test storage_slot_layout \
+	--test best_lane_reorg_rule \
+	--test type_widths
+
 coverage-on-chain-client:
-	cargo llvm-cov --manifest-path on-chain-client/Cargo.toml \
-		--features test-support \
-		--lib \
-		--test fuzz_decode_org_state \
-		--test fuzz_parse_revive_event \
-		--test fuzz_event_round_trip \
-		--test contract_address_filter \
-		--test log_ownership \
-		--test decode_revive_event \
-		--test decode_org_state \
-		--test runtime_version_dispatch \
-		--test h160_mapping \
-		--test storage_slot_layout \
-		--test best_lane_reorg_rule \
-		--test type_widths \
+	cargo llvm-cov $(ON_CHAIN_CLIENT_COVERAGE_ARGS) \
 		--summary-only \
 		--fail-under-lines $(ON_CHAIN_CLIENT_LINES) \
 		--fail-under-regions $(ON_CHAIN_CLIENT_REGIONS)
@@ -251,8 +311,47 @@ coverage-on-chain-client:
 # Every person test target, none excluded: the crate has no lane that needs a
 # tool outside cargo, so the measurement and `cargo test -p person` (its
 # verify_commands entry) run the same suite.
+PERSON_COVERAGE_ARGS := -p person
+
 coverage-person:
-	cargo llvm-cov -p person \
+	cargo llvm-cov $(PERSON_COVERAGE_ARGS) \
 		--summary-only \
 		--fail-under-lines $(PERSON_LINES) \
 		--fail-under-regions $(PERSON_REGIONS)
+
+# Decision coverage per unit, on the pinned nightly (see BRANCH_TOOLCHAIN). Each
+# recipe measures EXACTLY the test set of its stable twin above: both read the
+# same *_COVERAGE_ARGS variable, so the statement and decision figures always
+# describe one suite.
+coverage-branch: coverage-branch-org-members coverage-branch-on-chain-client coverage-branch-person
+
+# $(1) report name, $(2) floor. Prints the figure, then fails below the floor.
+define judge_branches
+	@jq -r '.data[0].totals.branches | "$(1): \(.covered) of \(.count) branches, \(.percent)% (floor $(2)%)"' $(BRANCH_REPORT_DIR)/$(1).json
+	@jq -e --argjson floor $(2) '.data[0].totals.branches.percent >= $$floor' $(BRANCH_REPORT_DIR)/$(1).json > /dev/null \
+		|| { echo "$(1): branch coverage is below its floor of $(2)%"; exit 1; }
+endef
+
+coverage-branch-org-members:
+	mkdir -p $(BRANCH_REPORT_DIR)
+	CARGO_TARGET_DIR=$(BRANCH_TARGET_DIR) cargo +$(BRANCH_TOOLCHAIN) llvm-cov \
+		$(ORG_MEMBERS_COVERAGE_ARGS) \
+		--branch --json --summary-only \
+		--output-path $(BRANCH_REPORT_DIR)/org-members.json
+	$(call judge_branches,org-members,$(ORG_MEMBERS_BRANCHES))
+
+coverage-branch-on-chain-client:
+	mkdir -p $(BRANCH_REPORT_DIR)
+	CARGO_TARGET_DIR=$(BRANCH_TARGET_DIR) cargo +$(BRANCH_TOOLCHAIN) llvm-cov \
+		$(ON_CHAIN_CLIENT_COVERAGE_ARGS) \
+		--branch --json --summary-only \
+		--output-path $(BRANCH_REPORT_DIR)/on-chain-client.json
+	$(call judge_branches,on-chain-client,$(ON_CHAIN_CLIENT_BRANCHES))
+
+coverage-branch-person:
+	mkdir -p $(BRANCH_REPORT_DIR)
+	CARGO_TARGET_DIR=$(BRANCH_TARGET_DIR) cargo +$(BRANCH_TOOLCHAIN) llvm-cov \
+		$(PERSON_COVERAGE_ARGS) \
+		--branch --json --summary-only \
+		--output-path $(BRANCH_REPORT_DIR)/person.json
+	$(call judge_branches,person,$(PERSON_BRANCHES))

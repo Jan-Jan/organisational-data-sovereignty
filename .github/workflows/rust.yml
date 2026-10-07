@@ -170,11 +170,8 @@ jobs:
   # The statement-coverage gate, running all three per-unit coverage targets
   # the merge gates run (`make coverage` = coverage-org-members +
   # coverage-on-chain-client + coverage-person). Floors live in the Makefile and ratchet upward
-  # only. This covers the statement half of the class C target; decision
-  # coverage is not measured in CI (docs/adr/2026-09-01-safety-class-c.md).
-  # Branch coverage needs nightly; for person the Makefile records it as
-  # measured by hand on nightly: 28 of 28 branches, re-measured 2026-10-05
-  # (see the person floors there).
+  # only. This covers the statement half of the class C target; the decision
+  # half is the `coverage-branch` job below.
   #
   # Note that the floors were calibrated on aarch64-darwin and are enforced
   # here on x86_64-linux, against a floating `stable` toolchain and an
@@ -190,6 +187,29 @@ jobs:
         with: { components: llvm-tools-preview }
       - uses: taiki-e/install-action@cargo-llvm-cov
       - run: make coverage
+
+  # The decision half of the class C target (docs/adr/2026-09-01-safety-class-c.md,
+  # amended 2026-10-06): `make coverage-branch`, branch floors per unit. Branch
+  # instrumentation is unstable in rustc, so this job runs the nightly the
+  # Makefile pins as BRANCH_TOOLCHAIN. The pin lives in both files; the first
+  # run step fails if they disagree, and the env value is passed to make, so
+  # the toolchain installed and the toolchain used are one string. cargo-llvm-cov is pinned too: the floors and the JSON shape jq reads were
+  # calibrated on 0.9.0. The same cross-platform caveat as the job above
+  # applies to its floors.
+  coverage-branch:
+    runs-on: ubuntu-latest
+    env:
+      BRANCH_TOOLCHAIN: nightly-2026-10-03
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.BRANCH_TOOLCHAIN }}
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@v2
+        with: { tool: cargo-llvm-cov@0.9.0 }
+      - run: grep -qx "BRANCH_TOOLCHAIN := $BRANCH_TOOLCHAIN" Makefile || { echo "rust.yml BRANCH_TOOLCHAIN ($BRANCH_TOOLCHAIN) differs from the Makefile pin"; exit 1; }
+      - run: make coverage-branch BRANCH_TOOLCHAIN="$BRANCH_TOOLCHAIN"
 
   # fetch-depth: 0 is for the pull-request steps below, which resolve
   # `origin/<base>` and ask which files the branch touched. check-ids.sh needs

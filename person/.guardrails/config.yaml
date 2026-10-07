@@ -52,9 +52,11 @@ problem_age_days: 30
 problem_open_max: 10
 
 # Statement coverage, floors in the root Makefile (first set 2026-10-04,
-# ratchet upward only).
+# ratchet upward only). Decision coverage since 2026-10-06, on the pinned
+# nightly (Makefile BRANCH_TOOLCHAIN; 36 of 36 branches, floor 99%).
 coverage_command:
   - make coverage-person
+  - make coverage-branch-person
 
 expectation_age_days: 90
 expectation_open_max: 10

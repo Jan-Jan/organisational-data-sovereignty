@@ -246,7 +246,8 @@ register should be read as resting on a coverage number, because there is none.
 
 **Decision coverage is unmeasured, here as in every unit.** Class C asks for
 statement *and* decision coverage. No unit in this repository measures the
-second.
+second. *Amended 2026-10-06:* org-members, on-chain-client and person measure
+it since then (`make coverage-branch`); app and org-node still do not.
 
 ### Claims held by review, not by a gate
 

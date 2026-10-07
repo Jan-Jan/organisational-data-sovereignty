@@ -82,7 +82,8 @@ ways, and each has real cost:
   unstable and fails on stable rustc. It needs a nightly toolchain with
   `llvm-tools-preview`. Until that is in place the class target is unmet, and it
   is unmet in a way the previous class did not have: this is now a gap against a
-  mandatory requirement rather than a stretch goal.
+  mandatory requirement rather than a stretch goal. *Amended 2026-10-06:*
+  measured on a pinned nightly for three units since then; see open item 1.
 - **Low-level requirements are REQUIRED per software item**, not optional per
   item: interfaces, algorithms, error behaviour and resource limits each get a
   testable LLR. This lands squarely on tooth 6 (`design-architecture`), which
@@ -135,6 +136,15 @@ project default is C.
    step 5 requires that acceptance from the user and records it in the
    verification record, and it has not been given. Unlike the Class B coverage
    gap, this one is against a requirement rather than a target.
+   **Amended 2026-10-06** (worktree-guardrails-branch-coverage,
+   `docs/plans/2026-10-06-branch-coverage.md`): measured and enforced for
+   org-members, on-chain-client and person — `make coverage-branch` on a
+   pinned nightly, a branch floor per unit, its own CI job. Three limits
+   remain. org-node and app have no coverage target of any kind yet (tooth 5).
+   A branch figure counts only functions that ran, so it is read beside the
+   statement floor (see the Makefile, beside the branch floors). And
+   on-chain-client's `write` feature is not compiled into its coverage run at
+   all (PR-b795an).
 2. **Tooth 6 must produce LLRs per software item**, not optionally. The adoption
    order needs re-scoping before it runs.
 3. **The review policy needs a decision** on what "thorough" means here, and

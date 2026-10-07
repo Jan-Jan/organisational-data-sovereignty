@@ -89,7 +89,11 @@ about the sandbox, in both directions.
       measured anywhere: `cargo llvm-cov --branch` is unstable on stable rustc.
       Needs `rustup component add llvm-tools-preview --toolchain nightly`, a
       `--branch` lane in the Makefile and in CI's `coverage` job, floors from
-      the first measurement.
+      the first measurement. **Done 2026-10-06 for org-members,
+      on-chain-client and person** (`docs/plans/2026-10-06-branch-coverage.md`:
+      `coverage-branch-<unit>` targets on pinned nightly-2026-10-03, floors
+      98/99/99%, a `coverage-branch` CI job). Stays open for org-node and app,
+      which get theirs with their statement coverage at tooth 5.
 - [ ] **Human review policy.** Who signs off a merge; who is the independent
       reviewer at `merge-change` step 6a; whether critical items take two
       reviewers. Every change so far has used one fresh subagent, recorded by
@@ -592,6 +596,8 @@ did not add one (owner's decision, 2026-09-14: keep one measurement basis for
 org-node and app together). Under class C that is a gap against a mandatory
 requirement and it stays recorded here. Tooth 5 now owns: a floor for org-node,
 a floor for app, and decision coverage — unmeasured in all four units.
+*(Amended 2026-10-06: measured since for org-members, on-chain-client and
+person; see the checklist item above.)*
 
 **CI.** app's three `verify_commands` used to run nowhere in CI. After this
 change two of the three do: a new `app-frontend` job runs `npm --prefix app run
