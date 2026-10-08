@@ -13,7 +13,7 @@ enumerates", because org-node has enumerated none of its own yet.
 hazards of its own, and the two entries below are read against org-members'
 register only because that is the frame in which they were assessed.)
 
-The two items assessed are the expectations in
+The two items assessed were the expectations in
 `org-node/docs/requirements/2026-09-06-dependency-expectations.md`.
 Both are derived: they exist because the system is partitioned into units and
 org-node's verify-and-commit path leans on behaviour its providers perform
@@ -28,21 +28,11 @@ The register in question is
 
 ## Assessment
 
-assesses: REQ-ysyu9g
-
-REQ-ysyu9g (on-chain-client returns the finalised Organisation state when no
-block is named). Hazard impact: **mitigates**, and directly on the decisive
-control of org-members' register. Its stale-or-divergent-record hazard and its
-root-reversion hazard both rest on the base-matching control that REQ-4umsuz
-realises, and the register states in as many words that the root the control
-compares against must come from a path the attacker does not control. A
-best-block read is such a path only until the next reorganisation; a
-finalised read is not. Failure behaviour if the expectation is violated: a
-revocation is committed against a root the chain later discards, and a
-removed Member is believed removed on evidence that no longer exists — the
-retained-access pathway, S3. No new hazard is introduced by asking for the
-finalised read; its cost is latency, which that register's staleness
-discussion already carries.
+*Moved 2026-10-07 to org-io's risk ledger
+(`org-io/docs/risk/2026-10-08-org-io.md`, finalised at the
+merge of change `worktree-org-io-create`) by ruling A, with the expectation
+it assessed: the finalised-block expectation on on-chain-client is now held
+by org-io, which performs the chain read. org-node reads no chain.*
 
 assesses: REQ-q92yac
 
@@ -77,8 +67,9 @@ meantime.
 (Corrected 2026-09-09: org-node's register is written —
 `org-node/docs/risk/2026-09-09-org-node-hazards.md` — and it does evaluate
 against the matrix. It also names the hazard each expectation was written
-toward: REQ-ysyu9g stands against HAZ-tawvm2, a Change set accepted on its
-sender's word, and REQ-q92yac against HAZ-vxabf9, a device removed from the
+toward: the finalised-block expectation (now held by org-io, see above) stands
+against HAZ-tawvm2, a Change set accepted on its sender's word, and REQ-q92yac
+against HAZ-vxabf9, a device removed from the
 record that keeps acting as a member. Neither carries `(implements: RC-…)`,
 and the annotation is still deliberately withheld: an unmet expectation
 carrying it fails this unit's gate on every run, and the providers' ninety

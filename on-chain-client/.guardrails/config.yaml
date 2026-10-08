@@ -68,7 +68,7 @@ test_paths:
 # target of this unit is: it needs a fork and on-chain/scripts/node_modules.
 verify_commands:
   - cargo test --manifest-path on-chain-client/Cargo.toml --features test-support --lib --test fuzz_decode_org_state --test fuzz_parse_revive_event --test fuzz_event_round_trip --test contract_address_filter --test log_ownership --test decode_revive_event --test decode_org_state --test runtime_version_dispatch --test h160_mapping --test storage_slot_layout --test best_lane_reorg_rule --test type_widths
-  - cargo test --manifest-path on-chain-client/Cargo.toml --features test-support,write --test write_manifest --test write_pure --test write_compose --test write_events
+  - cargo test --manifest-path on-chain-client/Cargo.toml --features test-support,write --test write_manifest --test write_pure --test write_compose --test write_events --test signatory_set_decode --test fuzz_signatory_set
 
 # Raised from 30 to 45 on 2026-10-05 by owner ruling, during the chain-authority
 # change: PR-w5sk5k, PR-h4mb8y, PR-uq5r97 and PR-qpp28h reach 30 days around
@@ -140,6 +140,20 @@ problem_open_max: 10
 # functions that ran, and client.rs's unexecuted paths are not among them (see
 # the Makefile, beside the branch floors). Nor does it reach the chain writer:
 # the run builds without the `write` feature (PR-b795an).
+#
+# The writer measured, 2026-10-07 (worktree-org-io-create, T4, resolves
+# PR-b795an): both recipes now build with `--features test-support,write` and
+# run the six writer targets of the second verify_commands line, so the two
+# coverage commands measure both verify_commands lines. Statement: 47.66% lines
+# (428 of 898) / 48.53% regions (658 of 1356), up from 41.75% / 42.60%; floors
+# raised to 46 / 47. write/subxt_ops.rs, the chain-only shell, is 0.00% over
+# 116 lines; the pure writer files read 86-100%. Decision: first 56 of 58
+# branches, 96.55%, down from 34 of 34 because the writer brought two
+# unreached outcomes into the count (write/proxy.rs:41 and write/events.rs:15;
+# the Makefile names them). Both were then covered by tests alone (task
+# s2t4b), and the figures are now 58 of 58 branches, 100%, against the
+# unchanged floor of 99, with 47.88% lines (430 of 898) / 48.75% regions
+# (661 of 1356); both coverage commands exit 0.
 coverage_command:
   - make coverage-on-chain-client
   - make coverage-branch-on-chain-client

@@ -8,7 +8,7 @@ use org_node::chain::OrgState;
 use org_node::error::OrgNodeError;
 use org_node::ids::OrgId;
 use org_node::reconcile::{reconcile, Reconciled};
-use org_node::store::{ProvisionalChange, ProvisionalUpdate, StoreData};
+use org_node::store::{ProvisionalChange, ProvisionalUpdate, ProvisionalUpdateParts, StoreData};
 use org_node::{Epoch, RootHash};
 use rand::rngs::OsRng;
 use support::*;
@@ -78,7 +78,7 @@ async fn reconcile_commits_the_update_the_chain_holds_after_a_crash() {
     };
     let record = store.orgs.iter().find(|r| r.org_id == s.org_id).unwrap();
     assert_eq!((record.epoch, record.root_hash, record.org_pub_key), (chain_state.epoch, chain_state.root_hash, chain_state.org_pub_key));
-    let ProvisionalChange::ChangeSet { change_set, .. } = &update.change else { panic!("a Change set") };
+    let ProvisionalChange::ChangeSet { change_set, .. } = update.change_for_test() else { panic!("a Change set") };
     assert_eq!(record.kept_change_set.as_ref(), Some(change_set));
     assert!(store.provisional_updates.iter().all(|u| u.resulting_root != update.resulting_root));
     assert!(outcome.revocations.is_empty());
@@ -142,7 +142,7 @@ async fn reconcile_returns_a_refusal_of_the_commit_step_as_the_error() {
     s.chain.apply_update(s.org_id, update.resulting_root, update.org_pub_key, rec_of(&s.svc_a, s.org_id).epoch).unwrap();
     let mut store = s.svc_a.store_data().clone();
     for kept in &mut store.provisional_updates {
-        if let ProvisionalChange::ChangeSet { change_set, .. } = &mut kept.change {
+        if let ProvisionalChange::ChangeSet { change_set, .. } = kept.change_mut_for_test() {
             *change_set = vec![0xff; 4];
         }
     }
@@ -164,7 +164,7 @@ async fn reconcile_of_a_removal_signs_and_forgets() {
     s.chain.apply_update(s.org_id, update.resulting_root, update.org_pub_key, rec_of(&s.svc_a, s.org_id).epoch).unwrap();
     // B holds A's revocation as a provisional update of its own: copy it into B's store data.
     let mut b_store = s.svc_b.store_data().clone();
-    b_store.provisional_updates.push(ProvisionalUpdate { persona_id: s.pid_b.clone(), ..update });
+    b_store.provisional_updates.push(ProvisionalUpdate::from(ProvisionalUpdateParts { persona_id: s.pid_b.clone(), ..update.into() }));
     let seeds = vec![s.b_device_kp.device_seed()];
     let Reconciled::Removed { store, acknowledgements } =
         reconcile(&b_store, s.org_id, s.chain.get(&s.org_id).unwrap(), || seeds).unwrap()
@@ -189,7 +189,7 @@ async fn a_removal_that_cannot_sign_forgets_nothing() {
     let update = s.svc_a.revoke_member(&mut OsRng, s.org_id, b_id).unwrap();
     s.chain.apply_update(s.org_id, update.resulting_root, update.org_pub_key, rec_of(&s.svc_a, s.org_id).epoch).unwrap();
     let mut b_store = s.svc_b.store_data().clone();
-    b_store.provisional_updates.push(ProvisionalUpdate { persona_id: s.pid_b.clone(), ..update });
+    b_store.provisional_updates.push(ProvisionalUpdate::from(ProvisionalUpdateParts { persona_id: s.pid_b.clone(), ..update.into() }));
     let before = encoded(&b_store);
     let on_disk_before = store_bytes("reconcile-removal-unsigned", "b");
     for seeds in [vec![], vec![org_node::DeviceSeed::from([99; 32])]] {
@@ -204,8 +204,9 @@ async fn a_removal_that_cannot_sign_forgets_nothing() {
 
 /// verifies: LLR-fm38ww
 ///
-/// The interim service caller reads the chain once, reconciles, and adopts
-/// and saves the successor: the reopened store holds the committed record.
+/// The interim service caller, given the state org-io read, reconciles, and
+/// adopts and saves the successor: the reopened store holds the committed
+/// record. (2026-10-08, ruling B: the state is an argument.)
 #[tokio::test]
 async fn the_service_reconcile_adopts_and_saves_the_committed_record() {
     let mut s = admit_b_directly(setup("reconcile-service").await).await;
@@ -213,25 +214,33 @@ async fn the_service_reconcile_adopts_and_saves_the_committed_record() {
     let update = s.svc_a.admit_member(&mut OsRng, s.org_id, &joiner_c).unwrap();
     s.chain.apply_update(s.org_id, update.resulting_root, update.org_pub_key, rec_of(&s.svc_a, s.org_id).epoch).unwrap();
     let chain_state = s.chain.get(&s.org_id).unwrap();
-    assert!(matches!(s.svc_a.reconcile(&mut OsRng, s.org_id).await, Ok(Reconciled::Committed { .. })));
+    assert!(matches!(
+        s.svc_a.svc.reconcile(&mut OsRng, s.org_id, s.chain.get(&s.org_id)),
+        Ok(Reconciled::Committed { .. })
+    ));
     assert_eq!(rec_of(&s.svc_a, s.org_id).epoch, chain_state.epoch);
     let on_disk = disk_rec_of(&reopen_store("reconcile-service", "a", "pw_a"), s.org_id);
     assert_eq!((on_disk.epoch, on_disk.root_hash), (chain_state.epoch, chain_state.root_hash));
-    assert!(matches!(s.svc_a.reconcile(&mut OsRng, s.org_id).await, Ok(Reconciled::InStep)));
+    assert!(matches!(s.svc_a.svc.reconcile(&mut OsRng, s.org_id, s.chain.get(&s.org_id)), Ok(Reconciled::InStep)));
 }
 
 /// verifies: LLR-gr8x3r
 ///
 /// The service caller refuses an Organisation it does not hold with
-/// `OrgNotHeld` before it reads the chain: no chain read is made.
+/// `OrgNotHeld` whatever state it is given — a state, or none — before it
+/// looks at the state. *Renamed 2026-10-08 (ruling B):* was
+/// `the_service_reconcile_refuses_an_unheld_organisation_without_a_chain_read`;
+/// org-node reads no chain, and the order of org-io's read is org-io's.
 #[tokio::test]
-async fn the_service_reconcile_refuses_an_unheld_organisation_without_a_chain_read() {
-    let (mut s, counting) = setup_counting("reconcile-unheld").await;
+async fn the_service_reconcile_refuses_an_unheld_organisation_whatever_state_it_is_given() {
+    let mut s = setup("reconcile-unheld").await;
     let unheld = OrgId::new([9; 20]);
-    let before = counting.reads();
-    assert!(matches!(
-        s.svc_a.reconcile(&mut OsRng, unheld).await,
-        Err(OrgNodeError::OrgNotHeld { org_id }) if org_id == unheld
-    ));
-    assert_eq!(counting.reads(), before, "no chain read for an unheld Organisation");
+    let held_state = s.chain.get(&s.org_id);
+    assert!(held_state.is_some(), "fixture: a real state to offer");
+    for given in [held_state, None] {
+        assert!(matches!(
+            s.svc_a.svc.reconcile(&mut OsRng, unheld, given),
+            Err(OrgNodeError::OrgNotHeld { org_id }) if org_id == unheld
+        ));
+    }
 }

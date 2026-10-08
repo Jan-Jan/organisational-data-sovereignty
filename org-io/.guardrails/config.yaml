@@ -1,0 +1,98 @@
+# guardrails configuration for the `org-io` unit — flat schema only:
+#   `key: value` scalars and two-space `- item` lists, every key at column one,
+#   set once, in its own form (LIST keys: strict_paths, test_paths,
+#   verify_commands, coverage_command, depends_on, segregated_from; everything
+#   else a scalar). The schema is CLOSED and validated before any gate runs;
+#   the full rule list, with the reason each rule exists, is the header of
+#   templates/config.yaml in the guardrails repository this was copied from.
+#
+# This is a UNIT config (.guardrails/units.yaml at the repository root names
+# the units). Every doc_* value and every strict_paths/test_paths entry must
+# sit inside this unit's own directory, and doc_verification must NOT be set —
+# the verification record is repository-level (docs/verification).
+#
+# Scripts run from the repository root, so paths and commands below are
+# repository-relative.
+guardrails_version: 0.5.1
+guardrails_commit: 35570e874193e9082b9e5e690efedb355cf36768
+
+# IEC 62304 software safety class. C: org-io submits the chain write that
+# changes who is a Member, holds the user's own signatory key that authorises
+# it (there is no Organisation-wide signing key), and reads
+# the chain state every verification is judged against
+# (docs/adr/2026-10-06-org-io-unit.md; owner ruling of the same day: org-io is
+# class C).
+# Its providers org-node and on-chain-client are class C too.
+safety_class: C
+
+id_prefixes: REQ HAZ RC SDD LLR PR ADR
+
+# Canonical document locations. Registered 2026-10-06 by the change that
+# creates the unit (worktree-org-io-create, stage S2 of
+# docs/plans/2026-10-06-org-io-roadmap.md).
+doc_srs: org-io/docs/requirements
+doc_rmf: org-io/docs/risk
+doc_sad: org-io/docs/architecture
+doc_soup: org-io/docs/architecture/soup.md
+doc_problems: org-io/docs/problems
+
+# The unit was born as a guardrails skeleton; its crate exists since task T1
+# of S2's develop phase (docs/plans/2026-10-06-org-io-create.md). The source
+# scan covers the crate's source, the ledger directories and the unit's
+# AGENTS.md.
+strict_paths:
+  - org-io/src
+  - org-io/docs
+  - org-io/AGENTS.md
+
+# The crate's integration tests and fuzz targets; the `verifies:` search runs
+# over them. Requirements whose tests land in later tasks are MISSING-TEST
+# until then, which is the true state of a requirement with no code yet.
+test_paths:
+  - org-io/tests
+
+# Since T1 of docs/plans/2026-10-06-org-io-create.md, when the crate landed.
+# Later tasks extend the first line with their test targets and features.
+# The chopsticks-dependent target `preflight` is excluded: it spawns a
+# chopsticks fork and needs on-chain/scripts/node_modules (as in org-node,
+# from which it moved at T5).
+# Since T7, the first line runs with `test-support`: `submit_flow` and
+# `receive_order` drive the handle over `test_support::FakeChain`.
+# Since T8, `signatory_rule` (the own-admin check) joins the first line.
+# Since T9, `app_boundary` (the app's manifest names org-io alone) joins it.
+# Since T12, the second line runs with `test-support,dev-seed`, as the plan
+# header's final form gives it.
+# Since review round 3 (2026-10-08), `open` (`OrgIo::open`) joins the first line.
+verify_commands:
+  - cargo test -p org-io --features test-support --lib --test key_custody_config --test fuzz_seed_parse --test signatory_key --test absences --test chain_read_rule --test receive_order --test submit_flow --test signatory_rule --test app_boundary --test open
+  - cargo test -p org-io --features test-support,dev-seed --test key_custody_config --test signatory_key --test dev_seed_env
+  - cargo build -p org-io
+  - cargo clippy -p org-io --all-targets --features test-support,dev-seed -- -D warnings
+
+problem_age_days: 30
+problem_open_max: 10
+
+# Statement and branch coverage from the first merge (owner ruling,
+# 2026-10-06); floors in the root Makefile (ORG_IO_LINES, ORG_IO_REGIONS,
+# ORG_IO_BRANCHES), set one point below the first measurement (T12,
+# 2026-10-08) and raised to one point below the next (T12b, 2026-10-08:
+# lines 62, regions 59, branches 64).
+coverage_command:
+  - make coverage-org-io
+  - make coverage-branch-org-io
+
+expectation_age_days: 90
+expectation_open_max: 10
+
+# Declared 2026-10-06 after the dependency assessments in
+# docs/plans/2026-10-06-org-io-create.md §5. Both providers are class C, so
+# the class floor (MISCLASSED-DEPENDENCY) has nothing to convict and no
+# segregated_from: entry is needed. org-node exports nothing yet: until it
+# exports the requirements org-io relies on, org-io's ledgers name no org-node
+# ID. The edge to person is declared when org-io's code first names a person
+# type.
+depends_on:
+  - org-node
+  - on-chain-client
+# segregated_from:
+#   - <unit> (RC-xxxxxx)

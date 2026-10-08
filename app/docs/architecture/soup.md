@@ -88,15 +88,12 @@ Requirements are from `app/docs/requirements/`.
 | `tauri-build` | build | 2.6.3 | `tauri_build::build()` in `build.rs`; generates the context and the ACL schemas in `gen/schemas` | — | Called with defaults, so no app ACL manifest is generated for the custom commands. |
 | `serde` | normal | 1.0.229 | Derive layer for IPC payloads and event structs. `commands.rs`, `events.rs`, `policy.rs` | REQ-645jq9, REQ-affyf5, REQ-dp95pv, REQ-tw4cb5, REQ-kn5rtx | Derive-only. |
 | `serde_json` | normal | 1.0.151 | `serde_json::Value` event payloads emitted to the webview. `events.rs` | REQ-affyf5, REQ-dp95pv, REQ-tw4cb5, REQ-kn5rtx, REQ-jfxah3 | `events.rs:180` `.expect`s `to_value`; it relies on every payload being a plain struct of owned scalars. |
-| `tokio` | normal | 1.53.1 | `tokio::sync::Mutex` around `OrgService` (`state.rs`); `tokio::spawn` of the receiver loop (`commands.rs:420`) | REQ-3hfggn, REQ-6hgm8r, REQ-jfxah3 | `sync`, `rt-multi-thread`, `macros`. The mutex serialises every command's access to the service. |
+| `tokio` | normal | 1.53.1 | `tokio::sync::Mutex` around the org-io handle (`state.rs`; around `OrgService` until 2026-10-08); `tokio::spawn` of the receiver loop (`commands.rs:420`) | REQ-3hfggn, REQ-6hgm8r, REQ-jfxah3 | `sync`, `rt-multi-thread`, `macros`. The mutex serialises every command's access to the service. |
 | `hex` | normal | 0.4.3 | Hex encoding and decoding of keys, ids and addresses crossing IPC. `commands.rs`, `parsing.rs`, `state.rs` | REQ-sjkp8z, REQ-vgr7s2 | Unlike org-node, the app **parses** hex from untrusted input: `parsing.rs` and the revoke and admit handlers decode strings from the webview, and `state.rs` decodes `ODS_*` environment values. |
 | `base64` | normal | 0.22.1 | Standard-alphabet armour around the postcard bytes of the Invite and Invite-reply Blobs. `invitation.rs` | REQ-yazum3 (and REQ-prjja8, REQ-65xqp8 through the same Blobs) | *Added 2026-10-06 (change `worktree-org-node-chain-authority`).* **Decodes untrusted text** pasted into the webview: a decode failure is a named refusal (`"<Blob>: not a Blob: …"`), never a panic. Was org-node's (`blobs.rs`) until the invitation exchange moved to the app; org-node no longer depends on it. |
-| `async-trait` | normal | 0.1.92 | Implements org-node's `ChainOps` seam for `ChainNotConfigured`. `state.rs:72` | — (startup wiring) | Proc-macro shim; boxes every call's future. |
 | `rand` | normal | 0.8.8 | `rand::rngs::OsRng`, passed into org-node's key generation and store nonces. `commands.rs:19` and every handler that creates keys or saves the store | REQ-vgr7s2 (revoke), plus the onboarding commands | **Used in production here**; in org-node `rand` is dev-only. This is the one place the shipped product supplies the `CryptoRng` that org-node's `rand_core` row says the compiler cannot vouch for. |
 | `postcard` | normal | 1.1.3 | `postcard::from_bytes` of `iroh::EndpointAddr` bytes from a join request (`commands.rs:219`) and from the revoke handler's `peer_addr` (`commands.rs:283`) | REQ-vgr7s2 | **Decodes untrusted bytes** that arrive hex-encoded over IPC from the webview or inside a join-request blob. A decode failure is mapped to an error string, not a panic. No fuzz target in this unit reaches these two calls. *Amended 2026-10-06 (change `worktree-org-node-chain-authority`): the Join request is gone; the peer address is decoded once, by `commands.rs:253` for both the admit and the revoke handlers, and postcard now also encodes and decodes the Invite and Invite-reply Blobs inside their Base64 armour (`invitation.rs`, REQ-yazum3).* |
 | `iroh` | normal | 0.98.2 | `EndpointAddr` and `EndpointId::from_bytes` for the peer to dial. `commands.rs:204,215,263` | REQ-vgr7s2 | Types only; the endpoint itself is org-node's. Pinned 0.98 with org-node. |
-| `subxt` | normal | 0.50.3 | **No code reference in `app/src-tauri/src`.** Declared only to unify features with org-node and on-chain-client; the client is built by `org_node::service::connect_chain_client` | — (chain setup) | The manifest comment says it is "needed by state.rs connect_chain", which overstates it. Removing it would change feature unification, not code. |
-| `subxt-signer` | normal | 0.50.3 | Builds the admin sr25519 keypair from the 32-byte `ODS_ADMIN_SEED`. `state.rs:314` | — (chain setup) | The seed comes from the process environment, hex-decoded in `state.rs`. This path runs only when `ODS_CHAIN_WS` is set and no gated test reaches it. |
 | `tauri` (`test`) | dev | 2.11.5 | `tauri::test::mock_builder`, `mock_context`, `get_ipc_response` in `tests/ipc.rs` | — | Feature unification means a dev build of the lib also sees `test`. |
 | `tempfile` | dev | 3.27.0 | Temporary data directories in `tests/ipc.rs` and `tests/state_assembly.rs` | — | Test-only. |
 
@@ -112,6 +109,19 @@ call. The writer stores no key. The `write` feature's two dependencies,
 the app lock's versions (0.50.3, 0.10.6).*
 `on-chain-client`, `org-node` (normal, path) and `org-members` (dev, path) are
 units of this repository with their own ledgers, not SOUP.
+
+*Amended 2026-10-08 (change `worktree-org-io-create`, task T9).* The app
+depends on `org-io` alone (normal, path; and dev, path, with its
+`test-support` feature), a unit of this repository with its own ledgers, not
+SOUP. The rows for `subxt`, `subxt-signer` and `async-trait` are removed,
+with the `on-chain-client`, `org-node` and `org-members` entries: the app
+names none of them, and the chain connection, the chain writer and the
+signatory key are org-io's (`org-io/docs/architecture/soup.md` records
+`subxt`, `subxt-signer`, `zeroize`, `tokio`, `async-trait` and `hex` for
+org-io's use). The paragraph above is history: the app no longer enables
+on-chain-client's `write` feature, holds no signatory key, and submits
+nothing itself; org-io does, and REQ-nfr3n2 is org-io's. The app's own
+`dev-seed` feature only enables org-io's.
 
 ## npm packages
 
@@ -141,7 +151,8 @@ Added by review round 1 (finding-8). The webview is not in either lock: Tauri
 These app direct crates are also in org-node's inventory at the same versions:
 `iroh` 0.98.2, `postcard` 1.1.3, `serde` 1.0.229, `tokio` 1.53.1,
 `async-trait` 0.1.92, `hex` 0.4.3, `subxt` 0.50.3, `subxt-signer` 0.50.3 and
-`rand` 0.8.8. The crates the app reaches only through org-node
+`rand` 0.8.8 *(since 2026-10-08 `async-trait`, `subxt` and `subxt-signer` are
+no longer direct crates of the app; they reach it through org-io)*. The crates the app reaches only through org-node
 (`ed25519-dalek` 2.2.0 and 3.0.0-pre.6, `chacha20poly1305` 0.10.1, `argon2`
 0.5.3, `thiserror` 2.0.20, `rand_core` 0.6.4) are also at org-node's versions.
 *(Amended 2026-10-06, change `worktree-org-node-chain-authority`: `base64` is
@@ -157,6 +168,15 @@ builds on-chain-client it uses the app lock, so the app ships `subxt` **0.50.3**
 The same holds for on-chain-client's `tokio` 1.52.3, `serde` 1.0.228 and
 `async-trait` 0.1.89. on-chain-client's inventory therefore does not describe
 the versions the app ships.
+
+**Org-io through the app lock.** *Added 2026-10-08 (change
+`worktree-org-io-create`, task T9).* `app/src-tauri` is its own workspace
+with its own lock, so when the app builds org-io, org-io's dependencies
+resolve through the app lock, not the root lock org-io's inventory was
+measured against. Today they agree for the crates org-io's inventory names
+(`subxt` and `subxt-signer` 0.50.3, `zeroize` 1.9.0, `tokio` 1.53.1,
+`async-trait` 0.1.92, `jsonrpsee` 0.24.11 under subxt); a later lock update
+in either workspace can make them drift, as on-chain-client's did.
 
 ## Tauri configuration
 

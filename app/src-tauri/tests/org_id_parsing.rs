@@ -5,7 +5,7 @@
 //! panicking or silently truncating.
 
 use ods_poc_lib::parsing::parse_org_id;
-use org_node::OrgId;
+use org_io::node::OrgId;
 
 // verifies: LLR-ecaw34
 #[test]

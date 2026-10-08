@@ -68,6 +68,11 @@ Organisation private key until it commits).
   dependencies. `MockChainOps` keeps a test stand-in for the chain write
   (`apply_genesis`, `apply_update`) so a story can be exercised without a
   chain.
+  *Superseded 2026-10-08 (ruling B, change worktree-org-io-create):*
+  `ChainOps` is gone too; org-node reads no chain and every chain-judging
+  operation takes the state as a value (LLR-mn5c2q, in
+  `2026-10-08-values.md`). The test stand-in is
+  `test_fixtures::ChainSlots`.
 - **Provisional updates.** `create_organisation`, `admit_member` and
   `revoke_member` each build and store a `ProvisionalUpdate` and return it;
   none writes to the chain, sends anything or changes a record. The app
@@ -448,6 +453,18 @@ the provisional updates and the expected admissions unchanged; the early
 `read_state` that existed to obtain a signing key is removed.
 satisfies: REQ-f2k4tr
 
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
+org-node's part of the same guarantee. org-node no longer reads the chain;
+`receive_and_verify` and `receive_and_self_delete_if_revoked` leave it. The
+chain-free phase (`prepare_receive`, `prepare_self_delete`) runs
+`check_chain_free` against the record and, on any refusal, returns that
+error with no pending value — "with no `read_state` call" reads "refused by
+the chain-free phase, which hands org-io no Organisation to read" — and the
+apply phase verifies against "the state it is given", not "the state read".
+The ordering itself (no read before the chain-free checks pass, at most one
+read) is org-io's receive-sequence requirement, in org-io's architecture
+ledger (`org-io/docs/architecture/2026-10-08-org-io.md`).
+
 **LLR-s8xp7m**: on an Organisation-information Wire message about an
 Organisation the node holds no record of, `receive_and_verify` refuses with
 `AdmissionNotExpected { org_id }`, before decoding the record snapshot and
@@ -458,6 +475,13 @@ reads the chain once. Every refusal leaves every expectation in place. (A
 revocation about such an Organisation is refused before this check,
 LLR-38e2kn.)
 satisfies: REQ-8amu2a
+
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
+`prepare_receive` makes the refusal and the snapshot decode and
+`check_chain_free`; "with no `read_state` call" reads "refused by the
+chain-free phase, which hands org-io no Organisation to read", and "only
+then reads the chain once" reads "only then returns the pending value whose
+Organisation org-io reads once".
 
 *Amended 2026-10-06 (owner ruling on pre-emption, REQ-8amu2a as amended).*
 The expectation matched on the Organisation alone.
@@ -514,6 +538,16 @@ any refusal of verify-against-chain — returns the typed error and leaves the
 record, every provisional update and the Persona records exactly as they were,
 with nothing written to disk.
 satisfies: REQ-tqap3r
+
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place: a
+narrowing. "A failed or empty chain read" reads "no chain state given
+(`None`)": both commits take the state as an argument, so a failed read
+never reaches org-node; it is org-io's to report, by its read-back
+requirement after a write (org-io's architecture ledger). The failed-read
+tests (`commit_paths.rs`'s `a_failed_chain_read_refuses_commit_genesis` and
+the failing half of the former
+`commit_update_refuses_when_the_chain_fails_or_is_silent`) are deleted; the
+silent half stays as `commit_update_refuses_when_the_chain_holds_no_state`.
 
 **LLR-4tcxsu**: `commit_update` and `commit_genesis` bind no endpoint and send
 nothing: each returns once the store is saved, so a commit never waits on a

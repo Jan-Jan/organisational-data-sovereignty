@@ -53,10 +53,29 @@ impl PersonaDetails {
 }
 
 /// A locally-held identity, one per org (spec §4.2). Seeds held in their secret
-/// types; `Debug` redacts them (PR-hqwpg9).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// types; `Debug` redacts them (PR-hqwpg9). Both seeds are crate-private
+/// and the record is not `Serialize` outside test builds: no public path
+/// hands out a stored private key, device ed25519 or Member X25519 (owner
+/// ruling 2026-10-06, as org-io states it; closed 2026-10-08);
+/// the store encodes it through `PersonaRecordEncoding`.
+#[derive(Clone, Debug, Deserialize)]
 #[serde(try_from = "RawPersonaRecord")]
 pub struct PersonaRecord {
+    pub persona_id: PersonaId,
+    pub org_id: Option<OrgId>,
+    pub handle: Handle,
+    pub name: Name,
+    pub surname: Surname,
+    pub(crate) member_seed: MemberSeed,
+    pub(crate) device_seed: DeviceSeed,
+    pub member_id: Option<MemberId>,
+    pub status: PersonaStatus,
+}
+
+/// Every field of a `PersonaRecord`, public, for tests that build one
+/// (test builds only).
+#[cfg(feature = "test-support")]
+pub struct PersonaRecordParts {
     pub persona_id: PersonaId,
     pub org_id: Option<OrgId>,
     pub handle: Handle,
@@ -66,6 +85,76 @@ pub struct PersonaRecord {
     pub device_seed: DeviceSeed,
     pub member_id: Option<MemberId>,
     pub status: PersonaStatus,
+}
+
+#[cfg(feature = "test-support")]
+impl From<PersonaRecordParts> for PersonaRecord {
+    fn from(parts: PersonaRecordParts) -> Self {
+        Self {
+            persona_id: parts.persona_id,
+            org_id: parts.org_id,
+            handle: parts.handle,
+            name: parts.name,
+            surname: parts.surname,
+            member_seed: parts.member_seed,
+            device_seed: parts.device_seed,
+            member_id: parts.member_id,
+            status: parts.status,
+        }
+    }
+}
+
+#[cfg(feature = "test-support")]
+impl PersonaRecord {
+    /// The stored device seed (test builds only).
+    pub fn device_seed_for_test(&self) -> &DeviceSeed {
+        &self.device_seed
+    }
+
+    /// The stored Member seed (test builds only).
+    pub fn member_seed_for_test(&self) -> &MemberSeed {
+        &self.member_seed
+    }
+}
+
+/// A `PersonaRecord` as the store encodes it: the derived `Serialize` of
+/// the record, borrowed, crate-private (LLR-8bum44's `Raw…` mirror in the
+/// other direction). Encodes exactly as `RawPersonaRecord` decodes.
+#[derive(Serialize)]
+struct PersonaRecordEncoding<'a> {
+    persona_id: &'a PersonaId,
+    org_id: &'a Option<OrgId>,
+    handle: &'a Handle,
+    name: &'a Name,
+    surname: &'a Surname,
+    member_seed: &'a MemberSeed,
+    device_seed: &'a DeviceSeed,
+    member_id: &'a Option<MemberId>,
+    status: &'a PersonaStatus,
+}
+
+impl<'a> From<&'a PersonaRecord> for PersonaRecordEncoding<'a> {
+    fn from(record: &'a PersonaRecord) -> Self {
+        Self {
+            persona_id: &record.persona_id,
+            org_id: &record.org_id,
+            handle: &record.handle,
+            name: &record.name,
+            surname: &record.surname,
+            member_seed: &record.member_seed,
+            device_seed: &record.device_seed,
+            member_id: &record.member_id,
+            status: &record.status,
+        }
+    }
+}
+
+/// Test builds encode a record as the store does.
+#[cfg(feature = "test-support")]
+impl Serialize for PersonaRecord {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        PersonaRecordEncoding::from(self).serialize(serializer)
+    }
 }
 
 /// A `PersonaRecord` as decoded, before parsing (LLR-8bum44).
@@ -109,8 +198,12 @@ pub enum PersonaStatus {
     Revoked,
 }
 
-/// A member's local view of an org (spec §4.3).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// A member's local view of an org (spec §4.3). The Organisation private key
+/// is crate-private and the record is not `Serialize` outside test builds:
+/// no public path hands out a stored X25519 secret (owner ruling
+/// 2026-10-06, as org-io states it; closed 2026-10-08, review round 2); the
+/// store encodes it through `OrgRecordEncoding`.
+#[derive(Clone, Debug, Deserialize)]
 #[serde(try_from = "RawOrgRecord")]
 pub struct OrgRecord {
     pub org_id: OrgId,
@@ -130,11 +223,90 @@ pub struct OrgRecord {
     /// of the epoch it reaches, and no earlier key is kept (LLR-6s785x,
     /// LLR-4kh9w9). It renders under `Debug` as its redacted secret type
     /// (LLR-2dvhz8).
-    pub org_private_key: OrgPrivateKey,
+    pub(crate) org_private_key: OrgPrivateKey,
     /// The Change set bytes of the Envelope the last commit verified, `None`
     /// on a record `commit_genesis` creates; a first admission keeps the
     /// admitting Envelope's Change set (LLR-d9778a). Sent to nobody.
     pub kept_change_set: Option<Vec<u8>>,
+}
+
+/// Every field of an `OrgRecord`, public, for tests that build one (test
+/// builds only).
+#[cfg(feature = "test-support")]
+pub struct OrgRecordParts {
+    pub org_id: OrgId,
+    pub root_hash: RootHash,
+    pub org_pub_key: OrgPublicKey,
+    pub epoch: Epoch,
+    pub last_seq: SequenceNumber,
+    pub trie_members: Vec<MemberSnapshot>,
+    pub proxy_account: Option<ChainAccount>,
+    pub org_private_key: OrgPrivateKey,
+    pub kept_change_set: Option<Vec<u8>>,
+}
+
+#[cfg(feature = "test-support")]
+impl From<OrgRecordParts> for OrgRecord {
+    fn from(parts: OrgRecordParts) -> Self {
+        Self {
+            org_id: parts.org_id,
+            root_hash: parts.root_hash,
+            org_pub_key: parts.org_pub_key,
+            epoch: parts.epoch,
+            last_seq: parts.last_seq,
+            trie_members: parts.trie_members,
+            proxy_account: parts.proxy_account,
+            org_private_key: parts.org_private_key,
+            kept_change_set: parts.kept_change_set,
+        }
+    }
+}
+
+#[cfg(feature = "test-support")]
+impl OrgRecord {
+    /// The stored Organisation private key (test builds only).
+    pub fn org_private_key_for_test(&self) -> &OrgPrivateKey {
+        &self.org_private_key
+    }
+}
+
+/// An `OrgRecord` as the store encodes it (see `PersonaRecordEncoding`).
+/// Encodes exactly as `RawOrgRecord` decodes.
+#[derive(Serialize)]
+struct OrgRecordEncoding<'a> {
+    org_id: &'a OrgId,
+    root_hash: &'a RootHash,
+    org_pub_key: &'a OrgPublicKey,
+    epoch: &'a Epoch,
+    last_seq: &'a SequenceNumber,
+    trie_members: &'a [MemberSnapshot],
+    proxy_account: &'a Option<ChainAccount>,
+    org_private_key: &'a OrgPrivateKey,
+    kept_change_set: &'a Option<Vec<u8>>,
+}
+
+impl<'a> From<&'a OrgRecord> for OrgRecordEncoding<'a> {
+    fn from(record: &'a OrgRecord) -> Self {
+        Self {
+            org_id: &record.org_id,
+            root_hash: &record.root_hash,
+            org_pub_key: &record.org_pub_key,
+            epoch: &record.epoch,
+            last_seq: &record.last_seq,
+            trie_members: &record.trie_members,
+            proxy_account: &record.proxy_account,
+            org_private_key: &record.org_private_key,
+            kept_change_set: &record.kept_change_set,
+        }
+    }
+}
+
+/// Test builds encode a record as the store does.
+#[cfg(feature = "test-support")]
+impl Serialize for OrgRecord {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        OrgRecordEncoding::from(self).serialize(serializer)
+    }
 }
 
 /// An `OrgRecord` as decoded, before parsing (LLR-8bum44).
@@ -220,8 +392,11 @@ impl TryFrom<RawMemberSnapshot> for MemberSnapshot {
 pub const MAX_PROVISIONAL_BYTES: usize = 1 << 20;
 
 /// An update this node built and keeps until the chain agrees with it
-/// (REQ-xs4ab8, LLR-95753m).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// (REQ-xs4ab8, LLR-95753m). Its change, which carries the next
+/// Organisation private key, is crate-private, and the update is not
+/// `Serialize` outside test builds (closed 2026-10-08, review round 2); the
+/// store encodes it through `ProvisionalUpdateEncoding`.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "RawProvisionalUpdate")]
 pub struct ProvisionalUpdate {
     /// `None` for genesis: there is no identifier until the chain write.
@@ -240,7 +415,100 @@ pub struct ProvisionalUpdate {
     pub seq: SequenceNumber,
     /// The Organisation public key the app publishes with the root.
     pub org_pub_key: OrgPublicKey,
+    pub(crate) change: ProvisionalChange,
+}
+
+/// Every field of a `ProvisionalUpdate`, public, for tests that build or
+/// take one apart (test builds only).
+#[cfg(feature = "test-support")]
+pub struct ProvisionalUpdateParts {
+    pub org_id: Option<OrgId>,
+    pub persona_id: PersonaId,
+    pub base_root: Option<RootHash>,
+    pub resulting_root: RootHash,
+    pub seq: SequenceNumber,
+    pub org_pub_key: OrgPublicKey,
     pub change: ProvisionalChange,
+}
+
+#[cfg(feature = "test-support")]
+impl From<ProvisionalUpdateParts> for ProvisionalUpdate {
+    fn from(parts: ProvisionalUpdateParts) -> Self {
+        Self {
+            org_id: parts.org_id,
+            persona_id: parts.persona_id,
+            base_root: parts.base_root,
+            resulting_root: parts.resulting_root,
+            seq: parts.seq,
+            org_pub_key: parts.org_pub_key,
+            change: parts.change,
+        }
+    }
+}
+
+#[cfg(feature = "test-support")]
+impl From<ProvisionalUpdate> for ProvisionalUpdateParts {
+    fn from(update: ProvisionalUpdate) -> Self {
+        Self {
+            org_id: update.org_id,
+            persona_id: update.persona_id,
+            base_root: update.base_root,
+            resulting_root: update.resulting_root,
+            seq: update.seq,
+            org_pub_key: update.org_pub_key,
+            change: update.change,
+        }
+    }
+}
+
+#[cfg(feature = "test-support")]
+impl ProvisionalUpdate {
+    /// The change, with the Organisation private key it carries (test
+    /// builds only).
+    pub fn change_for_test(&self) -> &ProvisionalChange {
+        &self.change
+    }
+
+    /// The change, to tamper with (test builds only).
+    pub fn change_mut_for_test(&mut self) -> &mut ProvisionalChange {
+        &mut self.change
+    }
+}
+
+/// A `ProvisionalUpdate` as the store encodes it (see
+/// `PersonaRecordEncoding`). Encodes exactly as `RawProvisionalUpdate`
+/// decodes.
+#[derive(Serialize)]
+struct ProvisionalUpdateEncoding<'a> {
+    org_id: &'a Option<OrgId>,
+    persona_id: &'a PersonaId,
+    base_root: &'a Option<RootHash>,
+    resulting_root: &'a RootHash,
+    seq: &'a SequenceNumber,
+    org_pub_key: &'a OrgPublicKey,
+    change: &'a ProvisionalChange,
+}
+
+impl<'a> From<&'a ProvisionalUpdate> for ProvisionalUpdateEncoding<'a> {
+    fn from(update: &'a ProvisionalUpdate) -> Self {
+        Self {
+            org_id: &update.org_id,
+            persona_id: &update.persona_id,
+            base_root: &update.base_root,
+            resulting_root: &update.resulting_root,
+            seq: &update.seq,
+            org_pub_key: &update.org_pub_key,
+            change: &update.change,
+        }
+    }
+}
+
+/// Test builds encode an update as the store does.
+#[cfg(feature = "test-support")]
+impl Serialize for ProvisionalUpdate {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        ProvisionalUpdateEncoding::from(self).serialize(serializer)
+    }
 }
 
 impl ProvisionalUpdate {
@@ -326,7 +594,10 @@ impl TryFrom<RawProvisionalUpdate> for ProvisionalUpdate {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+/// Not `Serialize` outside test builds: it holds the device seeds
+/// (owner ruling 2026-10-06; closed 2026-10-08); `save` encodes it through
+/// `StoreDataEncoding`.
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct StoreData {
     pub personas: Vec<PersonaRecord>,
     pub orgs: Vec<OrgRecord>,
@@ -349,10 +620,14 @@ impl StoreData {
         let same_identity = |u: &ProvisionalUpdate| {
             target.names(u) && u.resulting_root == update.resulting_root && u.org_pub_key == update.org_pub_key
         };
-        // `Vec<&ProvisionalUpdate>` encodes exactly as `Vec<ProvisionalUpdate>`.
-        let mut group: Vec<&ProvisionalUpdate> =
-            self.provisional_updates.iter().filter(|u| target.names(u) && !same_identity(u)).collect();
-        group.push(&update);
+        // The group in its stored form: each update as `save` encodes it.
+        let mut group: Vec<ProvisionalUpdateEncoding<'_>> = self
+            .provisional_updates
+            .iter()
+            .filter(|u| target.names(u) && !same_identity(u))
+            .map(ProvisionalUpdateEncoding::from)
+            .collect();
+        group.push(ProvisionalUpdateEncoding::from(&update));
         let len = postcard::to_allocvec(&group)
             .map_err(|e| OrgNodeError::Chain(format!("provisional encode: {e}")))?
             .len();
@@ -436,6 +711,34 @@ impl TryFrom<RawStoreData> for StoreData {
                 .collect::<Result<_, _>>()?,
             expected_admissions: raw.expected_admissions,
         })
+    }
+}
+
+/// `StoreData` as the store encodes it (see `PersonaRecordEncoding`).
+#[derive(Serialize)]
+struct StoreDataEncoding<'a> {
+    personas: Vec<PersonaRecordEncoding<'a>>,
+    orgs: Vec<OrgRecordEncoding<'a>>,
+    provisional_updates: Vec<ProvisionalUpdateEncoding<'a>>,
+    expected_admissions: &'a [ExpectedAdmission],
+}
+
+impl<'a> From<&'a StoreData> for StoreDataEncoding<'a> {
+    fn from(data: &'a StoreData) -> Self {
+        Self {
+            personas: data.personas.iter().map(PersonaRecordEncoding::from).collect(),
+            orgs: data.orgs.iter().map(OrgRecordEncoding::from).collect(),
+            provisional_updates: data.provisional_updates.iter().map(ProvisionalUpdateEncoding::from).collect(),
+            expected_admissions: &data.expected_admissions,
+        }
+    }
+}
+
+/// Test builds encode the store's data as `save` does.
+#[cfg(feature = "test-support")]
+impl Serialize for StoreData {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        StoreDataEncoding::from(self).serialize(serializer)
     }
 }
 
@@ -562,7 +865,7 @@ impl PersonaStore {
 
     /// Encrypt and write the store. Generates a fresh 24-byte random nonce per save.
     pub fn save<R: RngCore + CryptoRng>(&self, rng: &mut R) -> Result<(), OrgNodeError> {
-        let pt = postcard::to_allocvec(&self.data)
+        let pt = postcard::to_allocvec(&StoreDataEncoding::from(&self.data))
             .map_err(|e| OrgNodeError::Chain(format!("store encode: {e}")))?;
         let out = seal(&self.key, &pt, rng)?;
         std::fs::write(&self.path, out).map_err(|e| OrgNodeError::Chain(e.to_string()))

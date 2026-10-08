@@ -4,7 +4,8 @@
 # the targets named by `coverage_command` in org-members/.guardrails/config.yaml,
 # on-chain-client/.guardrails/config.yaml and person/.guardrails/config.yaml
 # (per-unit configs since 2026-09-05; person's since 2026-10-04; `coverage`
-# runs all three and is what CI calls). Since 2026-10-06 each of those configs
+# runs all three and is what CI calls; since 2026-10-08 it runs org-io's
+# `coverage-org-io` too, named by org-io/.guardrails/config.yaml). Since 2026-10-06 each of those configs
 # also names its `coverage-branch-<unit>` twin, the decision-coverage half, run
 # by `coverage-branch` and CI's job of the same name (nightly; see
 # BRANCH_TOOLCHAIN). Note what that does and does not mean: NO check
@@ -21,8 +22,8 @@
 #   rustup toolchain install $(BRANCH_TOOLCHAIN) --component llvm-tools-preview
 
 .PHONY: coverage coverage-org-members coverage-on-chain-client coverage-person \
-	coverage-branch coverage-branch-org-members coverage-branch-on-chain-client \
-	coverage-branch-person
+	coverage-org-io coverage-branch coverage-branch-org-members \
+	coverage-branch-on-chain-client coverage-branch-person coverage-branch-org-io
 
 # TWO metrics, because the STATEMENT-coverage half of the class target (class
 # C: statement AND decision) is measured two ways here and the two
@@ -86,6 +87,20 @@
 #   old (--lib + 3 fuzz), after  the relocation  23.75%     24.08%   501 lines
 #   new (+ the 8 relocated targets)              42.91%     43.47%   501 lines
 #   + the 9th (type_widths), re-measured         41.75%     42.45%   491 lines
+#   2026-10-07, +write (PR-b795an)               47.66%     48.53%   898 lines
+#
+# The 2026-10-07 row is PR-b795an's fix (worktree-org-io-create, T4): the
+# recipe now builds with `--features test-support,write` and runs the writer's
+# six targets (write_manifest, write_pure, write_compose, write_events,
+# signatory_set_decode, fuzz_signatory_set), so src/write/ is measured for the
+# first time: 428 of 898 lines covered (was 205 of 491), 658 of 1356 regions.
+# The pure writer files read 86-100% (calldata.rs and ceremony.rs 100.00%,
+# events.rs 97.30%, proxy.rs 96.55%, multisig.rs 90.70%, signatory_set.rs
+# 88.24%); write/subxt_ops.rs, the chain-only shell, is 0.00% over 116 lines
+# and write/mod.rs 40.00%; client.rs grows to 388 lines under `write` and
+# reads 14.18%. Both figures rose, so the floors below rose with them, one
+# point below the measurement rounded down (stable rustc 1.99.0 b940084d7
+# 2026-09-28, cargo-llvm-cov 0.9.0, aarch64-darwin).
 #
 # The last row is review round 1's finding 1 landing: the final two
 # `#[cfg(test)]` tests left `src/types.rs` for `tests/type_widths.rs`. It is
@@ -131,8 +146,12 @@ ORG_MEMBERS_REGIONS := 91
 # basis changed. Set one point below the then-measured 42.91% / 43.47%; the
 # measurement is 41.75% / 42.45% since `type_widths` joined the recipe, and
 # these floors are deliberately unchanged under it.
-ON_CHAIN_CLIENT_LINES := 41
-ON_CHAIN_CLIENT_REGIONS := 42
+# Raised 2026-10-07 from 41 / 42 when the writer joined the recipe (PR-b795an):
+# one point below the measured 47.66% / 48.53%, rounded down. Re-measured the
+# same day after the writer's two branch outcomes were covered: 47.88% / 48.75%
+# (430 of 898 lines, 661 of 1356 regions); floors unchanged.
+ON_CHAIN_CLIENT_LINES := 46
+ON_CHAIN_CLIENT_REGIONS := 47
 # person, first floors, 2026-10-04 — same rule: one point below the
 # measurement, rounded down to an integer. Measured on the task branch that
 # added this target, with `cargo llvm-cov -p person --summary-only` (stable
@@ -169,6 +188,55 @@ ON_CHAIN_CLIENT_REGIONS := 42
 # For stale nightly binaries and `cargo llvm-cov clean`, see BRANCH_TARGET_DIR.
 PERSON_LINES := 99
 PERSON_REGIONS := 99
+# org-io, first floors, 2026-10-08 (worktree-org-io-create, task T12 of
+# docs/plans/2026-10-06-org-io-create.md) — same rule: one point below the
+# measurement, rounded down. Measured with `make coverage-org-io` (stable
+# rustc 1.99.0 (b940084d7 2026-09-28), cargo-llvm-cov 0.9.0, aarch64-darwin):
+#
+#   measured 2026-10-08        lines     regions
+#   org-io                     62.30%     59.72%   (342 of 549 lines; 507 of 849 regions)
+#   org-io, task T12b          63.39%     60.90%   (348 of 549 lines; 517 of 849 regions)
+#   org-io, review round 2     65.57%     63.44%   (400 of 610 lines; 597 of 941 regions)
+#   org-io, review round 3     71.26%     69.16%   (476 of 668 lines; 711 of 1028 regions)
+#   org-io, review round 4     70.91%     69.07%   (468 of 660 lines; 708 of 1025 regions)
+#
+# Raised 2026-10-08 (task T12b, the missing tests outside the shell) to
+# 62 / 59, one point below the T12b row; raised again after review round 2's
+# fixes to 64 / 62, one point below the round-2 row (round 1's fixes, which
+# raised the figures, had left the floors where T12b set them); raised again
+# after review round 3's fixes to 70 / 68, one point below the round-3 row
+# (`view.rs` and the new `open` target: `OrgIo::open` is now measured here).
+# Review round 4's fix removed `BuiltUpdate::names` (fully covered; its
+# comparison moved to org-node's `holds_provisional`), so the figures fell a
+# little. One point below the round-4 row would be 69 / 68; a floor is never
+# lowered, so they stay 70 / 68, both still met.
+#
+# This floor is LOW, and it is a shortfall rather than a target met, as
+# on-chain-client's is. Most of the uncovered code is the chain-facing shell
+# (SDD-z85ux9, which carries no low-level requirements) that no gated test
+# reaches without a chain: bin/preflight.rs and preflight.rs 0.00% (89 lines),
+# connect.rs 8.57%, the body of `OrgIo::connect` past the custody checks
+# (lib.rs), `OnChainStateReader` (chain_read.rs), `OnChainSignatorySetReader`
+# (signatory.rs), `OnChainWriter` and `SignatoryKey::keypair`, which only it
+# calls (submit.rs, custody.rs). The rest, outside the shell:
+#   - custody.rs, `SignatoryKey::from_seed`'s `NotAKey` arm and
+#     `parse_32_hex`'s `let … else`: unreachable defensive code (an sr25519
+#     mini secret key accepts any 32 bytes; `chunks_exact(2)` yields pairs);
+#   - signatory.rs, `OwnAdminError`'s `Display` for `Read`: no LLR states how
+#     that error renders, so no test is owed. (Its `NotConfigured` arm and
+#     `SignatorySetNotConfigured`'s reads are covered since review round 2,
+#     finding 6: in a build without `dev-seed` they say the seed is read only
+#     by development builds, REQ-8zuka3.)
+#   (test_support.rs's hand-written `Default for FakeChain`, uncovered at T12,
+#   is a derive since the review pass.)
+# Covered since T12b (LLR-7pj5af, LLR-9r2bxd, LLR-qhjp6g): `WriterNotConfigured`,
+# `refused_after_write`'s other-refusal arm, and lib.rs:207 — which is the
+# `Prepared::Done` arm of `receive_and_self_delete_if_revoked` (an
+# acknowledgement on the self-delete path), not its `NeedsChain` read as T12
+# wrote; that read was covered, and its failed-read error path now is.
+# The owner accepts the shortfall or not at merge (verification record).
+ORG_IO_LINES := 70
+ORG_IO_REGIONS := 68
 
 # DECISION coverage, the other half of the class C target, added 2026-10-06
 # (worktree-guardrails-branch-coverage, docs/plans/2026-10-06-branch-coverage.md).
@@ -218,8 +286,44 @@ BRANCH_TOOLCHAIN := nightly-2026-10-03
 BRANCH_TARGET_DIR := $(CURDIR)/target/branch-coverage
 BRANCH_REPORT_DIR := $(BRANCH_TARGET_DIR)/reports
 ORG_MEMBERS_BRANCHES := 98
+# 2026-10-07, +write (PR-b795an): on-chain-client measures 58 of 58 branches,
+# 100%, same nightly. When the writer first joined the denominator it read 56
+# of 58 (96.55%) with two outcomes no test reached, both since covered by
+# tests alone, no production change: write/proxy.rs:41, `is_proxied`'s
+# `let ValueDef::Variant(..) = &call.value else`, by a test passing a call that
+# is not a variant; and write/events.rs:15, the `event == "ProxyExecuted"`
+# operand of `observed_event`, which was reached true in two of the function's
+# closure instantiations but not in a third (llvm-cov counts instantiations
+# apart) — tests/write_events.rs now passes one closure type, `fields_reader`,
+# to every call, so there is one instantiation. The floor stays at 99.
 ON_CHAIN_CLIENT_BRANCHES := 99
 PERSON_BRANCHES := 99
+# org-io, first floor, 2026-10-08 (task T12): 17 of 26 branches, 65.38%, on
+# nightly-2026-10-03 (rustc 1.101.0-nightly 0abfedbc7 2026-10-02),
+# cargo-llvm-cov 0.9.0, aarch64-darwin. The nine outcomes no test reaches:
+#   - preflight.rs (6: `first != second` in `check_chain_live`, and the two
+#     `if`s in `render`) and bin/preflight.rs (2: `if render(…)` in `main`):
+#     the preflight is shell (SDD-z85ux9) and never runs in this suite. These
+#     functions are not generic, so llvm-cov counts them although they never
+#     ran. `render` is pure and could be tested without a chain; SDD-z85ux9
+#     has no LLR for such a test to verify;
+#   - custody.rs:102, the `else` of `parse_32_hex`'s `let (Some, Some) = …`:
+#     unreachable defensive code (`chunks_exact(2)` over 64 bytes).
+# Re-measured at T12b (2026-10-08): 17 of 26 again — its tests reach match
+# arms and `?` paths, which llvm-cov counts as regions, not branches. The
+# floor stays 64.
+# Re-measured after review round 2's fixes (2026-10-08, same toolchain): 18 of
+# 28 branches, 64.29% (the two new outcomes since T12b are round 1's; round 2
+# added no uncovered branch). One point below would be 63, and a floor is
+# never lowered, so it stays 64 — a margin of one outcome.
+# Re-measured after review round 3's fixes (2026-10-08, same toolchain): 25 of
+# 38 branches, 65.79% (the new pre-write refusals in `submit_commit_send` and
+# `view.rs`'s filters add outcomes). One point below is 64.79, so the floor
+# stays 64.
+# Re-measured after review round 4's fix (2026-10-08, same toolchain): 21 of
+# 32 branches, 65.63% (`BuiltUpdate::names`' six `&&` outcomes left with it;
+# the comparison is org-node's `holds_provisional` now). The floor stays 64.
+ORG_IO_BRANCHES := 64
 
 # Per-crate, so a regression in the well-covered crate cannot hide behind the
 # poorly-covered one. Known limit, unfixable today: each floor is still an
@@ -232,7 +336,7 @@ PERSON_BRANCHES := 99
 # 64.29%, so the block is gone and enabling it is available work (see the
 # RESOLVED note above). Figures updated 2026-09-10; the pre-relocation ones
 # were 353 of 715 and 96.23%.
-coverage: coverage-org-members coverage-on-chain-client coverage-person
+coverage: coverage-org-members coverage-on-chain-client coverage-person coverage-org-io
 
 # Scope note: this omits `mbt_conformance` (`newtypes` and `encoding_golden`,
 # added 2026-10-04, and `person_error_mapping` and `absence_proofs`, both
@@ -287,7 +391,7 @@ coverage-org-members:
 # `--lib`-only figure twice over (the relocated bodies were themselves covered
 # library lines, and the branches they exercised stop being reached at all).
 ON_CHAIN_CLIENT_COVERAGE_ARGS := --manifest-path on-chain-client/Cargo.toml \
-	--features test-support \
+	--features test-support,write \
 	--lib \
 	--test fuzz_decode_org_state \
 	--test fuzz_parse_revive_event \
@@ -300,7 +404,13 @@ ON_CHAIN_CLIENT_COVERAGE_ARGS := --manifest-path on-chain-client/Cargo.toml \
 	--test h160_mapping \
 	--test storage_slot_layout \
 	--test best_lane_reorg_rule \
-	--test type_widths
+	--test type_widths \
+	--test write_manifest \
+	--test write_pure \
+	--test write_compose \
+	--test write_events \
+	--test signatory_set_decode \
+	--test fuzz_signatory_set
 
 coverage-on-chain-client:
 	cargo llvm-cov $(ON_CHAIN_CLIENT_COVERAGE_ARGS) \
@@ -319,11 +429,27 @@ coverage-person:
 		--fail-under-lines $(PERSON_LINES) \
 		--fail-under-regions $(PERSON_REGIONS)
 
+# org-io's verify_commands test targets, in one run with both features so
+# `dev_seed_env` (its own binary, so it races nothing) is measured beside the
+# `test-support` targets. The chopsticks-only `preflight` target is excluded, as
+# in verify_commands.
+ORG_IO_COVERAGE_ARGS := -p org-io --features test-support,dev-seed \
+	--lib --test key_custody_config --test fuzz_seed_parse --test signatory_key \
+	--test dev_seed_env --test absences --test chain_read_rule --test receive_order \
+	--test submit_flow --test signatory_rule --test app_boundary --test open
+
+coverage-org-io:
+	cargo llvm-cov $(ORG_IO_COVERAGE_ARGS) \
+		--summary-only \
+		--fail-under-lines $(ORG_IO_LINES) \
+		--fail-under-regions $(ORG_IO_REGIONS)
+
 # Decision coverage per unit, on the pinned nightly (see BRANCH_TOOLCHAIN). Each
 # recipe measures EXACTLY the test set of its stable twin above: both read the
 # same *_COVERAGE_ARGS variable, so the statement and decision figures always
 # describe one suite.
-coverage-branch: coverage-branch-org-members coverage-branch-on-chain-client coverage-branch-person
+coverage-branch: coverage-branch-org-members coverage-branch-on-chain-client coverage-branch-person \
+	coverage-branch-org-io
 
 # $(1) report name, $(2) floor. Prints the figure, then fails below the floor.
 define judge_branches
@@ -355,3 +481,11 @@ coverage-branch-person:
 		--branch --json --summary-only \
 		--output-path $(BRANCH_REPORT_DIR)/person.json
 	$(call judge_branches,person,$(PERSON_BRANCHES))
+
+coverage-branch-org-io:
+	mkdir -p $(BRANCH_REPORT_DIR)
+	CARGO_TARGET_DIR=$(BRANCH_TARGET_DIR) cargo +$(BRANCH_TOOLCHAIN) llvm-cov \
+		$(ORG_IO_COVERAGE_ARGS) \
+		--branch --json --summary-only \
+		--output-path $(BRANCH_REPORT_DIR)/org-io.json
+	$(call judge_branches,org-io,$(ORG_IO_BRANCHES))

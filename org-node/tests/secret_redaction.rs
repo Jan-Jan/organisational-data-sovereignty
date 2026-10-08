@@ -68,7 +68,7 @@ fn assert_not_rendered(rendered: &str, secret: &[u8; 32], what: &str) {
 }
 
 fn persona(member: [u8; 32], device: [u8; 32]) -> PersonaRecord {
-    PersonaRecord {
+    PersonaRecord::from(org_node::store::PersonaRecordParts {
         persona_id: PersonaId::new("p1".to_string()),
         org_id: None,
         handle: Handle::parse("alice").unwrap(),
@@ -78,11 +78,11 @@ fn persona(member: [u8; 32], device: [u8; 32]) -> PersonaRecord {
         device_seed: DeviceSeed::from(device),
         member_id: None,
         status: PersonaStatus::Active,
-    }
+    })
 }
 
 fn org(private: [u8; 32]) -> OrgRecord {
-    OrgRecord {
+    OrgRecord::from(org_node::store::OrgRecordParts {
         org_id: OrgId::new([5u8; 20]),
         root_hash: RootHash::new([0x11u8; 32]),
         org_pub_key: org_public_key(),
@@ -92,7 +92,7 @@ fn org(private: [u8; 32]) -> OrgRecord {
         proxy_account: None,
         org_private_key: OrgPrivateKey::from(private),
         kept_change_set: None,
-    }
+    })
 }
 
 fn wire(private: [u8; 32]) -> WireMessage {

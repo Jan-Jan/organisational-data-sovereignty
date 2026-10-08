@@ -1,4 +1,4 @@
-// Duplicated from on-chain-client/tests/common/chopsticks_reorg.rs for the org-node e2e harness.
+// Duplicated from on-chain-client/tests/common/chopsticks_reorg.rs for the org-node e2e harness; copied to org-io with the preflight 2026-10-07.
 //! Drive chopsticks's dev_* JSON-RPC extensions to manipulate the local
 //! chain — provides `mine_block` for advancing the chain during tests.
 

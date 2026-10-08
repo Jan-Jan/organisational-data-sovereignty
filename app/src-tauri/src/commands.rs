@@ -1,8 +1,8 @@
 //! Tauri command handlers for the ODS PoC app.
 //!
-//! Each command locks `AppState.service` (tokio async Mutex), calls the
-//! matching `OrgService` method, and maps `OrgNodeError` → `String` for the
-//! Tauri `Result<T, String>` convention.
+//! Each command locks `AppState.org_io` (tokio async Mutex), calls the
+//! matching org-io operation or, through it, `OrgService` method, and maps
+//! `OrgNodeError` → `String` for the Tauri `Result<T, String>` convention.
 //!
 //! ## `start_receiver` and its events
 //!
@@ -21,21 +21,22 @@ use rand::{CryptoRng, RngCore};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
-use org_node::service::{OrgService, SelfDeleteOutcome};
-use org_node::store::{OrgRecord, PersonaDetails, PersonaRecord};
-use org_node::{CommitOutcome, MemberId, OrgId, OrgNodeError, PersonaId};
+use org_io::node::service::SelfDeleteOutcome;
+use org_io::node::store::PersonaDetails;
+use org_io::node::{CommitOutcome, MemberId, OrgId, OrgNodeError, PersonaId};
+use org_io::{OrgIo, OrgSummary, PersonaSummary};
 
 use crate::invitation::{self, Invite};
 use crate::parsing::parse_org_id;
 use crate::state::{AppState, ConnectionStatus};
-use crate::submit::{submit_commit_send, ChainWriter};
 use crate::{events, policy};
 
 // ---------------------------------------------------------------------------
 // Serialisable DTOs
 // ---------------------------------------------------------------------------
 
-/// A serialisable view of a `PersonaRecord` (no key material).
+/// A serialisable view of a Persona (org-io's `PersonaSummary`: no key
+/// material).
 #[derive(Debug, Serialize)]
 pub struct PersonaDto {
     pub persona_id: String,
@@ -46,8 +47,8 @@ pub struct PersonaDto {
     pub status: String,
 }
 
-impl From<&PersonaRecord> for PersonaDto {
-    fn from(p: &PersonaRecord) -> Self {
+impl From<&PersonaSummary> for PersonaDto {
+    fn from(p: &PersonaSummary) -> Self {
         Self {
             persona_id: p.persona_id.as_str().to_string(),
             org_id: p.org_id.map(|id| hex::encode(id.as_bytes())),
@@ -59,7 +60,7 @@ impl From<&PersonaRecord> for PersonaDto {
     }
 }
 
-/// A serialisable view of an `OrgRecord`.
+/// A serialisable view of an Organisation (org-io's `OrgSummary`).
 #[derive(Debug, Serialize)]
 pub struct OrgDto {
     pub org_id: String,
@@ -68,13 +69,13 @@ pub struct OrgDto {
     pub member_count: usize,
 }
 
-impl From<&OrgRecord> for OrgDto {
-    fn from(o: &OrgRecord) -> Self {
+impl From<&OrgSummary> for OrgDto {
+    fn from(o: &OrgSummary) -> Self {
         Self {
             org_id: hex::encode(o.org_id.as_bytes()),
             epoch: o.epoch.get(),
             root_hash: hex::encode(o.root_hash.as_bytes()),
-            member_count: o.trie_members.len(),
+            member_count: o.members.len(),
         }
     }
 }
@@ -102,25 +103,24 @@ pub async fn create_persona(
             }
             other => other.to_string(),
         })?;
-    let mut svc = state.service.lock().await;
-    svc.create_persona(&mut OsRng, handle, name, surname)
+    let mut io = state.org_io.lock().await;
+    io.node_mut()
+        .create_persona(&mut OsRng, handle, name, surname)
         .map(|id| id.as_str().to_string())
         .map_err(|e| e.to_string())
 }
 
-/// Create an organisation: org-node builds the genesis update, the app writes
-/// it to the chain through on-chain-client, then org-node commits it
-/// (REQ-nfr3n2, `crate::submit::found_organisation`).
+/// Create an organisation: the app decides to found it and hands that to
+/// org-io, which has org-node build the genesis update, writes it to the
+/// chain, and only then has org-node commit it (REQ-m8sgjk, REQ-nfr3n2).
 /// Returns the org_id (40 hex chars).
 #[tauri::command]
 pub async fn create_organisation(
     state: State<'_, AppState>,
     persona_id: String,
 ) -> Result<String, String> {
-    let mut svc = state.service.lock().await;
-    let org_id =
-        crate::submit::found_organisation(&mut svc, &*state.writer, &mut OsRng, &PersonaId::new(persona_id))
-            .await?;
+    let mut io = state.org_io.lock().await;
+    let org_id = io.found_organisation(&mut OsRng, &PersonaId::new(persona_id)).await?;
     Ok(hex::encode(org_id.as_bytes()))
 }
 
@@ -134,9 +134,9 @@ pub async fn export_invite(
     invitee_name: String,
 ) -> Result<String, String> {
     let oid = parse_org_id(&org_id)?;
-    let svc = state.service.lock().await;
+    let io = state.org_io.lock().await;
     let mut outstanding = state.outstanding.lock().await;
-    invitation::issue_invite(&svc, &mut outstanding, &mut OsRng, oid, &org_name, &invitee_name)
+    invitation::issue_invite(io.view(), &mut outstanding, &mut OsRng, oid, &org_name, &invitee_name)
 }
 
 /// An Invite as the invitee is shown it. Nothing in it is verified
@@ -172,8 +172,8 @@ pub async fn produce_invite_reply(
     persona_id: String,
     confirmed: bool,
 ) -> Result<String, String> {
-    let mut svc = state.service.lock().await;
-    invitation::produce_reply(&mut svc, &mut OsRng, &invite_blob, &PersonaId::new(persona_id), confirmed)
+    let mut io = state.org_io.lock().await;
+    invitation::produce_reply(io.node_mut(), &mut OsRng, &invite_blob, &PersonaId::new(persona_id), confirmed)
 }
 
 /// An Invite reply as the inviter is shown it before admitting.
@@ -203,8 +203,9 @@ pub async fn import_invite_reply(state: State<'_, AppState>, blob: String) -> Re
 }
 
 /// Admit the person an Invite reply names (LLR-gha5f6): org-node builds the
-/// admission, the app writes it to the chain, then org-node commits it and
-/// sends it to the reply's device (REQ-nfr3n2, LLR-q225ws). The target is the
+/// admission, and the app hands it to org-io, which writes it to the chain,
+/// then has org-node commit it and send it to the reply's device (REQ-m8sgjk,
+/// REQ-nfr3n2, LLR-q225ws). The target is the
 /// Organisation the reply's outstanding pair names; `org_id` is the
 /// operator's selection and is refused unless it is that one.
 ///
@@ -221,18 +222,10 @@ pub async fn admit_member(
 ) -> Result<String, String> {
     let oid = parse_org_id(&org_id)?;
     let peer_addr = parse_peer_addr(&peer_addr_blob)?;
-    let mut svc = state.service.lock().await;
+    let mut io = state.org_io.lock().await;
     let mut outstanding = state.outstanding.lock().await;
-    let member_id = invitation::admit_reply(
-        &mut svc,
-        &*state.writer,
-        &mut outstanding,
-        &mut OsRng,
-        oid,
-        &reply_blob,
-        peer_addr,
-    )
-    .await?;
+    let member_id =
+        invitation::admit_reply(&mut io, &mut outstanding, &mut OsRng, oid, &reply_blob, peer_addr).await?;
     Ok(hex::encode(member_id.as_bytes()))
 }
 
@@ -277,52 +270,51 @@ pub async fn revoke_member(
 
     let peer_addr = parse_peer_addr(&peer_addr_blob)?;
 
-    let mut svc = state.service.lock().await;
-    revoke_and_send(&mut svc, &*state.writer, &mut OsRng, oid, MemberId::new(member_id), peer_addr)
+    let mut io = state.org_io.lock().await;
+    revoke_and_send(&mut io, &mut OsRng, oid, MemberId::new(member_id), peer_addr)
         .await
         .map(|_| ())
 }
 
-/// Revoke `member` from `org_id` (REQ-nfr3n2): org-node builds the removal,
-/// the app writes it to the chain, and only then does org-node commit it and
-/// send it, once, to the first DevicePublicKey of the removed Member's
-/// snapshot in the record as it stood before the removal — which the
-/// committed record no longer lists, so org-node sends that Device a
-/// revocation (LLR-q225ws). The `revoke_member` command's body.
+/// Revoke `member` from `org_id` (REQ-m8sgjk, REQ-nfr3n2): org-node builds
+/// the removal, and the app hands it to org-io, which writes it to the chain,
+/// and only then has org-node commit it and send it, once, to the first
+/// DevicePublicKey of the removed Member's snapshot in the record as it stood
+/// before the removal — which the committed record no longer lists, so
+/// org-node sends that Device a revocation (LLR-q225ws). The `revoke_member`
+/// command's body.
 pub async fn revoke_and_send<R: RngCore + CryptoRng + Send>(
-    svc: &mut OrgService,
-    writer: &dyn ChainWriter,
+    io: &mut OrgIo,
     rng: &mut R,
     org_id: OrgId,
     member: MemberId,
     peer_addr: Option<iroh::EndpointAddr>,
 ) -> Result<CommitOutcome, String> {
-    let recipient = svc
-        .list_orgs()
-        .iter()
-        .find(|o| o.org_id == org_id)
+    let recipient = io
+        .view()
+        .organisation(org_id)
         .ok_or_else(|| OrgNodeError::OrgNotOnChain.to_string())?
-        .trie_members
+        .members
         .iter()
         .find(|m| m.id == member)
         .and_then(|m| m.device_keys.first().copied())
         .ok_or("member_id names no member of this organisation")?;
-    let update = svc.revoke_member(rng, org_id, member).map_err(|e| e.to_string())?;
-    submit_commit_send(svc, writer, rng, &update, recipient, peer_addr).await
+    let update = io.node_mut().revoke_member(rng, org_id, member).map_err(|e| e.to_string())?;
+    io.submit_commit_send(rng, &update, recipient, peer_addr).await
 }
 
 /// List all local personas (no key material returned).
 #[tauri::command]
 pub async fn list_personas(state: State<'_, AppState>) -> Result<Vec<PersonaDto>, String> {
-    let svc = state.service.lock().await;
-    Ok(svc.list_personas().iter().map(PersonaDto::from).collect())
+    let io = state.org_io.lock().await;
+    Ok(io.view().personas().iter().map(PersonaDto::from).collect())
 }
 
 /// List all local org records.
 #[tauri::command]
 pub async fn list_orgs(state: State<'_, AppState>) -> Result<Vec<OrgDto>, String> {
-    let svc = state.service.lock().await;
-    Ok(svc.list_orgs().iter().map(OrgDto::from).collect())
+    let io = state.org_io.lock().await;
+    Ok(io.view().organisations().iter().map(OrgDto::from).collect())
 }
 
 /// Return the current connection status: what the running configuration was
@@ -367,12 +359,12 @@ pub async fn connection_status<R: Runtime>(
 /// a return value rather than an emission, so `tests/receiver_events.rs` gates
 /// the announcement and this function stays a straight translation.
 async fn next_outcomes<R: Runtime>(app: &AppHandle<R>) -> Vec<events::ReceiverOutcome> {
-    // Re-lock the service each iteration so other commands can proceed between
+    // Re-lock the handle each iteration so other commands can proceed between
     // messages (the lock is held only for the duration of one receive+verify).
     let result = {
         let state: State<'_, AppState> = app.state::<AppState>();
-        let mut svc = state.service.lock().await;
-        svc.receive_and_self_delete_if_revoked(&mut OsRng).await
+        let mut io = state.org_io.lock().await;
+        io.receive_and_self_delete_if_revoked(&mut OsRng).await
     };
 
     match result {
@@ -400,11 +392,8 @@ async fn next_outcomes<R: Runtime>(app: &AppHandle<R>) -> Vec<events::ReceiverOu
             // Re-read the org record to get the current epoch + root.
             let record = {
                 let state: State<'_, AppState> = app.state::<AppState>();
-                let svc = state.service.lock().await;
-                svc.list_orgs()
-                    .iter()
-                    .find(|o| o.org_id == org_id)
-                    .map(|o| (o.epoch.get(), hex::encode(o.root_hash.as_bytes())))
+                let io = state.org_io.lock().await;
+                io.view().organisation(org_id).map(|o| (o.epoch.get(), hex::encode(o.root_hash.as_bytes())))
             };
             let org_id = hex::encode(org_id.as_bytes());
             match record {

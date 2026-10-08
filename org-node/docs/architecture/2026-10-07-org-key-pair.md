@@ -112,6 +112,32 @@ an `OrgInformation` body that ends before its record snapshot or before
 the 32 bytes of its Organisation private key, and a body of any of the three
 kinds with bytes left over after its last field.
 satisfies: REQ-c29s93, REQ-3dsweu
+superseded-by: LLR-tajh9d
+
+*Superseded 2026-10-08 (change worktree-org-io-create; owner's ruling on
+PR-zf924s, hybrid: a change of meaning mints a new ID).* The first amendment
+below changed this item's meaning under the same ID: from two message kinds
+to three, and a revocation payload from an Envelope to an absence proof.
+LLR-tajh9d (`2026-10-08-wire-kinds.md`) states the rule
+that holds now; the text above is kept as it stood when superseded. Its tests
+stay annotated with this ID, and the new test of LLR-tajh9d names both.
+
+*Note 2026-10-08 (review round 1 of change worktree-org-io-create,
+finding-13: dual-ID coverage).* These older tests still name only this ID:
+`org-node/tests/encoding_golden.rs`'s
+`organisation_information_wire_message_is_pinned` (:191) and
+`revocation_wire_message_is_pinned` (:217); `wire_frame_bound.rs`'s
+`the_three_kinds_round_trip_with_their_indices` (:81),
+`malformed_revocations_and_acknowledgements_are_refused` (:100),
+`an_org_information_body_with_trailing_bytes_is_refused` (:130) and
+`an_organisation_information_body_without_its_snapshot_or_key_does_not_decode`
+(:224); and the fuzz target `fuzz_wire_decode/fuzz_target.rs` (:16). They are
+already green, and the robustness rule forbids re-annotating a green test
+with a new ID: a test gains a new ID only by being watched red against it.
+The dual-ID coverage of the supersession is therefore the new red-first test
+`wire_frame_bound.rs`'s
+`exactly_three_kinds_round_trip_and_an_unknown_kind_or_leftover_bytes_are_refused`
+(:146), which names LLR-tajh9d and LLR-js9dsu both.
 
 *Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3;
 REQ-3dsweu as amended there, REQ-ps2gy2).* This had two variants, the second
@@ -281,6 +307,12 @@ or expectation is consulted and with no `read_state` call, leaving the store
 unchanged and unwritten.
 satisfies: REQ-c29s93
 
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
+`receive_one` is now the public `receive_message` (transport only, body
+unchanged), and the refusal reaches org-io's receive sequence before any
+chain-free phase runs: "with no `read_state` call" reads "before the
+chain-free phase, so org-io is handed no Organisation to read".
+
 **LLR-ba2ejp**: on an `OrgInformation` message, `receive_and_verify` and
 `receive_and_self_delete_if_revoked`, once the message has verified against
 the chain state read by their one `read_state` call, compare
@@ -293,6 +325,12 @@ it runs before the own-Persona check (LLR-3f5h7b). A `Revocation` carries no
 key and is not checked.
 satisfies: REQ-bwx7eg
 
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
+the check runs in the apply phase (`apply_receive`, `apply_self_delete`)
+against "the state the apply phase is given", which reads for "the chain
+state read by their one `read_state` call"; the comparison, its order and
+its refusal are unchanged.
+
 **LLR-38e2kn**: on a `Revocation` about an Organisation the node holds no
 record of, `receive_and_verify` and `receive_and_self_delete_if_revoked`
 refuse with `RevocationNotHeld { org_id }`, through `revocation::check_notice`
@@ -300,6 +338,11 @@ refuse with `RevocationNotHeld { org_id }`, through `revocation::check_notice`
 `read_state` call, creating no record, clearing no expectation and writing
 nothing; an expectation for that Organisation stays in place.
 satisfies: REQ-vxqc5g
+
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
+the refusal is made by the chain-free phase (`prepare_receive`,
+`prepare_self_delete`); "with no `read_state` call" reads "refused by the
+chain-free phase, which hands org-io no Organisation to read".
 
 *Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3).*
 `receive_and_self_delete_if_revoked` refused such a message with
@@ -330,6 +373,16 @@ acknowledgements. A revocation never commits an update into a record the
 node keeps, and an Organisation-information message never reaches
 `revocation::accept`.
 satisfies: REQ-3dsweu, REQ-m2xh8q, REQ-b462sh
+
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
+the same decisions, split across the two phases. `check_notice`, the sender
+rule and `check_acknowledgement` run in the chain-free phase
+(`prepare_receive`, `prepare_self_delete`), whose refusals hand org-io no
+Organisation to read; an acknowledgement is decided there
+(`Prepared::Done`). A notice that passes returns a pending value, and the
+apply phase (`apply_receive`, `apply_self_delete`) passes "the state it is
+given" — for "the state of their one `read_state` call" — to
+`revocation::accept` with the lazy device-seed source, unchanged.
 
 *Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3;
 REQ-3dsweu and REQ-m2xh8q).* This verified a revocation "as any update"

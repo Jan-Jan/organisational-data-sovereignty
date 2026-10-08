@@ -75,17 +75,27 @@ membership trie and the delta algebra, `on-chain-client` supplies the chain
 reading, and `app` drives it. Both providers are class C, so no
 `segregated_from:` entry is needed and the class floor has nothing to convict.
 What this unit relies on beyond what its providers state as requirements is
-written as `expects:` items in its own SRS — REQ-ysyu9g against
+written as `expects:` items in its own SRS — org-io's finalised-block expectation (moved 2026-10-07) against
 `on-chain-client` and REQ-q92yac against `org-members`.
+
+*Amended 2026-10-08 (ruling B, change `worktree-org-io-create`).* org-node
+now consumes `org-members` and `person` only; its edge to `on-chain-client`
+is removed. org-io owns the `OrgService`, the chain connection, the reader,
+the writer and the user's signatory key, and meets org-node by values in,
+values out: it reads each Organisation's state, parses it through
+`OrgState::from_chain`, and passes it to the operations that judge against
+it (org-io's ledgers, `org-io/docs/`). The finalised-block expectation
+against `on-chain-client` is org-io's, and only REQ-q92yac remains an
+expectation of this unit.
 
 ### The decomposition
 
 **Nineteen software items.** An item is a responsibility with an interface,
 not a file: seven of them live wholly or partly in `service.rs`, and one,
-SDD-z85ux9, spans seven whole files and parts of two more. They group into
+org-io's chain-connection item (moved 2026-10-07), spans seven whole files and parts of two more. They group into
 five layers. *Corrected 2026-10-05 by review round 8: this said "eight" and
 "parts of six modules", neither of which was counted.* *Amended 2026-10-05 by
-the org-node type-safety change: SDD-z85ux9 now spans six whole files and
+the org-node type-safety change: org-io's chain-connection item (moved 2026-10-07) now spans six whole files and
 parts of three, because `chain_read.rs`'s parse and cache moved to SDD-pa6p7w.
 That change's value types (`types.rs`) belong to SDD-swtd3w, and its ten
 low-level requirements sit under SDD-swtd3w, SDD-sxp8hb, SDD-pa6p7w,
@@ -102,15 +112,20 @@ SDD-swtd3w, and LLR-8bum44 from SDD-vee2fq to SDD-af5vnt.)*
 | **The commit rule** | SDD-kk2y3e, SDD-d8ktxa, SDD-na9nc3, SDD-pa6p7w | What a change must prove before it is believed |
 | **Carriage and rest** | SDD-kwncn7, SDD-8uyg4s, SDD-af5vnt, SDD-vee2fq | How bytes reach the node, and where secrets sit when they are not moving |
 | **The five stories** | SDD-ueh4tm, SDD-89es4z, SDD-rx2yvy, SDD-8cpyfa, SDD-72ddm6, SDD-b8tuv3 | How the parts compose into what a Persona does |
-| **The supplier edge** | SDD-msb6xh, SDD-rq6nv4, SDD-z85ux9 | What is said to the chain |
+| **The supplier edge** | SDD-msb6xh, SDD-rq6nv4, org-io's chain-connection item (moved 2026-10-07) | What is said to the chain |
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 The supplier edge now only reads: SDD-msb6xh and SDD-rq6nv4 state that
 org-node holds no calldata and no multisig, which moved with the chain write to
-on-chain-client, and SDD-z85ux9 reads Organisation state and runs the
+on-chain-client, and org-io's chain-connection item (moved 2026-10-07) reads Organisation state and runs the
 preflight checks. SDD-kk2y3e's Envelope carries no signature and SDD-sxp8hb's
 keys sign nothing. SDD-vee2fq states that org-node holds no out-of-band blob.
 The nineteen items stand; none is deleted.
+*Amended 2026-10-08 (ruling B, change `worktree-org-io-create`).* The
+chain-connection item moved to org-io (2026-10-07), so org-node holds
+eighteen items and the supplier edge reads nothing: SDD-msb6xh and
+SDD-rq6nv4 state absences, and LLR-mn5c2q states that org-node names no
+chain library and reads no chain.
 
 **The decisive property is one function.** `verify_envelope_against_chain`
 performs seven checks in a security-critical order, and eleven low-level
@@ -128,6 +143,13 @@ four chain-free checks run before the chain is read.*
 the chain substitutable, and `ChainReader` (SDD-pa6p7w) makes the trusted-root
 oracle substitutable. Without them the five user stories would be reachable
 only with a live chain, and four items would lose all their evidence.
+*Amended 2026-10-08 (ruling B, change `worktree-org-io-create`).* Both seams
+are gone, with `MockChain`, `MockChainOps` and `ChainOpsReader`: every
+operation that judges against the chain takes the Organisation's state as
+an `Option<OrgState>` value, so the stories are exercised without a chain by
+passing values from `test_fixtures::ChainSlots` (SDD-ueh4tm, SDD-pa6p7w as
+amended). A failed read never reaches org-node; it is org-io's to report.
+The next paragraph's lesson stands; its substitutes are history.
 
 **A seam is only as good as the substitutes written for it.** Until 2026-10-04
 every `ChainReader` this unit's gate could reach returned `Ok` — `MockChain`
@@ -141,7 +163,7 @@ only ever carries a substitute that succeeds is tested on one side.
 ### Where the gate can and cannot see
 
 This unit's gate reaches about seventy per cent of it *(about seventy-five per
-cent since the org-node type-safety change)*. **SDD-z85ux9 — the
+cent since the org-node type-safety change)*. **org-io's chain-connection item (moved 2026-10-07) — the
 chain-facing I/O shell, 1125 of 3768 source lines measured (1116 of 4391,
 re-measured 2026-10-05 after that change) — carries no low-level
 requirements**, which is a deviation from what class C asks and is
@@ -152,6 +174,10 @@ because they spawn a chopsticks fork, so no mutation to the code they cover
 would redden this unit's gate. Writing low-level requirements there would
 assert properties no gate can observe. The remedy — bringing those targets
 into the gate — is booked in `docs/plans/2026-09-05-ratchet-setup.md`.
+*Amended 2026-10-08 (change `worktree-org-io-create`).* That shell and its
+deviation are org-io's now (ruling A, moved 2026-10-07; the chain code left
+org-node with ruling B), so org-node carries no chain shell; its remaining
+unseen I/O is the transport, listed below.
 
 Further things the gate cannot observe are named where they live, in the
 dated decomposition file's sections on behaviours deliberately not refined and
@@ -170,7 +196,7 @@ in the verification record's Gaps:
 
 ### Evidence
 
-Every low-level requirement outside SDD-z85ux9 is carried by a test that runs
+Every low-level requirement outside org-io's chain-connection item (moved 2026-10-07) is carried by a test that runs
 at this unit's gate, and was **discharged by red by mutation** rather than by
 being observed already green, **with named exceptions**. The dated
 decomposition file lists them, each with its reason:

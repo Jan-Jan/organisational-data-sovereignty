@@ -7,8 +7,8 @@
 
 use org_node::ids::OrgId;
 use org_node::store::{
-    ExpectedAdmission, MemberSnapshot, PersonaStore, ProvisionalChange, ProvisionalUpdate, StoreData,
-    MAX_PROVISIONAL_BYTES,
+    ExpectedAdmission, MemberSnapshot, PersonaStore, ProvisionalChange, ProvisionalUpdate, ProvisionalUpdateParts,
+    StoreData, MAX_PROVISIONAL_BYTES,
 };
 use org_node::test_fixtures::{device_key, member_key, org_public_key};
 use org_node::{Handle, Name, OrgNodeError, OrgPrivateKey, PersonaId, RootHash, SequenceNumber, Surname};
@@ -17,7 +17,7 @@ use rand::rngs::OsRng;
 const CHANGE_SET_PRIVATE: [u8; 32] = [0x99; 32];
 
 fn change_set(org: u8, root: u8, bytes: usize) -> ProvisionalUpdate {
-    ProvisionalUpdate {
+    ProvisionalUpdate::from(ProvisionalUpdateParts {
         org_id: Some(OrgId::new([org; 20])),
         persona_id: PersonaId::new("p-alice".into()),
         base_root: Some(RootHash::new([0x33; 32])),
@@ -25,13 +25,13 @@ fn change_set(org: u8, root: u8, bytes: usize) -> ProvisionalUpdate {
         seq: SequenceNumber::new(3),
         org_pub_key: org_public_key(),
         change: ProvisionalChange::ChangeSet { change_set: vec![0xab; bytes], org_private_key: OrgPrivateKey::from(CHANGE_SET_PRIVATE) },
-    }
+    })
 }
 
 const PRIVATE: [u8; 32] = [0x88; 32];
 
 fn genesis(persona: &str, root: u8) -> ProvisionalUpdate {
-    ProvisionalUpdate {
+    ProvisionalUpdate::from(ProvisionalUpdateParts {
         org_id: None,
         persona_id: PersonaId::new(persona.into()),
         base_root: None,
@@ -49,7 +49,7 @@ fn genesis(persona: &str, root: u8) -> ProvisionalUpdate {
             }],
             org_private_key: OrgPrivateKey::from(PRIVATE),
         },
-    }
+    })
 }
 
 fn store_path(tag: &str) -> std::path::PathBuf {
@@ -93,10 +93,10 @@ fn an_update_with_the_same_identity_replaces_and_others_are_kept() {
     data.insert_provisional(genesis("p-alice", 0x66)).unwrap();
     data.insert_provisional(genesis("p-bob", 0x66)).unwrap();
     // The same root under another key is another update (LLR-95753m).
-    let other_key = ProvisionalUpdate {
+    let other_key = ProvisionalUpdate::from(ProvisionalUpdateParts {
         org_pub_key: OrgPrivateKey::from([0x55; 32]).x25519_keypair().org_public_key().unwrap(),
-        ..change_set(0xbb, 0x66, 5)
-    };
+        ..change_set(0xbb, 0x66, 5).into()
+    });
     data.insert_provisional(other_key).unwrap();
     assert_eq!(data.provisional_updates.len(), 5);
 }
@@ -112,7 +112,7 @@ fn an_update_with_the_same_identity_replaces_and_others_are_kept() {
 fn every_updates_private_key_lives_only_in_its_provisional_update() {
     let mut data = StoreData::default();
     let update = genesis("p-alice", 0x10);
-    let ProvisionalChange::Genesis { org_private_key, .. } = &update.change else { panic!("genesis") };
+    let ProvisionalChange::Genesis { org_private_key, .. } = update.change_for_test() else { panic!("genesis") };
     assert_eq!(org_private_key.x25519_keypair().org_public_key().unwrap(), update.org_pub_key);
     data.insert_provisional(update).unwrap();
     data.insert_provisional(change_set(0xbb, 0x66, 4)).unwrap();

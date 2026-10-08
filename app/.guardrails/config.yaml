@@ -126,6 +126,13 @@ test_paths:
 #   startup_policy 13 + connection_status 10 + org_id_parsing 14
 #   + receiver_events 32 + receiver_guard 6 + ipc 35 + csp_policy 24
 #   + state_assembly 3 + submit_flow 5 + invitation 17 = 159 tests; vitest 43.
+# 2026-10-08, T9 of docs/plans/2026-10-06-org-io-create.md (the app depends
+# on org-io alone): submit_flow 5 -> 2 — the five submission tests moved to
+# org-io's own submit_flow with the code (REQ-nfr3n2 is org-io's since then);
+# the two recipient tests (LLR-q225ws) stay. Measured at T9:
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 35 + receiver_guard 6 + ipc 33 + csp_policy 24
+#   + state_assembly 3 + submit_flow 2 + invitation 17 = 157 tests.
 #
 # `npm run check` is `svelte-kit sync && svelte-check`; it type-checks app/src
 # AND app/tests (measured 2026-09-14 — the generated .svelte-kit/tsconfig.json
@@ -184,8 +191,16 @@ expectation_open_max: 10
 # Until org-node defines an exported requirement carrying
 # `satisfies: REQ-x3c8n2`, this unit's run reports UNMET-EXPECTATION and
 # org-node's reports one open expectation standing against it. Due 2026-12-13.
+#
+# Updated 2026-10-08 (change worktree-org-io-create, stage S2, task T9): the
+# app depends on org-io alone. Its edges to org-node and on-chain-client are
+# replaced by one edge to org-io (class C), assessed in
+# docs/plans/2026-10-06-org-io-create.md §5; the app reaches org-node's types
+# through org-io's transitional re-export and the chain only through org-io
+# (org-io/tests/app_boundary.rs). REQ-x3c8n2 is re-addressed to org-io
+# (expects: org-io, same opened date), which returns org-node's receive-path
+# error unchanged and answers it when stage S4 moves the receive loop.
 depends_on:
-  - org-node
-  - on-chain-client
+  - org-io
 # segregated_from:
 #   - <unit> (RC-xxxxxx)

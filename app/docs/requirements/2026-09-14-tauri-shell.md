@@ -57,6 +57,15 @@ built from, and shall not re-read them from the process environment when the
 status is requested. (implements: RC-a7fenm)
 satisfies: derived
 
+*Checked 2026-10-08 (change `worktree-org-io-create`, task T9); text
+unchanged.* The chain is now built by org-io's `OrgIo::connect`. The app
+records, as the endpoint, the values it handed that call, and only when the
+call succeeded; when it fails the handle is `OrgIo::not_configured` and no
+endpoint is recorded. So "configured" (REQ-e4ah9h) and "the values it was
+built from" (REQ-bvx4nh) hold as before, and "no endpoint ⇔ not configured"
+is unchanged (owner ruling of 2026-10-07: the read stays built with the
+write in S2).
+
 **Four amendments made 2026-09-14 by the independent review, before any of
 these items was first merged** — so they are edits in place, not supersessions;
 nothing here has ever been merged for a `superseded-by:` to point at.
@@ -392,9 +401,24 @@ identifier check are the two halves of that boundary.
 error it returns from the receive path, a permanent failure of the transport
 endpoint from a transient one, so that the receiver loop's decision to stop can
 be made from the error's type rather than from the text of its message.
-expects: org-node
+expects: org-io
 opened: 2026-09-14
 satisfies: derived
+
+*Re-addressed 2026-10-08 (change `worktree-org-io-create`, task T9).* It was
+`expects: org-node`. The app no longer depends on org-node: it reaches the
+receive path through org-io, whose `receive_and_self_delete_if_revoked`
+returns org-node's error type unchanged, so org-io is the one unit this
+expectation can be addressed to (an `expects:` on a unit the app does not
+depend on is UNDECLARED-DEPENDENCY). What is expected is unchanged, and so
+are the ID and the `opened:` date (deadline 2026-12-13). org-io answers it
+when stage S4 moves the transport and the receive loop into it. Read
+"org-node" below as the unit the expectation was first addressed to; "Met
+when" now means when org-io defines an exported requirement carrying
+`satisfies:` this item. Classification under the hybrid rule: a
+clarification (the provider the app reaches the same error through), not a
+change of meaning — flagged for the owner, since the unit owing the work
+changes.
 
 Why this is an expectation and not this unit's own requirement. The receiver
 loop must decide, on every error, whether to keep looping or to stop. Today it

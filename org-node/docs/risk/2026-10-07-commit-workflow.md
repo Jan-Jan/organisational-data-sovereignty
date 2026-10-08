@@ -35,6 +35,12 @@ does not apply to a first admission, which has no record to check against
 and is verified against the chain alone, nor to an acknowledgement, whose
 sender rule is RC-eydn8t's. mitigates: HAZ-bedm57, HAZ-p6xkuz, HAZ-ep6uzs
 
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
+"before it reads the chain" reads "before it takes any chain state, so that
+none is read for it" — org-node no longer reads the chain; the order of
+org-io's read is stated in org-io's architecture ledger. The risk reasoning
+is unchanged.
+
 Owner ruling R1 (2026-10-07), with the owner's words: "Using iroh a
 connection can only be established via mutually known public keys, but I
 agree with only accepting updates and revocations from members. Furthermore,
@@ -487,3 +493,15 @@ it. What it breaks: a wrong deletion is now unrecoverable, which is why
 HAZ-p6xkuz rates S3 and why RC-ub82my and RC-u7kdam are the only doors to it.
 
 assesses: REQ-ps2gy2, REQ-qrtsc9, REQ-m2xh8q, REQ-em28bq, REQ-y99c9w, REQ-b462sh, REQ-tb4f8p, REQ-uv3v5w, REQ-uxv2x2, REQ-3dsweu, REQ-ea4qs5, REQ-ztdza4
+
+*Added 2026-10-08 (change `worktree-org-io-create`, owner's hybrid ruling on
+PR-zf924s).* **REQ-uk9rw7** supersedes REQ-ztdza4: it states the rule
+REQ-ztdza4 carried after its 2026-10-07 amendment (an update for a held
+Organisation is committed only from a Device the current record lists),
+under its own ID, with ruling B's wording of the order ("before it takes any
+chain state, so that none is read for it"). It realises RC-u7kdam as
+REQ-ztdza4 did, and the assessment above holds for it unchanged: the refusal
+writes nothing and asks for no chain state, and its worst case is a delay.
+No new hazard.
+
+assesses: REQ-uk9rw7

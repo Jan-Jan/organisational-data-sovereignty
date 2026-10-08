@@ -273,6 +273,18 @@ this. The defect is a class C boundary parser silently normalising malformed
 input, which is a robustness failure rather than a route to harm — which is why
 it is a problem report and not a hazard.
 
+*Note 2026-10-08 (change `worktree-org-io-create`, task T9).* Two of the
+startup sites above left the app: the seed and co-signer parsing moved to
+org-io, under org-io's single-strip parse requirement (at most one leading
+`0x`, a typed error naming the variable and the rule, no part of the value
+in it; `org-io/docs/requirements/2026-10-08-org-io.md`),
+which fixes those two sites. The app no longer reads `ODS_ADMIN_SEED`, and
+hands `ODS_COSIGNER_PUB` to org-io unparsed. The report stays open for the
+remaining sites: `ODS_CONTRACT_H160` (still parsed by the app, now in
+`state.rs`'s `chain_settings`), and `peer_addr_blob`, with the whitespace
+question below. (The `org_secret_hex` site above was removed by the
+key-pair change: `admit_member` takes no Organisation secret.)
+
 **Widened 2026-09-14: the same two parsers also disagree about whitespace.**
 Found while fixing the second independent review's findings, and measured rather
 than inferred. `validateRevokeInput` (`app/src/lib/revoke.ts`) calls `.trim()`,

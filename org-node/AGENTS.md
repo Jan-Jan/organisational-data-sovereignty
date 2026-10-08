@@ -11,8 +11,11 @@ Same rule as org-members; why: `../docs/adr/2026-10-04-parse-at-the-system-edge.
 - **Plain types (`&str`, `String`, `[u8; 32]`) only where data enters the
   system**, parsed there, once. org-node's edges: app/Tauri command inputs,
   persona-store decoding (`store.rs`), transport frames
-  (`transport/wire.rs`), chain reads (`chain_read.rs`). The invitation Blobs
-  are the app's edge (`app/src-tauri/src/invitation.rs`), not org-node's.
+  (`transport/wire.rs`), and the chain state org-io hands in
+  (`OrgState::from_chain` in `chain.rs`; org-io reads the chain and calls it,
+  org-node reads no chain — ruling B, 2026-10-08, change
+  `worktree-org-io-create`, which deleted `chain_read.rs`). The invitation
+  Blobs are the app's edge (`app/src-tauri/src/invitation.rs`), not org-node's.
   Everywhere else -- every signature, struct field and return -- uses the
   newtype.
 - **Reuse org-members' types** (`Handle`, `MemberId`, `RootHash`, and

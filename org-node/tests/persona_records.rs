@@ -17,7 +17,7 @@ use org_node::store::{
 };
 use org_node::test_fixtures::{device_key, member_key};
 use org_node::{
-    ChainAccount, DeviceSeed, Epoch, MemberSeed, MockChainOps, OrgNodeError, OrgPrivateKey, OrgPublicKey, OrgService,
+    ChainAccount, DeviceSeed, Epoch, MemberSeed, OrgNodeError, OrgPrivateKey, OrgPublicKey, OrgService,
     PersonaId, SequenceNumber,
 };
 use rand::rngs::OsRng;
@@ -42,7 +42,7 @@ fn off_curve_key() -> [u8; 32] {
 
 /// The only construction site of a `PersonaRecord` in this file.
 fn persona(handle: &str) -> PersonaRecord {
-    PersonaRecord {
+    PersonaRecord::from(org_node::store::PersonaRecordParts {
         persona_id: PersonaId::new("p1".to_string()),
         org_id: None,
         handle: Handle::parse(handle).unwrap(),
@@ -52,13 +52,13 @@ fn persona(handle: &str) -> PersonaRecord {
         device_seed: DeviceSeed::from([0x12; 32]),
         member_id: None,
         status: PersonaStatus::Proposed,
-    }
+    })
 }
 
 /// An Organisation record with one member, whose Member key (seed 0x21) is
 /// held nowhere else in the record.
 fn org_with_member() -> OrgRecord {
-    OrgRecord {
+    OrgRecord::from(org_node::store::OrgRecordParts {
         org_id: OrgId::new([5u8; 20]),
         root_hash: RootHash::new([0x11u8; 32]),
         org_pub_key: OrgPublicKey::parse(member_key(0x31).as_bytes()).unwrap(),
@@ -75,7 +75,7 @@ fn org_with_member() -> OrgRecord {
         proxy_account: None,
         org_private_key: OrgPrivateKey::from([0x5d; 32]),
         kept_change_set: None,
-    }
+    })
 }
 
 /// Replaces the one occurrence of `from` in `bytes` with `to` (same length).
@@ -98,7 +98,7 @@ fn sealed_store(name: &str, data: &StoreData, from: &[u8], to: &[u8]) -> PathBuf
 #[test]
 fn create_persona_holds_the_parsed_details_across_a_reopen() {
     let path = tmp_path("create");
-    let mut svc = OrgService::new(PersonaStore::open(path.clone(), "pw").unwrap(), Box::new(MockChainOps::new()));
+    let mut svc = OrgService::new(PersonaStore::open(path.clone(), "pw").unwrap());
     let pid = svc
         .create_persona(
             &mut OsRng,
@@ -122,8 +122,8 @@ fn create_persona_holds_the_parsed_details_across_a_reopen() {
     assert_eq!(
         svc.persona_public_keys(&pid).unwrap(),
         (
-            held.member_seed.x25519_keypair().member_key().unwrap(),
-            held.device_seed.signing_keypair().device_key().unwrap()
+            held.member_seed_for_test().x25519_keypair().member_key().unwrap(),
+            held.device_seed_for_test().signing_keypair().device_key().unwrap()
         )
     );
 }
@@ -143,7 +143,7 @@ fn a_persona_record_decoded_directly_refuses_an_invalid_handle() {
 #[test]
 fn persona_details_parse_into_their_types_and_create_a_persona() {
     let path = tmp_path("details-create");
-    let mut svc = OrgService::new(PersonaStore::open(path, "pw").unwrap(), Box::new(MockChainOps::new()));
+    let mut svc = OrgService::new(PersonaStore::open(path, "pw").unwrap());
     let details = PersonaDetails::parse("jose\u{0301}", "Jose\u{0301}", "Smith").unwrap();
     assert_eq!(details.handle.as_str(), "jos\u{e9}");
     assert_eq!(details.name.as_str(), "Jos\u{e9}");
@@ -175,7 +175,7 @@ fn persona_details_refuse_each_invalid_field_naming_it() {
 #[test]
 fn non_nfc_persona_details_are_stored_in_nfc() {
     let path = tmp_path("details-nfc");
-    let mut svc = OrgService::new(PersonaStore::open(path.clone(), "pw").unwrap(), Box::new(MockChainOps::new()));
+    let mut svc = OrgService::new(PersonaStore::open(path.clone(), "pw").unwrap());
     let PersonaDetails { handle, name, surname } =
         PersonaDetails::parse("jose\u{0301}", "Jose\u{0301}", "Nun\u{0303}ez").unwrap();
     svc.create_persona(&mut OsRng, handle, name, surname).unwrap();
@@ -356,7 +356,7 @@ fn a_store_with_every_record_kind_opens_with_every_field_parsed() {
     assert_eq!((m.member_key, m.device_keys.clone()), (member_key(0x21), vec![device_key(0x22)]));
     let pu = &d.provisional_updates[0];
     assert_eq!(pu.org_pub_key, OrgPublicKey::parse(member_key(0x33).as_bytes()).unwrap());
-    let ProvisionalChange::Genesis { members, .. } = &pu.change else { panic!("a genesis update") };
+    let ProvisionalChange::Genesis { members, .. } = pu.change_for_test() else { panic!("a genesis update") };
     assert_eq!(members[0].handle.as_str(), "bob");
     assert_eq!(
         d.expected_admissions,
@@ -378,14 +378,14 @@ fn a_record_carries_its_organisation_private_key_and_a_store_without_one_is_refu
         expected_admissions: vec![],
     };
     let plaintext = postcard::to_allocvec(&data).unwrap();
-    let key = org_with_member().org_private_key;
+    let key = org_with_member().org_private_key_for_test().clone();
     // The key is the record's 32 bytes before its `kept_change_set: None`
     // (`00`, LLR-d9778a; offsets shifted by one on 2026-10-07, S3 T2) and the
     // two empty lists.
     assert_eq!(&plaintext[plaintext.len() - 35..plaintext.len() - 3], key.expose_secret(), "no option tag");
     let path = tmp_path("with-key");
     store::seal_for_test(&path, "pw", &plaintext, &mut OsRng).unwrap();
-    assert_eq!(PersonaStore::open(path, "pw").unwrap().data().orgs[0].org_private_key, key);
+    assert_eq!(PersonaStore::open(path, "pw").unwrap().data().orgs[0].org_private_key_for_test(), &key);
 
     let mut legacy = plaintext[..plaintext.len() - 35].to_vec();
     legacy.extend_from_slice(&[0x00, 0x00, 0x00]); // `org_private_key: None`, then the two empty lists

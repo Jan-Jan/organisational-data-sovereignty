@@ -13,14 +13,37 @@ tests, and was traced by no item here and refined by no low-level requirement.
 No gate could have caught that — `check-trace.sh` has an UNTRACED-DESIGN rule
 and no UNTRACED-REQUIREMENT rule — so this ledger was the only place it could
 be. It is now refined by LLR-ag9mgm, LLR-rjg3m2 and LLR-j6j95z below. Two of
-the twenty are traced by nothing by design: REQ-ysyu9g and REQ-q92yac are
+the twenty are traced by nothing by design: org-io's finalised-block expectation (moved 2026-10-07) and REQ-q92yac are
 expectations on provider units, not behaviours of this one.*
 
 Safety class C throughout (`org-node/.guardrails/config.yaml`, no per-item
-override), so every item below carries LLRs — **with one exception, SDD-z85ux9,
+override), so every item below carries LLRs — **with one exception, org-io's chain-connection item (moved 2026-10-07),
 which carries none.** That is a deviation, not an override, and the section
 "The item with no low-level requirements" at the end of this file records it in
-full rather than leaving a reader to notice the absence.
+full rather than leaving a reader to notice the absence. *(Amended 2026-10-07,
+change `worktree-org-io-create`: that item and its deviation moved to org-io
+by ruling A, so every item left here carries LLRs and the exception is
+org-io's.)*
+
+*Re-parented 2026-10-08 (change `worktree-org-io-create`, owner's hybrid
+ruling on PR-zf924s).* REQ-ztdza4 is superseded by REQ-uk9rw7, which states
+the member-sender rule REQ-ztdza4 carried after its 2026-10-07 amendment. The
+items below that named REQ-ztdza4 on their `satisfies:` or `traces:` line now
+name REQ-uk9rw7 in its place, with no other change: SDD-8uyg4s with
+LLR-ygn78w and LLR-v873fx, SDD-rx2yvy's line (from `REQ-xa6smf, REQ-ztdza4,
+REQ-nhe2zu`), LLR-jn5jeh, SDD-8cpyfa's line, LLR-u6rq4s, SDD-72ddm6's line,
+LLR-3q63zv, and SDD-b8tuv3 with LLR-6zjzn2 and LLR-cns6q6. Prose that cites
+"REQ-ztdza4 as amended" is history and is left as written.
+
+*Amended 2026-10-08 (ruling B, change `worktree-org-io-create`).* "The seam"
+below says this unit "performs the chain and peer-to-peer I/O" and that
+`on-chain-client` supplies the chain reading, and its item count names the
+`ChainOps` seam. org-node now performs no chain I/O: org-io owns the
+`OrgService`, the chain connection, the reader, the writer and the user's
+signatory key, reads each Organisation's state and passes it in as a value
+(`2026-10-08-values.md`, LLR-mn5c2q). The peer-to-peer I/O
+stays here until stage S4. The text below is kept as the record of the
+decomposition it described.
 
 ## Overview
 
@@ -60,7 +83,7 @@ not a file: `receive_and_verify` and `revoke_member` are separate items that
 happen to be methods on one struct, and the `ChainOps` seam is a third that
 exists precisely so the first two can be exercised without a chain. *(This
 said "Eight". Seven items name `service.rs` as their location: SDD-ueh4tm,
-SDD-89es4z, SDD-rx2yvy, SDD-8cpyfa, SDD-72ddm6, SDD-b8tuv3 and SDD-z85ux9.
+SDD-89es4z, SDD-rx2yvy, SDD-8cpyfa, SDD-72ddm6, SDD-b8tuv3 and org-io's chain-connection item (moved 2026-10-07).
 Counted by review round 7.)*
 
 **The decisive property of the unit is one function.**
@@ -568,6 +591,17 @@ with `OrgNotOnChain`, distinctly from a chain read that failed, which is
 refused with `Chain`.
 satisfies: REQ-bvh8v6
 
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place: a
+narrowing, the meaning of what stays unchanged. "An Organisation for which
+the chain reports no state" reads "verification given no chain state
+(`None`)", still refused with `OrgNotOnChain`. The clause "distinctly from a
+chain read that failed, which is refused with `Chain`" leaves org-node,
+which no longer sees a read: telling absence from failure is the chain-read
+requirement org-io holds (moved 2026-10-07 to org-io's architecture ledger,
+`org-io/docs/architecture/2026-10-08-org-io.md`). Its
+absent-state test stays (`verify_against_chain.rs`,
+`rejects_when_org_absent_from_chain`); its failed-read test is deleted.
+
 **LLR-vf5mjx**: the epoch the chain reports must be **strictly** greater than
 the last committed epoch, and otherwise the change is refused with `StaleEpoch`
 carrying both.
@@ -602,6 +636,17 @@ returned here must come from a path the sender of a change does not control,
 and expressing it as a trait is what makes that substitutable and testable.
 traces: REQ-bvh8v6, REQ-nhe2zu, REQ-txvtm9, REQ-8jb4ny
 
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
+the view is now a value, what it decides unchanged. The `ChainReader` trait
+and `MockChain` are deleted: `verify_envelope_against_chain` takes the
+Organisation's state as `Option<OrgState>`, read by org-io from a path the
+sender does not control. `OrgState::from_chain` (the parse edge,
+REQ-8jb4ny) stays in `chain.rs`; `org_state_from_chain` left for org-io (task
+T5); `chain_read.rs`, with `OrgStateCache` and `OnChainReader`, is deleted,
+which resolves PR-k2xxaq. The notes below that name `chain_read.rs`,
+`ChainOps::read_state` or `ChainOpsReader` describe the code before this
+change.
+
 *Amended 2026-10-05 by the org-node type-safety change.* That change split the
 parse of a chain state and its cache out of `OnChainReader` into
 `org_state_from_chain` and `OrgStateCache`, an implementation of
@@ -609,7 +654,7 @@ parse of a chain state and its cache out of `OnChainReader` into
 serves when the chain's state is refused (LLR-mmdu38, in
 `2026-10-04-type-safety.md`). Those two parts of `chain_read.rs` are this
 item's; the rest of the file — `OnChainReader` and its `refresh`, which talk
-to a chain — stays SDD-z85ux9's.
+to a chain — stays org-io's chain-connection item's (moved 2026-10-07).
 
 *(Amended 2026-10-05 by the org-node type-safety change, review round 7:
 also constrained by LLR-mmdu38, which now sits under SDD-swtd3w in
@@ -633,26 +678,13 @@ used to read it first to obtain the signing key; `ChainOpsReader` wraps that
 one state. Nothing read here is used as a key: the Organisation state
 contributes its root and epoch to the decision and nothing else (LLR-37cj3n).
 
-**LLR-rm9x4z**: `get_org_state` returns `None` for an Organisation with no
-on-chain slot and `Some` for one that has state, distinguishing **absence from
-failure** — a failure is the `Err` arm — with one exception, stated by
-LLR-mmdu38: after a refresh whose fetched state holds an Organisation public
-key the parse refuses, `OrgStateCache` (and `OnChainReader` through it) returns
-`Ok(None)` for that Organisation, which is on chain, until a refresh succeeds.
-That refusal is the `Err` of the refresh, not of `get_org_state`.
-satisfies: REQ-bvh8v6
-
-*(Amended 2026-10-05 by the org-node type-safety change, review round 7: this
-said `None` only for an Organisation with no on-chain slot. By owner ruling
-(2026-10-05, LLR-mmdu38: fail closed) the cache now answers `Ok(None)` for an
-Organisation that is on chain once a fetched state is refused at parse, so
-verify-against-chain refuses with `OrgNotOnChain`. That reports a refused
-state as absence. It rejects the Change set, as REQ-bvh8v6 requires for
-absence, and it is recorded in the type-safety design's "Observable changes"
-under "Chain read". The production Receive path is not affected:
-`SubxtChainOps::read_state` caches nothing and returns a refusal at parse as
-an error, and `ChainOpsReader` only wraps a state that read has just
-returned.)*
+*Moved 2026-10-07 to org-io's architecture ledger
+(`org-io/docs/architecture/2026-10-08-org-io.md`, finalised
+at the merge of change `worktree-org-io-create`), ruling A: the low-level
+requirement that the chain read tells absence from failure went with the read
+to org-io, re-parented to org-io's chain-read requirement, and its cache
+exception retired with the cache (task T6 of
+`docs/plans/2026-10-06-org-io-create.md` deletes it).*
 
 ## SDD-kwncn7 — The wire frame and its bound
 
@@ -734,16 +766,16 @@ satisfies: REQ-9g6as6
 completed QUIC handshake is cryptographic evidence of which device is on the
 other end — together with the two bind modes and what each one is allowed to
 reach.
-traces: REQ-ztdza4, REQ-xa6smf, REQ-db6s7q, REQ-2wzfzv, REQ-eg5j8u
+traces: REQ-uk9rw7, REQ-xa6smf, REQ-db6s7q, REQ-2wzfzv, REQ-eg5j8u
 
 **LLR-ygn78w**: the endpoint's iroh `EndpointId` is byte-identical to the
 device key of the keypair it was bound with.
-satisfies: REQ-ztdza4, REQ-xa6smf
+satisfies: REQ-uk9rw7, REQ-xa6smf
 
 **LLR-v873fx**: `recv_one` returns the remote device key taken from the key
 authenticated by the QUIC handshake, **never from the Wire message body**, so the
 sender identity a caller cross-checks cannot be chosen by the sender.
-satisfies: REQ-ztdza4, REQ-xa6smf
+satisfies: REQ-uk9rw7, REQ-xa6smf
 
 *Note 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
@@ -1034,12 +1066,12 @@ item also owns `update_calldata(RootHash, OrgPublicKey, Epoch) -> Vec<u8>`,
 new and public in `calldata.rs`, which no item named. It is the one place
 both typed write paths unwrap the root, the key and the epoch into calldata:
 `revive_update_runtime_call`'s `data` is `update_calldata` of its arguments,
-and `submit::submit_update` (SDD-z85ux9's) calls it too. `calldata.rs` now
+and `submit::submit_update` (org-io's chain-connection item's (moved 2026-10-07)) calls it too. `calldata.rs` now
 holds three functions, all this item's. A typed-calldata golden test in
 `org-node/tests/calldata_typed.rs` pinned its output (LLR-ayrdr8).)*
 
 *Added 2026-10-04 by review round 6, which found this function inside
-SDD-z85ux9, the item with no low-level requirements, under a list headed "the
+org-io's chain-connection item (moved 2026-10-07), the item with no low-level requirements, under a list headed "the
 asynchronous functions only". It is neither asynchronous nor unreachable, and a
 test in `org-node/tests/chain_write_pure.rs` pinned it.*
 
@@ -1119,6 +1151,25 @@ SDD-rx2yvy, SDD-8cpyfa and SDD-72ddm6 verifiable items instead of parts of the
 I/O shell.
 traces: REQ-nhe2zu, REQ-txvtm9, REQ-bvh8v6
 
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place: a
+clarification of how the boundary is expressed, not of what it is for. It
+said the boundary is "expressed as a trait rather than a client"
+(`ChainOps`, `MockChainOps`, `MockChainInner`, `ChainOpsReader` in
+`service.rs`). org-node now reads no chain: the boundary is the
+`Option<OrgState>` value each chain-judging operation takes
+(`commit_genesis`, `commit_update`, `reconcile`, `apply_receive`,
+`apply_self_delete`, `verify_envelope_against_chain`), and the receive paths
+are split so that the chain-free phase (`prepare_receive`,
+`prepare_self_delete`) names the Organisation whose state the apply phase
+needs. The stories are still exercised in full without a chain, by passing
+values from the test-support store `org_node::test_fixtures::ChainSlots`,
+which replaces `MockChainOps` and keeps its `apply_genesis`/`apply_update`
+stand-ins. Its code is now `service.rs` (`Prepared`, `PendingReceive`, the
+`prepare_*`/`apply_*` split) and `test_fixtures.rs` (`ChainSlots`). The new
+low-level requirement LLR-mn5c2q (in
+`2026-10-08-values.md`) states the absence of any chain
+read and supersedes LLR-65py3d.
+
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 The seam is now read-only: `ChainOps` keeps `read_state` and loses
 `submit_genesis` and `submit_update`, because org-node does not write to the
@@ -1132,10 +1183,37 @@ asynchronous operation on a trait object, and presents no operation that
 writes to the chain, so a substitute may be injected without changing the
 service and the service cannot submit an update through it.
 satisfies: derived
+superseded-by: LLR-mn5c2q
+
+*Superseded 2026-10-08 (ruling B, change worktree-org-io-create; owner
+ruling on PR-zf924s, hybrid: a change of meaning).* `ChainOps` is gone and
+org-node presents no chain read at all; LLR-mn5c2q states what holds now.
+The clause "presents no operation that writes to the chain" still holds and
+is still verified by `absences.rs`'s `the_service_presents_no_chain_write`.
+
+*Note 2026-10-08 (review round 1 of change worktree-org-io-create,
+finding-13: dual-ID coverage).* That older test,
+`org-node/tests/absences.rs`'s `the_service_presents_no_chain_write` (:111),
+still names only this ID. It is already green, and the robustness rule
+forbids re-annotating a green test with a new ID: a test gains a new ID only
+by being watched red against it. The dual-ID coverage of the supersession is
+therefore the new red-first test `absences.rs`'s
+`org_node_names_no_chain_library_and_reads_no_chain` (:152), which names
+LLR-mn5c2q and LLR-65py3d both.
 
 **LLR-hg3xzf**: clones of `MockChainOps` share one chain state, so two services
 under test observe the same chain as each other.
 satisfies: derived
+
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place: a
+rename, the meaning unchanged. `MockChainOps` is replaced by the test-support
+value store `org_node::test_fixtures::ChainSlots`: clones of `ChainSlots`
+share one set of slots, so two services under test are given states from
+the same chain. The tests are re-pointed to it
+(`service_lifecycle.rs`: `clones_of_the_mock_chain_share_one_state` and
+`two_services_over_one_set_of_chain_slots_see_the_same_state`).
+
+*Note 2026-10-08 (robustness, N/A):* two services over one set of chain slots see the same state: a sharing property of the values the seam hands out, with no input that can be malformed, so it has no abnormal-input case. It was watched red with clones that did not share their slots (S2 T6).
 
 **LLR-ryzr8m**: `MockChainOps::apply_update(org_id, root, key, expected_epoch)`
 refuses an update whose expected epoch is not its slot's current epoch, with a
@@ -1145,6 +1223,13 @@ one and returns its org id. This is the contract's compare-and-swap as the
 mock imitates it, so a story exercised against the mock cannot commit an
 update the chain would refuse.
 satisfies: derived
+
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place: a
+rename, the meaning unchanged. `MockChainOps::apply_update` and
+`apply_genesis` are now `org_node::test_fixtures::ChainSlots::apply_update`
+and `apply_genesis`, unchanged in body: they stand in for the chain write
+org-io makes through on-chain-client, and the compare-and-swap is kept. The
+tests (`service_lifecycle.rs`) are re-pointed to `ChainSlots`.
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 LLR-65py3d said `ChainOps` presents "submitting an update" too, and LLR-ryzr8m
@@ -1331,7 +1416,7 @@ on the inviting node, minting the new Member's leaf into an admission
 provisional update and, once that update has committed, sending the joiner the
 committed Envelope and everything they need to check it; on the joining node,
 recording that the app expects that admission.
-traces: REQ-xa6smf, REQ-ztdza4, REQ-nhe2zu, REQ-txvtm9, REQ-d9g6nt, REQ-qn2erx, REQ-xs4ab8, REQ-tqap3r, REQ-8amu2a, REQ-szq3ud, REQ-3dsweu, REQ-stx9v3
+traces: REQ-xa6smf, REQ-uk9rw7, REQ-nhe2zu, REQ-txvtm9, REQ-d9g6nt, REQ-qn2erx, REQ-xs4ab8, REQ-tqap3r, REQ-8amu2a, REQ-szq3ud, REQ-3dsweu, REQ-stx9v3
 
 *Amended 2026-10-06 (owner ruling on rotation, change
 `worktree-org-node-org-key-pair`):* traces REQ-stx9v3. An admission
@@ -1455,7 +1540,7 @@ Organisation-information message and the Organisation private key it carries
 go wherever the address points. That is PR-2dmjzj's
 defect, stated here and not endorsed. One of its cures (dial by key in both
 modes) would replace this requirement.
-satisfies: REQ-ztdza4
+satisfies: REQ-uk9rw7
 
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 This said "an admission and its Organisation secret". The secret is gone, and
@@ -1668,7 +1753,21 @@ node's own provisional updates, run every check that needs no chain, read the
 chain once, verify against it, and commit, discarding the provisional updates
 the commit orphans. A first admission is attempted only for an Organisation the
 app declared it expects. Nothing about the sender is checked.
-traces: REQ-xa6smf, REQ-ztdza4, REQ-nhe2zu, REQ-txvtm9, REQ-bvh8v6, REQ-d9g6nt, REQ-qn2erx, REQ-f2k4tr, REQ-8amu2a, REQ-tqap3r, REQ-uv3v5w, REQ-uxv2x2, REQ-kt877x, REQ-yp75u9, REQ-c29s93, REQ-bwx7eg, REQ-ju6vn2, REQ-3dsweu, REQ-vxqc5g, REQ-jy6ybw, REQ-tb4f8p, REQ-ps2gy2, REQ-ea4qs5, REQ-b462sh
+traces: REQ-xa6smf, REQ-uk9rw7, REQ-nhe2zu, REQ-txvtm9, REQ-bvh8v6, REQ-d9g6nt, REQ-qn2erx, REQ-f2k4tr, REQ-8amu2a, REQ-tqap3r, REQ-uv3v5w, REQ-uxv2x2, REQ-kt877x, REQ-yp75u9, REQ-c29s93, REQ-bwx7eg, REQ-ju6vn2, REQ-3dsweu, REQ-vxqc5g, REQ-jy6ybw, REQ-tb4f8p, REQ-ps2gy2, REQ-ea4qs5, REQ-b462sh
+
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
+who reads, not what is decided. "Read the chain once" reads "take the state
+org-io read once". `receive_and_verify` and
+`receive_and_self_delete_if_revoked` leave `OrgService` (org-io composes
+them): each receive splits into `receive_message` (transport, returning the
+sender with the message), the chain-free phase `prepare_receive` /
+`prepare_self_delete` (every check that needs no chain; an acknowledgement
+is decided there, `Prepared::Done`), and the apply phase `apply_receive` /
+`apply_self_delete`, given the state of the Organisation the pending value
+names. `commit_update` takes the state org-io read back after its write.
+The item's code is now `prepare_receive`, `apply_receive`,
+`prepare_self_delete`, `apply_self_delete`, `Prepared`, `PendingReceive`,
+`ReceiveOutcome` and `first_admission_base`.
 
 *Amended 2026-10-07 (owner rulings at the S3a close-out residual review, change
 `worktree-org-io-commit-workflow`; plan task T12a).* "Nothing about the sender
@@ -1796,7 +1895,7 @@ and that verifies against the chain is committed whether or not that key is
 in the record after the update, and a revocation from such a key is accepted
 or refused (LLR-pt32fx) by the receiving node's own Device. The verified
 record after the update is never consulted about the sender.
-satisfies: REQ-ztdza4
+satisfies: REQ-uk9rw7
 
 *Amended 2026-10-07 (owner ruling R1 at the S3a close-out residual review,
 change `worktree-org-io-commit-workflow`; plan task T12a).* This said the key
@@ -2168,7 +2267,7 @@ Organisation (a second Invite) stays.
 the one path where committing a verified change means deleting the record
 rather than updating it. The item also owns the revoking side, `revoke_member`,
 which builds that change. Nothing about the sender is checked on this path.
-traces: REQ-uxv2x2, REQ-nhe2zu, REQ-txvtm9, REQ-xs4ab8, REQ-tqap3r, REQ-ztdza4, REQ-bwx7eg, REQ-ju6vn2, REQ-3dsweu, REQ-vxqc5g, REQ-stx9v3, REQ-em28bq, REQ-y99c9w, REQ-ea4qs5
+traces: REQ-uxv2x2, REQ-nhe2zu, REQ-txvtm9, REQ-xs4ab8, REQ-tqap3r, REQ-uk9rw7, REQ-bwx7eg, REQ-ju6vn2, REQ-3dsweu, REQ-vxqc5g, REQ-stx9v3, REQ-em28bq, REQ-y99c9w, REQ-ea4qs5
 
 *Amended 2026-10-07 (owner ruling R1, change `worktree-org-io-commit-workflow`;
 plan task T12a).* "Nothing about the sender is checked on this path" no
@@ -2285,7 +2384,14 @@ that deletes the record and on the branch that updates it alike (LLR-2r2fha,
 LLR-kzgjz8): a removal or an update delivered by a listed Device is acted on
 when it verifies against the chain; one delivered by any other Device is
 refused as `SenderNotListed`, nothing written.
-satisfies: REQ-ztdza4
+satisfies: REQ-uk9rw7
+
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
+where the check runs, the rule unchanged. "Before it reads the chain" reads
+"in `prepare_self_delete`", the chain-free phase of the self-delete path,
+which takes the sender as a value and on a refusal hands org-io no
+Organisation to read; "`receive_and_self_delete_if_revoked`" reads "the
+self-delete path (`prepare_self_delete` then `apply_self_delete`)".
 
 *Amended 2026-10-07 (owner ruling R1 at the S3a close-out residual review,
 change `worktree-org-io-commit-workflow`; plan task T12a).* This said the path
@@ -2322,6 +2428,11 @@ written: no record, and no expected admission cleared. The error's name is
 wrong — the refusal is about the local record, not the chain. That is recorded
 for the fix change and not endorsed.
 satisfies: derived
+
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
+"without reading the chain" reads "by the chain-free phase
+(`prepare_self_delete`), which hands org-io no Organisation to read". The
+refusal and its error are unchanged.
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 This said "no pending invite consumed" and that the chain "was read just
@@ -2529,19 +2640,19 @@ LLR-drgdy8 by `the_proxy_account_from_genesis_is_kept_and_handed_back` (renamed
 
 **SDD-b8tuv3**: when the transport comes into existence and whose key it
 carries — bound lazily, at most once, from the device seed of a named persona.
-traces: REQ-db6s7q, REQ-ztdza4
+traces: REQ-db6s7q, REQ-uk9rw7
 
 **LLR-6zjzn2**: `ensure_endpoint` binds at most one endpoint per service and
 returns that same endpoint on every later call. On a service holding more than
 one Persona this is the defect PR-8qsnhx books, and it is stated here and not
 endorsed.
-satisfies: REQ-ztdza4
+satisfies: REQ-uk9rw7
 
 **LLR-cns6q6**: the endpoint is bound from the device seed of the persona named
 by the call that first binds it, so the identity the transport authenticates
 is that persona's device key for every later send, whichever persona a later
 call names.
-satisfies: REQ-ztdza4
+satisfies: REQ-uk9rw7
 
 *Narrowed 2026-10-04 by review round 5. "The named persona's device key" was
 true of the first call only. With LLR-6zjzn2's bind-once rule, an
@@ -2566,151 +2677,19 @@ and it is recorded below among the behaviours that are deliberately not
 refined. The `test-support` relay-injecting constructor already booked for the
 Networked arm of `admit_member` is what closes both.*
 
-## SDD-z85ux9 — The chain-facing I/O shell
+## The chain-facing I/O shell (moved)
 
-`org-node/src/chain_read.rs` (all but `org_state_from_chain` and
-`OrgStateCache`, which are SDD-pa6p7w's since 2026-10-05),
-`org-node/src/chain_write/proxy.rs`, `org-node/src/chain_write/submit.rs`, `org-node/src/chain_write/mod.rs`,
-`org-node/src/ceremony.rs`, `org-node/src/preflight.rs`,
-`org-node/src/bin/preflight.rs`, and in `org-node/src/service.rs`
-`connect_chain_client` and the `SubxtChainOps` implementation of `ChainOps`;
-in `org-node/src/chain_write/multisig.rs`, the asynchronous functions only —
-`dispatch_org_call`, `fund` and `submit_and_watch`. *Corrected 2026-10-05 by
-review round 8: this also named `calldata.rs`, which holds no asynchronous
-function. Its two functions are SDD-msb6xh's.* *(Amended 2026-10-05 by the
-org-node type-safety change, review round 7: three since that change added
-`update_calldata`, also SDD-msb6xh's. LLR-mmdu38, under SDD-swtd3w, names
-`OnChainReader::refresh` only as the caller of `OrgStateCache::store_fetched`.
-The clause is carried by the cache, SDD-pa6p7w's, and this item still
-carries no low-level requirement.)*
-
-*Corrected 2026-10-04 by review round 6. This list named
-`revive_update_runtime_call` as one of "the asynchronous functions" and left
-out `submit_and_watch`. The first is a pure, synchronous `Value` builder that
-a test can pin without a chain, so the deviation's argument never applied to
-it. It now belongs to SDD-msb6xh, with LLR-rc74nq. The second is async and
-belongs here.*
-
-**SDD-z85ux9**: everything that actually talks to a chain — opening an RPC
-connection, reading an Organisation's state through on-chain-client, and the
-operator-facing preflight checks. It submits nothing: org-node builds, signs
-and dispatches no extrinsic. It is the unit's whole supplier-facing surface
-and it carries **no low-level requirements**.
-traces: REQ-nhe2zu, REQ-txvtm9, REQ-bvh8v6
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-This listed "building and signing an extrinsic, submitting it, driving block
-production, creating and rotating a pure proxy, running the genesis ceremony".
-The owner ruled that org-node does not write to the chain: `chain_write/`
-(`proxy.rs`, `submit.rs`, `mod.rs`, and the asynchronous `dispatch_org_call`,
-`fund` and `submit_and_watch` in `multisig.rs`), `ceremony.rs`,
-`FinalitySink` and the write half of `SubxtChainOps` move to on-chain-client's
-chain writer
-(`on-chain-client/docs/architecture/2026-10-06-chain-write.md`),
-and org-node drops `subxt-signer` and the sr25519 key. What stays here is
-`chain_read.rs` (but for SDD-pa6p7w's parts), `preflight.rs`,
-`bin/preflight.rs`, `connect_chain_client` and `SubxtChainOps::read_state`.
-The size measured below is of the shell before this change; it is to be
-re-measured when the change is implemented, and what the chopsticks targets
-that exercised the write (`chain_genesis_e2e`, `finality_polling`) still
-exercise here is for the implementation plan to settle.
-
-## The item with no low-level requirements
-
-SDD-z85ux9 carries none, under a class that requires them. This section is the
-deviation, recorded here rather than left for a reader to notice.
-
-**What it is not.** The `on-chain-client` unit has an item of the same shape —
-its chain-facing transport shell, the one item its decomposition records as
-carrying no low-level requirements, described in the section "The item with no
-low-level requirements" of
-`on-chain-client/docs/architecture/2026-09-28-decomposition.md` — and **its
-argument does not transfer.** That item is *unreachable*: nothing exercises it
-at all, so there is no behaviour anyone has watched. This one is exercised.
-`org-node/tests/chain_genesis_e2e.rs` is
-507 lines over **two** tests, `finality_polling.rs` 129 lines over two more,
-`preflight.rs` 85 lines over three; **seven in all**. Together they drive the
-ceremony, the proxy, the submission path and the health checks end to end
-against a real runtime.
-
-*Corrected 2026-10-04 by review round 1*, which found this sentence claiming
-eight, four and six — eighteen tests, two and a half times what the tree holds.
-The line counts were right and the test counts were taken from a `grep` that
-counted helper functions as tests. The argument below does not turn on the
-number, but a deviation this large should not be argued from a figure nobody
-measured.
-
-**What it is.** Those three targets are excluded from this unit's
-`verify_commands`, by a decision recorded in `org-node/.guardrails/config.yaml`:
-they spawn a chopsticks fork and need `on-chain/scripts/node_modules`, neither
-of which the gate provides. So the honest statement is narrower than
-on-chain-client's, and worse:
-
-> A low-level requirement written here could be true, could be well-tested, and
-> **no mutation to the code it describes would redden this unit's gate.** It
-> would be an assertion carrying no evidence that this gate can produce.
-
-That is precisely the failure this repository has now recorded three times — a
-property credited to an assertion that cannot observe it — and writing
-eighty-odd lines of LLR into the one part of the unit where the gate is blind
-would be committing it deliberately, at scale, in the ledger rather than in a
-test.
-
-**What follows from it.** The remedy is not to write the LLRs. It is to bring
-the three chopsticks targets into the gate, which is an infrastructure change
-of its own — a hermetic chopsticks fixture, or a recorded-transcript substitute
-for the RPC layer — and it is booked in
-`docs/plans/2026-09-05-ratchet-setup.md` rather than attempted here. Until then
-this unit's architecture is **described** across its whole surface and
-**evidenced** across about seventy per cent of it, and the rest is named.
-
-**Its size, measured.** `chain_read.rs` 67, `chain_write/proxy.rs` 225,
-`chain_write/submit.rs` 77, `chain_write/mod.rs` 70, `ceremony.rs` 66,
-`preflight.rs` 138, `bin/preflight.rs` 97 — 740 lines of whole files, plus
-the parts: `mod subxt_impl` in `service.rs` (the `SubxtChainOps`
-implementation) 260, `connect_chain_client` 40, and in `multisig.rs`
-`submit_and_watch` 46, `fund` 24 and `dispatch_org_call` 15. Each part is
-counted from its first doc comment or attribute to its closing brace. **1125
-lines in all, against a unit of 3768 lines over 24 files: about 30%.**
-
-*Re-measured 2026-10-05 by the org-node type-safety change, at its merge of
-this file, with the same rule.* `chain_read.rs` 55 (its 101 lines less the 46
-of `org_state_from_chain` and `OrgStateCache`, now SDD-pa6p7w's),
-`chain_write/proxy.rs` 234, `chain_write/submit.rs` 80, `chain_write/mod.rs`
-70, `ceremony.rs` 68, `preflight.rs` 138, `bin/preflight.rs` 97 — 742 lines
-of whole files and the remainder of one; the parts `mod subxt_impl` 249,
-`connect_chain_client` 40, `submit_and_watch` 46, `fund` 24 and
-`dispatch_org_call` 15 — 374. **1116 lines in all, against a unit of 4391
-lines over 25 files: about 25%.** The share fell because that change added
-`types.rs` and typed parts the gate does reach, not because the shell shrank.
-
-*Measured 2026-10-04 by review round 6, which found this paragraph counting
-only the whole files and calling the result "a fifth", while the parts were
-left uncounted. The parts are a further 385 lines. The ledger said "a fifth",
-and the README and the plan carried "roughly 815". Neither was measured. The
-figure above is, and `revive_update_runtime_call`'s 45 lines are no longer in
-it.*
-
-*Re-measured 2026-10-06 by change `worktree-org-node-chain-authority` (T17),
-after the chain write left org-node, with the same rule: whole files plus the
-named parts of `service.rs`, each part from its first doc comment or attribute
-to its closing brace.* `chain_read.rs` 55 (its 97 lines less the 42 of
-`org_state_from_chain`, `OrgStateCache` and the cache's `ChainReader` impl,
-SDD-pa6p7w's), `preflight.rs` 138, `bin/preflight.rs` 97 — 290 lines of whole
-files and the remainder of one; the parts `mod subxt_impl` 36 (`read_state`
-only) and `connect_chain_client` 41 — 77. `chain_write/` (`proxy.rs`,
-`submit.rs`, `mod.rs`, `multisig.rs`'s asynchronous functions) and
-`ceremony.rs` are deleted. **367 lines in all, against a unit of 3370 lines
-over 18 files: about 11%.** The chopsticks targets `chain_genesis_e2e` and
-`finality_polling` are deleted with the write they drove (its evidence moved
-to on-chain-client's `write_genesis_e2e`); `preflight` (85 lines, three
-tests) is the one chopsticks target left, so the shell this section describes
-is now exercised only by the health checks, still outside the gate.
-
-**What is still true of it.** It is class C like everything else here, it is
-described by a software item with an interface and a trace, and its
-requirements are the unit's. What it lacks is refinement into separately
-mutable claims, and the reason is stated above rather than implied.
+*Moved 2026-10-07 to org-io's architecture ledger
+(`org-io/docs/architecture/2026-10-08-org-io.md`, finalised
+at the merge of change `worktree-org-io-create`), ruling A: the design item
+for the chain connection, the production read and the preflight, with its
+recorded deviation (no low-level requirements) and its size measurement, now
+re-measured over org-io's files. org-node has no chain-facing shell after
+ruling B: it takes the Organisation state as a value and reads no chain.
+Until task T6 of `docs/plans/2026-10-06-org-io-create.md` removes them,
+org-node's `chain_read.rs`, `preflight.rs`, `bin/preflight.rs`,
+`connect_chain_client` and `SubxtChainOps` are copies of what org-io now
+owns, described by no item here.*
 
 ## What is not an item
 
@@ -2782,7 +2761,7 @@ and that target is chopsticks-excluded), and replacing the whole Networked arm
 with the Loopback body leaves the entire gate green. The requirement now states
 only the Loopback clause.
 
-The Networked arm is therefore **SDD-z85ux9's problem in miniature, inside an
+The Networked arm is therefore **org-io's chain-connection item's (moved 2026-10-07) problem in miniature, inside an
 item that is otherwise well evidenced**: it is real code on a real path, and
 this gate is blind to it. It cannot be brought into the gate the way the
 Loopback path was, because `bind_with_mode(Networked)` uses `presets::N0` —
@@ -2844,7 +2823,7 @@ construction while leaving the item's coverage complete. The pairs are:
 | LLR-wx3php (strictly greater is accepted) | — the same LLR states both sides |
 | LLR-jsx922 (still a member: update) | LLR-6p4pj2 (no longer a member: delete) |
 | LLR-6qmq2g (verification fails: record stands) | LLR-vw2jn6 (verification runs first) |
-| LLR-rm9x4z (absence from failure) | — the same LLR states both sides |
+| org-io's absence-from-failure LLR (moved 2026-10-07) (absence from failure) | — the same LLR states both sides |
 
 *Amended 2026-10-05; reworded the same day by
 docs/plans/2026-10-05-switch-trim.md. The Envelope carries no signature
@@ -2901,13 +2880,13 @@ of its two arguments claimed more than it could.*
 | SDD-b8tuv3 | an endpoint bind that fails |
 | SDD-rx2yvy | `admit_member` given a malformed member or device key (→ `OrgNodeError::Chain("bad member key")`) or a handle already held (→ `OrgNodeError::Trie`) — **the most material of the seven**, because both are reachable from a join request a stranger composes. *Amended 2026-10-05 by the org-node type-safety change: `admit_member` now takes the parsed `JoinRequest`, and a malformed key or handle in a Join request is refused at `import_join_request` with `InvalidField` naming it (LLR-8bum44, under SDD-af5vnt in `2026-10-04-type-safety.md` — *amended 2026-10-05 by the org-node type-safety change, review round 7: it read "under SDD-vee2fq"*), so the first clause cannot reach `admit_member` and the `Chain("bad member key")` refusal no longer exists. A handle already held is still untested here.* *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`): `admit_member` takes a parsed `Joiner` built by the app from the Invite reply it parsed; a handle already held is still untested, and now reaches `admit_member` from the app's parse rather than from `import_join_request`.* |
 | SDD-ueh4tm | a `ChainOps` implementation whose `read_state` or `submit_update` fails. *Since review round 8 the item has one refusal case, the mock's wrong-epoch update (LLR-ryzr8m), but that is the mock refusing, not an implementation failing, so the line stands.* *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`): `submit_update` leaves the trait, so the owed case is a `read_state` that fails, as it reaches a commit (LLR-ewkg85 names it among the refusals).* |
-| SDD-z85ux9 | every abnormal case it has. The item has no gated test of any kind — that is the deviation recorded at the end of this file — so it has no abnormal one either, and listing it here is the honest bookkeeping |
+| org-io's chain-connection item (moved 2026-10-07) | every abnormal case it has. The item has no gated test of any kind — that is the deviation recorded at the end of this file — so it has no abnormal one either, and listing it here is the honest bookkeeping |
 | SDD-msb6xh | none — `build_update_calldata` is total over its argument types, so there is no abnormal input to offer it. *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`): the item now states that org-node holds no calldata; with no interface left it has no input, normal or abnormal.* |
 | SDD-rq6nv4 | `multi_account_id` is total over its argument types. `build_dispatch_tx` is **not**: `runtime_call_to_tx` has three `WriteError::MalformedCall` arms, none of them tested, and this change made the function publicly reachable through `org_node::test_support`, so the abnormal input is now one line of test away. *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`): both functions leave org-node, and the untested `MalformedCall` arms go with them to on-chain-client's chain writer, where they are owed.* |
 
 **SDD-pa6p7w is no longer on this list.** Round 2 found it missing from it —
 nothing reachable at this gate could make `ChainReader::get_org_state` return
-`Err`, so the failure arm of LLR-8m99q2 and LLR-rm9x4z was untested and
+`Err`, so the failure arm of LLR-8m99q2 and org-io's absence-from-failure LLR (moved 2026-10-07) was untested and
 untestable — and this change now carries `FailingChain` in
 `tests/verify_against_chain.rs` and
 `a_chain_read_that_fails_is_refused_as_chain_not_as_absence`, which pins the
@@ -2925,7 +2904,7 @@ in the Gaps section of this change's verification record.
 
 ## Evidence
 
-Every LLR above, excepting SDD-z85ux9's absent ones, is carried by a test **in
+Every LLR above, excepting org-io's chain-connection item's (moved 2026-10-07) absent ones, is carried by a test **in
 `org-node/tests`** — one of the thirteen harnessed targets there that
 `verify_commands` names, or one of its three bolero targets. With `--lib`,
 which carries no low-level requirement, the command runs fourteen harnessed
@@ -2942,7 +2921,7 @@ under `org-node/src`". Both were wrong: the count is fourteen, and `test_paths`
 reads `verifies:` annotations **only** from `org-node/tests`, which is the whole
 reason this change relocated twenty-two tests. One `#[cfg(test)]` module
 survives in `src` — `chain.rs`'s `mock_chain_returns_set_state` — and it carries
-no annotation and no low-level requirement; LLR-rm9x4z is evidenced from
+no annotation and no low-level requirement; org-io's absence-from-failure LLR (moved 2026-10-07) is evidenced from
 `tests/` instead.
 
 **A test that is already green has never been watched failing.** So each LLR is

@@ -144,3 +144,18 @@ cannot be discarded by a later reorganisation. The Organisation state a
 Change set is verified against is read from one.
 _Avoid_: best block, latest block, head (each names a block that can still
 be discarded)
+
+**Admin**:
+A user whose own account is a signatory of the multisig that controls the
+Organisation's pure proxy. A Device is an Admin's Device when its user is one.
+Admin status is a fact on the chain, not a role in the Membership record.
+(Added 2026-10-08, change `worktree-org-io-create`.)
+_Avoid_: administrator key, Organisation admin (on-chain-client's term for
+the Organisation's 20-byte identifier, which is not a user)
+
+**org-io**:
+The unit that does all IO for an Organisation: reading and writing the chain,
+holding the user's signatory key, and (from stage S4) peer communication and
+local storage, while org-node takes values and returns values. (Added
+2026-10-08, change `worktree-org-io-create`;
+`docs/adr/2026-10-06-org-io-unit.md`.)

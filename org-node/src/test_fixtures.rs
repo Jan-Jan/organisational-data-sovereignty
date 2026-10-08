@@ -113,6 +113,90 @@ pub fn bob_absence_notice(org_id: crate::ids::OrgId) -> crate::revocation::Revoc
     crate::revocation::RevocationNotice { org_id, member_id, device, proof }
 }
 
+/// The slots and the id counter `ChainSlots` shares between its clones.
+#[derive(Default)]
+struct ChainSlotsInner {
+    slots: std::collections::HashMap<crate::ids::OrgId, crate::chain::OrgState>,
+    next_id_seed: u8,
+}
+
+/// A test-side store of Organisation states, standing in for the chain a
+/// test's org-io would read: org-node's chain-judging operations take the
+/// state as a value (ruling B), and a test passes them `get(&org_id)`.
+/// Clones share one set of slots, so two services under test observe the
+/// same chain (LLR-hg3xzf).
+#[derive(Clone, Default)]
+pub struct ChainSlots {
+    inner: std::sync::Arc<std::sync::Mutex<ChainSlotsInner>>,
+}
+
+impl ChainSlots {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, ChainSlotsInner> {
+        self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Set a slot directly (for test setup only).
+    pub fn set(&self, org_id: crate::ids::OrgId, state: crate::chain::OrgState) {
+        self.lock().slots.insert(org_id, state);
+    }
+
+    /// The state of a slot, `None` for an Organisation with none.
+    pub fn get(&self, org_id: &crate::ids::OrgId) -> Option<crate::chain::OrgState> {
+        self.lock().slots.get(org_id).copied()
+    }
+
+    /// Stand-in for the genesis chain write org-io makes through
+    /// on-chain-client: a slot at epoch one holding `root` and `key`, under an
+    /// id derived from the root and a counter (LLR-ryzr8m).
+    pub fn apply_genesis(&self, root: org_members::RootHash, key: OrgPublicKey) -> crate::ids::OrgId {
+        let mut inner = self.lock();
+        let mut id_bytes = [0u8; 20];
+        id_bytes.copy_from_slice(&root.as_bytes()[..20]);
+        id_bytes[0] ^= inner.next_id_seed;
+        inner.next_id_seed = inner.next_id_seed.wrapping_add(1);
+        let org_id = crate::ids::OrgId::new(id_bytes);
+        inner.slots.insert(
+            org_id,
+            crate::chain::OrgState { root_hash: root, org_pub_key: key, epoch: crate::types::Epoch::new(1) },
+        );
+        org_id
+    }
+
+    /// Stand-in for the update chain write org-io makes through
+    /// on-chain-client: `root` and `key` at `expected_epoch + 1`, refused
+    /// unless the slot is at `expected_epoch` (LLR-ryzr8m).
+    pub fn apply_update(
+        &self,
+        org_id: crate::ids::OrgId,
+        root: org_members::RootHash,
+        key: OrgPublicKey,
+        expected_epoch: crate::types::Epoch,
+    ) -> Result<(), crate::error::OrgNodeError> {
+        let mut inner = self.lock();
+        let state = inner.slots.get(&org_id).copied().ok_or(crate::error::OrgNodeError::OrgNotOnChain)?;
+        if state.epoch != expected_epoch {
+            return Err(crate::error::OrgNodeError::Chain(format!(
+                "epoch mismatch: expected {}, found {}",
+                expected_epoch.get(),
+                state.epoch.get()
+            )));
+        }
+        inner.slots.insert(
+            org_id,
+            crate::chain::OrgState {
+                root_hash: root,
+                org_pub_key: key,
+                epoch: crate::types::Epoch::new(expected_epoch.get() + 1),
+            },
+        );
+        Ok(())
+    }
+}
+
 /// Answers at run time whether a type implements `Display` or `Copy`, so a
 /// test can assert that a secret type implements neither (LLR-sz4xhc,
 /// LLR-scgk5j). Autoref specialisation: the impl on `Probe<T>` applies when

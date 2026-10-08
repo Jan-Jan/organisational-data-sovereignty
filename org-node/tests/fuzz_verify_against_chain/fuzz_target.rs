@@ -41,7 +41,7 @@ use bolero::check;
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
 use org_members::{Handle, MemberId, MemberLeaf, Name, Surname};
-use org_node::chain::{ChainReader, MockChain, OrgState};
+use org_node::chain::OrgState;
 use org_node::envelope::Envelope;
 use org_node::ids::OrgId;
 use org_node::keys::{SigningKeypair, X25519Keypair};
@@ -99,15 +99,11 @@ fn main() {
     // produces, so an unperturbed shape-3 input is ACCEPTED and the
     // `assert_eq!` below runs; a perturbed one that still applies yields a
     // different root and must be refused at the root match (check 7).
-    let mut chain = MockChain::new();
-    chain.set(
-        org,
-        OrgState {
-            root_hash: honest_root,
-            org_pub_key: OrgPrivateKey::from([9u8; 32]).x25519_keypair().org_public_key().unwrap(),
-            epoch: Epoch::new(9),
-        },
-    );
+    let chain_state = OrgState {
+        root_hash: honest_root,
+        org_pub_key: OrgPrivateKey::from([9u8; 32]).x25519_keypair().org_public_key().unwrap(),
+        epoch: Epoch::new(9),
+    };
 
     // bolero wraps each iteration in `catch_unwind`, which requires the
     // closure's captures to be `RefUnwindSafe`. `OrgTrie` contains a
@@ -115,7 +111,6 @@ fn main() {
     // None of local/chain/org can actually be left inconsistent by an unwind
     // because the closure never mutates them — asserting safety is correct.
     let local = AssertUnwindSafe(local);
-    let chain = AssertUnwindSafe(chain);
 
     check!().for_each(move |bytes: &[u8]| {
         let ctx = || VerifyContext {
@@ -124,12 +119,9 @@ fn main() {
             last_committed_epoch: Epoch::new(0),
         };
         let run = |env: &Envelope| {
-            if let Ok(out) = verify_envelope_against_chain(&*local, env, &ctx(), &*chain) {
+            if let Ok(out) = verify_envelope_against_chain(&*local, env, &ctx(), Some(chain_state)) {
                 // Any accepted update must equal the chain root it verified against.
-                assert_eq!(
-                    out.trie.root_hash().unwrap(),
-                    chain.get_org_state(&org).unwrap().unwrap().root_hash
-                );
+                assert_eq!(out.trie.root_hash().unwrap(), chain_state.root_hash);
             }
         };
 

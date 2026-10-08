@@ -106,12 +106,12 @@ fn org_node_holds_no_invite_identifier() {
     assert_absent("invite_id", "LLR-ms8njy, LLR-48jakr: no field or argument carries one");
 }
 
-// The service's chain seam writes nothing; the proxy account is never handed
-// to it (absences, no input side).
+// The service writes nothing to the chain; the proxy account is never handed
+// to a chain write (absences, no input side).
 // verifies: LLR-65py3d, LLR-3v5nu9, REQ-xs4ab8
 #[test]
 fn the_service_presents_no_chain_write() {
-    assert_absent_in("service.rs", "async fn submit_", "ChainOps presents no write, so nothing can take the proxy account to the chain");
+    assert_absent_in("service.rs", "async fn submit_", "the service has no submission, so nothing can take the proxy account to the chain");
 }
 
 // org-node builds no calldata, derives no multisig account, holds no
@@ -145,6 +145,35 @@ fn org_node_writes_nothing_to_the_chain() {
     for dep in ["subxt-signer", "blake2", "parity-scale-codec"] {
         assert!(!deps.lines().any(|l| l.trim_start().starts_with(dep)), "{dep} is not a dependency");
     }
+}
+
+// org-node does no chain IO (ruling B, change worktree-org-io-create): no
+// chain library, no chain seam, no chain read, no `chain` feature.
+// verifies: LLR-mn5c2q, LLR-65py3d
+#[test]
+fn org_node_names_no_chain_library_and_reads_no_chain() {
+    for (needle, why) in [
+        // Paths, not the bare words: `types.rs`'s doc comment names subxt's
+        // account type in prose, as `org_node_writes_nothing_to_the_chain` notes.
+        ("on_chain_client::", "the chain is org-io's"),
+        ("subxt::", "the chain is org-io's"),
+        ("ChainOps", "org-node takes the chain state as a value"),
+        ("ChainReader", "verification takes the chain state as a value"),
+        ("read_state", "org-node reads no chain"),
+        ("OnChainReader", "deleted with its cache (PR-k2xxaq)"),
+        ("OrgStateCache", "deleted (PR-k2xxaq)"),
+        ("connect_chain_client", "the connection is org-io's"),
+    ] {
+        assert_absent(needle, why);
+    }
+    let dependencies = normal_dependencies();
+    for crate_name in ["subxt", "on-chain-client", "async-trait", "hex"] {
+        assert!(!dependencies.contains(&format!("{crate_name} =")), "org-node depends on {crate_name}");
+    }
+    assert!(
+        !std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap().contains("chain = ["),
+        "org-node has no `chain` feature"
+    );
 }
 
 // --- S3 (commit workflow): scans of the code, not of its comments ----------

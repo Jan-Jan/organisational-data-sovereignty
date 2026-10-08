@@ -163,7 +163,7 @@ premise of this whole section. Measured on this tree: this unit has
 **nineteen** requirements and **every one** of them is `satisfies: derived`.
 Fifteen — all of them in `2026-09-09-verify-and-commit.md` — carry
 `(implements: RC-…)`. **Four do not**: the two expectations in
-`2026-09-06-dependency-expectations.md`, REQ-ysyu9g and REQ-q92yac, where that
+`2026-09-06-dependency-expectations.md`, org-io's finalised-block expectation (moved 2026-10-07) and REQ-q92yac, where that
 file says at `:26` and `:35` that the withholding is deliberate pending the
 analysis; and the two minted here. So REQ-db6s7q is the third derived
 requirement in this unit citing no control and REQ-2wzfzv is the fourth.

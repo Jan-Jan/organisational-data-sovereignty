@@ -993,6 +993,16 @@ every child process, are visible to other processes on some platforms, and are
 routinely captured by crash reporters and process supervisors. Not minted
 because the remedy is a key-storage design decision spanning this unit and
 `org-node`.
+*Amended 2026-10-08 (change `worktree-org-io-create`, task T9).* The key is
+the user's own sr25519 signatory key (there is no Organisation-wide signing
+key), and since this change org-io reads it, not the app: the variable is
+development-only (owner, 2026-10-06), and a build of org-io without its
+`dev-seed` feature — every release build — contains no code that reads it
+(org-io's development-only seed requirement, in
+`org-io/docs/requirements/2026-10-08-org-io.md`). The app no longer reads, parses or holds
+it. Production custody (OS keychain or a hardware signer) is the org-io
+roadmap's stage S8. The note stays unminted: in a development build the
+exposure it describes remains, and it is accepted there.
 
 **Nothing authenticates a pasted blob before the operator acts on it.**
 `import_invite` and `import_join_request` accept any string. The Admit panel

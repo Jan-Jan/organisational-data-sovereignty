@@ -143,6 +143,67 @@ fn an_org_information_body_with_trailing_bytes_is_refused() {
     }
 }
 
+/// verifies: LLR-tajh9d, LLR-js9dsu
+///
+/// Normal: each of the three kinds round-trips with its variant index and its
+/// payload. Abnormal: a body of any kind with a leftover byte, or the body of
+/// any kind under an unknown variant index (every first byte from 3 to 0xFF),
+/// is `Malformed`, without a panic.
+#[test]
+fn exactly_three_kinds_round_trip_and_an_unknown_kind_or_leftover_bytes_are_refused() {
+    let kinds = [
+        (sample_msg(), 0u8),
+        (WireMessage::Revocation(sample_notice()), 1),
+        (WireMessage::Acknowledgement(sample_acknowledgement()), 2),
+    ];
+    for (message, index) in &kinds {
+        let body = body_of(message);
+        assert_eq!(body[0], *index);
+        let decoded = decode_body(&body).unwrap();
+        let decoded_as_the_same_kind = match (&decoded, message) {
+            (
+                WireMessage::OrgInformation { envelope, record_snapshot, org_private_key },
+                WireMessage::OrgInformation {
+                    envelope: sent_envelope,
+                    record_snapshot: sent_snapshot,
+                    org_private_key: sent_key,
+                },
+            ) => {
+                assert_eq!(envelope, sent_envelope);
+                assert_eq!(record_snapshot, sent_snapshot);
+                assert_eq!(org_private_key, sent_key);
+                true
+            }
+            (WireMessage::Revocation(notice), WireMessage::Revocation(sent_notice)) => {
+                assert_eq!(notice, sent_notice);
+                true
+            }
+            (WireMessage::Acknowledgement(acknowledgement), WireMessage::Acknowledgement(sent)) => {
+                assert_eq!(acknowledgement, sent);
+                true
+            }
+            _ => false,
+        };
+        assert!(decoded_as_the_same_kind, "kind {index} decoded as another kind: {decoded:?}");
+
+        let mut leftover = body.clone();
+        leftover.push(0);
+        assert!(
+            matches!(decode_body(&leftover), Err(TransportError::Malformed)),
+            "kind {index} with a leftover byte"
+        );
+
+        for unknown_index in 3u8..=0xFF {
+            let mut unknown_kind = body.clone();
+            unknown_kind[0] = unknown_index;
+            assert!(
+                matches!(decode_body(&unknown_kind), Err(TransportError::Malformed)),
+                "kind {index}'s payload under index {unknown_index}"
+            );
+        }
+    }
+}
+
 /// verifies: LLR-378cj4
 ///
 /// Boundary of `Signature64`'s decode: exactly 64 signature bytes decode;

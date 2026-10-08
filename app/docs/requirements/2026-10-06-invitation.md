@@ -69,8 +69,13 @@ Organisation identifier, keys, handle, name or surname does not parse, naming
 the field that failed, and shall act on nothing from it.
 satisfies: derived
 
-**REQ-nfr3n2**: The software shall submit a provisional update built by
-org-node to the chain through on-chain-client, and only once the submission
-has executed ask org-node to commit and send it; when the submission fails it
-shall ask org-node to do neither and shall report the failure.
-satisfies: derived
+*Moved 2026-10-08 (change `worktree-org-io-create`, task T9, ruling A).* The
+requirement that stood here — submit org-node's provisional update to the
+chain through on-chain-client, and only once the submission has executed
+ask org-node to commit and send it, reporting a failure and asking for
+neither — moved, with its ID and its text, to org-io's requirements
+(`org-io/docs/requirements/2026-10-08-org-io.md`,
+"Submission"), with the code that does it. org-io exports it, so this unit
+may still cite it. What the app keeps — when to submit, and to which Device
+— is this unit's new requirement in
+`app/docs/requirements/2026-10-08-submission.md`.

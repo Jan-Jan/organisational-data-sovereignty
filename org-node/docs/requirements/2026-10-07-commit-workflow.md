@@ -107,6 +107,13 @@ unchanged.
 (implements: RC-u7kdam)
 satisfies: derived
 
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place: a
+clarification of who reads. "Before it reads the chain or uses any chain
+state" reads "before it takes any chain state, so that none is read for it":
+org-node no longer reads the chain, and the order of the read is stated in
+org-io's architecture ledger
+(`org-io/docs/architecture/2026-10-08-org-io.md`).
+
 REQ-ea4qs5 follows owner ruling R1 of 2026-10-07 (the member-sender rule,
 recorded in `docs/plans/2026-10-06-org-io-commit-workflow.md`, decision 16):
 a membership update and a revocation are acted on only when the sending

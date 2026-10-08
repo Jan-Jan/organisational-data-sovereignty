@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "org-members",
+    "org-io",
     "org-node",
     "person",
     "spike-common",
@@ -9,9 +10,9 @@ members = [
     "spike-p2panda",
 ]
 # on-chain-client declares its own [workspace] and is intentionally outside
-# this workspace. It is used as a path dependency by org-node (behind the
-# `chain` feature). Excluding it here prevents the "multiple workspace
-# roots" error when Cargo traverses the directory tree.
+# this workspace. It is used as a path dependency by org-io. Excluding it
+# here prevents the "multiple workspace roots" error when Cargo traverses the
+# directory tree.
 exclude = [
     "on-chain-client",
 ]

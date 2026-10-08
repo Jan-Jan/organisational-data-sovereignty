@@ -10,6 +10,16 @@ added: each requirement below sits under the item of that file that owns its
 code, and that item's `traces:` line is amended in place there with a dated
 note.
 
+*Amended 2026-10-08 (change `worktree-org-io-create`, task T9, ruling A).*
+The submission requirement of that list moved to org-io, which exports it,
+and with it the two low-level requirements that stood under "Under
+SDD-rmbr3t" below for the write-then-commit-then-send order and the
+90-second bound; they are in org-io's architecture ledger
+(`org-io/docs/architecture/2026-10-08-org-io.md`, under
+the submission item). The decision that stays in the app is REQ-m8sgjk
+(`app/docs/requirements/2026-10-08-submission.md`), which
+LLR-gha5f6 below now satisfies in its place.
+
 The conventions are that ledger's. Safety class C, no per-item override. A
 low-level requirement is written only where a gated test reddens when its
 behaviour breaks; the tests named under each are the ones this change's
@@ -26,6 +36,12 @@ send), and one of the webview, `app/src/lib/invite.ts`. What of them no gated
 test reaches — the production chain writer over subxt, the Tauri handlers'
 success paths that need a chain, and the Svelte panels — is SDD-6g3wnh's, as
 that item's amended code list states.
+*Amended 2026-10-08 (change `worktree-org-io-create`, task T9).*
+`app/src-tauri/src/submit.rs` is deleted: the chain write, then org-node's
+commit and send, are org-io's (`org-io/src/submit.rs`), reached through the
+org-io handle, and the production chain writer over subxt is org-io's
+chain-connection item's. What of this unit no gated test reaches is the
+Tauri handlers' success paths that need a chain and the Svelte panels.
 
 ## Under SDD-2pa6h6 — Command-boundary parsing
 
@@ -153,12 +169,26 @@ pair names: `org_id` is kept as the operator's selection in the Admit panel,
 which preselects it from the reply, and is not trusted — it can only confirm
 that Organisation, never choose another. Otherwise `admit_reply` builds
 org-node's `Joiner` from the reply's five values, has org-node build the
-admission to that Organisation, submits it as LLR-qhjp6g states with the
+admission to that Organisation, submits it as org-io's write-then-commit-then-send
+order states (org-io's architecture ledger, the submission item) with the
 reply's DevicePublicKey as the one recipient (LLR-q225ws), passing org-node no
 Organisation secret, key or invite identifier, and settles that pair once the
 admission has committed — even when the send that follows fails; when the
 submission fails the pair stays outstanding.
-satisfies: REQ-65xqp8, REQ-nfr3n2
+satisfies: REQ-65xqp8, REQ-m8sgjk
+
+*Amended 2026-10-08 (change `worktree-org-io-create`, task T9).* The
+signature was `admit_reply(svc, writer, outstanding, rng, org_id, reply_blob, peer_addr)`
+and is `admit_reply(io, outstanding, rng, org_id, reply_blob, peer_addr)`:
+the service and the chain writer are both behind the org-io handle, whose
+`submit_commit_send` it calls. The text said it "submits it as" the app's
+order requirement states; that requirement moved to org-io and is not
+exported, so it is named in prose. `satisfies:` was REQ-65xqp8, REQ-nfr3n2;
+REQ-nfr3n2 moved to org-io, and an app low-level requirement does not
+decompose another unit's requirement, so it is replaced by the app's
+REQ-m8sgjk (the decision to admit, handed to org-io). Classification under
+the hybrid rule: a clarification, not a change of meaning; the behaviour
+and the tests are unchanged.
 
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 `admit_reply` took an `org_secret` and passed it, with the reply's invite
@@ -189,37 +219,15 @@ named another this device holds was admitted there. The check is now on the
 pair, and the test `a_reply_for_another_organisation_is_refused` is rewritten
 as `a_reply_admitted_under_another_selected_organisation_is_refused`.
 
-**LLR-qhjp6g**: `found_organisation` and `submit_commit_send` call the chain
-writer first and ask org-node to commit (`commit_genesis`, `commit_update`)
-only after the write has returned success, and `submit_commit_send` asks
-org-node to send (`send_update`) only after the commit has succeeded. When the
-write fails they ask org-node for neither, keep the provisional update, and
-return an error that reports the failure. `submit_commit_send` refuses before
-writing when the Organisation's record holds no proxy account.
-satisfies: REQ-nfr3n2
-
-Normal: `founding_writes_the_chain_then_commits`,
-`an_admission_is_written_then_committed_then_sent` (submit_flow).
-Abnormal: `a_failed_genesis_write_commits_nothing_and_reports_the_failure`,
-`a_failed_update_write_neither_commits_nor_sends`, and the proxy-account
-refusal in `an_admission_is_written_then_committed_then_sent` (submit_flow).
-
-**LLR-be3zv9**: each call `found_organisation` and `submit_commit_send` make
-to the chain writer is bounded by a 90-second timeout (`tokio::time::timeout`);
-a call that has not finished when it elapses is treated as a failed write, so
-org-node is asked neither to commit nor to send, the provisional update is
-kept, and the error reports that the submission timed out.
-satisfies: REQ-nfr3n2
-
-Normal: `founding_writes_the_chain_then_commits` (submit_flow), whose writer
-returns at once.
-Abnormal: `a_submission_that_never_finishes_times_out_and_nothing_is_committed`
-(submit_flow), with tokio's clock paused.
-
-The writer in on-chain-client has no timer of its own (its normal
-dependencies exclude tokio), so its wait for finality can wait without end;
-the bound is the app's, at the 90 seconds org-node's settle used before
-(plan T14, dispatcher addition of 2026-10-06).
+*Moved 2026-10-08 (change `worktree-org-io-create`, task T9, ruling A).* The
+two low-level requirements that stood here — the write-then-commit-then-send
+order of `found_organisation` and `submit_commit_send` with its refusals, and
+the 90-second bound on each chain write, with the note that the bound was the
+app's — moved, with their IDs, their five tests in `submit_flow.rs` and the
+code, to org-io's architecture ledger
+(`org-io/docs/architecture/2026-10-08-org-io.md`, under the
+submission item), where the bound is org-io's. org-io does not export them,
+so this unit names them in prose.
 
 ## Under SDD-jx363y — Revocation input decision
 

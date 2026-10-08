@@ -433,8 +433,7 @@ fn stopped_emits_exactly_one_event() {
 // names. It deliberately does not re-derive the partition from a predicate: a
 // test that recomputed the match would agree with any match.
 
-use org_members::OrgMembersError;
-use org_node::OrgNodeError;
+use org_io::node::{OrgMembersError, OrgNodeError};
 
 /// The `OrgNodeError` variants that ARE verdicts of the verification the
 /// receiver performs on an incoming update. Each one means "this update does
@@ -746,13 +745,13 @@ fn the_commit_workflow_refusals_are_classified_as_receiver_errors() {
     // secret and the recipient refusals are about the caller. A misfiled
     // verdict is the hazard (HAZ-9fmhm4), a misfiled receiver error merely
     // less specific, so each is a receiver error.
-    let org_id = org_node::OrgId::new([1; 20]);
+    let org_id = org_io::node::OrgId::new([1; 20]);
     for e in [
         OrgNodeError::OrgNotHeld { org_id },
         OrgNodeError::StaleChainState {
             org_id,
-            chain_epoch: org_node::Epoch::new(1),
-            record_epoch: org_node::Epoch::new(2),
+            chain_epoch: org_io::node::Epoch::new(1),
+            record_epoch: org_io::node::Epoch::new(2),
         },
         OrgNodeError::ChainStateConflict { org_id },
         OrgNodeError::RevocationProofRefused { org_id, cause: OrgMembersError::IdNotFound },
@@ -777,7 +776,7 @@ fn the_sender_refusals_are_classified_as_receiver_errors() {
     // Owner rulings of 2026-10-07: a message from a Device the record does
     // not list, or an acknowledgement not sent by its own Device, is refused
     // before anything is verified, so neither is a verdict on an update.
-    let org_id = org_node::OrgId::new([1; 20]);
+    let org_id = org_io::node::OrgId::new([1; 20]);
     for e in [OrgNodeError::SenderNotListed { org_id }, OrgNodeError::AcknowledgementNotFromItsDevice { org_id }] {
         assert_eq!(
             events::classify_receive_error(&e),
@@ -812,15 +811,15 @@ fn locally_reachable_variants_are_classified_as_receiver_errors() {
     for e in [
         OrgNodeError::OrgNotOnChain,
         OrgNodeError::Trie(OrgMembersError::IdNotFound),
-        OrgNodeError::AdmissionNotExpected { org_id: org_node::OrgId::new([1; 20]) },
-        OrgNodeError::AdmissionNotOurs { org_id: org_node::OrgId::new([1; 20]) },
+        OrgNodeError::AdmissionNotExpected { org_id: org_io::node::OrgId::new([1; 20]) },
+        OrgNodeError::AdmissionNotOurs { org_id: org_io::node::OrgId::new([1; 20]) },
         OrgNodeError::ProvisionalLimit { limit: 1 },
         OrgNodeError::NoProvisionalUpdate,
-        OrgNodeError::PersonaAlreadyBound { persona_id: org_node::PersonaId::new("p".into()) },
+        OrgNodeError::PersonaAlreadyBound { persona_id: org_io::node::PersonaId::new("p".into()) },
         OrgNodeError::MalformedMessage,
-        OrgNodeError::OrgKeyMismatch { org_id: org_node::OrgId::new([1; 20]) },
-        OrgNodeError::RevocationNotHeld { org_id: org_node::OrgId::new([1; 20]) },
-        OrgNodeError::RevocationNotForThisDevice { org_id: org_node::OrgId::new([1; 20]) },
+        OrgNodeError::OrgKeyMismatch { org_id: org_io::node::OrgId::new([1; 20]) },
+        OrgNodeError::RevocationNotHeld { org_id: org_io::node::OrgId::new([1; 20]) },
+        OrgNodeError::RevocationNotForThisDevice { org_id: org_io::node::OrgId::new([1; 20]) },
     ] {
         let outcome = events::classify_receive_error(&e);
         assert_eq!(

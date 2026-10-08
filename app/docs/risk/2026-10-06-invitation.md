@@ -36,6 +36,16 @@ invitee that the Invite's sender is a Member or a signatory of the
 Organisation's multisig, which nothing in this change can establish; the
 multisig signatory read is planned for a later change of the sequence.
 
+*Amended 2026-10-08 (change `worktree-org-io-create`, task T9).* The
+signatory read now exists, in org-io, and checks this node's own admin
+status only: the chain can confirm a signatory set but cannot list one, so
+the inviter's status cannot be checked without the inviter's signatory set,
+which an Invite does not carry (accepted recommendation, 2026-10-06). The
+control therefore stays information for safety, and the app does not call
+org-io's own-admin check in S2 (owner ruling of 2026-10-07). The residual
+and its acceptance below are unchanged. Classification: a clarification of
+the rationale, not a change of meaning.
+
 What this control breaks: nothing a user relies on; it adds one confirmation
 to joining.
 
@@ -75,24 +85,29 @@ declaration only lets a chain-valid admission for that Organisation be read.
 field): no hazard impact; it is the parse-at-the-system-edge rule at this
 unit's new edge, and refusing acts on nothing.
 
-**REQ-nfr3n2** (submit through on-chain-client, then ask org-node to commit and
-send): no new hazard. The multisig signatory key the app held for org-node it
-now hands to on-chain-client instead; its custody is unchanged and remains as
-HAZ-8ghmhn analyses. A submission that fails leaves org-node's record and
-every peer's untouched; one that succeeds and is then not sent is org-node's
-publish-before-persist hazard, which org-node's requirement that the sender
-commit after verifying against the chain narrows.
+*Moved 2026-10-08 (change `worktree-org-io-create`, task T9, ruling A).* The
+assessment of the submission requirement that stood here (submit through
+on-chain-client, then ask org-node to commit and send) moved with the
+requirement to org-io's risk ledger
+(`org-io/docs/risk/2026-10-08-org-io.md`), where it is
+re-assessed for the signatory key's custody, now org-io's. This file's
+`assesses:` line keeps its five other requirements. The app's residue, the
+decision when to submit and to which Device, is assessed in
+`app/docs/risk/2026-10-08-submission.md`.
 
-assesses: REQ-prjja8, REQ-65xqp8, REQ-tcutr6, REQ-ab2mfz, REQ-yazum3, REQ-nfr3n2
+assesses: REQ-prjja8, REQ-65xqp8, REQ-tcutr6, REQ-ab2mfz, REQ-yazum3
 
 ## Derived low-level requirements amended by the design (2026-10-06)
 
 The design step wrote eight low-level requirements for the requirements above
 (`app/docs/architecture/2026-10-06-invitation.md`);
-each satisfies one of them, and none is derived. LLR-be3zv9 bounds each chain
-write at 90 seconds: a write that is still pending when the bound elapses is
+each satisfies one of them, and none is derived. The 90-second bound on each chain
+write: a write that is still pending when the bound elapses is
 reported as failed and nothing is committed or sent, which is REQ-nfr3n2's
-failure case. A write that executes on the chain after the app gave up leaves
+failure case. *Note 2026-10-08 (task T9 of `worktree-org-io-create`):* that
+bound, its low-level requirement and the submission requirement moved to
+org-io's ledgers, and "the app" below is org-io since then; the rest of this
+paragraph stands. A write that executes on the chain after the app gave up leaves
 the chain ahead of the node. org-node's `commit_update` could reach it from
 the provisional update the failure kept, but no app path retries that commit
 today: the only caller is the next submission's `submit_commit_send`, which

@@ -9,13 +9,10 @@ publish = false
 
 [features]
 default = []
-# On-chain reads via on-chain-client; org-node writes nothing to the chain.
-# Pulls a large async stack; the Phase 2.1 core builds and tests without it.
-chain = ["dep:subxt", "dep:tokio", "dep:on-chain-client", "dep:async-trait", "dep:hex"]
 # Device-to-device transport over iroh QUIC (EndpointId = DevicePublicKey).
 transport = ["dep:iroh", "dep:tokio"]
-# Full node-app integration: chain + transport + encrypted persistence.
-app = ["chain", "transport", "dep:chacha20poly1305", "dep:argon2"]
+# Full node-app integration: transport + encrypted persistence.
+app = ["transport", "dep:chacha20poly1305", "dep:argon2"]
 # Test-only seams (e.g. binding an iroh endpoint against an in-process relay).
 # Never enabled in production builds; gated constructors live behind this.
 # Pulls iroh's `test-utils` so `run_relay_server()` and the self-signed-relay
@@ -41,12 +38,7 @@ postcard = { version = "1", features = ["alloc", "use-std"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = { version = "2", default-features = false }
 rand_core = "0.6"
-# Features mirror on-chain-client's pins so the subxt types unify across crates.
-subxt = { version = "0.50", default-features = false, features = ["native", "jsonrpsee", "reconnecting-rpc-client"], optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
-on-chain-client = { path = "../on-chain-client", default-features = false, features = ["dev-rpc"], optional = true }
-async-trait = { version = "0.1", optional = true }
-hex = { version = "0.4", optional = true }
 iroh = { version = "0.98", optional = true }
 chacha20poly1305 = { version = "0.10", optional = true }
 argon2 = { version = "0.5", optional = true }
@@ -67,25 +59,19 @@ iroh = { version = "0.98", features = ["test-utils"] }
 # see the library's normal deps directly — re-declared here so fuzz_verify_against_chain
 # can name org_members::trie::OrgTrie, org_members::MemberLeaf, etc.
 org-members = { path = "../org-members", features = ["std", "serde"] }
-# Chopsticks test harness (tests/common, used by preflight): chopsticks spawn +
-# subxt client. These mirror on-chain-client's dev-dependencies for the same
-# helpers.
-jsonrpsee = { version = "0.26", default-features = false, features = ["ws-client", "http-client"] }
+# JSON for the golden encodings in tests/encoding_golden.rs.
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
-libc = "0.2"
-async-trait = "0.1"
-on-chain-client = { path = "../on-chain-client", default-features = false, features = ["dev-rpc"] }
-subxt = { version = "0.50", default-features = false, features = ["native", "jsonrpsee"] }
 
 [lints]
 workspace = true
 
-# The preflight binary is #![cfg(feature = "app")]; without this gate cargo
-# would try to build it under feature sets lacking `app` (e.g. `--features
-# transport`) and fail with E0601 (empty file, no `main`).
+# The preflight binary (the transport check only, until S4) is
+# #![cfg(feature = "transport")]; without this gate cargo would try to build
+# it under feature sets lacking `transport` and fail with E0601 (empty file,
+# no `main`).
 [[bin]]
 name = "preflight"
-required-features = ["app"]
+required-features = ["transport"]
 
 [[test]]
 name = "fuzz_envelope_decode"
@@ -120,12 +106,12 @@ required-features = ["transport"]
 [[test]]
 name = "service_stories"
 path = "tests/service_stories.rs"
-required-features = ["app"]
+required-features = ["app", "test-support"]
 
 [[test]]
 name = "preflight"
 path = "tests/preflight.rs"
-required-features = ["app"]
+required-features = ["transport"]
 
 [[test]]
 name = "transport_networked"
@@ -175,12 +161,6 @@ name = "node_value_types"
 path = "tests/node_value_types.rs"
 required-features = ["test-support"]
 
-# The chain read parses the Organisation state (LLR-mmdu38).
-[[test]]
-name = "chain_read_state"
-path = "tests/chain_read_state.rs"
-required-features = ["chain"]
-
 # The Persona's records: parsed details and field-named refusal (SDD-af5vnt,
 # SDD-vee2fq).
 [[test]]
@@ -217,7 +197,7 @@ required-features = ["test-support"]
 [[test]]
 name = "service_lifecycle"
 path = "tests/service_lifecycle.rs"
-required-features = ["app"]
+required-features = ["app", "test-support"]
 
 # The Organisation public and private key: a fresh X25519 secret per created Organisation
 # (REQ-ech45n) and the validity of the key read from the chain (REQ-8jb4ny).

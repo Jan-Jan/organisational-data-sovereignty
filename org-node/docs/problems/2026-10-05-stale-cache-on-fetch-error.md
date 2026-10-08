@@ -6,7 +6,16 @@ RPC error), leaving the last good state cached, so `get_org_state` keeps
 serving a root and epoch the chain may already have superseded.
 affects: LLR-mmdu38
 opened: 2026-10-05
-status: open
+status: resolved
+resolution: root cause — `OnChainReader::refresh` returned early on a failed
+fetch without clearing its cached state. Fix — deleted with `OnChainReader`
+and `OrgStateCache` (`org-node/src/chain_read.rs` removed) by task T6 of
+change `worktree-org-io-create` (ruling B: org-node reads no chain and caches
+no chain state; org-io reads the state afresh for each decision). LLR-mmdu38's
+cache clause is retired with the cache. Verified by the absence test of
+LLR-mn5c2q (`org-node/tests/absences.rs`,
+`org_node_names_no_chain_library_and_reads_no_chain`, which refuses
+`OnChainReader` and `OrgStateCache` anywhere in org-node's source).
 
 Found 2026-10-05 by the fix for independent-review round 3 of the org-node
 type-safety change. That change made a state refused at parse clear the cache
@@ -23,3 +32,7 @@ staleness that the type-safety change does not make.
 `worktree-person-shared-types`.** LLR-mmdu38 is amended in place there
 (docs/plans/2026-10-05-switch-trim.md) and keeps its cache clause unchanged,
 so this report stands against it.
+
+**2026-10-08, change `worktree-org-io-create`, task T6.** Resolved by
+deletion: `OnChainReader` and `OrgStateCache` are gone with
+`chain_read.rs`; the absence is LLR-mn5c2q's test.

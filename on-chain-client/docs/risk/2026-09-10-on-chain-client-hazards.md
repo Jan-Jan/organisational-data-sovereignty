@@ -464,10 +464,16 @@ paths, which is the same call org-node's half made and org-members' before it.
 This unit is a **provider**. org-node and app depend on it
 (declared in each consumer's own config — `org-node/.guardrails/config.yaml` and
 `app/.guardrails/config.yaml`, not in `.guardrails/units.yaml`, whose schema
-cannot carry an edge); it depends on nothing. One requirement of org-node's
+cannot carry an edge); it depends on nothing. One requirement of org-io's
 is addressed to this unit as an expectation — REQ-ysyu9g, that a state read with
 no block named returns the state at the latest Finalised block — and it has a
 section of its own below, because this change deliberately does not meet it.
+*(Amended 2026-10-08: this named org-node as the holder. The expectation
+moved to org-io with the chain read (change
+`worktree-org-io-create`, ruling A; ID, `opened:` date and due date
+unchanged), and org-io is now this unit's consumer for the chain read and
+write: org-node's edge to this unit is removed in that change (ruling B), and
+the app's is replaced by org-io in the same change.)*
 Everything else in a consumer's ledger is cited here **by file path and never by
 identifier**, which is not a stylistic choice: `check-trace.sh` reports
 `UNDECLARED-DEPENDENCY` for a provider that names a consumer's item, and the
@@ -1575,7 +1581,12 @@ what belongs on this side is the missing signal. Not minted (not-minted control
 
 ## The obligation this change does not meet
 
-org-node holds one requirement addressed to this unit: **REQ-ysyu9g**, an
+*(Amended 2026-10-08: the next sentence named org-node as the holder. The
+expectation moved to org-io with the chain read, change
+`worktree-org-io-create`, ruling A; ID, `opened:` date and due date
+unchanged.)*
+
+org-io holds one requirement addressed to this unit: **REQ-ysyu9g**, an
 `expects:` item requiring that a state read taken without naming a block return
 the Organisation state recorded at the latest Finalised block, so that the
 Membership root a Change set is verified against is never one a reorganisation

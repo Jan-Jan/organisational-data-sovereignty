@@ -217,7 +217,10 @@ satisfies: derived
 ## What these requirements do not say
 
 They do not state which block a state read taken without naming one is at. That
-is org-node's expectation REQ-ysyu9g, addressed to this unit and due 2026-12-05,
+is org-io's expectation REQ-ysyu9g, addressed to this unit and due 2026-12-05,
+*(amended 2026-10-08: this named org-node as the holder; the expectation moved to org-io
+with the chain read, change `worktree-org-io-create`, ruling A; ID, `opened:`
+date and due date unchanged)*
 and this change deliberately does not answer it: the risk file's section "The
 obligation this change does not meet" records the confirmed fact — subxt 0.50.1
 documents `at_current_block` as the current finalised block at

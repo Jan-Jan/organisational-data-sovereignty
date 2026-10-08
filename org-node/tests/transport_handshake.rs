@@ -2,10 +2,10 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 //! Two real iroh endpoints on loopback. A sends an admit envelope to B; B
 //! authenticates A's device key from the connection and verifies against a
-//! MockChain. Offline (no relay/internet — loopback direct connect only).
+//! chain state passed as a value. Offline (no relay/internet — loopback direct connect only).
 use std::time::Duration;
 
-use org_node::chain::{MockChain, OrgState};
+use org_node::chain::OrgState;
 use org_node::{DeviceSeed, MemberSeed};
 use org_node::ids::OrgId;
 use org_node::keys::{SigningKeypair, X25519Keypair};
@@ -115,10 +115,9 @@ async fn delivers_and_verifies_admit_over_iroh() {
     // 2. The WireMessage arrived intact.
     assert_eq!(got, msg, "received WireMessage must equal sent WireMessage");
 
-    // 3. B verifies the received envelope against a MockChain seeded with
-    //    the new root at epoch 2 (simulating an independent on-chain read).
-    let mut chain = MockChain::new();
-    chain.set(org, OrgState { root_hash: new_root, org_pub_key: OrgPrivateKey::from([9u8; 32]).x25519_keypair().org_public_key().unwrap(), epoch: Epoch::new(2) });
+    // 3. B verifies the received envelope against the chain state holding
+    //    the new root at epoch 2 (an independent on-chain read, as a value).
+    let chain_state = Some(OrgState { root_hash: new_root, org_pub_key: OrgPrivateKey::from([9u8; 32]).x25519_keypair().org_public_key().unwrap(), epoch: Epoch::new(2) });
     let ctx = VerifyContext {
         expected_org_id: org,
         seq_guard: SeqGuard::from_last_seen(SequenceNumber::new(1)),
@@ -126,7 +125,7 @@ async fn delivers_and_verifies_admit_over_iroh() {
     };
     // The received message equals `msg` (2.), so its Envelope is `env`; only
     // Organisation information holds one (LLR-js9dsu).
-    let out = verify_envelope_against_chain(&genesis, &env, &ctx, &chain)
+    let out = verify_envelope_against_chain(&genesis, &env, &ctx, chain_state)
         .expect("verify_envelope_against_chain must succeed");
 
     assert_eq!(

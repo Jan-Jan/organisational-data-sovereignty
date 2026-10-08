@@ -106,6 +106,15 @@ Owner rulings (2026-10-05):
   an Organisation's multisig. That is advisory, for the app to decide what to
   offer, and is never an input to verification.
 
+*Superseded in part 2026-10-08 (ruling B, change `worktree-org-io-create`;
+`docs/plans/2026-10-06-org-io-roadmap.md` and
+`docs/adr/2026-10-06-org-io-unit.md`).* The last two bullets no longer
+hold. org-node reads no chain and names no on-chain-client: org-io owns the
+`OrgService`, the chain connection, the reader, the writer and the user's
+signatory key, reads each Organisation's state and passes it to org-node as
+a value. The signatory read is org-io's own-admin check, not org-node's.
+Verification stays in org-node.
+
 ## Requirements
 
 **REQ-xs4ab8**: The software shall build, for creating an Organisation,
@@ -257,6 +266,12 @@ Sequencing (owner rulings 2026-10-05): four changes, one at a time.
    check, keep-or-clear, admission sends the key. Resolves PR-szkat6 and
    PR-xwek5e.
 4. Whatever the first three leave, including the advisory signatory read.
+
+*Superseded 2026-10-08 (change `worktree-org-io-create`).* The sequence was
+replaced by the org-io roadmap (`docs/plans/2026-10-06-org-io-roadmap.md`,
+ADR `docs/adr/2026-10-06-org-io-unit.md`): change 2's transport moves to
+org-io in its stage S4, not to the app, and the signatory read of item 4 is
+org-io's own-admin check (stage S2).
 
 The rulings above on the key pair are recorded here so change 3 starts from
 them; this change implements only those that belong to change 1.

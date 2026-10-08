@@ -6,7 +6,7 @@
 //! without a Tauri application, an OrgService, a chain or a peer — none of
 //! which any gate in this repository can stand up.
 
-use org_node::OrgNodeError;
+use org_io::node::OrgNodeError;
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;

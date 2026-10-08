@@ -44,7 +44,7 @@ fn snapshot_of(leaf: &MemberLeaf) -> MemberSnapshot {
 
 /// The record of the calculated `trie` at `epoch`.
 fn record_of(trie: &Trie, epoch: u64) -> OrgRecord {
-    OrgRecord {
+    OrgRecord::from(org_node::store::OrgRecordParts {
         org_id: org(),
         root_hash: trie.root_hash().unwrap(),
         org_pub_key: org_node::test_fixtures::org_public_key(),
@@ -54,7 +54,7 @@ fn record_of(trie: &Trie, epoch: u64) -> OrgRecord {
         proxy_account: None,
         org_private_key: OrgPrivateKey::from([9; 32]),
         kept_change_set: None,
-    }
+    })
 }
 
 /// A calculated trie of the admin and bob, bob holding `bob_devices`.
@@ -189,7 +189,7 @@ fn bound_device() -> DevicePublicKey {
 /// A store with one Persona bound to the Organisation as bob (M) with
 /// Device D, and the record at epoch 4 listing M with D.
 fn bound_store() -> StoreData {
-    let persona = PersonaRecord {
+    let persona = PersonaRecord::from(org_node::store::PersonaRecordParts {
         persona_id: PersonaId::new("bob".into()),
         org_id: Some(org()),
         handle: Handle::parse("bob").unwrap(),
@@ -199,7 +199,7 @@ fn bound_store() -> StoreData {
         device_seed: bound_device_seed(),
         member_id: Some(bob_id()),
         status: PersonaStatus::Active,
-    };
+    });
     StoreData {
         personas: vec![persona],
         orgs: vec![record_of(&trie_with_bob(vec![bound_device()]), 4)],
@@ -357,7 +357,7 @@ fn a_chain_state_at_the_records_epoch_with_another_root_is_a_conflict() {
 /// A Persona named `id`, bound to `org_id` as `member_id`, with the Device
 /// of `device_seed`.
 fn persona(id: &str, org_id: Option<OrgId>, member_id: Option<MemberId>, device_seed: DeviceSeed) -> PersonaRecord {
-    PersonaRecord {
+    PersonaRecord::from(org_node::store::PersonaRecordParts {
         persona_id: PersonaId::new(id.into()),
         org_id,
         handle: Handle::parse(id).unwrap(),
@@ -367,7 +367,7 @@ fn persona(id: &str, org_id: Option<OrgId>, member_id: Option<MemberId>, device_
         device_seed,
         member_id,
         status: PersonaStatus::Active,
-    }
+    })
 }
 
 /// verifies: LLR-r7zm39

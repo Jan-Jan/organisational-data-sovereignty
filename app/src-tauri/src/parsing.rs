@@ -1,6 +1,6 @@
 //! Input parsing at the command boundary.
 
-use org_node::OrgId;
+use org_io::node::OrgId;
 
 /// REQ-sjkp8z. Accepts 40 hex characters, with or without a `0x` prefix.
 ///

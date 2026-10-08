@@ -1,6 +1,8 @@
-#![cfg(feature = "app")]
+#![cfg(all(feature = "app", feature = "test-support"))]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-//! The chain-operations seam (SDD-ueh4tm), persona and Organisation genesis
+//! The chain-operations boundary (SDD-ueh4tm: since 2026-10-08 the state
+//! value each chain-judging operation takes, and the test-side
+//! `ChainSlots`), persona and Organisation genesis
 //! (SDD-89es4z), and the endpoint lifecycle (SDD-b8tuv3).
 //!
 //! Relocated from the `#[cfg(test)]` module in `org-node/src/service.rs` so
@@ -11,7 +13,8 @@ use org_node::chain::OrgState;
 use org_node::ids::OrgId;
 use org_node::store::{PersonaStatus, PersonaStore};
 use org_node::transport::TransportMode;
-use org_node::{MockChainOps, OrgService};
+use org_node::test_fixtures::ChainSlots;
+use org_node::OrgService;
 use org_node::{Epoch, OrgPublicKey, RootHash};
 use rand::rngs::OsRng;
 
@@ -42,7 +45,7 @@ fn store_at(tag: &str) -> (PersonaStore, std::path::PathBuf) {
 #[test]
 fn a_new_persona_is_proposed_with_an_id_derived_from_its_member_key() {
     let (store, path) = store_at("persona");
-    let mut svc = OrgService::new(store, Box::new(MockChainOps::new()));
+    let mut svc = OrgService::new(store);
     let pid = svc.create_persona(&mut OsRng, h("alice"), nm("Alice"), sn("Smith")).unwrap();
 
     assert!(!pid.as_str().is_empty());
@@ -56,7 +59,7 @@ fn a_new_persona_is_proposed_with_an_id_derived_from_its_member_key() {
     // from the stored seed rather than drawn independently. On this branch
     // the member key is the X25519 public key of the member seed (merged
     // 2026-10-05; master derived it from an ed25519 verifying key).
-    let member_kp = rec.member_seed.x25519_keypair();
+    let member_kp = rec.member_seed_for_test().x25519_keypair();
     let expected: String = member_kp
         .public_bytes()
         .iter()
@@ -66,11 +69,11 @@ fn a_new_persona_is_proposed_with_an_id_derived_from_its_member_key() {
     assert_eq!(pid.as_str(), expected);
 
     // The member and device keypairs are independent of each other.
-    assert_ne!(rec.member_seed.expose_secret(), rec.device_seed.expose_secret());
+    assert_ne!(rec.member_seed_for_test().expose_secret(), rec.device_seed_for_test().expose_secret());
 
     // It survives a reload from disk.
     let reopened = PersonaStore::open(path, "pw").unwrap();
-    let svc2 = OrgService::new(reopened, Box::new(MockChainOps::new()));
+    let svc2 = OrgService::new(reopened);
     assert_eq!(svc2.list_personas().len(), 1);
     assert_eq!(svc2.list_personas()[0].handle.as_str(), "alice");
 }
@@ -84,9 +87,9 @@ fn a_new_persona_is_proposed_with_an_id_derived_from_its_member_key() {
 #[test]
 fn creating_an_organisation_writes_only_a_genesis_update() {
     let (store, path) = store_at("org");
-    let chain = MockChainOps::new();
+    let chain = ChainSlots::new();
     let chain_view = chain.clone();
-    let mut svc = OrgService::new(store, Box::new(chain));
+    let mut svc = OrgService::new(store);
 
     let pid = svc.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
     let update = svc.create_organisation(&mut OsRng, &pid).unwrap();
@@ -109,7 +112,7 @@ fn creating_an_organisation_writes_only_a_genesis_update() {
 // verifies: LLR-hg3xzf
 #[test]
 fn clones_of_the_mock_chain_share_one_state() {
-    let chain = MockChainOps::new();
+    let chain = ChainSlots::new();
     let view = chain.clone();
     let org = OrgId::new([4u8; 20]);
     assert!(view.get(&org).is_none());
@@ -131,7 +134,7 @@ fn clones_of_the_mock_chain_share_one_state() {
 // verifies: LLR-ryzr8m
 #[test]
 fn the_mock_chain_refuses_an_update_at_the_wrong_epoch() {
-    let chain = MockChainOps::new();
+    let chain = ChainSlots::new();
     let org = OrgId::new([6u8; 20]);
     let at_three = OrgState { root_hash: RootHash::new([1u8; 32]), org_pub_key: org_key(), epoch: Epoch::new(3) };
     chain.set(org, at_three);
@@ -147,25 +150,28 @@ fn the_mock_chain_refuses_an_update_at_the_wrong_epoch() {
     assert_eq!(chain.get(&org).unwrap().epoch, Epoch::new(4), "the right epoch is accepted and advances");
 }
 
-// The seam presents reading and nothing else: a substitute that implements
-// only `read_state` is a complete `ChainOps` and drives the service.
-// verifies: LLR-65py3d
-#[tokio::test]
-async fn the_seam_is_a_trait_object_a_substitute_can_stand_in_for() {
-    struct ReadOnly(MockChainOps);
-    #[async_trait::async_trait]
-    impl org_node::ChainOps for ReadOnly {
-        async fn read_state(&self, org: OrgId) -> Result<Option<OrgState>, org_node::OrgNodeError> {
-            self.0.read_state(org).await
-        }
-    }
+// *Rewritten 2026-10-08 (ruling B, change worktree-org-io-create).* Was
+// `the_seam_is_a_trait_object_a_substitute_can_stand_in_for` (LLR-65py3d,
+// whose annotation moved to `absences.rs`'s
+// `org_node_names_no_chain_library_and_reads_no_chain`): there is no seam.
+// Two services over one `ChainSlots`: one commits its genesis against the
+// state it is given, and the other's view of the same slots holds that state.
+// verifies: LLR-hg3xzf
+#[test]
+fn two_services_over_one_set_of_chain_slots_see_the_same_state() {
+    let chain = ChainSlots::new();
+    let other_view = chain.clone();
     let (store, _) = store_at("seam");
-    let chain = MockChainOps::new();
-    let mut svc = OrgService::new(store, Box::new(ReadOnly(chain.clone())));
+    let (other_store, _) = store_at("seam-other");
+    let mut svc = OrgService::new(store);
+    let other = OrgService::new(other_store);
     let pid = svc.create_persona(&mut OsRng, h("s"), nm("S"), sn("T")).unwrap();
     let update = svc.create_organisation(&mut OsRng, &pid).unwrap();
     let org = chain.apply_genesis(update.resulting_root, update.org_pub_key);
-    svc.commit_genesis(&mut OsRng, &pid, org, org_node::ChainAccount::new([1; 32])).await.unwrap();
+    let committed = svc.commit_genesis(&mut OsRng, &pid, org, org_node::ChainAccount::new([1; 32]), chain.get(&org)).unwrap();
+    assert!(other.list_orgs().is_empty(), "the other service holds no record");
+    let seen = other_view.get(&org).expect("the other view sees the slot");
+    assert_eq!((seen.root_hash, seen.epoch), (committed.root, committed.epoch));
 }
 
 // Normal: the stand-in for the genesis write makes a slot at epoch one and
@@ -174,7 +180,7 @@ async fn the_seam_is_a_trait_object_a_substitute_can_stand_in_for() {
 // verifies: LLR-ryzr8m
 #[test]
 fn the_mock_genesis_makes_a_slot_at_epoch_one() {
-    let chain = MockChainOps::new();
+    let chain = ChainSlots::new();
     let root = RootHash::new([3u8; 32]);
     let first = chain.apply_genesis(root, org_key());
     assert_eq!(chain.get(&first).unwrap(), OrgState { root_hash: root, org_pub_key: org_key(), epoch: Epoch::new(1) });
@@ -193,11 +199,11 @@ fn the_mock_genesis_makes_a_slot_at_epoch_one() {
 #[tokio::test]
 async fn the_endpoint_is_bound_once_and_the_same_one_is_returned_after() {
     let (store, _) = store_at("endpoint");
-    let mut svc = OrgService::new(store, Box::new(MockChainOps::new()));
+    let mut svc = OrgService::new(store);
     svc.set_transport_mode(TransportMode::Loopback);
     let pid = svc.create_persona(&mut OsRng, h("ep"), nm("Ep"), sn("User")).unwrap();
 
-    let device_seed = svc.list_personas()[0].device_seed.clone();
+    let device_seed = svc.list_personas()[0].device_seed_for_test().clone();
     let expected = device_seed.signing_keypair().device_key().unwrap();
 
     let first_ep = svc.ensure_endpoint(&pid).await.unwrap();
@@ -227,15 +233,15 @@ async fn the_endpoint_is_bound_once_and_the_same_one_is_returned_after() {
 #[tokio::test]
 async fn the_endpoint_binds_the_named_personas_device_not_the_first_personas() {
     let (store, _) = store_at("endpoint-named");
-    let mut svc = OrgService::new(store, Box::new(MockChainOps::new()));
+    let mut svc = OrgService::new(store);
     svc.set_transport_mode(TransportMode::Loopback);
 
     let first_pid = svc.create_persona(&mut OsRng, h("one"), nm("One"), sn("User")).unwrap();
     let second_pid = svc.create_persona(&mut OsRng, h("two"), nm("Two"), sn("User")).unwrap();
     assert_eq!(svc.list_personas().len(), 2);
 
-    let first_seed = svc.list_personas()[0].device_seed.clone();
-    let second_seed = svc.list_personas()[1].device_seed.clone();
+    let first_seed = svc.list_personas()[0].device_seed_for_test().clone();
+    let second_seed = svc.list_personas()[1].device_seed_for_test().clone();
     assert_ne!(first_seed, second_seed, "two personas must hold distinct device seeds");
     let first_key = first_seed.signing_keypair().device_key().unwrap();
     let second_key = second_seed.signing_keypair().device_key().unwrap();
@@ -267,7 +273,7 @@ async fn the_endpoint_binds_the_named_personas_device_not_the_first_personas() {
 #[tokio::test]
 async fn a_service_in_loopback_mode_binds_loopback_sockets_only() {
     let (store, _) = store_at("mode");
-    let mut svc = OrgService::new(store, Box::new(MockChainOps::new()));
+    let mut svc = OrgService::new(store);
     svc.set_transport_mode(TransportMode::Loopback);
     let pid = svc.create_persona(&mut OsRng, h("m"), nm("M"), sn("User")).unwrap();
 

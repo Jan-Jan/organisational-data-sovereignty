@@ -13,12 +13,6 @@ pub mod verify;
 #[cfg(feature = "transport")]
 pub mod transport;
 
-#[cfg(feature = "chain")]
-pub mod chain_read;
-
-#[cfg(feature = "chain")]
-pub use chain_read::OnChainReader;
-
 #[cfg(feature = "app")]
 pub mod store;
 // Under `transport`: the Wire message carries a notice or an acknowledgement.
@@ -26,18 +20,17 @@ pub mod store;
 pub mod revocation;
 #[cfg(feature = "app")]
 pub mod service;
-#[cfg(feature = "app")]
+// The transport check only, until S4 moves the transport into org-io.
+#[cfg(feature = "transport")]
 pub mod preflight;
 #[cfg(feature = "app")]
 pub mod reconcile;
 
 #[cfg(feature = "app")]
 pub use service::{
-    ChainOps, CommitOutcome, Joiner, MockChainOps, OrgService, OutgoingUpdate, ProvisionalTarget, ReceiveOutcome,
+    CommitOutcome, Joiner, OrgService, OutgoingUpdate, PendingReceive, Prepared, ProvisionalTarget, ReceiveOutcome,
     SelfDeleteOutcome,
 };
-#[cfg(feature = "app")]
-pub use service::SubxtChainOps;
 
 // Deterministic fixtures for this crate's unit tests and, under the
 // `test-support` feature (never enabled in production builds), for the
@@ -45,7 +38,7 @@ pub use service::SubxtChainOps;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_fixtures;
 
-pub use chain::{ChainReader, OrgState};
+pub use chain::OrgState;
 pub use envelope::Envelope;
 pub use error::OrgNodeError;
 pub use ids::OrgId;
@@ -58,4 +51,4 @@ pub use verify::{verify_envelope_against_chain, VerifyContext, VerifiedUpdate};
 
 // org-members types that appear in org-node's public interface and that the
 // app names, re-exported so the app depends on org-node alone for them.
-pub use org_members::{DevicePublicKey, Handle, MemberId, Name, PersonPublicKey, RootHash, Surname};
+pub use org_members::{DevicePublicKey, Handle, MemberId, Name, OrgMembersError, PersonPublicKey, RootHash, Surname};

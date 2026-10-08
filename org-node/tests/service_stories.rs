@@ -1,17 +1,18 @@
-//! Integration test: the five user stories via OrgService against MockChainOps
-//! + loopback iroh endpoints.  Offline — no live chain, no relay.
+//! Integration test: the five user stories via OrgService against chain
+//! states from `ChainSlots` (passed as values, since 2026-10-08) + loopback
+//! iroh endpoints.  Offline — no live chain, no relay.
 //!
 //! Stories exercised:
-//!   1. A creates a persona and an organisation → epoch 1 in MockChain.
+//!   1. A creates a persona and an organisation → epoch 1 in the slots.
 //!   2. B creates a persona and declares it expects the admission; A reads
 //!      the joiner it admits B as (B's details and two public keys).
-//!   3. A admits B (trie add → epoch 2 in MockChain; envelope pushed to B over iroh).
+//!   3. A admits B (trie add → epoch 2 in the slots; envelope pushed to B over iroh).
 //!   4. B receives and verifies the envelope → B's persona Active, OrgRecord stored.
 //!   5. A revokes B (trie remove → epoch 3); B self-deletes its OrgRecord.
 //!
-//! The gate: `cargo test -p org-node --features app --test service_stories`
+//! The gate: `cargo test -p org-node --features app,test-support --test service_stories`
 
-#![cfg(feature = "app")]
+#![cfg(all(feature = "app", feature = "test-support"))]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod support;
@@ -25,7 +26,9 @@ use org_node::transport::wire::WireMessage;
 
 use std::time::Duration;
 
-use org_node::service::{MockChainOps, OrgService, SelfDeleteOutcome};
+use org_node::service::SelfDeleteOutcome;
+use org_node::test_fixtures::ChainSlots;
+use support::Node;
 use org_node::store::PersonaStatus;
 use org_node::transport::endpoint::OrgEndpoint;
 use org_node::{DeviceSeed, Epoch};
@@ -52,7 +55,7 @@ async fn five_stories_full_e2e() {
     use rand::rngs::OsRng;
 
     // ---- Shared chain ----
-    let chain = MockChainOps::new();
+    let chain = ChainSlots::new();
     let chain_a = chain.clone();
     let chain_b_admit = chain.clone();   // for story 3/4
     let chain_b_revoke = chain.clone();  // for story 5
@@ -67,8 +70,8 @@ async fn five_stories_full_e2e() {
     // ---- Stores (cleared first: a reused pid would open a store an earlier
     // run left, review round 6) ----
     // svc_a starts without an endpoint; we bind it below once we know A's device seed.
-    let mut svc_a = OrgService::new(open_store("e2e", "a", "pw_a"), Box::new(chain_a));
-    let mut svc_b = OrgService::new(open_store("e2e", "b", "pw_b"), Box::new(chain_b_admit));
+    let mut svc_a = Node::new(open_store("e2e", "a", "pw_a"), chain_a);
+    let mut svc_b = Node::new(open_store("e2e", "b", "pw_b"), chain_b_admit);
 
     // ---- Story 1: A creates persona + org ----
     let pid_a = svc_a.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
@@ -101,7 +104,7 @@ async fn five_stories_full_e2e() {
 
     // Rebuild svc_b with ep_b_admit so B can receive A's push.
     let store_b2 = reopen_store("e2e", "b", "pw_b");
-    let mut svc_b2 = OrgService::new(store_b2, Box::new(chain_b_revoke.clone()))
+    let mut svc_b2 = Node::new(store_b2, chain_b_revoke.clone())
         .with_endpoint(ep_b_admit);
 
     // ---- Story 3+4: B spawns recv, A admits ----
@@ -123,7 +126,7 @@ async fn five_stories_full_e2e() {
         .await
         .expect("admit_member failed");
 
-    // MockChain: epoch 2.
+    // The chain slots: epoch 2.
     assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(2), "admit must bump to epoch 2");
 
     // Collect B's result + svc_b (moved out of the task).
@@ -146,7 +149,7 @@ async fn five_stories_full_e2e() {
     // B must have the OrgRecord.
     assert_eq!(svc_b3.list_orgs().len(), 1, "B must have exactly 1 OrgRecord");
     assert_eq!(svc_b3.list_orgs()[0].epoch, Epoch::new(2));
-    assert_eq!(svc_b3.list_orgs()[0].org_private_key, svc_a.list_orgs()[0].org_private_key);
+    assert_eq!(svc_b3.list_orgs()[0].org_private_key_for_test(), svc_a.list_orgs()[0].org_private_key_for_test());
     assert!(svc_b3.expected_admissions().is_empty(), "the expectation is cleared on commit");
 
     // ---- Story 5: A revokes B; B self-deletes ----
@@ -181,7 +184,7 @@ async fn five_stories_full_e2e() {
         .await
         .expect("revoke_member failed");
 
-    // MockChain: epoch 3.
+    // The chain slots: epoch 3.
     assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(3), "revoke must bump to epoch 3");
 
     // Collect B's self-delete result.
@@ -228,9 +231,9 @@ async fn revocation_of_another_member_is_committed_not_self_deleted() {
     use rand::rngs::OsRng;
 
     // ---- Shared chain and two services ----
-    let chain = MockChainOps::new();
-    let mut svc_a = OrgService::new(open_store("revoke-other", "a", "pw_a"), Box::new(chain.clone()));
-    let mut svc_b = OrgService::new(open_store("revoke-other", "b", "pw_b"), Box::new(chain.clone()));
+    let chain = ChainSlots::new();
+    let mut svc_a = Node::new(open_store("revoke-other", "a", "pw_a"), chain.clone());
+    let mut svc_b = Node::new(open_store("revoke-other", "b", "pw_b"), chain.clone());
 
     // ---- Stories 1-2: A creates persona + org; B declares it expects the admission ----
     let pid_a = svc_a.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
@@ -379,22 +382,22 @@ async fn revocation_from_an_unknown_device_leaves_the_record_in_place() {
     type Trie = OrgTrie<Blake3Hasher>;
 
     /// The member and device keypairs of a persona, from its persisted seeds.
-    fn keys_of(svc: &OrgService, persona_id: &PersonaId) -> (X25519Keypair, SigningKeypair) {
+    fn keys_of(svc: &Node, persona_id: &PersonaId) -> (X25519Keypair, SigningKeypair) {
         let p = svc
             .list_personas()
             .iter()
             .find(|p| &p.persona_id == persona_id)
             .expect("persona not found");
         (
-            p.member_seed.x25519_keypair(),
-            p.device_seed.signing_keypair(),
+            p.member_seed_for_test().x25519_keypair(),
+            p.device_seed_for_test().signing_keypair(),
         )
     }
 
     // ---- Two services over one shared mock chain ----
-    let chain = MockChainOps::new();
-    let mut svc_a = OrgService::new(open_store("unknown-sender", "a", "pw_a"), Box::new(chain.clone()));
-    let mut svc_b = OrgService::new(open_store("unknown-sender", "b", "pw_b"), Box::new(chain.clone()));
+    let chain = ChainSlots::new();
+    let mut svc_a = Node::new(open_store("unknown-sender", "a", "pw_a"), chain.clone());
+    let mut svc_b = Node::new(open_store("unknown-sender", "b", "pw_b"), chain.clone());
 
     // ---- A creates persona + org; B declares it expects the admission ----
     let pid_a = svc_a.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
@@ -486,7 +489,7 @@ async fn revocation_from_an_unknown_device_leaves_the_record_in_place() {
     let msg = WireMessage::Revocation(RevocationNotice { org_id, member_id: b_member_id, device: b_device, proof });
 
     // Nothing is deleted after either refusal.
-    let assert_nothing_deleted = |svc: &OrgService| {
+    let assert_nothing_deleted = |svc: &Node| {
         assert_eq!(svc.list_orgs().len(), 1, "B must still hold its OrgRecord after a rejected revocation");
         let rec = &svc.list_orgs()[0];
         assert_eq!(rec.org_id, org_id);

@@ -239,9 +239,28 @@ impl OrgEndpoint {
         )
     }
 
-    /// Access the raw iroh `Endpoint` (for tests / advanced callers).
+    /// The raw iroh `Endpoint`, test builds only: its `secret_key()` is the
+    /// device's ed25519 private key, which no production build hands out
+    /// (owner ruling 2026-10-06; closed 2026-10-08). Production callers get the three
+    /// things they read from it, below.
+    #[cfg(feature = "test-support")]
     pub fn inner(&self) -> &iroh::Endpoint {
         &self.inner
+    }
+
+    /// The endpoint's address as iroh currently knows it (`Endpoint::addr`).
+    pub fn addr(&self) -> EndpointAddr {
+        self.inner.addr()
+    }
+
+    /// The UDP sockets the endpoint is bound to (`Endpoint::bound_sockets`).
+    pub fn bound_sockets(&self) -> Vec<std::net::SocketAddr> {
+        self.inner.bound_sockets()
+    }
+
+    /// Wait until the endpoint is online (`Endpoint::online`).
+    pub async fn online(&self) {
+        self.inner.online().await
     }
 
     /// Dial `peer` by its full `EndpointAddr`, open a bidirectional stream, and

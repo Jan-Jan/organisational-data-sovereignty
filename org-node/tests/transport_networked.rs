@@ -13,7 +13,7 @@ use std::time::Duration;
 use iroh::address_lookup::MemoryLookup;
 use org_node::Envelope;
 use org_node::{DeviceSeed, Epoch, MemberSeed, OrgPrivateKey, SequenceNumber};
-use org_node::chain::{MockChain, OrgState};
+use org_node::chain::OrgState;
 use org_node::ids::OrgId;
 use org_node::keys::{SigningKeypair, X25519Keypair};
 use org_node::sequence::SeqGuard;
@@ -140,13 +140,13 @@ async fn delivers_and_verifies_admit_over_relay_by_id() {
     // 2. The WireMessage arrived intact over the relay.
     assert_eq!(got, msg, "received WireMessage must equal sent WireMessage");
 
-    // 3. B verifies the received envelope against a MockChain seeded with the
-    //    new root at epoch 2 (independent on-chain read).
-    let mut chain = MockChain::new();
-    chain.set(
-        org,
-        OrgState { root_hash: new_root, org_pub_key: OrgPrivateKey::from([9u8; 32]).x25519_keypair().org_public_key().unwrap(), epoch: Epoch::new(2) },
-    );
+    // 3. B verifies the received envelope against the chain state holding
+    //    the new root at epoch 2 (independent on-chain read, passed as a value).
+    let chain_state = Some(OrgState {
+        root_hash: new_root,
+        org_pub_key: OrgPrivateKey::from([9u8; 32]).x25519_keypair().org_public_key().unwrap(),
+        epoch: Epoch::new(2),
+    });
     let ctx = VerifyContext {
         expected_org_id: org,
         seq_guard: SeqGuard::from_last_seen(SequenceNumber::new(1)),
@@ -154,7 +154,7 @@ async fn delivers_and_verifies_admit_over_relay_by_id() {
     };
     // The received message equals `msg` (2.), so its Envelope is `env`; only
     // Organisation information holds one (LLR-js9dsu).
-    let out = verify_envelope_against_chain(&genesis, &env, &ctx, &chain)
+    let out = verify_envelope_against_chain(&genesis, &env, &ctx, chain_state)
         .expect("verify_envelope_against_chain must succeed");
     assert_eq!(out.trie.root_hash().unwrap(), new_root, "committed root mismatch");
     assert_eq!(out.epoch, Epoch::new(2), "committed epoch must be 2");

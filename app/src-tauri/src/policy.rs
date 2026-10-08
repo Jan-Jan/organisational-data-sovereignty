@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 
 /// Which of the two ways this installation reaches other nodes. Mirrors
-/// org_node::transport::TransportMode, but is this unit's own type because it
+/// org-node's `transport::TransportMode` (through org-io), but is this unit's own type because it
 /// is serialised across the IPC boundary and org-node's is not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -19,7 +19,7 @@ pub enum TransportModeName {
 }
 
 /// The chain endpoint the running configuration was actually built from.
-/// Present only when `build_chain_ops` succeeded (REQ-bvx4nh).
+/// Present only when `OrgIo::connect` succeeded with it (REQ-bvx4nh).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChainEndpoint {
     pub ws_url: String,

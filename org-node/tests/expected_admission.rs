@@ -9,7 +9,7 @@ mod support;
 
 use org_node::error::OrgNodeError;
 use org_node::ids::OrgId;
-use org_node::service::{MockChainOps, OrgService};
+use org_node::service::OrgService;
 use org_node::store::ExpectedAdmission;
 use org_node::test_fixtures::{admin_device, genesis_trie};
 use org_node::{Joiner, MemberSeed};
@@ -17,8 +17,8 @@ use rand::rngs::OsRng;
 use support::*;
 
 /// A second joining node that expects nothing yet, reading through `counting`.
-fn second_joiner(tag: &str, counting: &CountingChain) -> (OrgService, org_node::keys::SigningKeypair, Joiner) {
-    let mut svc = OrgService::new(open_store(tag, "b2", "pw_b2"), Box::new(counting.clone()));
+fn second_joiner(tag: &str, counting: &CountingChain) -> (Node, org_node::keys::SigningKeypair, Joiner) {
+    let mut svc = Node::new(open_store(tag, "b2", "pw_b2"), counting.clone());
     let pid = svc.create_persona(&mut OsRng, h("bea"), nm("Bea"), sn("Second")).unwrap();
     let joiner = joiner_of(&svc, &pid);
     let kp = device_kp(&svc, &pid);
@@ -122,7 +122,7 @@ async fn a_first_admission_that_lists_none_of_our_personas_is_refused() {
 // verifies: REQ-8amu2a, LLR-9zfnmb, LLR-95753m
 #[test]
 fn expect_admission_records_an_organisation_once_and_reaches_the_disk() {
-    let mut svc = OrgService::new(open_store("once", "b", "pw_b"), Box::new(MockChainOps::new()));
+    let mut svc = OrgService::new(open_store("once", "b", "pw_b"));
     let (org, other) = (OrgId::new([0x42; 20]), OrgId::new([0x43; 20]));
     svc.expect_admission(&mut OsRng, org).unwrap();
     svc.expect_admission(&mut OsRng, org).unwrap();

@@ -2,6 +2,10 @@
 
 Low-level requirement for change `worktree-org-node-org-key-pair`, written
 2026-10-06. It refines REQ-nfr3n2 (`app/docs/requirements/2026-10-06-invitation.md`)
+*(restated 2026-10-08, change `worktree-org-io-create`, task T9: that
+requirement moved to org-io, which exports it; this file's item now refines
+the app's REQ-m8sgjk, `app/docs/requirements/2026-10-08-submission.md`,
+the decision of which Device receives the committed update)*
 for the owner ruling of that change that the kind of Wire message org-node
 sends depends on the recipient, not on the operation: a Device the committed
 Membership record lists receives Organisation information, which carries the
@@ -29,9 +33,20 @@ the record as it stood before the revocation, which the committed record no
 longer lists, so org-node sends that Device a revocation. Neither command
 sends the committed update to any other Device, whether of another Member
 or another Device of the same Member.
-satisfies: REQ-nfr3n2
+satisfies: REQ-m8sgjk
 
 *Amended 2026-10-07 (S3): `send_update` takes the `CommitOutcome`; a revoked Device is sent its notice, and a Device neither record lists nothing.*
+
+*Amended 2026-10-08 (change `worktree-org-io-create`, task T9).* `satisfies:`
+was REQ-nfr3n2, which moved to org-io: an app low-level requirement does not
+decompose another unit's requirement, so it is re-parented to the app's
+REQ-m8sgjk, the decision of which Device receives the committed update. The
+command now hands its one recipient to org-io's `OrgIo::submit_commit_send`,
+which asks org-node for that one `send_update` after the commit; the
+recipient each command chooses, and that there is exactly one, are
+unchanged. Classification under the hybrid rule: a clarification, not a
+change of meaning; its two tests stay in `app/src-tauri/tests/submit_flow.rs`
+with their annotations unchanged.
 
 This states the app's behaviour as it is, not as the ruling would have it
 broadly: the other Members' Devices, which the ruling says receive

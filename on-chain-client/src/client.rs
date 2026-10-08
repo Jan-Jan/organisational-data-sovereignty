@@ -210,6 +210,75 @@ impl OrgRegistryClient {
         Ok(Some(state))
     }
 
+    /// The account pallet-revive maps `admin` to (`Revive.OriginalAccount`)
+    /// at the latest finalised block (REQ-8p2veg): `Ok(None)` when the H160
+    /// is not mapped, `ClientError::Decode` when the stored value is not a
+    /// 32-byte account. The decoding is LLR-m3tjvp's.
+    ///
+    /// SDD-3b8zef's shell; exercised only against a chain.
+    #[cfg(feature = "write")]
+    pub async fn original_account(
+        &self,
+        admin: OrgAdmin,
+    ) -> Result<Option<crate::write::AccountId>, ClientError> {
+        let key = Value::from_bytes(admin.0.as_slice());
+        match self.fetch_storage_raw("Revive", "OriginalAccount", key).await? {
+            None => Ok(None),
+            Some(bytes) => crate::write::signatory_set::decode_original_account(&bytes)
+                .map(Some)
+                .map_err(signatory_set_decode_error),
+        }
+    }
+
+    /// `account`'s proxy delegates (`Proxy.Proxies`) at the latest finalised
+    /// block, in stored order (REQ-v8jczx): empty when the account has no
+    /// proxies, `ClientError::Decode` when the stored value does not decode
+    /// as the runtime's proxy definitions. The decoding is LLR-a9bb7b's.
+    ///
+    /// SDD-3b8zef's shell; exercised only against a chain.
+    #[cfg(feature = "write")]
+    pub async fn proxy_delegates(
+        &self,
+        account: crate::write::AccountId,
+    ) -> Result<Vec<crate::write::AccountId>, ClientError> {
+        let key = Value::from_bytes(account.0.as_slice());
+        match self.fetch_storage_raw("Proxy", "Proxies", key).await? {
+            None => Ok(Vec::new()),
+            Some(bytes) => crate::write::signatory_set::decode_proxy_delegates(&bytes)
+                .map_err(signatory_set_decode_error),
+        }
+    }
+
+    /// The raw value of a single-key storage map entry at the latest
+    /// finalised block — the block `get_org_state` reads with `at = None` —
+    /// or `None` when no value is stored. The key is fetched raw, not through
+    /// subxt's typed fetch, so an entry's metadata default never stands in
+    /// for an absent value.
+    #[cfg(feature = "write")]
+    async fn fetch_storage_raw(
+        &self,
+        pallet: &str,
+        entry: &str,
+        key: Value,
+    ) -> Result<Option<Vec<u8>>, ClientError> {
+        let at_block = self
+            .api
+            .at_current_block()
+            .await
+            .map_err(|e| ClientError::Subxt(format!("at_current_block: {e}")))?;
+        let storage = at_block.storage();
+        let address = subxt::dynamic::storage::<Vec<Value>, Value>(pallet, entry);
+        let key_bytes = storage
+            .entry(address)
+            .and_then(|storage_entry| storage_entry.fetch_key(alloc::vec![key]))
+            .map_err(|e| ClientError::Subxt(format!("{pallet}.{entry} key: {e}")))?;
+        match storage.fetch_raw(key_bytes).await {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(subxt::error::StorageError::NoValueFound) => Ok(None),
+            Err(e) => Err(ClientError::Subxt(format!("{pallet}.{entry}: {e}"))),
+        }
+    }
+
     async fn read_contract_slot(
         &self,
         slot: &[u8; 32],
@@ -683,6 +752,13 @@ async fn decode_contract_events(
         out.push(Ok(wrap(emitted.event, block_ref)));
     }
     Ok(out)
+}
+
+/// A signatory-set value that did not decode is a decode error of the read,
+/// reported, never read as "not mapped" or "no delegates".
+#[cfg(feature = "write")]
+fn signatory_set_decode_error(error: crate::write::signatory_set::SignatorySetError) -> ClientError {
+    ClientError::Decode(DecodeError::Scale(format!("{error}")))
 }
 
 fn subxt_block_ref(h: BlockHash) -> subxt::utils::H256 {

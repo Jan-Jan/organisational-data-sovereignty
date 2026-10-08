@@ -74,7 +74,7 @@ their units. No statement of the defect was rewritten. Two
 things learned since: the production receive path does not use this reader —
 `receive_and_verify` reads the chain itself in the same operation and hands
 verification a one-shot adapter (`org-node/src/service.rs`, the
-`read_state` call in `receive_and_verify` and `ChainOpsReader`); and on the provider's side the same fact is now REQ-ysyu9g, the
+`read_state` call in `receive_and_verify` and `ChainOpsReader`); and on the provider's side the same fact is now org-io's finalised-block expectation (moved 2026-10-07), the
 expectation this unit holds on on-chain-client.
 
 Reach corrected, 2026-09-10. The note above said the cached reader "serves the
@@ -102,12 +102,20 @@ The 2026-09-02 body above is left as it stands.
 
 Resolved, 2026-10-03. The doc-comments in `org-node/src/chain_read.rs` now say
 what the code does: `refresh()` reads at the latest finalised block (`at =
-None`, which org-node holds on-chain-client to as REQ-ysyu9g) and caches the
+None`, which org-node holds on-chain-client to as org-io's finalised-block expectation (moved 2026-10-07)) and caches the
 result; `get_org_state` reads no block and returns the last `refresh()`'s
 snapshot, so the root's freshness is the caller's refresh discipline; and the
 module states that the production receive path does not use this reader.
 Documentation only — no behaviour changed, so no reproducing test; the "current
 best" wording that a second reader could have been written from is gone.
+
+*Note 2026-10-08 (ruling B, change `worktree-org-io-create`).* The module
+this report was filed against is deleted: `chain_read.rs`, with
+`OnChainReader`, `OrgStateCache` and the `read_state`/`ChainOpsReader` path
+named above. org-node reads no chain; org-io reads the state at the latest
+finalised block and hands it in as a value, and the finalised-block
+expectation on on-chain-client is org-io's. The resolution stands; the file
+and line references above are history.
 
 ## The publish path writes the chain before the record
 

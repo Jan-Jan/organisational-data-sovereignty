@@ -94,6 +94,15 @@ about the sandbox, in both directions.
       `coverage-branch-<unit>` targets on pinned nightly-2026-10-03, floors
       98/99/99%, a `coverage-branch` CI job). Stays open for org-node and app,
       which get theirs with their statement coverage at tooth 5.
+      **Amended 2026-10-08 (change `worktree-org-io-create`, S2 of
+      `docs/plans/2026-10-06-org-io-roadmap.md`):** the fifth unit, org-io,
+      is born with both. Owner ruling of 2026-10-06: statement and branch
+      floors from its first merge, as `coverage-org-io` and
+      `coverage-branch-org-io` (the branch-coverage pattern, sharing
+      `ORG_IO_COVERAGE_ARGS`) in `org-io/.guardrails/config.yaml`'s
+      `coverage_command:`, floors one point below the first measurement;
+      S2's task T12 measures, sets the floors and enables the entry. org-io never joins this item's open list, which
+      stays org-node and app.
 - [ ] **Human review policy.** Who signs off a merge; who is the independent
       reviewer at `merge-change` step 6a; whether critical items take two
       reviewers. Every change so far has used one fresh subagent, recorded by

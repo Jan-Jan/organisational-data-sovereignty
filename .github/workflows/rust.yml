@@ -2,10 +2,10 @@
 #
 # Multi-unit repository since 2026-09-05 (.guardrails/units.yaml): each unit's
 # `verify_commands` live in `<unit>/.guardrails/config.yaml`. The `test` job
-# runs the cargo entries of org-members, on-chain-client, org-node and person
-# verbatim, so that CI and the local merge gate cannot disagree about what
+# runs the cargo entries of org-members, on-chain-client, org-node, person and
+# org-io verbatim, so that CI and the local merge gate cannot disagree about what
 # "passing" means; person's clippy entry runs verbatim in the `clippy` job
-# (since 2026-10-05). The app unit has THREE verify_commands as of 2026-09-14,
+# (since 2026-10-05), and org-io's (since 2026-10-08). The app unit has THREE verify_commands as of 2026-09-14,
 # and TWO of them run here, in the `app-frontend` job below:
 # `npm --prefix app run check` and `npm --prefix app run test`, each preceded
 # by the `npm --prefix app ci` they need because app/node_modules is
@@ -79,6 +79,18 @@ jobs:
             --test admission_sender
       # person's verify_commands test entry: every target, none excluded.
       - run: cargo test -p person
+      # org-io's two verify_commands test entries (since 2026-10-08). The
+      # chopsticks-dependent `preflight` target is excluded there too; the
+      # second line is the dev-seed build, whose `dev_seed_env` target is its
+      # own binary because it sets the environment.
+      - run: |
+          cargo test -p org-io --features test-support --lib \
+            --test key_custody_config --test fuzz_seed_parse --test signatory_key \
+            --test absences --test chain_read_rule --test receive_order \
+            --test submit_flow --test signatory_rule --test app_boundary
+      - run: |
+          cargo test -p org-io --features test-support,dev-seed \
+            --test key_custody_config --test signatory_key --test dev_seed_env
 
   # The declared MSRV, measured (docs/adr/2026-10-03-quint-conformance-gate.md,
   # decision 6): quint-connect is edition 2024, so the test build needs 1.85.
@@ -144,6 +156,9 @@ jobs:
       # covers --all-targets: person inherits the workspace lints, and its test
       # targets allow `expect` by an explicit attribute where they use it.
       - run: cargo clippy -p person --all-targets -- -D warnings
+      # org-io's verify_commands clippy entry, verbatim (since 2026-10-08):
+      # --all-targets under both features, as person's.
+      - run: cargo clippy -p org-io --all-targets --features test-support,dev-seed -- -D warnings
 
   # org-members' documented build matrix (org-members/AGENTS.md), and person's
   # wasm32 checks. no_std is a hard requirement for both, but
@@ -167,9 +182,10 @@ jobs:
       - run: cargo check -p person --target wasm32-unknown-unknown
       - run: cargo check -p person --no-default-features --target wasm32-unknown-unknown
 
-  # The statement-coverage gate, running all three per-unit coverage targets
+  # The statement-coverage gate, running all four per-unit coverage targets
   # the merge gates run (`make coverage` = coverage-org-members +
-  # coverage-on-chain-client + coverage-person). Floors live in the Makefile and ratchet upward
+  # coverage-on-chain-client + coverage-person + coverage-org-io, the last
+  # since 2026-10-08). Floors live in the Makefile and ratchet upward
   # only. This covers the statement half of the class C target; the decision
   # half is the `coverage-branch` job below.
   #

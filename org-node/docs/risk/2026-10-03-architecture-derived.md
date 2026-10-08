@@ -263,6 +263,17 @@ a Change set whose agreement with the chain is not established) rather than a
 new one, and RC-6a2dke already states the control it would defeat. Probability
 unchanged — it requires a deliberate miswiring, not an input.
 
+*Amended 2026-10-08 (ruling B, change `worktree-org-io-create`).* The risk
+recorded here is closed by deletion, not by gating. `ChainOps` and
+`MockChainOps` are gone (LLR-65py3d superseded by LLR-mn5c2q): org-node
+holds no chain seam, and every operation that judges against the chain
+takes the Organisation's state as a value that org-io read. Their
+replacement for tests, `test_fixtures::ChainSlots` (LLR-hg3xzf as amended),
+is compiled only under `test-support`, which no production build enables.
+A miswired caller would now have to pass a fabricated state value, which
+is the reach org-io's chain read (its own ledgers, `org-io/docs/`) exists to
+deny; that is org-io's to assess.
+
 ### C. Persona and Organisation construction — LLR-tev8h8, LLR-s7yu4k, LLR-v82xds, LLR-68yd3j
 
 assesses: LLR-tev8h8, LLR-s7yu4k, LLR-v82xds, LLR-68yd3j
@@ -719,7 +730,7 @@ SDD-msb6xh's other requirements pin. The chain's own epoch check sits behind
 it either way.
 
 **Assessment.** No new hazard and no new control. It was moved here from
-SDD-z85ux9 by review round 6, because it is pure and testable, and it is now
+org-io's chain-connection item (moved 2026-10-07) by review round 6, because it is pure and testable, and it is now
 pinned.
 
 *(Re-checked 2026-10-05 against LLR-rc74nq as amended by the org-node
@@ -867,6 +878,9 @@ What it bears on is the **evidence**. A mock without the check would let a
 story test pass with an update the real contract would refuse, such as the
 retry PR-vt244s makes impossible. The requirement keeps the mock as strict as
 the contract on that one property.
+*(Amended 2026-10-08, ruling B, change `worktree-org-io-create`: the mock is
+now the test-support value store `test_fixtures::ChainSlots`, whose
+`apply_update` keeps the compare-and-swap; the assessment stands.)*
 
 **Assessment.** No new hazard and no new control.
 

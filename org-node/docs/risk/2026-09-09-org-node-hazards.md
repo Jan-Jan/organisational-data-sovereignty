@@ -66,8 +66,9 @@ Deliberately **outside** this analysis, and not to be read as assessed:
   its register and stated in its exported requirements, which this file cites
   by ID where org-node leans on them.
 - **What the chain returns.** on-chain-client decodes the Organisation state;
-  what org-node needs from it is stated as the expectation REQ-ysyu9g and
-  assessed in `2026-09-06-dependency-expectations.md`.
+  what org-node needed from it was stated as an expectation, assessed in
+  `2026-09-06-dependency-expectations.md`; since 2026-10-07 it is the
+  finalised-block expectation now held by org-io (`org-io/docs/requirements/`).
 - **The administrator's surface.** How the app shows a member before an act
   on them, and how it collects the passphrase and the invite. The app is its
   own unit and its analysis follows this one.
@@ -108,11 +109,12 @@ them into `org-node/tests`, where `test_paths` points, and adds the
 abnormal-input cases class C requires. No behaviour of the crate is changed.
 
 Two of org-node's requirements predate this file and are **expectations** on
-its providers: REQ-ysyu9g (on-chain-client returns the Finalised
-Organisation state when no block is named) and REQ-q92yac (org-members
+its providers: the finalised-block expectation now held by org-io
+(`org-io/docs/requirements/`) (on-chain-client returns the Finalised Organisation state when
+no block is named; org-node's until 2026-10-07) and REQ-q92yac (org-members
 rejects a Change set that removes a Device key without replacing the
 Member-as-a-group key). Each is named below, and the two stand in different
-relations to the controls. REQ-ysyu9g's subject *is* the decisive input to
+relations to the controls. The finalised-block expectation's subject *is* the decisive input to
 RC-6a2dke: the chain read that control compares against, so the control is
 only as good as the expectation. REQ-q92yac's subject is not a half of any
 control here — RC-wqgm2p is fully implemented and tested in this unit — but
@@ -244,7 +246,8 @@ The Organisation state is only as trustworthy as the read that produced it.
 `SubxtChainOps::read_state` asks on-chain-client for the state with no block
 named (`org-node/src/service.rs:408-418`), which on-chain-client documents as
 the latest Finalised block — a doc-comment, not a commitment, which is why
-REQ-ysyu9g exists. Until on-chain-client states it as an exported requirement,
+the finalised-block expectation now held by org-io (`org-io/docs/requirements/`) exists.
+Until on-chain-client states it as an exported requirement,
 the decisive input to RC-6a2dke rests on a comment. The same read is what the
 chain-reader problem report that moved into this ledger is about: the
 node's own `OnChainReader::refresh` documents it as "current best"
@@ -271,7 +274,8 @@ the caching, and the line reference above is to the comment as it then stood.)
 change (`worktree-org-node-loopback-timeout`) rather than by the change that
 resolved the report: the decisive input to RC-6a2dke still rests on a
 doc-comment rather than on an exported requirement, because that comment is
-on-chain-client's and REQ-ysyu9g is still open. Correcting org-node's
+on-chain-client's and the finalised-block expectation now held by org-io
+(`org-io/docs/requirements/`) is still open. Correcting org-node's
 description of the read did not move that, and the paragraph above is left
 standing because it is the assessment made of RC-6a2dke while the contradiction
 existed — an assessment that quietly becomes a description of a fixed tree
@@ -1019,7 +1023,8 @@ Assessed **S3 / P2**. Controls, none minted: fan-out of every Change set to
 every current device; a periodic chain read that flags a record older than the
 chain's epoch; a stated maximum age beyond which the node refuses to act on
 its record. The consumer-side
-half of one of these already exists as REQ-ysyu9g's premise — that the state
+half of one of these already exists as the premise of the finalised-block
+expectation now held by org-io (`org-io/docs/requirements/`) — that the state
 read is the Finalised one — but nothing reads it on a schedule.
 
 **A revoked device keeps the organisation secret.** Stated under HAZ-vxabf9
@@ -1075,7 +1080,8 @@ the update extrinsic to be finalised before the local record moves
 the Organisation state with no block named, which on-chain-client performs as
 a Finalised read. So a reorganisation that discards a published root should
 find no node that committed against it. Two qualifications. The receiver's
-half is REQ-ysyu9g, an expectation open until 2026-12-05 with a doc-comment
+half is the finalised-block expectation now held by org-io (`org-io/docs/requirements/`), open
+until 2026-12-05 with a doc-comment
 behind it. The submitter's half is tested only in the chopsticks lane
 (`org-node/tests/finality_polling.rs`, `chain_genesis_e2e.rs`), which the
 merge gate does not run; and there is no reorganisation test anywhere in the
@@ -1122,7 +1128,7 @@ Per hazard, after controls:
 
 | Hazard | S/P | Residual | Why |
 |---|---|---|---|
-| HAZ-tawvm2 | S3/P2 | not acceptable | decisive read rests on a provider's doc-comment until REQ-ysyu9g is met; one author key |
+| HAZ-tawvm2 | S3/P2 | not acceptable | decisive read rests on a provider's doc-comment until the finalised-block expectation now held by org-io (`org-io/docs/requirements/`) is met; one author key |
 | HAZ-p4gfv9 | S3/P1 | not acceptable | per-node mark; the Organisation-level bar is the contract's |
 | HAZ-5f9jcm | S3/P2 | not acceptable | shallow fuzzing at the gate; blobs unbounded; no accept-time limits |
 | HAZ-ep6uzs | S3/P2 | not acceptable | check skipped without an invite; revocation path unchecked; PR-2dmjzj |
@@ -1202,7 +1208,8 @@ unit, the conclusion org-members' register reached for the membership
 capability on 2026-09-02 and does not change it: three defects, on the publish
 path, the loopback admission path and the revocation receive path; one control
 whose decisive half is an open expectation on a provider (RC-6a2dke, whose
-chain read is REQ-ysyu9g's subject) and, separately, one uncontrolled residual
+chain read is the subject of the finalised-block expectation now held by
+org-io (`org-io/docs/requirements/`)) and, separately, one uncontrolled residual
 of HAZ-vxabf9 that a second open expectation would close (REQ-q92yac); one
 control that depends on the excluded device's cooperation; a store whose
 protection is a passphrase over a fixed salt, with no way back for the member
@@ -1402,7 +1409,8 @@ parent. Each is assessed here, and each has a hazard to point at.
   (S3/P1, not acceptable: the same loss of the same file as the
   keys-lost-on-crash hazard).
 
-The two expectations, REQ-ysyu9g and REQ-q92yac, were assessed in
+The two expectations, the finalised-block expectation now held by org-io
+(`org-io/docs/requirements/`) and REQ-q92yac, were assessed in
 `2026-09-06-dependency-expectations.md`, which remains the assessment of
 record; this file adds the hazards each was written toward — HAZ-tawvm2 and
 HAZ-vxabf9 respectively — and the dates they fall due.

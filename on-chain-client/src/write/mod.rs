@@ -10,6 +10,7 @@ pub mod ceremony;
 pub mod events;
 pub mod multisig;
 pub mod proxy;
+pub mod signatory_set;
 pub mod subxt_ops;
 
 pub use ceremony::{genesis, submit_update, FUND_AMOUNT};

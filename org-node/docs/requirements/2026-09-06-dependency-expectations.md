@@ -29,8 +29,8 @@ is the intended escalation.
 
 (Corrected 2026-09-09: that register now exists —
 `org-node/docs/risk/2026-09-09-org-node-hazards.md`, written as tooth 3 — and
-it names the hazard each item above was written toward: REQ-ysyu9g stands
-against HAZ-tawvm2, a Change set accepted on its sender's word, and REQ-q92yac
+it names the hazard each item above was written toward: the finalised-block
+expectation (now held by org-io, see below) stands against HAZ-tawvm2, a Change set accepted on its sender's word, and REQ-q92yac
 against HAZ-vxabf9, a device removed from the record that keeps acting as a
 member. Neither item was annotated `(implements: RC-…)`, and the withholding
 is deliberate for the reason this paragraph gives: an unmet expectation that
@@ -47,49 +47,13 @@ read.
 
 ## The independent trusted root
 
-**REQ-ysyu9g**: The software shall rely on on-chain-client to return, when
-asked for an Organisation's state without naming a block, the Organisation
-state recorded at the latest Finalised block, so that the Membership root a
-Change set is verified against is never one that a chain reorganisation can
-later discard.
-expects: on-chain-client
-opened: 2026-09-06
-satisfies: derived
-
-Why this is an expectation and not org-node's own requirement. org-node's
-verify-and-commit path applies a Change set under REQ-4umsuz's rules and then
-compares the recomputed Membership root against a root obtained from the
-chain, and that comparison is only worth anything if the chain read is one the
-chain will not revoke. The read is performed by on-chain-client, which
-documents the behaviour in a doc-comment on `get_org_state` ("`at = None`
-reads at the latest finalised block") and nowhere else: on-chain-client has no
-requirements ledger entry stating it, and `org-node/src/chain_read.rs`
-documents the same call as "current best" — the contradiction filed as an open
-problem report in `org-members/docs/problems/2026-09-02-chain-reader-finality-doc.md`.
-(Corrected 2026-10-03: that report, now in org-node's own ledger, is resolved;
-`chain_read.rs` states the finalised read.)
-(Corrected 2026-09-10, as part of the 2026-09-09 correction above: that report
-moved with this change into org-node's own ledger, under D14, and now lives in
-`org-node/docs/problems/2026-09-09-org-node-problems.md`. The org-members file
-named above is emptied and defines no item; it is kept only so its ledger's
-history reads chronologically.)
-(Added 2026-10-03 by the transport change, after the correction above:
-**this item is unaffected by that resolution and stays open.** What was fixed
-is org-node's description of the read; what this item asks for is
-on-chain-client stating the behaviour as an exported requirement, which is
-REQ-ysyu9g and is still owed. The sentence above is left as written because it
-is what made the case for this item, and the case has not changed: a
-doc-comment on the provider is still the only statement of the behaviour.)
-A doc-comment is not a commitment. This item is what makes it one, on the
-provider that performs the read.
-
-What org-node owes in return, and does not state here: that the root it
-compares against came from this read and not from the envelope or its author.
-That is the "independent trusted root" responsibility org-members' hazard
-analysis (`org-members/docs/risk/2026-09-02-membership-hazards.md`, the
-stale-or-divergent-record hazard) places on its consumer. It is org-node's own
-requirement, written from org-node's own risk analysis, not an expectation on
-anyone.
+*Moved 2026-10-07 to org-io's requirements ledger
+(`org-io/docs/requirements/2026-10-08-org-io.md`, finalised
+at the merge of change `worktree-org-io-create`) by ruling A: the expectation
+that on-chain-client reads the latest Finalised block when no block is named
+is now held by org-io, which performs the chain read, with its opening date
+(2026-09-06) unchanged. org-node reads no chain: it takes the Organisation
+state as a value. Its assessment moved with it.*
 
 ## Device removal on the wire path
 

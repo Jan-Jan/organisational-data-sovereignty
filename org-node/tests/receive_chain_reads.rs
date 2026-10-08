@@ -9,7 +9,7 @@ mod support;
 use org_node::error::OrgNodeError;
 use org_node::ids::OrgId;
 use org_node::revocation::RevocationNotice;
-use org_node::service::{OrgService, SelfDeleteOutcome};
+use org_node::service::SelfDeleteOutcome;
 use org_node::test_fixtures::admit_member_delta;
 use org_node::transport::wire::{encode_frame, WireMessage};
 use org_node::{Envelope, Epoch, MemberSeed, SequenceNumber};
@@ -30,7 +30,7 @@ fn foreign_delta() -> org_members::delta::Delta {
 /// with `SenderNotListed` and no chain read (owner ruling R1 of 2026-10-07,
 /// LLR-2r2fha). The tests below send from A's listed Device otherwise
 /// (*rewritten 2026-10-07, S3 T12a*: they sent from a relay).
-async fn refused_from_a_relay(svc_b: &mut OrgService, counting: &CountingChain, org_id: OrgId, msg: &WireMessage) {
+async fn refused_from_a_relay(svc_b: &mut Node, counting: &CountingChain, org_id: OrgId, msg: &WireMessage) {
     let before = counting.reads();
     let not_listed = Err(OrgNodeError::SenderNotListed { org_id });
     assert_eq!(deliver_to_receive(svc_b, msg.clone()).await.map(|_| ()), not_listed);
@@ -264,7 +264,10 @@ async fn revocations_are_refused_without_writing() {
         assert_eq!(counting.reads() - reads_before, expected_reads);
     }
     let after = rec_of(&s.svc_b, s.org_id);
-    assert_eq!((after.epoch, after.root_hash, after.org_private_key), (held.epoch, held.root_hash, held.org_private_key));
+    assert_eq!(
+        (after.epoch, after.root_hash, after.org_private_key_for_test()),
+        (held.epoch, held.root_hash, held.org_private_key_for_test())
+    );
     assert_eq!(s.svc_b.list_personas().len(), 1, "B's Persona is kept");
     assert_eq!(store_bytes("refuse-notice", "b"), before, "nothing written");
 }
@@ -475,4 +478,42 @@ async fn a_first_admission_without_its_key_is_refused_and_keeps_the_expectation(
     assert!(svc_b.list_orgs().is_empty());
     assert_eq!(svc_b.expected_admissions().len(), 1, "the expectation is kept");
     assert_eq!(store_bytes("keyless-first", "b"), on_disk, "nothing written");
+}
+
+// REQ-uk9rw7 (supersedes REQ-ztdza4: owner ruling R1 of 2026-10-07, and the
+// owner's hybrid ruling on PR-zf924s, 2026-10-08), at the value boundary: an
+// update about a held Organisation from a Device the current record does not
+// list is refused by the chain-free phase itself, which returns no pending
+// value, so no chain state is asked for; the same update from a listed
+// Device names the Organisation whose state it needs. Nothing is written
+// either way.
+// verifies: REQ-uk9rw7, REQ-ztdza4, LLR-2r2fha
+#[tokio::test(flavor = "multi_thread")]
+async fn an_update_from_an_unlisted_device_is_refused_before_any_chain_state_is_asked_for() {
+    let (mut s, counting) = admitted("unlisted-value").await;
+    let msg = captured_admission_of_c(&mut s).await;
+    let on_disk = store_bytes("unlisted-value", "b");
+    let held = rec_of(&s.svc_b, s.org_id);
+    let reads_before = counting.reads();
+
+    let stranger = org_node::test_fixtures::device_key(0x6d);
+    assert!(!held.trie_members.iter().any(|member| member.device_keys.contains(&stranger)));
+    let not_listed = Err(OrgNodeError::SenderNotListed { org_id: s.org_id });
+    assert_eq!(s.svc_b.prepare_receive(stranger, msg.clone()).map(|_| ()), not_listed);
+    assert_eq!(s.svc_b.prepare_self_delete(stranger, msg.clone()).map(|_| ()), not_listed);
+
+    let a_device = org_node::DeviceSeed::from(device_seed_of(&s.svc_a, &s.pid_a))
+        .signing_keypair()
+        .device_key()
+        .unwrap();
+    match s.svc_b.prepare_receive(a_device, msg) {
+        Ok(org_node::service::Prepared::NeedsChain(pending)) => assert_eq!(pending.org_id(), s.org_id),
+        Ok(org_node::service::Prepared::Done(_)) => panic!("an update is never decided without the chain"),
+        Err(refused) => panic!("an update from a listed Device passes the chain-free phase: {refused:?}"),
+    }
+
+    assert_eq!(counting.reads(), reads_before, "the chain-free phase reads no chain");
+    let after = rec_of(&s.svc_b, s.org_id);
+    assert_eq!((after.epoch, after.root_hash, after.last_seq), (held.epoch, held.root_hash, held.last_seq));
+    assert_eq!(store_bytes("unlisted-value", "b"), on_disk, "nothing written");
 }

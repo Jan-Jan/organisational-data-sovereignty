@@ -47,6 +47,18 @@ the transport mode, and the refusal, with its message, when a required value
 is missing. Every function is total and none reads the process environment.
 traces: REQ-7g3k9a, REQ-rxc8sp, REQ-bmk2z2, REQ-645jq9
 
+*Amended 2026-10-08 (change `worktree-org-io-create`, task T9).* The app's
+rule that `AppState::init` is the only reader of the process environment
+holds for every variable but one: `ODS_ADMIN_SEED`, the development signing
+seed, is read by org-io, and only in a build with org-io's `dev-seed`
+feature (the app's own `dev-seed` feature enables it); the app never reads
+it (accepted recommendation, 2026-10-06). The reason for the rule — cargo
+runs a binary's tests as threads of one process, so a test that set a
+variable would race the rest — holds for org-io's reader too: org-io's tests
+exercise its parser on values, and its one test that sets the variable runs
+alone in its own test binary. Classification: a clarification, not a change
+of meaning.
+
 **LLR-tpkmh3**: `resolve_passphrase` returns the configured passphrase,
 unaltered, when it is non-empty, whether or not development defaults are
 enabled. When the value is absent, it returns `DEV_PASSPHRASE` if development
@@ -116,6 +128,19 @@ built from. `AppState::init` and `AppState::for_test` both build through
 `transport_mode_for`.
 traces: REQ-bvx4nh
 
+*Amended 2026-10-08 (change `worktree-org-io-create`, task T9).* The state
+holds one org-io handle (`AppState.org_io: Mutex<OrgIo>`), not `OrgService`
+wired to a chain implementation plus a separate chain writer: the item wires
+the service over the store into the handle, and org-io owns the chain read,
+the chain write and the signatory key. The store is opened by
+`open_service` (the data directory, the store, the transport mode), which
+`init` and `for_test` both call before building the handle; `assemble` then
+opens the outstanding Invites beside the store and records the directory,
+the chain endpoint and the transport mode. `for_test` builds the handle with
+the chain not configured (`OrgIo::not_configured`). Classification under the
+hybrid rule: a clarification of the item's code and wiring, not a change of
+meaning.
+
 **LLR-85zque**: `assemble` creates the data directory, with any missing
 parents, and opens the persona store at `persona_store.bin` inside it, under
 the given passphrase. When the directory cannot be created, it refuses with a
@@ -128,6 +153,49 @@ Normal: `the_store_is_opened_inside_the_data_dir_it_creates` (state_assembly).
 Abnormal: `a_data_dir_that_cannot_be_created_is_refused_naming_it`,
 `a_store_under_another_passphrase_is_refused` (state_assembly),
 `connection_status_reports_a_data_dir_it_had_to_create_verbatim` (ipc).
+
+*Amended 2026-10-08 (change `worktree-org-io-create`, task T9).* What this
+states of `assemble` is done since T9 by `open_service`, which `init` and
+`for_test` call before `assemble`, with the same messages; the tests are
+unchanged. When `init`'s connect to the chain fails, the handle it was given
+the service for is dropped and `open_service` opens the same store again for
+the unconfigured handle — the same file under the same passphrase, never
+another store. Classification: a clarification (the function's name), not a
+change of meaning.
+
+*Amended 2026-10-08 (change `worktree-org-io-create`, task T9b).* The note
+above said that after a failed connect "`open_service` opens the same store
+again for the unconfigured handle". It no longer does: `OrgIo::connect`
+hands the service back with its refusal (org-io's development-seed
+requirement, which is not exported), the
+unconfigured handle is built from it, and `init` opens the store once.
+Classification: a narrowing (one open instead of two of the same store),
+not a change of meaning. Test: `init_opens_the_store_once_even_when_the_connect_is_refused`
+(state_assembly, a scan of `init`'s source, since `init` reads the
+environment).
+
+*Amended 2026-10-08 (change `worktree-org-io-create`, review round 2,
+finding 2).* `open_service` is gone: the app no longer builds org-node's
+service. `init` and `for_test` call `OrgIo::open`, which creates the data
+directory, opens `persona_store.bin` in it under the passphrase with the
+same two refusal messages, and returns the unconfigured handle; `init`
+connects that handle (`connect` takes it), and a refused connect gives it
+back through `ConnectFailed::into_not_configured`, so the store is still
+opened once. The app's sources construct no `OrgService`. Classification:
+a clarification (where the open is done), not a change of meaning; the
+tests are unchanged except that the source scan also counts `OrgIo::open(`.
+
+*Clarified 2026-10-08 (change `worktree-org-io-create`, review round 3,
+finding 3).* The item's text still names `assemble`. Read it as "the
+app's state assembly (`init`, `for_test`), through org-io's `OrgIo::open`".
+The open, the two refusals and "opens no other store in its place" are
+`OrgIo::open`'s, stated where that code is (org-io's development-seed item,
+clause of 2026-10-08) and tested there too. This item keeps the app's side:
+the state is assembled over the directory and the store `OrgIo::open`
+opened, and its refusals reach the app unchanged. Classification under the
+hybrid rule: a clarification (the function's name and where the behaviour
+is stated), not a change of meaning; the ID is kept and its tests are
+unchanged.
 
 **LLR-vqkr5t**: `AppState.data_dir` is the directory the store was opened in,
 and the `connection_status` command reports exactly that directory.
@@ -404,7 +472,7 @@ here (LLR-4wcyqy).
 service, calls `OrgService`, maps its error to a string and returns a DTO
 that carries no secret key material. The commands named in SDD-6g3wnh carry
 no low-level requirement.
-traces: REQ-vgr7s2, REQ-sjkp8z, REQ-645jq9, REQ-prjja8, REQ-tcutr6, REQ-65xqp8, REQ-ab2mfz, REQ-nfr3n2
+traces: REQ-vgr7s2, REQ-sjkp8z, REQ-645jq9, REQ-prjja8, REQ-tcutr6, REQ-65xqp8, REQ-ab2mfz, REQ-m8sgjk
 
 *Amended 2026-10-06 (change `worktree-org-node-chain-authority`).* The
 invitation exchange and the chain write moved into this unit, behind the
@@ -416,8 +484,24 @@ commands. The item's code gains `app/src-tauri/src/invitation.rs`
 `import_invite_reply` take. The surface is still twelve commands:
 `export_join_request` and `import_join_request` leave, `produce_invite_reply`
 and `import_invite_reply` arrive. Its low-level requirements for the new
-behaviour (LLR-9sraks, LLR-f35pda, LLR-w4mhd4, LLR-gha5f6, LLR-qhjp6g,
-LLR-be3zv9) are in `2026-10-06-invitation.md`.
+behaviour (LLR-9sraks, LLR-f35pda, LLR-w4mhd4, LLR-gha5f6, and the two
+low-level requirements of the chain write's order and bound) are in `2026-10-06-invitation.md`.
+
+*Amended 2026-10-08 (change `worktree-org-io-create`, task T9).*
+`app/src-tauri/src/submit.rs` leaves the item: it is deleted, and the chain
+write, then org-node's commit and send, are org-io's (`org-io/src/submit.rs`).
+Each command locks the org-io handle (`AppState.org_io`) and calls org-node's
+queries and builders through it (`OrgIo::node`, `OrgIo::node_mut`) and the
+submission through it (`OrgIo::found_organisation`,
+`OrgIo::submit_commit_send`); `revoke_and_send` and `admit_reply` take the
+handle. The two low-level requirements of the chain write's order and its
+90-second bound moved with the code to org-io's architecture ledger
+(`org-io/docs/architecture/2026-10-08-org-io.md`), which
+does not export them; the sentence above that named them is rewritten to
+prose. `traces:` swaps the submission requirement, now org-io's, for the
+app's REQ-m8sgjk (the decision when to submit and to which Device). The
+surface is still twelve commands. Classification under the hybrid rule: a
+clarification, not a change of meaning.
 
 **LLR-4wcyqy**: the IPC suite's handler list registers the twelve commands
 under their snake_case names, and an invocation of any other name is refused
@@ -965,7 +1049,26 @@ entry point and the startup wiring that reads the environment, chain-connection
 setup, the receiver loop, the commands whose success needs a chain, the
 frontend IPC client, and every Svelte component and route. It carries **no
 low-level requirements**.
-traces: REQ-7g3k9a, REQ-rxc8sp, REQ-bmk2z2, REQ-645jq9, REQ-e4ah9h, REQ-bvx4nh, REQ-6hgm8r, REQ-3hfggn, REQ-jfxah3, REQ-2k7ys4, REQ-dp95pv, REQ-tw4cb5, REQ-a83vqr, REQ-wu6z9p, REQ-rq8g2v, REQ-vgr7s2, REQ-he8ejb, REQ-prjja8, REQ-tcutr6, REQ-ab2mfz, REQ-nfr3n2
+traces: REQ-7g3k9a, REQ-rxc8sp, REQ-bmk2z2, REQ-645jq9, REQ-e4ah9h, REQ-bvx4nh, REQ-6hgm8r, REQ-3hfggn, REQ-jfxah3, REQ-2k7ys4, REQ-dp95pv, REQ-tw4cb5, REQ-a83vqr, REQ-wu6z9p, REQ-rq8g2v, REQ-vgr7s2, REQ-he8ejb, REQ-prjja8, REQ-tcutr6, REQ-ab2mfz, REQ-m8sgjk
+
+*Amended 2026-10-08 (change `worktree-org-io-create`, task T9).* The chain
+connection leaves this unit for org-io's chain-connection item
+(`org-io/docs/architecture/2026-10-08-org-io.md`, the item
+moved there from org-node): `build_chain_ops`, `connect_chain`,
+`ChainNotConfigured` and `OnChainWriter` are gone from the app, and their
+work is `OrgIo::connect`, `OrgIo::not_configured` and org-io's writer. What
+stays here of "chain-connection setup" is `init`'s read of `ODS_CHAIN_WS`,
+`ODS_CONTRACT_H160` and `ODS_COSIGNER_PUB` and its parse of the contract
+address (`chain_settings`, PR-5mc4d8), the `block_on` of `OrgIo::connect`,
+the endpoint it records only when that succeeded, and the fallback to
+`OrgIo::not_configured`. The signing seed is no longer read here: org-io
+reads it, in development builds only. The candidates 12–16 below are
+narrowed accordingly: the admin seed and co-signer parse moved to org-io,
+where they are tested, and "that stub's three refusals" are org-io's.
+`traces:` swaps the submission requirement, now org-io's, for the app's
+REQ-m8sgjk, which `create_organisation`, `admit_member` and `revoke_member`
+realise at their call sites. Classification under the hybrid rule: a
+narrowing of the item's code, not a change of meaning.
 
 *Amended 2026-10-06 (change `worktree-org-node-chain-authority`).* The code
 list below changes with the invitation exchange and the chain write moving
@@ -987,7 +1090,9 @@ Its code:
   `app/src-tauri/src/lib.rs` `run`, `app/src-tauri/src/main.rs`, and in
   `app/src-tauri/src/state.rs` `AppState::init` and `transport_mode_for`.
 - **Chain-connection setup** (survey item C, whole): in `state.rs`,
-  `build_chain_ops`, `connect_chain` and `ChainNotConfigured`.
+  `build_chain_ops`, `connect_chain` and `ChainNotConfigured`. *Since
+  2026-10-08 (T9 above):* `chain_settings` and `init`'s call of
+  `OrgIo::connect`; the rest is org-io's.
 - **The receiver loop** (survey item G, in part): in
   `app/src-tauri/src/commands.rs`, `start_receiver` and `next_outcomes`.
 - **Commands whose success needs a chain**: in `commands.rs`,

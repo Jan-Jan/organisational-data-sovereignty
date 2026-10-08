@@ -56,6 +56,18 @@
 # the shared validated types (docs/adr/2026-10-04-parse-at-the-system-edge.md);
 # the assessment is walked (docs/plans/2026-10-04-person-shared-types.md) and
 # the edge is declared by the change that switches org-members to them.
+#
+# `org-io` added 2026-10-06 (class C, depends_on org-node and on-chain-client;
+# person later, when its code first names a person type): the one unit that
+# does IO for an Organisation — the chain read and write, the custody of the
+# user's own signatory key, the own-admin check, and from stage S4 the transport and
+# storage file IO — while org-node takes values and returns values
+# (docs/adr/2026-10-06-org-io-unit.md, stage S2 of
+# docs/plans/2026-10-06-org-io-roadmap.md). The edges' assessments are in
+# docs/plans/2026-10-06-org-io-create.md §5. It is born as a guardrails
+# skeleton with no crate; the crate lands in S2's develop phase. Since
+# 2026-10-08 (S2) the app depends on org-io alone; org-node no longer depends
+# on on-chain-client.
 
 units:
   - org-members
@@ -63,6 +75,7 @@ units:
   - org-node
   - app
   - person
+  - org-io
 
 not_a_unit:
   - on-chain          # Foundry contracts (OrgRegistry.sol); separate toolchain — later tooth

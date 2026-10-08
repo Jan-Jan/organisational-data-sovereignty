@@ -28,10 +28,16 @@ unchanged by the move.)
 
 The amendments this change makes to items and low-level requirements defined
 in `2026-10-03-decomposition.md` — `types.rs` added to SDD-swtd3w, the
-`OrgStateCache` part of `chain_read.rs` moved from SDD-z85ux9 to SDD-pa6p7w,
+`OrgStateCache` part of `chain_read.rs` moved from org-io's chain-connection item (moved 2026-10-07) to SDD-pa6p7w,
 and the requirements that described the untyped API — are edited there, where
 those items are defined, each marked "Amended 2026-10-05 by the org-node
 type-safety change".
+*(Amended 2026-10-08, ruling B, change `worktree-org-io-create`.)*
+`chain_read.rs` is deleted: `OrgStateCache` and `OnChainReader` with it,
+and `org_state_from_chain` moved to org-io, which reads the chain and hands
+org-node the state as a value. org-node keeps the parse edge,
+`OrgState::from_chain` in `chain.rs`. The mentions of `chain_read.rs`,
+`SubxtChainOps` and `ChainOps` below record the change as it was made.
 
 *Re-homed 2026-10-05 by owner ruling, at the merge of `master` `05f6f04`
 (ratchet tooth 4).* This change was written when org-node had no design items,
@@ -196,6 +202,16 @@ whose Organisation public key the parse refuses leaves no cached state:
 so `get_org_state` returns `Ok(None)` until a refresh succeeds.
 satisfies: derived
 
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place: a
+narrowing. The parse and `Debug` clauses stand unchanged. The fail-closed
+cache clause (from "A chain state whose Organisation public key the parse
+refuses leaves no cached state" to the end) is retired: `OrgStateCache` and
+`OnChainReader` are deleted with `chain_read.rs`, and org-node caches no
+chain state (PR-k2xxaq resolved by that deletion). The two parse cases of
+the deleted `tests/chain_read_state.rs` moved to org-io with
+`org_state_from_chain`; org-node's evidence for this item is
+`node_value_types.rs`.
+
 *Amended 2026-10-05 (owner answer Q4 of that day to
 docs/plans/2026-10-05-switch-trim.md; written by change
 `worktree-person-shared-types`).* This item stated the Edwards-point rule,
@@ -223,7 +239,7 @@ rule rejects would be accepted.)
 
 (Amended 2026-10-05 by the org-node type-safety change, review round 7: moved
 here from SDD-pa6p7w, which is named for its last clause. The `Ok(None)` it
-serves after a refusal is the exception that LLR-rm9x4z, SDD-pa6p7w's split of
+serves after a refusal is the exception that org-io's absence-from-failure LLR (moved 2026-10-07), SDD-pa6p7w's split of
 absence from failure, now states.)
 
 (Amended 2026-10-05 by the org-node type-safety change, review round 8: the
@@ -261,6 +277,10 @@ replacement item that stated this text was withdrawn before merge.
 the read view accepts as an Organisation public key, and what it serves when
 the chain's state is refused. Also constrained by LLR-mmdu38, under
 SDD-swtd3w above. No requirement of this change sits under it.
+*(Amended 2026-10-08, ruling B, change `worktree-org-io-create`: the
+location is now `org-node/src/chain.rs`, `OrgState::from_chain`; the read,
+`org_state_from_chain`, is org-io's, and the cache is deleted. SDD-pa6p7w
+in `2026-10-03-decomposition.md` carries the amendment.)*
 
 (Amended 2026-10-05 by the org-node type-safety change, review round 7: this
 section named `org-node/src/types.rs` (`OrgPublicKey::parse`) as the item's.
@@ -501,7 +521,7 @@ change:
   `SubxtChainOps::read_state` caches nothing, so there is no such state there.
   (Amended 2026-10-05 by the org-node type-safety change, review round 7: this
   `Ok(None)` is for an Organisation that is on chain, so it is an exception to
-  LLR-rm9x4z's rule that `None` means no on-chain slot. LLR-rm9x4z now states
+  org-io's absence-from-failure LLR's (moved 2026-10-07) rule that `None` means no on-chain slot. org-io's absence-from-failure LLR (moved 2026-10-07) now states
   the exception.)
 - **Invite import** (`OrgService::import_invite`) refuses an Invite whose
   Organisation public key, Member key or Device key is not a curve point

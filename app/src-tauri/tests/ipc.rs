@@ -30,7 +30,7 @@
 use ods_poc_lib::commands;
 use ods_poc_lib::policy::{ChainEndpoint, TransportModeName};
 use ods_poc_lib::state::AppState;
-use org_node::OrgNodeError;
+use org_io::node::OrgNodeError;
 
 use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
 use tauri::test::MockRuntime;

@@ -200,6 +200,17 @@ required-features = ["test-support", "write"]
 name = "write_events"
 required-features = ["test-support", "write"]
 
+# The signatory-set decoders (SDD-rxfu6h), on the same verify_commands line.
+[[test]]
+name = "signatory_set_decode"
+required-features = ["test-support", "write"]
+
+[[test]]
+name = "fuzz_signatory_set"
+path = "tests/fuzz_signatory_set/fuzz_target.rs"
+harness = false
+required-features = ["test-support", "write"]
+
 # Chopsticks: outside every gate, like this unit's other chopsticks targets.
 # Run: cargo test --manifest-path on-chain-client/Cargo.toml --features write
 #      --test write_genesis_e2e -- --test-threads=1

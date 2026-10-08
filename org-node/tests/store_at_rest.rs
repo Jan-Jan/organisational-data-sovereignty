@@ -26,7 +26,7 @@ fn tmp_path(suffix: &str) -> PathBuf {
 }
 
 fn persona(member_seed: [u8; 32], device_seed: [u8; 32]) -> PersonaRecord {
-    PersonaRecord {
+    PersonaRecord::from(org_node::store::PersonaRecordParts {
         persona_id: PersonaId::new("p1".to_string()),
         org_id: None,
         handle: Handle::parse("alice").unwrap(),
@@ -36,13 +36,13 @@ fn persona(member_seed: [u8; 32], device_seed: [u8; 32]) -> PersonaRecord {
         device_seed: DeviceSeed::from(device_seed),
         member_id: None,
         status: PersonaStatus::Proposed,
-    }
+    })
 }
 
 /// An org record holding the Organisation private key `key`, with the
 /// remaining fields fixed.
 fn org_record(key: [u8; 32]) -> OrgRecord {
-    OrgRecord {
+    OrgRecord::from(org_node::store::OrgRecordParts {
         org_id: OrgId::new([5u8; 20]),
         root_hash: RootHash::new([0x11u8; 32]),
         org_pub_key: OrgPrivateKey::from(key).x25519_keypair().org_public_key().unwrap(),
@@ -52,7 +52,7 @@ fn org_record(key: [u8; 32]) -> OrgRecord {
         proxy_account: None,
         org_private_key: OrgPrivateKey::from(key),
         kept_change_set: None,
-    }
+    })
 }
 
 fn contains(hay: &[u8], needle: &[u8]) -> bool {
@@ -211,39 +211,45 @@ fn encoded<T: serde::Serialize>(value: &T) -> Vec<u8> {
 /// provisional update and one expectation; plus an unbound genesis update
 /// built by org 1's Persona.
 fn two_organisation_store() -> StoreData {
-    let persona = |number: u8, org_id: OrgId| PersonaRecord {
-        persona_id: PersonaId::new(format!("p{number}")),
-        org_id: Some(org_id),
-        handle: Handle::parse(&format!("h{number}")).unwrap(),
-        name: Name::parse("N").unwrap(),
-        surname: Surname::parse("S").unwrap(),
-        member_seed: MemberSeed::from([number; 32]),
-        device_seed: DeviceSeed::from([number + 10; 32]),
-        member_id: Some(MemberId::new([number; 32])),
-        status: PersonaStatus::Active,
+    let persona = |number: u8, org_id: OrgId| {
+        PersonaRecord::from(org_node::store::PersonaRecordParts {
+            persona_id: PersonaId::new(format!("p{number}")),
+            org_id: Some(org_id),
+            handle: Handle::parse(&format!("h{number}")).unwrap(),
+            name: Name::parse("N").unwrap(),
+            surname: Surname::parse("S").unwrap(),
+            member_seed: MemberSeed::from([number; 32]),
+            device_seed: DeviceSeed::from([number + 10; 32]),
+            member_id: Some(MemberId::new([number; 32])),
+            status: PersonaStatus::Active,
+        })
     };
-    let record = |org_id: OrgId| OrgRecord {
-        org_id,
-        root_hash: RootHash::new([org_id.as_bytes()[0]; 32]),
-        org_pub_key: org_public_key(),
-        epoch: Epoch::new(4),
-        last_seq: SequenceNumber::new(4),
-        trie_members: vec![],
-        proxy_account: None,
-        org_private_key: OrgPrivateKey::from([org_id.as_bytes()[0]; 32]),
-        kept_change_set: Some(vec![org_id.as_bytes()[0]]),
+    let record = |org_id: OrgId| {
+        OrgRecord::from(org_node::store::OrgRecordParts {
+            org_id,
+            root_hash: RootHash::new([org_id.as_bytes()[0]; 32]),
+            org_pub_key: org_public_key(),
+            epoch: Epoch::new(4),
+            last_seq: SequenceNumber::new(4),
+            trie_members: vec![],
+            proxy_account: None,
+            org_private_key: OrgPrivateKey::from([org_id.as_bytes()[0]; 32]),
+            kept_change_set: Some(vec![org_id.as_bytes()[0]]),
+        })
     };
-    let update = |org_id: Option<OrgId>, number: u8| ProvisionalUpdate {
-        org_id,
-        persona_id: PersonaId::new(format!("p{number}")),
-        base_root: org_id.map(|org| RootHash::new([org.as_bytes()[0]; 32])),
-        resulting_root: RootHash::new([number + 50; 32]),
-        seq: SequenceNumber::new(5),
-        org_pub_key: org_public_key(),
-        change: ProvisionalChange::ChangeSet {
-            change_set: vec![number],
-            org_private_key: OrgPrivateKey::from([number + 60; 32]),
-        },
+    let update = |org_id: Option<OrgId>, number: u8| {
+        ProvisionalUpdate::from(org_node::store::ProvisionalUpdateParts {
+            org_id,
+            persona_id: PersonaId::new(format!("p{number}")),
+            base_root: org_id.map(|org| RootHash::new([org.as_bytes()[0]; 32])),
+            resulting_root: RootHash::new([number + 50; 32]),
+            seq: SequenceNumber::new(5),
+            org_pub_key: org_public_key(),
+            change: ProvisionalChange::ChangeSet {
+                change_set: vec![number],
+                org_private_key: OrgPrivateKey::from([number + 60; 32]),
+            },
+        })
     };
     let (org_1, org_2) = (OrgId::new(ORG_1), OrgId::new(ORG_2));
     StoreData {

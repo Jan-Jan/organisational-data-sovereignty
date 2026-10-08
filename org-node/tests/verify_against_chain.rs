@@ -13,14 +13,13 @@
 //! binding, the replay check is the only check before the decode.
 
 use org_members::RootHash;
-use org_node::chain::{MockChain, OrgState};
+use org_node::chain::OrgState;
 use org_node::MemberSeed;
 use org_node::ids::OrgId;
 use org_node::sequence::SeqGuard;
 use org_node::test_fixtures::{admin_device, admit_member_delta, genesis_trie, org_public_key, Trie};
 use org_node::verify::{check_chain_free, verify_envelope_against_chain, VerifyContext};
 use org_node::{DeviceSeed, Envelope, Epoch, OrgNodeError, SequenceNumber};
-use std::cell::Cell;
 
 fn setup() -> (OrgId, Trie, Envelope, RootHash) {
     let admin = MemberSeed::from([1u8; 32]).x25519_keypair();
@@ -37,7 +36,7 @@ fn setup() -> (OrgId, Trie, Envelope, RootHash) {
 
 /// The receiver's context: expects `org`, has committed `parent_seq` 1 at
 /// epoch 1. It holds no key: verification decides from the Envelope, this
-/// context and the chain reader alone (LLR-na7p4w).
+/// context and the chain state alone (LLR-na7p4w).
 fn ctx(org: OrgId) -> VerifyContext {
     VerifyContext {
         expected_org_id: org,
@@ -46,11 +45,10 @@ fn ctx(org: OrgId) -> VerifyContext {
     }
 }
 
-/// A chain whose state for `org` is `root` at `epoch`.
-fn chain_at(org: OrgId, root: RootHash, epoch: Epoch) -> MockChain {
-    let mut chain = MockChain::new();
-    chain.set(org, OrgState { root_hash: root, org_pub_key: org_public_key(), epoch });
-    chain
+/// The chain state of `org` — given to verification as a value — at `root`
+/// and `epoch`. (`org` names whose state it is; a state carries no id.)
+fn chain_at(_org: OrgId, root: RootHash, epoch: Epoch) -> Option<OrgState> {
+    Some(OrgState { root_hash: root, org_pub_key: org_public_key(), epoch })
 }
 
 /// An envelope for `org` at `seq` whose Change set bytes do not decode.
@@ -71,7 +69,7 @@ fn happy_path_commits_when_root_matches_chain() {
     let (org, local, env, new_root) = setup();
     let chain = chain_at(org, new_root, Epoch::new(2));
     let ctx = ctx(org);
-    let out = verify_envelope_against_chain(&local, &env, &ctx, &chain).unwrap();
+    let out = verify_envelope_against_chain(&local, &env, &ctx, chain).unwrap();
     assert_eq!(out.epoch, Epoch::new(2));
     assert_eq!(out.seq_guard.last_seen(), SequenceNumber::new(2));
     assert_eq!(out.trie.root_hash().unwrap(), new_root);
@@ -81,10 +79,10 @@ fn happy_path_commits_when_root_matches_chain() {
 #[test]
 fn rejects_wrong_org_id() {
     let (_org, local, env, _) = setup();
-    let chain = MockChain::new();
+    let chain = None;
     let ctx = ctx(OrgId::new([0xff; 20]));
     assert_eq!(
-        verify_envelope_against_chain(&local, &env, &ctx, &chain).unwrap_err(),
+        verify_envelope_against_chain(&local, &env, &ctx, chain).unwrap_err(),
         OrgNodeError::OrgIdMismatch
     );
 }
@@ -99,63 +97,27 @@ fn rejects_stale_seq() {
         ..ctx(org)
     };
     assert_eq!(
-        verify_envelope_against_chain(&local, &env, &ctx, &chain).unwrap_err(),
+        verify_envelope_against_chain(&local, &env, &ctx, chain).unwrap_err(),
         OrgNodeError::StaleSeq { got: 2, last_seen: 2 }
     );
 }
 
-// verifies: REQ-bvh8v6, LLR-8m99q2, LLR-rm9x4z
+// verifies: REQ-bvh8v6, LLR-8m99q2
 #[test]
 fn rejects_when_org_absent_from_chain() {
     let (org, local, env, _) = setup();
-    let chain = MockChain::new(); // empty
+    let chain = None; // no state for the Organisation
     let ctx = ctx(org);
     assert_eq!(
-        verify_envelope_against_chain(&local, &env, &ctx, &chain).unwrap_err(),
+        verify_envelope_against_chain(&local, &env, &ctx, chain).unwrap_err(),
         OrgNodeError::OrgNotOnChain
     );
 }
 
-/// A `ChainReader` whose read FAILS, as distinct from one that reports the
-/// Organisation absent. Added 2026-10-04 after review round 2: no reader
-/// reachable at this gate could return `Err` — `MockChain::get_org_state`
-/// always returns `Ok`, and `ChainOpsReader` wraps a state already read — so
-/// the second clause of LLR-8m99q2 and the whole of LLR-rm9x4z's "a failure is
-/// the `Err` arm" rested on nothing: changing `.map_err(OrgNodeError::Chain)`
-/// in `verify.rs` to any other variant left the gate green.
-struct FailingChain;
-
-impl org_node::chain::ChainReader for FailingChain {
-    fn get_org_state(&self, _org_id: &OrgId) -> Result<Option<OrgState>, String> {
-        Err("registry read failed".into())
-    }
-}
-
-// The abnormal-input case of SDD-pa6p7w: absence and failure are different
-// answers and must not collapse into one rejection. A caller that cannot tell
-// them apart would treat a transient registry failure as proof that the
-// Organisation does not exist — the trusted-root oracle reporting "no anchor"
-// when what happened is "no answer".
-// verifies: REQ-bvh8v6, LLR-8m99q2, LLR-rm9x4z
-#[test]
-fn a_chain_read_that_fails_is_refused_as_chain_not_as_absence() {
-    let (org, local, env, _) = setup();
-
-    let failed = verify_envelope_against_chain(&local, &env, &ctx(org), &FailingChain)
-        .unwrap_err();
-    assert_eq!(
-        failed,
-        OrgNodeError::Chain("registry read failed".into()),
-        "a failed chain read must be refused with Chain, carrying the reason"
-    );
-
-    // The same envelope against an EMPTY chain is a different rejection, so
-    // the two answers are distinguished rather than merged.
-    let absent = verify_envelope_against_chain(&local, &env, &ctx(org), &MockChain::new())
-        .unwrap_err();
-    assert_eq!(absent, OrgNodeError::OrgNotOnChain);
-    assert_ne!(failed, absent, "a read failure and an absent slot must not be the same error");
-}
+// (2026-10-08, change worktree-org-io-create, ruling B: the test that a
+// failed chain read is refused as `Chain`, not as absence, left with the
+// read. org-node is given a state or `None` and never sees a read fail;
+// org-io's chain-read tests tell the two apart.)
 
 // REQ-nhe2zu's commit rule, and REQ-txvtm9's after it, is conditional, so
 // withholding the commit when the recomputed root does not match the
@@ -177,7 +139,7 @@ fn rejects_root_mismatch_when_chain_root_differs() {
     let ctx = ctx(org);
     assert_eq!(ctx.seq_guard.last_seen(), SequenceNumber::new(1), "the mark this test hands in");
     assert_eq!(
-        verify_envelope_against_chain(&local, &env, &ctx, &chain).unwrap_err(),
+        verify_envelope_against_chain(&local, &env, &ctx, chain).unwrap_err(),
         OrgNodeError::RootMismatch
     );
     assert_eq!(
@@ -194,7 +156,7 @@ fn rejects_stale_epoch() {
     let chain = chain_at(org, new_root, Epoch::new(1)); // chain epoch 1 is not newer than committed 1
     let ctx = ctx(org);
     assert_eq!(
-        verify_envelope_against_chain(&local, &env, &ctx, &chain).unwrap_err(),
+        verify_envelope_against_chain(&local, &env, &ctx, chain).unwrap_err(),
         OrgNodeError::StaleEpoch { got: 1, last: 1 }
     );
 }
@@ -234,7 +196,7 @@ fn rejects_wrong_org_before_decoding_delta() {
     let (org, local, _env, _) = setup();
     let ctx = ctx(OrgId::new([0xee; 20]));
     assert_eq!(
-        verify_envelope_against_chain(&local, &garbage(org, 2), &ctx, &MockChain::new())
+        verify_envelope_against_chain(&local, &garbage(org, 2), &ctx, None)
             .unwrap_err(),
         OrgNodeError::OrgIdMismatch
     );
@@ -248,7 +210,7 @@ fn rejects_wrong_org_before_decoding_delta() {
 fn undecodable_change_set_bytes_are_refused_as_malformed_delta() {
     let (org, local, _env, _) = setup();
     assert_eq!(
-        verify_envelope_against_chain(&local, &garbage(org, 2), &ctx(org), &MockChain::new())
+        verify_envelope_against_chain(&local, &garbage(org, 2), &ctx(org), None)
             .unwrap_err(),
         OrgNodeError::MalformedDelta
     );
@@ -263,7 +225,7 @@ fn rejects_stale_seq_before_decoding_delta() {
     let (org, local, _env, _) = setup();
     let ctx = ctx(org); // SeqGuard::from_last_seen(SequenceNumber::new(1))
     assert_eq!(
-        verify_envelope_against_chain(&local, &garbage(org, 1), &ctx, &MockChain::new())
+        verify_envelope_against_chain(&local, &garbage(org, 1), &ctx, None)
             .unwrap_err(),
         OrgNodeError::StaleSeq { got: 1, last_seen: 1 }
     );
@@ -310,7 +272,7 @@ fn rejects_a_delta_whose_base_root_is_not_the_local_root() {
     let divergent = genesis_trie(&stranger, &stranger_device);
 
     let chain = chain_at(org, new_root, Epoch::new(2));
-    let err = verify_envelope_against_chain(&divergent, &env, &ctx(org), &chain)
+    let err = verify_envelope_against_chain(&divergent, &env, &ctx(org), chain)
         .unwrap_err();
     assert_eq!(err, OrgNodeError::DeltaBaseMismatch);
 }
@@ -325,7 +287,7 @@ fn a_successful_verification_leaves_the_callers_trie_untouched() {
 
     let chain = chain_at(org, new_root, Epoch::new(2));
     let verified =
-        verify_envelope_against_chain(&local, &env, &ctx(org), &chain)
+        verify_envelope_against_chain(&local, &env, &ctx(org), chain)
             .unwrap();
 
     assert_eq!(local.root_hash().unwrap(), root_before, "the caller's trie moved");
@@ -347,7 +309,7 @@ fn a_rejected_verification_leaves_the_callers_trie_untouched() {
     // root the Change set does not reach. LLR-8hwqru is about the caller's
     // trie on any rejection path, not about which check rejects.
     let chain = chain_at(org, RootHash::new([0xde; 32]), Epoch::new(2));
-    assert!(verify_envelope_against_chain(&local, &env, &ctx(org), &chain).is_err());
+    assert!(verify_envelope_against_chain(&local, &env, &ctx(org), chain).is_err());
     assert_eq!(local.root_hash().unwrap(), root_before);
 }
 
@@ -362,7 +324,7 @@ fn a_stale_epoch_names_the_chain_epoch_and_the_committed_epoch_the_right_way_rou
     let (org, local, env, new_root) = setup();
     // ctx() commits epoch 1; the chain is behind it at epoch 0.
     let chain = chain_at(org, new_root, Epoch::new(0));
-    let err = verify_envelope_against_chain(&local, &env, &ctx(org), &chain).unwrap_err();
+    let err = verify_envelope_against_chain(&local, &env, &ctx(org), chain).unwrap_err();
     assert_eq!(err, OrgNodeError::StaleEpoch { got: 0, last: 1 });
 }
 
@@ -379,11 +341,11 @@ fn a_sequence_number_other_than_the_chain_epoch_is_refused() {
     let (org, local, env, new_root) = setup();
     let ctx = ctx(org);
 
-    let behind = verify_envelope_against_chain(&local, &env, &ctx, &chain_at(org, new_root, Epoch::new(3))).unwrap_err();
+    let behind = verify_envelope_against_chain(&local, &env, &ctx, chain_at(org, new_root, Epoch::new(3))).unwrap_err();
     assert_eq!(behind, OrgNodeError::SeqNotEpoch { seq: 2, epoch: 3 });
 
     let jam = Envelope { parent_seq: SequenceNumber::new(u64::MAX), ..env.clone() };
-    let ahead = verify_envelope_against_chain(&local, &jam, &ctx, &chain_at(org, new_root, Epoch::new(2))).unwrap_err();
+    let ahead = verify_envelope_against_chain(&local, &jam, &ctx, chain_at(org, new_root, Epoch::new(2))).unwrap_err();
     assert_eq!(ahead, OrgNodeError::SeqNotEpoch { seq: u64::MAX, epoch: 2 });
     assert_eq!(ctx.seq_guard.last_seen(), SequenceNumber::new(1), "a refusal must leave the mark where it was");
 }
@@ -402,29 +364,17 @@ fn the_sequence_number_is_checked_after_the_stale_epoch_and_before_the_root_matc
     let ctx = ctx(org);
 
     // Chain epoch 1 is not newer than the committed 1, and 2 is not 1.
-    let stale = verify_envelope_against_chain(&local, &env, &ctx, &chain_at(org, new_root, Epoch::new(1))).unwrap_err();
+    let stale = verify_envelope_against_chain(&local, &env, &ctx, chain_at(org, new_root, Epoch::new(1))).unwrap_err();
     assert_eq!(stale, OrgNodeError::StaleEpoch { got: 1, last: 1 });
 
     // 2 is not the chain's epoch 3, and the chain's root is not the one the
     // Change set reaches.
     let wrong_root = chain_at(org, RootHash::new([0xde; 32]), Epoch::new(3));
-    let both = verify_envelope_against_chain(&local, &env, &ctx, &wrong_root).unwrap_err();
+    let both = verify_envelope_against_chain(&local, &env, &ctx, wrong_root).unwrap_err();
     assert_eq!(both, OrgNodeError::SeqNotEpoch { seq: 2, epoch: 3 });
 }
 
 // ---- the chain-free half (T5 of docs/plans/2026-10-05-chain-authority.md) ---
-
-/// A chain reader that counts its reads.
-struct Counting {
-    inner: MockChain,
-    reads: Cell<usize>,
-}
-impl org_node::chain::ChainReader for Counting {
-    fn get_org_state(&self, org: &OrgId) -> Result<Option<OrgState>, String> {
-        self.reads.set(self.reads.get() + 1);
-        self.inner.get_org_state(org)
-    }
-}
 
 // Normal: an honest envelope passes the four chain-free checks.
 // verifies: REQ-f2k4tr, LLR-fuq379
@@ -448,18 +398,24 @@ fn check_chain_free_refuses_each_check_in_order() {
     assert_eq!(check_chain_free(&local, &wrong_base, &ctx(org)), Err(OrgNodeError::DeltaBaseMismatch));
 }
 
-// Abnormal and normal: verify reads the chain only after the chain-free
-// checks pass, and then exactly once.
+// Abnormal and normal: verify looks at the chain state only after the
+// chain-free checks pass. *Rewritten 2026-10-08 (ruling B, change
+// worktree-org-io-create):* the state is a value, so there is no read to
+// count; instead, a chain-free refusal given no state is still that refusal,
+// not `OrgNotOnChain`, and an envelope that passes them is refused for want
+// of a state and committed given one.
 // verifies: REQ-f2k4tr, LLR-fuq379
 #[test]
 fn verify_reads_the_chain_once_and_only_after_the_chain_free_checks() {
     let (org, local, env, new_root) = setup();
-    let chain = Counting { inner: chain_at(org, new_root, Epoch::new(2)), reads: Cell::new(0) };
     let stale = Envelope { parent_seq: SequenceNumber::new(1), ..env.clone() };
-    assert!(verify_envelope_against_chain(&local, &stale, &ctx(org), &chain).is_err());
-    assert_eq!(chain.reads.get(), 0, "a chain-free refusal reads no chain");
-    verify_envelope_against_chain(&local, &env, &ctx(org), &chain).unwrap();
-    assert_eq!(chain.reads.get(), 1, "a passing envelope reads the chain once");
+    assert_eq!(
+        verify_envelope_against_chain(&local, &stale, &ctx(org), None).unwrap_err(),
+        OrgNodeError::StaleSeq { got: 1, last_seen: 1 },
+        "a chain-free refusal comes before the state is looked at"
+    );
+    assert_eq!(verify_envelope_against_chain(&local, &env, &ctx(org), None).unwrap_err(), OrgNodeError::OrgNotOnChain);
+    verify_envelope_against_chain(&local, &env, &ctx(org), chain_at(org, new_root, Epoch::new(2))).unwrap();
 }
 
 // ---- normal cases of LLR-9sknpa and LLR-mcdh85 (S3 robustness, 2026-10-07) --
@@ -477,22 +433,21 @@ fn a_change_set_that_decodes_and_extends_the_record_is_taken() {
         let fresh = Envelope { parent_seq: SequenceNumber::new(seq), ..env.clone() };
         assert_eq!(check_chain_free(&local, &fresh, &ctx(org)), Ok(()), "Sequence number {seq}");
     }
-    let verified = verify_envelope_against_chain(&local, &env, &ctx(org), &chain_at(org, new_root, Epoch::new(2))).unwrap();
+    let verified = verify_envelope_against_chain(&local, &env, &ctx(org), chain_at(org, new_root, Epoch::new(2))).unwrap();
     assert_eq!(verified.trie.root_hash().unwrap(), new_root);
 }
 
 // Normal: an Envelope of exactly the Organisation, a Sequence number one past
 // the mark and decodable Change set bytes — no signature, no sender, and a
 // context that holds no key — is decoded and verified: nothing but the mark
-// stands between the binding and the decode, and the chain is read once.
+// stands between the binding and the decode, and the chain state is the one
+// verified against (2026-10-08: it is a value now, so no read is counted).
 // verifies: LLR-mcdh85
 #[test]
 fn an_envelope_past_the_mark_is_decoded_and_verified_with_no_signature_or_sender() {
     let (org, local, env, new_root) = setup();
     let bare = Envelope { org_id: org, parent_seq: SequenceNumber::new(2), delta_bytes: env.delta_bytes.clone() };
-    let chain = Counting { inner: chain_at(org, new_root, Epoch::new(2)), reads: Cell::new(0) };
-    let verified = verify_envelope_against_chain(&local, &bare, &ctx(org), &chain).unwrap();
-    assert_eq!(chain.reads.get(), 1);
+    let verified = verify_envelope_against_chain(&local, &bare, &ctx(org), chain_at(org, new_root, Epoch::new(2))).unwrap();
     assert_eq!((verified.epoch, verified.seq_guard.last_seen()), (Epoch::new(2), SequenceNumber::new(2)));
     assert_eq!(verified.trie.root_hash().unwrap(), new_root);
 }

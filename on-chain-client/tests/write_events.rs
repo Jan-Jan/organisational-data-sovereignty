@@ -7,6 +7,7 @@
 use on_chain_client::write::events::{dispatch_result, observed_event, outcome_of, ObservedEvent};
 use on_chain_client::write::proxy::{is_proxied, map_account_call, proxied};
 use on_chain_client::write::{AccountId, DispatchOutcome, WriteError};
+use std::cell::Cell;
 use subxt::dynamic::Value;
 use subxt::ext::scale_value::Composite;
 
@@ -75,17 +76,35 @@ fn a_proxy_executed_result_that_is_not_ok_or_err_is_a_typed_decode_failure() {
 #[test]
 fn observed_event_decodes_proxy_executed_and_ignores_the_fields_of_other_events() {
     let err = proxy_executed_fields(Value::variant("Err", Composite::unnamed(vec![module_error()])));
+    let read = Cell::new(false);
     assert!(matches!(
-        observed_event("Proxy", "ProxyExecuted", || Ok(err.clone())),
+        observed_event("Proxy", "ProxyExecuted", fields_reader(Ok(err), &read)),
         Ok(ObservedEvent::ProxyExecuted(Err(_)))
     ));
+    assert!(read.take(), "ProxyExecuted's fields are decoded");
     assert_eq!(
-        observed_event("Proxy", "ProxyExecuted", || Err(WriteError::Subxt("decode fields".into()))),
+        observed_event("Proxy", "ProxyExecuted", fields_reader(Err(WriteError::Subxt("decode fields".into())), &read)),
         Err(WriteError::Subxt("decode fields".into()))
     );
-    let never = || -> Result<Composite<()>, WriteError> { panic!("an event other than ProxyExecuted is not decoded") };
-    assert_eq!(observed_event("Proxy", "PureCreated", never), Ok(ObservedEvent::Other));
-    assert_eq!(observed_event("System", "ProxyExecuted", never), Ok(ObservedEvent::Other));
+    assert!(read.take(), "ProxyExecuted's fields are decoded");
+    let unused = proxy_executed_fields(Value::variant("Ok", Composite::unnamed(vec![])));
+    assert_eq!(observed_event("Proxy", "PureCreated", fields_reader(Ok(unused.clone()), &read)), Ok(ObservedEvent::Other));
+    assert!(!read.get(), "an event other than ProxyExecuted is not decoded");
+    assert_eq!(observed_event("System", "ProxyExecuted", fields_reader(Ok(unused), &read)), Ok(ObservedEvent::Other));
+    assert!(!read.get(), "an event other than ProxyExecuted is not decoded");
+}
+
+/// The one closure type every `observed_event` call in this file passes, so
+/// they share one instantiation (llvm-cov counts each apart): it yields
+/// `fields` and records in `read` that it was called.
+fn fields_reader(
+    fields: Result<Composite<()>, WriteError>,
+    read: &Cell<bool>,
+) -> impl FnOnce() -> Result<Composite<()>, WriteError> + '_ {
+    move || {
+        read.set(true);
+        fields
+    }
 }
 
 // verifies: LLR-24mwew, REQ-aat4yt, REQ-6jefu2
@@ -133,4 +152,11 @@ fn is_proxied_is_true_only_for_proxy_proxy() {
     assert!(is_proxied(&proxied(PROXY, map_account_call())));
     assert!(!is_proxied(&map_account_call()));
     assert!(!is_proxied(&on_chain_client::write::proxy::create_pure_call()));
+}
+
+// verifies: LLR-24mwew
+#[test]
+fn is_proxied_is_false_for_a_call_that_is_not_a_variant() {
+    assert!(!is_proxied(&Value::u128(0)));
+    assert!(!is_proxied(&Value::unnamed_composite(vec![Value::variant("proxy", Composite::unnamed(vec![]))])));
 }

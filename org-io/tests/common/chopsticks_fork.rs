@@ -1,4 +1,4 @@
-// Duplicated from on-chain-client/tests/common/chopsticks_fork.rs for the org-node e2e harness.
+// Duplicated from on-chain-client/tests/common/chopsticks_fork.rs for the org-node e2e harness; copied to org-io with the preflight 2026-10-07.
 //! Spawn / teardown a chopsticks-Paseo fork from a Rust test. Mirrors
 //! `../on-chain/scripts/chopsticks-sanity.sh`'s startup logic — same
 //! config, same HTTP pre-warm (chopsticks's WS metadata path observably
@@ -210,7 +210,7 @@ async fn wait_for_port_free(port: u16, budget: Duration) -> Option<()> {
 }
 
 fn on_chain_dir() -> PathBuf {
-    // Resolve `../on-chain/` relative to `org-node/`. CARGO_MANIFEST_DIR
+    // Resolve `../on-chain/` relative to `org-io/`. CARGO_MANIFEST_DIR
     // is set by Cargo when running tests.
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
         .map(PathBuf::from)

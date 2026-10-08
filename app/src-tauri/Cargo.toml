@@ -22,15 +22,13 @@ tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "time"
 hex = "0.4"
 # The invitation Blobs (`src/invitation.rs`): Base64 of postcard.
 base64 = "0.22"
-async-trait = "0.1"
 rand = "0.8"
 postcard = { version = "1", features = ["use-std"] }
 iroh = { version = "0.98" }
-# Needed by state.rs connect_chain (only used when ODS_CHAIN_WS is set at runtime).
-subxt = { version = "0.50", default-features = false, features = ["native", "jsonrpsee"] }
-subxt-signer = { version = "0.50", default-features = false, features = ["sr25519", "subxt"] }
-on-chain-client = { path = "../../on-chain-client", default-features = false, features = ["dev-rpc", "write"] }
-org-node = { path = "../../org-node", features = ["app"] }
+# The app's one way in to org-node, the chain and the signatory key
+# (docs/adr/2026-10-06-org-io-unit.md). Since S2 the app names no other unit
+# and no chain library (org-io/tests/app_boundary.rs).
+org-io = { path = "../../org-io" }
 
 [features]
 # Gates the test-only constructors and the integration test targets below.
@@ -38,6 +36,10 @@ org-node = { path = "../../org-node", features = ["app"] }
 # target with the feature off is a cargo ERROR rather than a silent skip —
 # the property on-chain-client's nine targets rely on.
 test-support = []
+# A development build: org-io reads the signing seed (ODS_ADMIN_SEED) only
+# with this feature (`npm run tauri dev -- --features dev-seed`). No release
+# build enables it.
+dev-seed = ["org-io/dev-seed"]
 
 [dev-dependencies]
 # `tauri/test` supplies mock_builder / mock_context / get_ipc_response, used by
@@ -46,15 +48,9 @@ test-support = []
 # an optional feature of the main entry.
 tauri = { version = "2", features = ["test"] }
 tempfile = "3"
-# `tests/submit_flow.rs` runs the 90 s write bound (LLR-be3zv9) on tokio's
-# paused clock (`#[tokio::test(start_paused = true)]`).
-tokio = { version = "1", features = ["test-util"] }
-# `tests/receiver_events.rs` constructs `OrgNodeError::Trie(_)`, whose payload
-# is an `org_members::OrgMembersError`. org-node does not re-export the type and
-# an integration test crate cannot reach a transitive dependency, so the test
-# needs the path dependency of its own. Same features as org-node's entry, so
-# feature unification changes nothing about the lib build.
-org-members = { path = "../../org-members", default-features = false, features = ["std", "serde"] }
+# org-io's test-only substitutes (`org_io::test_support::FakeChain`, the
+# handle's `OrgIo::for_test`) for the app's integration tests.
+org-io = { path = "../../org-io", features = ["test-support"] }
 
 [[test]]
 name = "startup_policy"

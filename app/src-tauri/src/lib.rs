@@ -1,6 +1,6 @@
 //! ODS PoC Tauri app library.
 //!
-//! Wires `AppState` (OrgService + chain config) into the Tauri builder,
+//! Wires `AppState` (the org-io handle + chain config) into the Tauri builder,
 //! registers all Tauri commands, and exposes the `run()` entry point.
 
 pub mod commands;
@@ -9,7 +9,6 @@ pub mod invitation;
 pub mod parsing;
 pub mod policy;
 pub mod state;
-pub mod submit;
 
 use tauri::Manager;
 

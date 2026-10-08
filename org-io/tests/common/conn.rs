@@ -1,4 +1,4 @@
-// Duplicated from on-chain-client/tests/common/conn.rs for the org-node e2e harness.
+// Duplicated from on-chain-client/tests/common/conn.rs for the org-node e2e harness; copied to org-io with the preflight 2026-10-07.
 //! Build subxt `OnlineClient`s for tests. Always over an explicit
 //! `LegacyBackend`: chopsticks fully implements the legacy RPC group
 //! (it targets polkadot.js) but only part of the v2 groups — e.g.

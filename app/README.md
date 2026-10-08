@@ -29,6 +29,7 @@ app/
 cd app
 npm install
 npm run tauri dev      # launches the desktop app (SvelteKit dev server on :5173)
+npm run tauri dev -- --features dev-seed   # the same, with chain writes: org-io reads ODS_ADMIN_SEED only in this build
 # build checks:
 npm run build          # static frontend → app/build/
 npm run check          # svelte-check
@@ -43,7 +44,7 @@ npm run check          # svelte-check
 | `ODS_PASSPHRASE` | Passphrase for the encrypted store (S9) | `ods-dev-default` |
 | `ODS_CHAIN_WS` | Chain WS endpoint (e.g. `ws://localhost:8000`) | unset → chain not configured |
 | `ODS_CONTRACT_H160` | Deployed `OrgRegistry` address (40 hex chars) | — |
-| `ODS_ADMIN_SEED` | Admin signer seed (64 hex / 32 bytes; must be a funded account for writes) | — |
+| `ODS_ADMIN_SEED` | Your own sr25519 signatory seed (64 hex / 32 bytes; must be a funded account for writes). Read by org-io, and only in a build with the `dev-seed` feature; without it the chain is not configured | — |
 | `ODS_COSIGNER_PUB` | Co-signer public key for the 1-of-2 multisig (64 hex) | none (1-of-1, which the runtime rejects — set it) |
 
 If the chain vars are unset, the app runs but on-chain commands return

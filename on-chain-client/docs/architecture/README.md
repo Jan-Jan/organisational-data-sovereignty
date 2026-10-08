@@ -84,6 +84,13 @@ writer holds no key and stores nothing, takes this unit's own value types, and
 depends on neither org-node nor org-members. It is class C like the rest and
 has no segregation boundary of its own.
 
+*Amended 2026-10-08 (change `worktree-org-io-create`; ADR
+`docs/adr/2026-10-06-org-io-unit.md`).* "the app calls it" above is now
+org-io: org-io calls the writer (SDD-yg7n55) and is the only consumer of the
+reader as well, so neither the app nor org-node depends on this unit. org-io
+also calls the two signatory-set reads of SDD-rxfu6h. No item's meaning
+changes.
+
 **Source cells corrected 2026-09-28 by this change's review sweep.**
 SDD-4z3k2u read `` `src/client.rs` (`internals`) ``, but the item is
 `internals::log_is_ours` **and** `event_admin`, and `event_admin` is not inside
@@ -124,6 +131,12 @@ cannot carry an edge in either direction; the edges onto this unit are in
 which list `on-chain-client`.) The unit is depended *upon* — by `org-node`
 and `app` — and the obligations that creates run in the other direction, as
 expectations addressed to this unit.
+
+*Amended 2026-10-08 (change `worktree-org-io-create`).* The edges named
+above leave with this change: org-node and the app drop `on-chain-client`
+from their `depends_on:`, and the one edge onto this unit is in
+`org-io/.guardrails/config.yaml`. The unit is depended upon by `org-io`
+alone, and the segregation finding is unchanged (org-io is class C).
 
 **SDD-3b8zef is a recorded deviation from class C's per-item LLR obligation**,
 not a per-item class override. The majority of `client.rs` — the async subxt

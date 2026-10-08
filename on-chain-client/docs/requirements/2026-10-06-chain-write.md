@@ -8,6 +8,16 @@ from org-node (`org-node/src/ceremony.rs`, `org-node/src/chain_write/`) to this
 unit, and the app calls them. org-node keeps reading the chain through this
 unit and verifies updates against what it reads.
 
+*Amended 2026-10-08 (change `worktree-org-io-create`, stage S2 of
+`docs/plans/2026-10-06-org-io-roadmap.md`; ADR
+`docs/adr/2026-10-06-org-io-unit.md`).* The consumer named above changed;
+neither requirement's meaning did. The paragraph read "the app calls them.
+org-node keeps reading the chain through this unit and verifies updates
+against what it reads." Both now hold of org-io: org-io calls the genesis
+ceremony and the update submission, and org-io reads the chain through this
+unit, handing org-node the Organisation state it read for verification.
+Neither the app nor org-node depends on this unit any more.
+
 Both requirements are `satisfies: derived`: they exist because of where the
 owner placed the chain write, not because a system-needs document asked for it.
 Terms: *Organisation admin*, *Organisation slot* and *Epoch* are defined in

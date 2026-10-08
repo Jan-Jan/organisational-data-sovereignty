@@ -4,6 +4,14 @@
 //! The story operations — `found`, `prepare_to_join`, `joiner_of`, `admit`,
 //! `revoke` — are the only place a test performs a story step, so a change to
 //! the service API changes their bodies and not the tests that call them.
+//!
+//! Since ruling B (change `worktree-org-io-create`) org-node reads no chain:
+//! its chain-judging operations take the state as a value. A test drives a
+//! [`Node`]: an `OrgService` with the chain view (`CountingChain`) a test's
+//! org-io reads through, whose methods run the sequence org-io runs — read
+//! the state, then call the synchronous operation with it; on a receive,
+//! transport, the chain-free phase, a read only when it returns
+//! `Prepared::NeedsChain`, then the apply phase.
 #![allow(dead_code, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::path::PathBuf;
@@ -16,8 +24,9 @@ use org_node::chain::OrgState;
 use org_node::error::OrgNodeError;
 use org_node::ids::OrgId;
 use org_node::keys::SigningKeypair;
-use org_node::service::{ChainOps, MockChainOps, OrgService, ReceiveOutcome, SelfDeleteOutcome};
+use org_node::service::{CommitOutcome, OrgService, Prepared, ReceiveOutcome, SelfDeleteOutcome};
 use org_node::store::{MemberSnapshot, OrgRecord, PersonaRecord, PersonaStore, ProvisionalChange, ProvisionalUpdate};
+use org_node::test_fixtures::ChainSlots;
 use org_node::{ChainAccount, Joiner, OrgPrivateKey};
 use org_node::transport::endpoint::OrgEndpoint;
 use org_node::transport::wire::WireMessage;
@@ -25,6 +34,102 @@ use org_node::{DeviceSeed, Epoch, PersonaId};
 use rand::rngs::OsRng;
 
 pub const NET: Duration = Duration::from_secs(30);
+
+/// An `OrgService` and the chain view its org-io reads through. Derefs to
+/// the service for every chain-free operation; the methods below shadow the
+/// chain-judging ones with org-io's sequence around them.
+pub struct Node {
+    pub svc: OrgService,
+    pub view: CountingChain,
+}
+
+impl std::ops::Deref for Node {
+    type Target = OrgService;
+    fn deref(&self) -> &OrgService {
+        &self.svc
+    }
+}
+
+impl std::ops::DerefMut for Node {
+    fn deref_mut(&mut self) -> &mut OrgService {
+        &mut self.svc
+    }
+}
+
+impl Node {
+    pub fn new(store: PersonaStore, view: impl Into<CountingChain>) -> Self {
+        Self { svc: OrgService::new(store), view: view.into() }
+    }
+
+    /// `OrgService::with_endpoint`, keeping the view.
+    pub fn with_endpoint(self, ep: OrgEndpoint) -> Self {
+        Self { svc: self.svc.with_endpoint(ep), view: self.view }
+    }
+
+    /// Read the state of `org_id`, then `OrgService::commit_genesis` with it.
+    pub async fn commit_genesis<R: rand_core::RngCore + rand_core::CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        persona_id: &PersonaId,
+        org_id: OrgId,
+        proxy_account: ChainAccount,
+    ) -> Result<ReceiveOutcome, OrgNodeError> {
+        let state = self.view.read(org_id)?;
+        self.svc.commit_genesis(rng, persona_id, org_id, proxy_account, state)
+    }
+
+    /// Read the state of `org_id` back after the write, then
+    /// `OrgService::commit_update` with it.
+    pub async fn commit_update<R: rand_core::RngCore + rand_core::CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        org_id: OrgId,
+    ) -> Result<CommitOutcome, OrgNodeError> {
+        let state = self.view.read(org_id)?;
+        self.svc.commit_update(rng, org_id, state)
+    }
+
+    /// Read the state of `org_id`, then `OrgService::reconcile` with it.
+    pub async fn reconcile<R: rand_core::RngCore + rand_core::CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        org_id: OrgId,
+    ) -> Result<org_node::reconcile::Reconciled, OrgNodeError> {
+        let state = self.view.read(org_id)?;
+        self.svc.reconcile(rng, org_id, state)
+    }
+
+    /// What org-io does on a receive: transport, chain-free phase, the
+    /// state, apply.
+    pub async fn receive_and_verify<R: rand_core::RngCore + rand_core::CryptoRng>(
+        &mut self,
+        rng: &mut R,
+    ) -> Result<ReceiveOutcome, OrgNodeError> {
+        let (sender, message) = self.svc.receive_message().await?;
+        match self.svc.prepare_receive(sender, message)? {
+            Prepared::Done(outcome) => Ok(outcome),
+            Prepared::NeedsChain(pending) => {
+                let state = self.view.read(pending.org_id())?;
+                self.svc.apply_receive(rng, pending, state)
+            }
+        }
+    }
+
+    /// `receive_and_verify`, on the self-delete path.
+    pub async fn receive_and_self_delete_if_revoked<R: rand_core::RngCore + rand_core::CryptoRng>(
+        &mut self,
+        rng: &mut R,
+    ) -> Result<SelfDeleteOutcome, OrgNodeError> {
+        let (sender, message) = self.svc.receive_message().await?;
+        match self.svc.prepare_self_delete(sender, message)? {
+            Prepared::Done(outcome) => Ok(outcome),
+            Prepared::NeedsChain(pending) => {
+                let state = self.view.read(pending.org_id())?;
+                self.svc.apply_self_delete(rng, pending, state)
+            }
+        }
+    }
+}
 
 /// The rogue relay's device seed — a third device, neither A's nor B's.
 pub const ROGUE_SEED: [u8; 32] = [0x33u8; 32];
@@ -77,7 +182,7 @@ pub fn persona_of(svc: &OrgService, persona_id: &PersonaId) -> PersonaRecord {
 
 /// The device keypair of a persona, from its persisted `device_seed`.
 pub fn device_kp(svc: &OrgService, persona_id: &PersonaId) -> SigningKeypair {
-    persona_of(svc, persona_id).device_seed.signing_keypair()
+    persona_of(svc, persona_id).device_seed_for_test().signing_keypair()
 }
 
 /// `svc`'s record of `org_id`, cloned.
@@ -107,11 +212,11 @@ pub fn dead_addr(seed: [u8; 32]) -> iroh::EndpointAddr {
 /// B's service and spawn `receive_and_verify`. Returns the address the sender
 /// must dial and the task handle yielding `(svc_b, result)`.
 pub async fn spawn_receive(
-    svc_b: OrgService,
+    svc_b: Node,
     b_device_kp: &SigningKeypair,
 ) -> (
     iroh::EndpointAddr,
-    tokio::task::JoinHandle<(OrgService, Result<ReceiveOutcome, OrgNodeError>)>,
+    tokio::task::JoinHandle<(Node, Result<ReceiveOutcome, OrgNodeError>)>,
 ) {
     let ep_b = OrgEndpoint::bind(b_device_kp).await.unwrap();
     let b_addr = ep_b.inner().addr();
@@ -130,12 +235,12 @@ pub async fn spawn_receive(
 /// Bind a fresh receiving endpoint for B and spawn the **self-delete** receive
 /// instead of the ordinary one. Mirrors `spawn_receive`.
 pub async fn spawn_self_delete(
-    svc_b: OrgService,
+    svc_b: Node,
     b_device_kp: &SigningKeypair,
 ) -> (
     iroh::EndpointAddr,
     tokio::task::JoinHandle<(
-        OrgService,
+        Node,
         Result<SelfDeleteOutcome, OrgNodeError>,
     )>,
 ) {
@@ -184,16 +289,17 @@ pub fn test_proxy() -> ChainAccount {
 
 /// The Organisation private key a provisional update holds.
 pub fn private_key_of(update: &ProvisionalUpdate) -> OrgPrivateKey {
-    match &update.change {
+    match update.change_for_test() {
         ProvisionalChange::Genesis { org_private_key, .. } | ProvisionalChange::ChangeSet { org_private_key, .. } => {
             org_private_key.clone()
         }
     }
 }
 
-/// Story 1: `pid` founds an Organisation — the genesis update is built, the
-/// app's chain write is stood in for by the mock, and the update committed.
-pub async fn found(svc: &mut OrgService, chain: &MockChainOps, pid: &PersonaId) -> OrgId {
+/// Story 1: `pid` founds an Organisation — the genesis update is built,
+/// org-io's chain write is stood in for by the slots, and the update
+/// committed against the state read back.
+pub async fn found(svc: &mut Node, chain: &ChainSlots, pid: &PersonaId) -> OrgId {
     let update = svc.create_organisation(&mut OsRng, pid).expect("build the genesis update");
     let org_id = chain.apply_genesis(update.resulting_root, update.org_pub_key);
     svc.commit_genesis(&mut OsRng, pid, org_id, test_proxy()).await.expect("commit genesis");
@@ -217,8 +323,8 @@ pub fn joiner_of(svc: &OrgService, pid: &PersonaId) -> Joiner {
 /// Story 3: admit `joiner` into `org_id`: build, write the chain (mock),
 /// commit, send to `addr`. Returns the joiner's new MemberId.
 pub async fn admit(
-    svc: &mut OrgService,
-    chain: &MockChainOps,
+    svc: &mut Node,
+    chain: &ChainSlots,
     org_id: OrgId,
     joiner: &Joiner,
     addr: iroh::EndpointAddr,
@@ -241,8 +347,8 @@ pub async fn admit(
 /// Story 5: revoke `member_id`: build, write the chain (mock), commit, send
 /// the committed revocation to the removed member's first device.
 pub async fn revoke(
-    svc: &mut OrgService,
-    chain: &MockChainOps,
+    svc: &mut Node,
+    chain: &ChainSlots,
     org_id: OrgId,
     member_id: MemberId,
     addr: Option<iroh::EndpointAddr>,
@@ -260,8 +366,8 @@ pub async fn revoke(
 /// the chain (mock), commit, and send the committed removal to `recipient`
 /// at `addr`.
 pub async fn revoke_and_tell(
-    svc: &mut OrgService,
-    chain: &MockChainOps,
+    svc: &mut Node,
+    chain: &ChainSlots,
     org_id: OrgId,
     member_id: MemberId,
     recipient: DevicePublicKey,
@@ -273,8 +379,8 @@ pub async fn revoke_and_tell(
 /// Build the removal of `member_id`, write the chain (mock), commit, and
 /// send the committed update to `recipient`.
 async fn revoke_and_send(
-    svc: &mut OrgService,
-    chain: &MockChainOps,
+    svc: &mut Node,
+    chain: &ChainSlots,
     org_id: OrgId,
     member_id: MemberId,
     recipient: DevicePublicKey,
@@ -348,9 +454,9 @@ pub fn with_key(msg: &WireMessage, org_private_key: OrgPrivateKey) -> WireMessag
 /// the test says not to), and A reads the joiner it admits B as. A's endpoint is bound
 /// from A's persona `device_seed`.
 pub struct Setup {
-    pub chain: MockChainOps,
-    pub svc_a: OrgService,
-    pub svc_b: OrgService,
+    pub chain: ChainSlots,
+    pub svc_a: Node,
+    pub svc_b: Node,
     pub org_id: OrgId,
     pub pid_a: PersonaId,
     pub pid_b: PersonaId,
@@ -363,21 +469,21 @@ pub async fn setup(tag: &str) -> Setup {
 }
 
 pub async fn setup_with(tag: &str, prepare: bool) -> Setup {
-    setup_over_both(tag, prepare, |c| Box::new(c), |c| Box::new(c)).await
+    setup_over_both(tag, prepare, CountingChain::over, CountingChain::over).await
 }
 
-/// `setup_with`, with A's service reading the chain through `a_chain(chain)`
+/// `setup_with`, with A's org-io reading the chain through `a_chain(chain)`
 /// and B's through `b_chain(chain)`.
 pub async fn setup_over_both(
     tag: &str,
     prepare: bool,
-    a_chain: impl FnOnce(MockChainOps) -> Box<dyn ChainOps>,
-    b_chain: impl FnOnce(MockChainOps) -> Box<dyn ChainOps>,
+    a_chain: impl FnOnce(ChainSlots) -> CountingChain,
+    b_chain: impl FnOnce(ChainSlots) -> CountingChain,
 ) -> Setup {
-    let chain = MockChainOps::new();
+    let chain = ChainSlots::new();
 
-    let mut svc_a = OrgService::new(open_store(tag, "a", "pw_a"), a_chain(chain.clone()));
-    let mut svc_b = OrgService::new(open_store(tag, "b", "pw_b"), b_chain(chain.clone()));
+    let mut svc_a = Node::new(open_store(tag, "a", "pw_a"), a_chain(chain.clone()));
+    let mut svc_b = Node::new(open_store(tag, "b", "pw_b"), b_chain(chain.clone()));
 
     // Story 1: A creates persona + org.
     let pid_a = svc_a.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
@@ -426,7 +532,7 @@ pub async fn admit_b_directly(mut s: Setup) -> Setup {
 /// A creates a further persona C and returns the joiner it is admitted as.
 /// A's founding Persona stays the first bound to the Organisation, so A
 /// still sends from its device.
-pub fn joiner_for_c(svc_a: &mut OrgService) -> Joiner {
+pub fn joiner_for_c(svc_a: &mut Node) -> Joiner {
     let pid_c = svc_a.create_persona(&mut OsRng, h("carol"), nm("Carol"), sn("Coder")).unwrap();
     let jr = joiner_of(svc_a, &pid_c);
     assert_eq!(jr.handle.as_str(), "carol");
@@ -494,19 +600,39 @@ pub fn snapshot_bytes(trie: &org_members::trie::OrgTrie<org_members::hasher::Bla
     postcard::to_allocvec(&members).unwrap()
 }
 
-/// A `ChainOps` over a shared `MockChainOps` that counts `read_state` calls,
-/// can hide an Organisation (answer `None` for it) and can fail every read.
+/// The state source a test's org-io reads through, over shared `ChainSlots`:
+/// it counts reads, can hide an Organisation (answer `None` for it) and can
+/// fail every read.
 #[derive(Clone)]
 pub struct CountingChain {
-    pub inner: MockChainOps,
+    slots: ChainSlots,
     reads: Arc<AtomicUsize>,
     hidden: Arc<Mutex<Vec<OrgId>>>,
     failing: Arc<AtomicBool>,
 }
 
+impl From<ChainSlots> for CountingChain {
+    fn from(slots: ChainSlots) -> Self {
+        Self::over(slots)
+    }
+}
+
 impl CountingChain {
-    pub fn over(inner: MockChainOps) -> Self {
-        Self { inner, reads: Default::default(), hidden: Default::default(), failing: Default::default() }
+    pub fn over(slots: ChainSlots) -> Self {
+        Self { slots, reads: Default::default(), hidden: Default::default(), failing: Default::default() }
+    }
+
+    /// One read of `org`'s state: counted, then the failing, hidden or slot
+    /// answer.
+    pub fn read(&self, org: OrgId) -> Result<Option<OrgState>, OrgNodeError> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        if self.failing.load(Ordering::SeqCst) {
+            return Err(OrgNodeError::Chain("chain unreachable".into()));
+        }
+        if self.hidden.lock().unwrap().contains(&org) {
+            return Ok(None);
+        }
+        Ok(self.slots.get(&org))
     }
     pub fn reads(&self) -> usize {
         self.reads.load(Ordering::SeqCst)
@@ -519,30 +645,12 @@ impl CountingChain {
     }
 }
 
-#[async_trait::async_trait]
-impl ChainOps for CountingChain {
-    async fn read_state(&self, org: OrgId) -> Result<Option<OrgState>, OrgNodeError> {
-        self.reads.fetch_add(1, Ordering::SeqCst);
-        if self.failing.load(Ordering::SeqCst) {
-            return Err(OrgNodeError::Chain("chain unreachable".into()));
-        }
-        if self.hidden.lock().unwrap().contains(&org) {
-            return Ok(None);
-        }
-        self.inner.read_state(org).await
-    }
-}
-
-/// `setup`, with B reading the chain through a `CountingChain`.
+/// `setup`, with B's org-io reading the chain through its own
+/// `CountingChain`, returned (B's view).
 pub async fn setup_counted(tag: &str) -> (Setup, CountingChain) {
-    let mut slot = None;
-    let s = setup_over_both(tag, true, |c| Box::new(c), |c| {
-        let counting = CountingChain::over(c);
-        slot = Some(counting.clone());
-        Box::new(counting)
-    })
-    .await;
-    (s, slot.expect("setup_over_both calls its closures"))
+    let s = setup(tag).await;
+    let counting = s.svc_b.view.clone();
+    (s, counting)
 }
 
 /// `setup`, with A and B both reading the chain through one `CountingChain`:
@@ -550,10 +658,9 @@ pub async fn setup_counted(tag: &str) -> (Setup, CountingChain) {
 pub async fn setup_counting(tag: &str) -> (Setup, CountingChain) {
     let shared: Arc<Mutex<Option<CountingChain>>> = Default::default();
     let counting_for = |shared: Arc<Mutex<Option<CountingChain>>>| {
-        move |c: MockChainOps| -> Box<dyn ChainOps> {
+        move |c: ChainSlots| -> CountingChain {
             let mut slot = shared.lock().unwrap();
-            let counting = slot.get_or_insert_with(|| CountingChain::over(c)).clone();
-            Box::new(counting)
+            slot.get_or_insert_with(|| CountingChain::over(c)).clone()
         }
     };
     let s = setup_over_both(tag, true, counting_for(shared.clone()), counting_for(shared.clone())).await;
@@ -584,7 +691,7 @@ async fn send_from(sender_seed: [u8; 32], addr: iroh::EndpointAddr, msg: &WireMe
 /// sender is refused for every message about a held Organisation: use this
 /// for the refusal cases, and `deliver_from_to_self_delete` from a listed
 /// Device otherwise.
-pub async fn deliver_to_self_delete(svc: &mut OrgService, msg: WireMessage) -> Result<SelfDeleteOutcome, OrgNodeError> {
+pub async fn deliver_to_self_delete(svc: &mut Node, msg: WireMessage) -> Result<SelfDeleteOutcome, OrgNodeError> {
     deliver_from_to_self_delete(svc, rand::random(), msg).await
 }
 
@@ -594,14 +701,14 @@ pub async fn deliver_to_self_delete(svc: &mut OrgService, msg: WireMessage) -> R
 /// for every message about a held Organisation: use this for the refusal
 /// cases and first admissions, and `deliver_from_to_receive` from a listed
 /// Device otherwise.
-pub async fn deliver_to_receive(svc: &mut OrgService, msg: WireMessage) -> Result<ReceiveOutcome, OrgNodeError> {
+pub async fn deliver_to_receive(svc: &mut Node, msg: WireMessage) -> Result<ReceiveOutcome, OrgNodeError> {
     deliver_from_to_receive(svc, rand::random(), msg).await
 }
 
 /// Deliver `msg` to `svc`'s `receive_and_self_delete_if_revoked` from the
 /// Device of `sender_seed`, and return its result.
 pub async fn deliver_from_to_self_delete(
-    svc: &mut OrgService,
+    svc: &mut Node,
     sender_seed: [u8; 32],
     msg: WireMessage,
 ) -> Result<SelfDeleteOutcome, OrgNodeError> {
@@ -616,7 +723,7 @@ pub async fn deliver_from_to_self_delete(
 /// Deliver `msg` to `svc`'s `receive_and_verify` from the Device of
 /// `sender_seed`, and return its result.
 pub async fn deliver_from_to_receive(
-    svc: &mut OrgService,
+    svc: &mut Node,
     sender_seed: [u8; 32],
     msg: WireMessage,
 ) -> Result<ReceiveOutcome, OrgNodeError> {
@@ -631,7 +738,7 @@ pub async fn deliver_from_to_receive(
 /// The device seed of `persona_id` in `svc`, as bytes: the Device a test
 /// sends from when the message must come from that Persona's Device.
 pub fn device_seed_of(svc: &OrgService, persona_id: &PersonaId) -> [u8; 32] {
-    *persona_of(svc, persona_id).device_seed.expose_secret()
+    *persona_of(svc, persona_id).device_seed_for_test().expose_secret()
 }
 
 /// A calculated trie of one Member that lists neither `member` nor `device`:

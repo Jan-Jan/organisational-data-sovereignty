@@ -1,12 +1,14 @@
 //! verify-against-chain: the single security property of the PoC. A received
 //! envelope is committed only if applying its delta reproduces a root that
 //! independently matches the on-chain root at a newer epoch. Nothing about who
-//! delivered it is checked (REQ-ag6kqm). See spec §5.2.
+//! delivered it is checked (REQ-ag6kqm). See spec §5.2. The chain's state is
+//! a value the caller passes: org-io reads it, org-node reads no chain
+//! (ruling B, change `worktree-org-io-create`).
 use org_members::delta::Delta;
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
 
-use crate::chain::ChainReader;
+use crate::chain::OrgState;
 use crate::envelope::Envelope;
 use crate::error::OrgNodeError;
 use crate::ids::OrgId;
@@ -55,32 +57,31 @@ fn chain_free(local_trie: &Trie, envelope: &Envelope, ctx: &VerifyContext) -> Re
 }
 
 /// The chain-free half of verify-against-chain, so a caller can refuse a
-/// stranger's Envelope before it reads the chain (LLR-fuq379, RC-mj6gjq).
-/// Touches no `ChainReader`.
+/// stranger's Envelope before any chain state is read for it (LLR-fuq379,
+/// RC-mj6gjq). Takes no chain state.
 pub fn check_chain_free(local_trie: &Trie, envelope: &Envelope, ctx: &VerifyContext) -> Result<(), OrgNodeError> {
     chain_free(local_trie, envelope, ctx).map(|_| ())
 }
 
-/// Verify an envelope against the local trie and an independent chain oracle.
+/// Verify an envelope against the local trie and `chain_state`, the state
+/// org-io read for the Organisation from a path the sender does not
+/// control; `None` (no state) is refused with `OrgNotOnChain` (LLR-8m99q2).
 ///
 /// Order is security-critical: cheap checks on what the envelope claims
-/// first, chain read and root match last. Returns the committed
+/// first, the chain state and root match last. Returns the committed
 /// trie or a typed rejection; never panics, never mutates `local_trie`.
-pub fn verify_envelope_against_chain<C: ChainReader>(
+pub fn verify_envelope_against_chain(
     local_trie: &Trie,
     envelope: &Envelope,
     ctx: &VerifyContext,
-    chain: &C,
+    chain_state: Option<OrgState>,
 ) -> Result<VerifiedUpdate, OrgNodeError> {
-    // 1–4. Org binding, replay, decode, base root: no chain read yet.
+    // 1–4. Org binding, replay, decode, base root: no chain state used yet.
     let delta = chain_free(local_trie, envelope, ctx)?;
     // 5. Apply → candidate.
     let candidate = local_trie.apply_delta(&delta)?;
     // 6. Independent trusted root + epoch from the chain.
-    let on_chain = chain
-        .get_org_state(&ctx.expected_org_id)
-        .map_err(OrgNodeError::Chain)?
-        .ok_or(OrgNodeError::OrgNotOnChain)?;
+    let on_chain = chain_state.ok_or(OrgNodeError::OrgNotOnChain)?;
     if on_chain.epoch <= ctx.last_committed_epoch {
         return Err(OrgNodeError::StaleEpoch { got: on_chain.epoch.get(), last: ctx.last_committed_epoch.get() });
     }

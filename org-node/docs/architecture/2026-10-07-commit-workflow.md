@@ -356,6 +356,9 @@ has bytes left over; the frame's 1 MiB bound (`MAX_FRAME`) applies to it as
 to every body, and `receive_one` maps `Malformed` to `MalformedMessage`.
 satisfies: REQ-ps2gy2, REQ-qrtsc9
 
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place: a
+rename. `receive_one` reads `receive_message`, now public, body unchanged.
+
 **LLR-378cj4**: `WireMessage::Acknowledgement(Acknowledgement)` (variant
 index 2) encodes, by postcard, `org_id`, `member_id`, `device`, `epoch`,
 `root` and the 64 signature bytes in that order; `decode_body` refuses with
@@ -478,6 +481,12 @@ returns `(DevicePublicKey, WireMessage)` instead of discarding it. Until S4
 moves receiving into org-io, org-node takes the sender from its own
 endpoint; afterwards org-io passes it in with the message (values in).
 
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* The sender
+is already a value: `receive_message` (public, the former `receive_one`)
+returns it with the message, and the chain-free phase (`prepare_receive`,
+`prepare_self_delete`) takes both as arguments. In S2 org-io passes what
+`receive_message` returned; S4 changes only who supplies it.
+
 **LLR-2r2fha**: on an `OrgInformation` message whose Envelope names an
 Organisation the store holds a record of, `receive_and_verify` and
 `receive_and_self_delete_if_revoked` refuse with `SenderNotListed { org_id }`
@@ -492,7 +501,18 @@ it: it is accepted from any sender and verified against the chain
 (REQ-xa6smf; owner amendment of 2026-10-07). A sender listed in the record
 and absent from the verified update's record (a Member relaying its own
 removal) passes.
-satisfies: REQ-ztdza4
+satisfies: REQ-uk9rw7
+
+*Re-parented 2026-10-08 (change worktree-org-io-create, owner's hybrid
+ruling on PR-zf924s).* This said `satisfies: REQ-ztdza4`. REQ-uk9rw7
+supersedes REQ-ztdza4 and states the same rule; this item is unchanged.
+
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
+where the check runs, the rule unchanged. "The sender `receive_one`
+returned" reads "the sender passed to `prepare_receive` /
+`prepare_self_delete`"; "before `check_chain_free`, the chain read and any
+decode" reads "in the chain-free phase, before `check_chain_free` and any
+decode, so the phase returns no pending value and no state is asked for".
 
 **LLR-kzgjz8**: on a `Revocation(notice)`, both receive paths, after
 `revocation::check_notice` passes (LLR-r7zm39) and before the chain read and
@@ -502,6 +522,13 @@ record of `notice.org_id`; the refusal reads no chain, never calls the seed
 source, writes nothing and saves nothing.
 satisfies: REQ-ea4qs5
 
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
+"the sender `receive_one` returned" reads "the sender passed to
+`prepare_receive` / `prepare_self_delete`"; "before the chain read and
+`revocation::accept`" reads "in the chain-free phase, so the phase returns
+no pending value and no state is asked for"; `revocation::accept` runs in
+the apply phase.
+
 **LLR-3aysup**: on an `Acknowledgement(ack)`, both receive paths call
 `revocation::check_acknowledgement(store, sender, ack)` (LLR-5azhry as
 amended) with the sender `receive_one` returned, and with no other Device key;
@@ -509,6 +536,11 @@ neither path applies LLR-2r2fha's or LLR-kzgjz8's check to an
 acknowledgement, whose sender is by design a Device the record no longer
 lists. No chain read, no write.
 satisfies: REQ-b462sh
+
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
+the check is made in the chain-free phase (`prepare_receive`,
+`prepare_self_delete`) with the sender passed to it, which returns the
+outcome itself (`Prepared::Done`), so no state is asked for.
 
 ## SDD-72ddm6 — The node's own removal (addition)
 

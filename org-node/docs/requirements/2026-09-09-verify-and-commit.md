@@ -121,6 +121,32 @@ under any other Device key with a typed error naming the Organisation, before
 it reads the chain, leaving the store unchanged.
 (implements: RC-b6mydy, RC-u7kdam)
 satisfies: derived
+superseded-by: REQ-uk9rw7
+
+*Superseded 2026-10-08 (change worktree-org-io-create; owner's hybrid ruling
+on PR-zf924s: a change of meaning mints a new ID).* The 2026-10-07 amendment
+below reversed this item's meaning under the same ID. REQ-uk9rw7
+(`2026-10-08-sender-rule.md`) states the rule that holds
+now; the text above is kept as it stood when superseded. Its tests stay
+annotated with this ID, and the new test of REQ-uk9rw7 names both.
+
+*Note 2026-10-08 (review round 1 of change worktree-org-io-create,
+finding-13: dual-ID coverage).* Two older tests still name only this ID:
+`org-node/tests/admission_sender.rs`'s
+`update_from_the_admin_after_admission_is_committed` (:88) and
+`a_removal_relayed_by_the_member_it_removes_is_committed` (:1393). They are
+already green, and the robustness rule forbids re-annotating a green test
+with a new ID: a test gains a new ID only by being watched red against it.
+The dual-ID coverage of the supersession is therefore the new red-first test
+`receive_chain_reads.rs`'s
+`an_update_from_an_unlisted_device_is_refused_before_any_chain_state_is_asked_for`
+(:487), which names REQ-uk9rw7 and REQ-ztdza4 both.
+
+*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place: a
+clarification of who reads. "Before it reads the chain" reads "before it
+takes any chain state, so that none is read for it": org-node no longer
+reads the chain, and the order of the read is stated in org-io's
+architecture ledger (`org-io/docs/architecture/2026-10-08-org-io.md`).
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 REQ-xa6smf first required a first admission's sender to be the administrator's
@@ -192,7 +218,7 @@ the Organisation private key (REQ-szq3ud).
 
 They do not state the base-root rule (REQ-4umsuz, org-members, exported): the
 node relies on it at step 5 of verification and it is org-members' behaviour.
-They do not state what the chain read returns (REQ-ysyu9g, an expectation on
+They do not state what the chain read returns (org-io's finalised-block expectation (moved 2026-10-07), an expectation on
 on-chain-client) nor what a Change set that removes a Device key must do to
 the Member-as-a-group key (REQ-q92yac, an expectation on org-members); both
 remain expectations, due 2026-12-05, and neither carries `(implements:)` in
@@ -229,3 +255,11 @@ nothing about the sender is checked.
 `worktree-org-io-commit-workflow`).* The membership cross-check is back for
 an Organisation the node holds: REQ-ztdza4 as amended that day. A first
 admission still checks nothing about the sender (REQ-xa6smf).
+
+*Amended 2026-10-08 (change `worktree-org-io-create`).* The membership
+cross-check is now stated by REQ-uk9rw7, which supersedes REQ-ztdza4 (owner's
+hybrid ruling on PR-zf924s). And by ruling B org-node reads no chain:
+`chain_read.rs` is deleted, `chain.rs` holds `OrgState` and its parse edge
+but no `ChainReader`, and the verify requirements take the chain's state as
+a value that org-io read (org-io's ledgers, `org-io/docs/`). The module list
+above is the one the hazard analysis ran over.

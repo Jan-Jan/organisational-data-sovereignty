@@ -8,12 +8,11 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
-use org_node::service::{Joiner, OrgService};
-use org_node::{DevicePublicKey, Handle, Name, OrgId, OrgNodeError, PersonPublicKey, PersonaId, Surname};
+use org_io::node::service::Joiner;
+use org_io::node::{DevicePublicKey, Handle, MemberId, Name, OrgId, OrgNodeError, PersonPublicKey, PersonaId, Surname};
+use org_io::{NodeView, OrgIo};
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
-
-use crate::submit::{submit_commit_send, ChainWriter};
 
 /// The identifier an Invite carries and its reply echoes (REQ-65xqp8): 32
 /// bytes this device drew at random. Not secret. The app's own type: it binds
@@ -270,18 +269,18 @@ impl OutstandingInvites {
 /// LLR-9sraks: an Invite for `org_id`, carrying the inviter's DevicePublicKeys
 /// (every Persona of this device bound to it) and a fresh outstanding id.
 pub fn issue_invite<R: RngCore + CryptoRng>(
-    svc: &OrgService,
+    view: NodeView<'_>,
     outstanding: &mut OutstandingInvites,
     rng: &mut R,
     org_id: OrgId,
     org_name: &str,
     invitee_name: &str,
 ) -> Result<String, String> {
-    let keys: Vec<DevicePublicKey> = svc
-        .list_personas()
+    let keys: Vec<DevicePublicKey> = view
+        .personas()
         .iter()
         .filter(|p| p.org_id == Some(org_id))
-        .map(|p| svc.persona_public_keys(&p.persona_id).map(|(_, d)| d).map_err(|e| e.to_string()))
+        .map(|p| view.persona_public_keys(&p.persona_id).map(|(_, d)| d).map_err(|e| e.to_string()))
         .collect::<Result<_, _>>()?;
     if keys.is_empty() {
         return Err("no Persona of this device belongs to that Organisation".into());
@@ -296,7 +295,7 @@ pub fn issue_invite<R: RngCore + CryptoRng>(
 /// (LLR-rt8gdz); declares the expected admission to the Invite's
 /// Organisation (REQ-tcutr6 as amended).
 pub fn produce_reply<R: RngCore + CryptoRng>(
-    svc: &mut OrgService,
+    mut svc: org_io::NodeBuilders<'_>,
     rng: &mut R,
     invite_blob: &str,
     persona_id: &PersonaId,
@@ -306,17 +305,12 @@ pub fn produce_reply<R: RngCore + CryptoRng>(
         return Err("confirm first: nothing has verified who sent this Invite or the name it states, and the reply reveals the chosen Persona's handle, name and surname".into());
     }
     let invite = Invite::parse(invite_blob)?;
-    let p = svc
-        .list_personas()
-        .iter()
-        .find(|p| &p.persona_id == persona_id)
-        .cloned()
-        .ok_or("no such Persona")?;
+    let p = svc.view().personas().into_iter().find(|p| &p.persona_id == persona_id).ok_or("no such Persona")?;
     // LLR-rt8gdz: one Persona, one Organisation.
     if p.org_id.is_some() {
         return Err(OrgNodeError::PersonaAlreadyBound { persona_id: persona_id.clone() }.to_string());
     }
-    let (member_key, device_key) = svc.persona_public_keys(persona_id).map_err(|e| e.to_string())?;
+    let (member_key, device_key) = svc.view().persona_public_keys(persona_id).map_err(|e| e.to_string())?;
     let reply = InviteReply {
         org_id: invite.org_id,
         invite_id: invite.invite_id,
@@ -341,20 +335,20 @@ pub fn check_reply(outstanding: &OutstandingInvites, reply_blob: &str) -> Result
     Ok(reply)
 }
 
-/// LLR-gha5f6, LLR-qhjp6g: admit the person a reply names, through the
-/// chain, to the Organisation its outstanding pair names, sent to the
-/// reply's Device alone (LLR-q225ws); the Invite is settled once the admission
-/// has committed, even when the send that follows fails. `org_id` is the
-/// operator's selection: it is not trusted, and must be that Organisation.
+/// LLR-gha5f6: admit the person a reply names, through org-io's submission
+/// (org-io's architecture ledger, the submission item), to the Organisation
+/// its outstanding pair names, sent to the reply's Device alone (LLR-q225ws);
+/// the Invite is settled once the admission has committed, even when the send
+/// that follows fails. `org_id` is the operator's selection: it is not
+/// trusted, and must be that Organisation.
 pub async fn admit_reply<R: RngCore + CryptoRng + Send>(
-    svc: &mut OrgService,
-    writer: &dyn ChainWriter,
+    io: &mut OrgIo,
     outstanding: &mut OutstandingInvites,
     rng: &mut R,
     org_id: OrgId,
     reply_blob: &str,
     peer_addr: Option<iroh::EndpointAddr>,
-) -> Result<org_node::MemberId, String> {
+) -> Result<MemberId, String> {
     let reply = check_reply(outstanding, reply_blob)?;
     if reply.org_id != org_id {
         return Err("this reply is for another Organisation".into());
@@ -366,13 +360,12 @@ pub async fn admit_reply<R: RngCore + CryptoRng + Send>(
         member_key: reply.member_key,
         device_key: reply.device_key,
     };
-    let update = svc.admit_member(rng, org_id, &joiner).map_err(|e| e.to_string())?;
-    let sent = submit_commit_send(svc, writer, rng, &update, reply.device_key, peer_addr).await;
-    let admitted = svc
-        .list_orgs()
-        .iter()
-        .find(|o| o.org_id == org_id)
-        .and_then(|o| o.trie_members.iter().find(|m| m.member_key == reply.member_key).map(|m| m.id));
+    let update = io.node_mut().admit_member(rng, org_id, &joiner).map_err(|e| e.to_string())?;
+    let sent = io.submit_commit_send(rng, &update, reply.device_key, peer_addr).await;
+    let admitted = io
+        .view()
+        .organisation(org_id)
+        .and_then(|o| o.members.iter().find(|m| m.member_key == reply.member_key).map(|m| m.id));
     match admitted {
         Some(id) => {
             outstanding.settle(org_id, &reply.invite_id)?;

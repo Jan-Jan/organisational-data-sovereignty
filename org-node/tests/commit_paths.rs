@@ -9,17 +9,17 @@ mod support;
 use org_node::chain::OrgState;
 use org_node::error::OrgNodeError;
 use org_node::ids::OrgId;
-use org_node::service::{MockChainOps, OrgService, ProvisionalTarget};
-use org_node::store::{MemberSnapshot, PersonaStatus, PersonaStore, ProvisionalChange, ProvisionalUpdate};
-use org_node::test_fixtures::{device_key, member_key, org_public_key};
+use org_node::service::ProvisionalTarget;
+use org_node::store::{MemberSnapshot, PersonaStatus, PersonaStore, ProvisionalChange, ProvisionalUpdate, ProvisionalUpdateParts};
+use org_node::test_fixtures::{device_key, member_key, org_public_key, ChainSlots};
 use org_node::transport::wire::WireMessage;
 use org_node::{Envelope, Epoch, Joiner, PersonaId, RootHash, SequenceNumber};
 use rand::rngs::OsRng;
 use support::*;
 
 /// A Persona on a fresh service over `chain`, and its genesis update.
-fn genesis_built(tag: &str, chain: &MockChainOps) -> (OrgService, PersonaId, ProvisionalUpdate) {
-    let mut svc = OrgService::new(open_store(tag, "a", "pw_a"), Box::new(chain.clone()));
+fn genesis_built(tag: &str, chain: &ChainSlots) -> (Node, PersonaId, ProvisionalUpdate) {
+    let mut svc = Node::new(open_store(tag, "a", "pw_a"), chain.clone());
     let pid = svc.create_persona(&mut OsRng, h("alice"), nm("Alice"), sn("Smith")).unwrap();
     let update = svc.create_organisation(&mut OsRng, &pid).unwrap();
     (svc, pid, update)
@@ -32,7 +32,7 @@ fn genesis_built(tag: &str, chain: &MockChainOps) -> (OrgService, PersonaId, Pro
 // verifies: REQ-xs4ab8, REQ-ech45n, LLR-s6qnht, LLR-qjz3q4, LLR-68yd3j, LLR-nvn3wk, LLR-6z5xya
 #[test]
 fn create_organisation_keeps_a_genesis_update_and_nothing_else() {
-    let chain = MockChainOps::new();
+    let chain = ChainSlots::new();
     let (svc, pid, update) = genesis_built("create", &chain);
     let persona = persona_of(&svc, &pid);
     let (member_key, device_key) = svc.persona_public_keys(&pid).unwrap();
@@ -40,7 +40,7 @@ fn create_organisation_keeps_a_genesis_update_and_nothing_else() {
     assert_eq!(update.persona_id, pid);
     assert_eq!(private_key_of(&update).x25519_keypair().org_public_key().unwrap(), update.org_pub_key);
     assert_ne!(update.org_pub_key.as_bytes(), member_key.as_bytes(), "a fresh key, not the founder's (REQ-ech45n)");
-    let ProvisionalChange::Genesis { members, .. } = &update.change else { panic!("a genesis change") };
+    let ProvisionalChange::Genesis { members, .. } = update.change_for_test() else { panic!("a genesis change") };
     assert_eq!(members.len(), 1);
     assert_eq!((members[0].member_key, members[0].device_keys.clone()), (member_key, vec![device_key]));
     assert!(svc.list_orgs().is_empty(), "no record");
@@ -57,7 +57,7 @@ fn create_organisation_keeps_a_genesis_update_and_nothing_else() {
 // verifies: LLR-nvn3wk
 #[test]
 fn reading_provisional_updates_changes_nothing() {
-    let chain = MockChainOps::new();
+    let chain = ChainSlots::new();
     let (svc, _pid, _update) = genesis_built("read-only", &chain);
     let before = store_bytes("read-only", "a");
     assert!(svc.genesis_provisional_updates(&PersonaId::new("nobody".into())).is_empty());
@@ -71,10 +71,10 @@ fn reading_provisional_updates_changes_nothing() {
 // verifies: REQ-d9g6nt, REQ-ech45n, LLR-rjg3m2
 #[test]
 fn the_founding_member_id_and_the_organisation_key_are_drawn_not_derived() {
-    let chain = MockChainOps::new();
+    let chain = ChainSlots::new();
     let (mut svc, pid, first) = genesis_built("ids", &chain);
     let second = svc.create_organisation(&mut OsRng, &pid).unwrap();
-    let id_of = |u: &ProvisionalUpdate| match &u.change {
+    let id_of = |u: &ProvisionalUpdate| match u.change_for_test() {
         ProvisionalChange::Genesis { members, .. } => (members[0].id, members[0].member_key),
         ProvisionalChange::ChangeSet { .. } => panic!("genesis"),
     };
@@ -92,7 +92,7 @@ fn the_founding_member_id_and_the_organisation_key_are_drawn_not_derived() {
 // verifies: REQ-tqap3r, REQ-uv3v5w, LLR-wzqqg9, LLR-qjz3q4, LLR-3fwykc, LLR-w3fhhg, LLR-q3aj8z, LLR-dzte8x, LLR-3v5nu9, LLR-4tcxsu, LLR-mkj4bz
 #[tokio::test]
 async fn commit_genesis_creates_the_record_once_the_chain_carries_the_root() {
-    let chain = MockChainOps::new();
+    let chain = ChainSlots::new();
     let (mut svc, pid, update) = genesis_built("commit-genesis", &chain);
     let org_id = chain.apply_genesis(update.resulting_root, update.org_pub_key);
     let outcome = svc.commit_genesis(&mut OsRng, &pid, org_id, test_proxy()).await.unwrap();
@@ -102,7 +102,7 @@ async fn commit_genesis_creates_the_record_once_the_chain_carries_the_root() {
         (rec.root_hash, rec.org_pub_key, rec.epoch, rec.last_seq),
         (update.resulting_root, update.org_pub_key, Epoch::new(1), SequenceNumber::new(1))
     );
-    assert_eq!(rec.org_private_key, private_key_of(&update));
+    assert_eq!(rec.org_private_key_for_test(), &private_key_of(&update));
     assert_eq!(rec.proxy_account, Some(test_proxy()));
     assert_eq!(svc.proxy_account(org_id).unwrap(), Some(test_proxy()));
     let p = persona_of(&svc, &pid);
@@ -121,7 +121,7 @@ async fn commit_genesis_creates_the_record_once_the_chain_carries_the_root() {
 // verifies: REQ-tqap3r, LLR-wzqqg9, LLR-ewkg85, LLR-mxskg9
 #[tokio::test]
 async fn commit_genesis_refusals_change_nothing_and_write_nothing() {
-    let chain = MockChainOps::new();
+    let chain = ChainSlots::new();
     let (mut svc, pid, update) = genesis_built("genesis-refused", &chain);
     let state = |root, key, epoch| OrgState { root_hash: root, org_pub_key: key, epoch: Epoch::new(epoch) };
     let unknown = OrgId::new([0x99; 20]);
@@ -159,7 +159,7 @@ async fn commit_genesis_refusals_change_nothing_and_write_nothing() {
 // verifies: LLR-wzqqg9, LLR-ewkg85
 #[tokio::test]
 async fn a_chain_past_epoch_one_refuses_commit_genesis_and_keeps_the_update() {
-    let chain = MockChainOps::new();
+    let chain = ChainSlots::new();
     let (mut svc, pid, update) = genesis_built("genesis-past-one", &chain);
     let org_id = chain.apply_genesis(update.resulting_root, update.org_pub_key);
     let before = store_bytes("genesis-past-one", "a");
@@ -183,14 +183,14 @@ async fn a_chain_past_epoch_one_refuses_commit_genesis_and_keeps_the_update() {
 // verifies: LLR-wzqqg9, LLR-ewkg85
 #[tokio::test]
 async fn a_genesis_whose_members_do_not_rebuild_the_root_is_refused() {
-    let chain = MockChainOps::new();
+    let chain = ChainSlots::new();
     let (svc, pid, update) = genesis_built("genesis-mismatch", &chain);
     drop(svc);
-    let forged = ProvisionalUpdate { resulting_root: RootHash::new([0x42; 32]), ..update };
+    let forged = ProvisionalUpdate::from(ProvisionalUpdateParts { resulting_root: RootHash::new([0x42; 32]), ..update.into() });
     let mut store = PersonaStore::open(store_dir("genesis-mismatch", "a").join("store.bin"), "pw_a").unwrap();
     store.data_mut().insert_provisional(forged.clone()).unwrap();
     store.save(&mut OsRng).unwrap();
-    let mut svc = OrgService::new(store, Box::new(chain.clone()));
+    let mut svc = Node::new(store, chain.clone());
     let org = chain.apply_genesis(forged.resulting_root, forged.org_pub_key);
     let before = store_bytes("genesis-mismatch", "a");
     assert_eq!(svc.commit_genesis(&mut OsRng, &pid, org, test_proxy()).await.unwrap_err(), OrgNodeError::RootMismatch);
@@ -206,16 +206,16 @@ async fn a_genesis_whose_members_do_not_rebuild_the_root_is_refused() {
 // verifies: LLR-wzqqg9
 #[tokio::test]
 async fn a_genesis_listing_no_leaf_with_the_personas_device_is_refused() {
-    let chain = MockChainOps::new();
+    let chain = ChainSlots::new();
     let (mut svc, pid, own) = genesis_built("genesis-not-ours", &chain);
     let pid_bob = svc.create_persona(&mut OsRng, h("bob"), nm("Bob"), sn("Jones")).unwrap();
     let bobs = svc.create_organisation(&mut OsRng, &pid_bob).unwrap();
     drop(svc);
-    let forged = ProvisionalUpdate { persona_id: pid.clone(), ..bobs };
+    let forged = ProvisionalUpdate::from(ProvisionalUpdateParts { persona_id: pid.clone(), ..bobs.into() });
     let mut store = PersonaStore::open(store_dir("genesis-not-ours", "a").join("store.bin"), "pw_a").unwrap();
     store.data_mut().insert_provisional(forged.clone()).unwrap();
     store.save(&mut OsRng).unwrap();
-    let mut svc = OrgService::new(store, Box::new(chain.clone()));
+    let mut svc = Node::new(store, chain.clone());
     let org = chain.apply_genesis(forged.resulting_root, forged.org_pub_key);
     let before = store_bytes("genesis-not-ours", "a");
     assert_eq!(
@@ -229,19 +229,10 @@ async fn a_genesis_listing_no_leaf_with_the_personas_device_is_refused() {
     assert_eq!(store_bytes("genesis-not-ours", "a"), before, "nothing written");
 }
 
-// Abnormal: a chain read that fails is refused as `Chain`, nothing written.
-// verifies: LLR-ewkg85
-#[tokio::test]
-async fn a_failed_chain_read_refuses_commit_genesis() {
-    let counting = CountingChain::over(MockChainOps::new());
-    counting.fail_reads();
-    let mut svc = OrgService::new(open_store("genesis-chain-fails", "a", "pw_a"), Box::new(counting.clone()));
-    let pid = svc.create_persona(&mut OsRng, h("alice"), nm("Alice"), sn("Smith")).unwrap();
-    svc.create_organisation(&mut OsRng, &pid).unwrap();
-    let before = store_bytes("genesis-chain-fails", "a");
-    assert!(matches!(svc.commit_genesis(&mut OsRng, &pid, OrgId::new([1; 20]), test_proxy()).await, Err(OrgNodeError::Chain(_))));
-    assert_eq!(store_bytes("genesis-chain-fails", "a"), before);
-}
+// (2026-10-08, change worktree-org-io-create, ruling B:
+// `a_failed_chain_read_refuses_commit_genesis` left with the read. A failed
+// read never reaches org-node; org-io's read-back test after a write takes
+// its place.)
 
 /// Another joiner, from fixed seeds.
 fn joiner_from(seed: u8, handle: &str) -> Joiner {
@@ -249,12 +240,12 @@ fn joiner_from(seed: u8, handle: &str) -> Joiner {
 }
 
 /// A founded Organisation (A) and a joiner (B's Persona) not yet admitted.
-async fn founded(tag: &str) -> (MockChainOps, OrgService, OrgId, Joiner, OrgService) {
-    let chain = MockChainOps::new();
-    let mut a = OrgService::new(open_store(tag, "a", "pw_a"), Box::new(chain.clone()));
+async fn founded(tag: &str) -> (ChainSlots, Node, OrgId, Joiner, Node) {
+    let chain = ChainSlots::new();
+    let mut a = Node::new(open_store(tag, "a", "pw_a"), chain.clone());
     let pid_a = a.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
     let org = found(&mut a, &chain, &pid_a).await;
-    let mut b = OrgService::new(open_store(tag, "b", "pw_b"), Box::new(chain.clone()));
+    let mut b = Node::new(open_store(tag, "b", "pw_b"), chain.clone());
     let pid_b = b.create_persona(&mut OsRng, h("bob"), nm("Bob"), sn("Builder")).unwrap();
     let joiner = joiner_of(&b, &pid_b);
     (chain, a, org, joiner, b)
@@ -281,13 +272,13 @@ async fn admit_member_keeps_a_provisional_update_and_changes_nothing_else() {
         "the update holds its private half"
     );
     assert_ne!(update.resulting_root, rec.root_hash);
-    assert!(matches!(update.change, ProvisionalChange::ChangeSet { .. }));
+    assert!(matches!(update.change_for_test(), ProvisionalChange::ChangeSet { .. }));
     assert_eq!(chain.get(&org).unwrap().epoch, Epoch::new(1), "no chain write");
     assert_eq!(rec_of(&a, org).trie_members.len(), rec.trie_members.len(), "record unchanged");
     let now = rec_of(&a, org);
     assert_eq!(
-        (now.org_pub_key, &now.org_private_key),
-        (rec.org_pub_key, &rec.org_private_key),
+        (now.org_pub_key, now.org_private_key_for_test()),
+        (rec.org_pub_key, rec.org_private_key_for_test()),
         "building changes neither of the record's keys"
     );
     assert!(a.endpoint().is_none());
@@ -295,6 +286,27 @@ async fn admit_member_keeps_a_provisional_update_and_changes_nothing_else() {
     assert_eq!((second.base_root, second.seq), (update.base_root, update.seq), "built on the same record");
     assert_ne!(second.org_pub_key, update.org_pub_key, "each update draws its own pair");
     assert_eq!(a.provisional_updates(org).len(), 2);
+}
+
+// Normal and abnormal (LLR-gwk4nk): the by-reference query answers true for
+// the held update's four public fields, and false when any one of them is
+// another's — the Organisation, the base root, the resulting root, the
+// public key; it writes nothing.
+// verifies: LLR-gwk4nk
+#[tokio::test]
+async fn holds_provisional_matches_all_four_public_fields_and_writes_nothing() {
+    let (_chain, mut a, org, joiner, _b) = founded("holds-provisional").await;
+    let update = a.admit_member(&mut OsRng, org, &joiner).unwrap();
+    let base = update.base_root.unwrap();
+    let (resulting, key) = (update.resulting_root, update.org_pub_key);
+    let before = store_bytes("holds-provisional", "a");
+    assert!(a.holds_provisional(org, base, resulting, key), "the held update");
+    assert!(!a.holds_provisional(OrgId::new([9; 20]), base, resulting, key), "another Organisation");
+    assert!(!a.holds_provisional(org, resulting, resulting, key), "another base root");
+    assert!(!a.holds_provisional(org, base, base, key), "another resulting root");
+    let record_key = rec_of(&a, org).org_pub_key;
+    assert!(!a.holds_provisional(org, base, resulting, record_key), "another public key: the record's");
+    assert_eq!(store_bytes("holds-provisional", "a"), before, "the query writes nothing");
 }
 
 // Abnormal (LLR-vdyu65): an admission into an Organisation this node holds no
@@ -329,7 +341,7 @@ async fn commit_update_commits_a_provisional_update_the_chain_carries() {
     chain.apply_update(org, update.resulting_root, update.org_pub_key, before.epoch).unwrap();
     let out = a.commit_update(&mut OsRng, org).await.unwrap();
     assert_eq!((out.org_id, out.epoch, out.root), (org, Epoch::new(2), update.resulting_root));
-    let ProvisionalChange::ChangeSet { change_set, org_private_key } = update.change.clone() else { panic!() };
+    let ProvisionalChange::ChangeSet { change_set, org_private_key } = update.change_for_test().clone() else { panic!() };
     assert_eq!(out.outgoing.envelope, Envelope { org_id: org, parent_seq: update.seq, delta_bytes: change_set });
     let sent: Vec<MemberSnapshot> = postcard::from_bytes(&out.outgoing.record_snapshot).unwrap();
     assert_eq!(sent, before.trie_members, "the record as it stood before the commit");
@@ -337,13 +349,13 @@ async fn commit_update_commits_a_provisional_update_the_chain_carries() {
     assert_eq!((after.root_hash, after.epoch, after.last_seq), (update.resulting_root, Epoch::new(2), update.seq));
     assert_eq!(after.trie_members.len(), 2);
     assert_eq!(
-        (after.org_pub_key, &after.org_private_key),
+        (after.org_pub_key, after.org_private_key_for_test()),
         (update.org_pub_key, &org_private_key),
         "the record takes the update's key pair and keeps no earlier one"
     );
     let disk = reopen_store("commit-update", "a", "pw_a").data().orgs[0].clone();
     assert_eq!(disk.epoch, Epoch::new(2));
-    assert_eq!((disk.org_pub_key, &disk.org_private_key), (update.org_pub_key, &org_private_key));
+    assert_eq!((disk.org_pub_key, disk.org_private_key_for_test()), (update.org_pub_key, &org_private_key));
     assert!(a.endpoint().is_none(), "a commit binds no endpoint and sends nothing");
 }
 
@@ -356,12 +368,12 @@ async fn commit_update_refusals_change_nothing_and_write_nothing() {
     let update = a.admit_member(&mut OsRng, org, &joiner).unwrap();
     let rec = rec_of(&a, org);
     let before = store_bytes("update-refused", "a");
-    let check = |a: &OrgService| {
+    let check = |a: &Node| {
         let now = rec_of(a, org);
         assert_eq!(now.root_hash, rec.root_hash);
         assert_eq!(
-            (now.org_pub_key, &now.org_private_key),
-            (rec.org_pub_key, &rec.org_private_key),
+            (now.org_pub_key, now.org_private_key_for_test()),
+            (rec.org_pub_key, rec.org_private_key_for_test()),
             "the record's keys are unchanged"
         );
         assert_eq!(a.provisional_updates(org), vec![update.clone()]);
@@ -393,19 +405,21 @@ async fn commit_update_refusals_change_nothing_and_write_nothing() {
     check(&a);
 }
 
-// Abnormal: a chain read that fails or finds no state refuses the commit.
+// Abnormal: given no chain state, the commit is refused with `OrgNotOnChain`
+// and the update kept, nothing written. *Rewritten 2026-10-08 (ruling B,
+// change worktree-org-io-create):* was
+// `commit_update_refuses_when_the_chain_fails_or_is_silent`; its failing half
+// left with the read (org-io's read-back test takes its place).
 // verifies: LLR-ewkg85
 #[tokio::test(flavor = "multi_thread")]
-async fn commit_update_refuses_when_the_chain_fails_or_is_silent() {
-    let (s, counting) = setup_counted("update-chain-fails").await;
-    let s = admit_b_directly(s).await;
+async fn commit_update_refuses_when_the_chain_holds_no_state() {
+    let s = admit_b_directly(setup("update-chain-fails").await).await;
     let mut b = s.svc_b;
     b.admit_member(&mut OsRng, s.org_id, &joiner_from(0x61, "carol")).unwrap();
-    counting.hide(s.org_id);
-    assert_eq!(b.commit_update(&mut OsRng, s.org_id).await.unwrap_err(), OrgNodeError::OrgNotOnChain);
-    counting.fail_reads();
-    assert!(matches!(b.commit_update(&mut OsRng, s.org_id).await, Err(OrgNodeError::Chain(_))));
+    let before = store_bytes("update-chain-fails", "b");
+    assert_eq!(b.svc.commit_update(&mut OsRng, s.org_id, None).unwrap_err(), OrgNodeError::OrgNotOnChain);
     assert_eq!(b.provisional_updates(s.org_id).len(), 1);
+    assert_eq!(store_bytes("update-chain-fails", "b"), before, "nothing written");
 }
 
 // Normal: a commit discards every provisional update for that Organisation
@@ -433,7 +447,7 @@ async fn a_commit_discards_the_provisional_updates_it_orphans() {
     let info = WireMessage::OrgInformation {
         envelope: out.outgoing.envelope,
         record_snapshot: out.outgoing.record_snapshot,
-        org_private_key: rec_of(&s.svc_a, s.org_id).org_private_key,
+        org_private_key: rec_of(&s.svc_a, s.org_id).org_private_key_for_test().clone(),
     };
     // *Rewritten 2026-10-07 (S3 T12a):* from a relay B's record does not
     // list, the commit is refused (LLR-2r2fha) and B's update is kept; from
@@ -468,7 +482,7 @@ async fn send_update_sends_organisation_information_to_a_listed_device_and_a_rev
     let on_disk = store_bytes("send", "a");
     let rec = rec_of(&a, org);
     let first_bound = a.list_personas().iter().find(|p| p.org_id == Some(org)).unwrap().clone();
-    let founder_device = first_bound.device_seed.signing_keypair().device_key().unwrap();
+    let founder_device = first_bound.device_seed_for_test().signing_keypair().device_key().unwrap();
 
     let (sink_addr, sink) = spawn_recv_one(rand::random()).await;
     a.send_update(&out, joiner.device_key, Some(sink_addr)).await.unwrap();
@@ -478,7 +492,7 @@ async fn send_update_sends_organisation_information_to_a_listed_device_and_a_rev
         WireMessage::OrgInformation {
             envelope: out.outgoing.envelope.clone(),
             record_snapshot: out.outgoing.record_snapshot.clone(),
-            org_private_key: rec.org_private_key.clone(),
+            org_private_key: rec.org_private_key_for_test().clone(),
         },
         "the joiner's Device is listed"
     );
@@ -586,7 +600,7 @@ async fn an_admission_refused_by_the_bound_writes_nothing() {
     drop(a);
     let path = store_dir("bound-refused", "a").join("store.bin");
     let mut store = PersonaStore::open(path, "pw_a").unwrap();
-    let big = ProvisionalUpdate {
+    let big = ProvisionalUpdate::from(ProvisionalUpdateParts {
         org_id: Some(org),
         persona_id: store.data().personas[0].persona_id.clone(),
         base_root: Some(store.data().orgs[0].root_hash),
@@ -594,10 +608,10 @@ async fn an_admission_refused_by_the_bound_writes_nothing() {
         seq: SequenceNumber::new(2),
         org_pub_key: store.data().orgs[0].org_pub_key,
         change: ProvisionalChange::ChangeSet { change_set: vec![0; org_node::store::MAX_PROVISIONAL_BYTES - 200], org_private_key: org_node::OrgPrivateKey::from([0x5e; 32]) },
-    };
+    });
     store.data_mut().insert_provisional(big).unwrap();
     store.save(&mut OsRng).unwrap();
-    let mut a = OrgService::new(store, Box::new(chain.clone()));
+    let mut a = Node::new(store, chain.clone());
     let before = store_bytes("bound-refused", "a");
     assert!(matches!(a.admit_member(&mut OsRng, org, &joiner), Err(OrgNodeError::ProvisionalLimit { .. })));
     assert_eq!(store_bytes("bound-refused", "a"), before);
@@ -610,7 +624,7 @@ async fn an_admission_refused_by_the_bound_writes_nothing() {
 // verifies: LLR-7cmp38, REQ-hhva9d
 #[test]
 fn discarding_a_genesis_update_removes_it_and_its_private_key_and_saves() {
-    let chain = MockChainOps::new();
+    let chain = ChainSlots::new();
     let (mut svc, pid, update) = genesis_built("discard-genesis", &chain);
     svc.discard_provisional(&mut OsRng, ProvisionalTarget::Genesis(pid.clone()), update.resulting_root, update.org_pub_key).unwrap();
     assert!(svc.genesis_provisional_updates(&pid).is_empty());
@@ -665,7 +679,7 @@ async fn discarding_an_unknown_root_is_refused_and_writes_nothing() {
 // verifies: LLR-7cmp38, REQ-hhva9d
 #[test]
 fn a_genesis_update_is_discarded_only_under_its_own_persona() {
-    let chain = MockChainOps::new();
+    let chain = ChainSlots::new();
     let (mut svc, pid, update) = genesis_built("discard-other-persona", &chain);
     let other = svc.create_persona(&mut OsRng, h("bob"), nm("Bob"), sn("Builder")).unwrap();
     let before = store_bytes("discard-other-persona", "a");
@@ -716,8 +730,8 @@ async fn commit_update_selects_the_update_by_its_root_and_its_key() {
     s.chain.set(s.org_id, OrgState { root_hash: second.resulting_root, org_pub_key: second.org_pub_key, epoch: next });
     a.commit_update(&mut OsRng, s.org_id).await.unwrap();
     let rec = rec_of(&a, s.org_id);
-    assert_eq!((rec.org_pub_key, &rec.org_private_key), (second.org_pub_key, &private_key_of(&second)));
-    assert_ne!(rec.org_private_key, private_key_of(&first));
+    assert_eq!((rec.org_pub_key, rec.org_private_key_for_test()), (second.org_pub_key, &private_key_of(&second)));
+    assert_ne!(rec.org_private_key_for_test(), &private_key_of(&first));
 }
 
 // Normal: revocation keeps a provisional update — base, the epoch it
@@ -861,8 +875,8 @@ async fn a_commit_that_keeps_one_of_our_personas_is_an_update() {
 // verifies: LLR-6z5xya, REQ-yp75u9, PR-mdv38y
 #[tokio::test]
 async fn a_persona_bound_to_an_organisation_cannot_found_another() {
-    let chain = MockChainOps::new();
-    let mut svc = OrgService::new(open_store("found-twice", "a", "pw_a"), Box::new(chain.clone()));
+    let chain = ChainSlots::new();
+    let mut svc = Node::new(open_store("found-twice", "a", "pw_a"), chain.clone());
     let pid = svc.create_persona(&mut OsRng, h("alice"), nm("Alice"), sn("Smith")).unwrap();
     let org_1 = found(&mut svc, &chain, &pid).await;
     let before = store_bytes("found-twice", "a");
@@ -886,7 +900,7 @@ async fn a_persona_bound_to_an_organisation_cannot_found_another() {
 // verifies: LLR-eyc4ud, REQ-yp75u9
 #[tokio::test]
 async fn commit_genesis_refuses_a_persona_bound_to_another_organisation() {
-    let chain = MockChainOps::new();
+    let chain = ChainSlots::new();
     let (mut svc, pid, first) = genesis_built("genesis-bound", &chain);
     let second = svc.create_organisation(&mut OsRng, &pid).unwrap();
     let org_1 = chain.apply_genesis(first.resulting_root, first.org_pub_key);
