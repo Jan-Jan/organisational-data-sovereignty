@@ -64,3 +64,15 @@ the definitions' delegates).
 finding-8):* `proxy_delegates`, the client read the note above kept, is
 removed (see SDD-rxfu6h's note of this date); `decode_proxy_delegates` and
 its tests stay as they are.
+
+*Note 2026-10-14 (change worktree-guardrails-upgrade-6a9d6eb; owner
+ruling).* `decode_proxy_delegates` is removed, with its two tests
+(`proxy_definitions_give_their_delegates_in_order`,
+`truncated_padded_or_overlong_definitions_are_malformed`) and its call in
+`fuzz_signatory_set` (and that target's property comparing its result with
+the definitions' delegates). No production code called it, and the trace
+gate at guardrails 6a9d6eb fails a test whose `verifies:` names only
+out-of-force items. LLR-n2vx5q's own tests
+(`definitions_decode_with_type_and_delay_in_stored_order`,
+`a_malformed_definitions_value_is_refused`) and `fuzz_signatory_set` cover
+the decoder.

@@ -201,6 +201,14 @@ assertion carried into `proxied_forces_the_any_proxy_type_by_name`
 (LLR-59kxsr, LLR-ywhd23). `proxied_wraps_any_call_unchanged_even_another_proxied_call`
 still passes and keeps its annotation.
 
+*Note 2026-10-14 (change worktree-guardrails-upgrade-6a9d6eb).*
+`proxied_wraps_any_call_unchanged_even_another_proxied_call`
+(`on-chain-client/tests/write_pure.rs`) now reads
+`// verifies: LLR-59kxsr, LLR-ywhd23`: it is pointed at this item's
+successor, LLR-59kxsr, as inherited coverage, not red-first evidence. The
+trace gate at guardrails 6a9d6eb fails a test whose `verifies:` names only
+out-of-force items.
+
 **LLR-gjx3jn**: `multi_account_id(signatories, threshold)` returns the
 blake2-256 of the SCALE encoding of `("modlpy/utilisuba", sorted signatories,
 threshold)`, sorting the signatories before hashing, so the account it derives

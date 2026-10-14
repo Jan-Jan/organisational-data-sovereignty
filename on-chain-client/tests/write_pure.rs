@@ -150,12 +150,35 @@ fn a_different_epoch_changes_only_the_data_field() {
     assert_eq!(at_8, expected_call(contract, build_update_calldata(root, key, Epoch(8))));
 }
 
-// Abnormal: wrapping is total — a proxied call wrapped again nests unchanged.
-// verifies: LLR-ywhd23
+/// `Proxy.proxy` built by hand: `real` the `Id` of `real`'s bytes, the proxy
+/// type forced to `Some(Any)` by name, and `call` exactly the call given.
+fn expected_proxied(real: u8, call: Value) -> Value {
+    Value::variant(
+        "Proxy",
+        Composite::unnamed(vec![Value::variant(
+            "proxy",
+            Composite::named(vec![
+                ("real".to_string(), Value::variant("Id", Composite::unnamed(vec![Value::from_bytes([real; 32])]))),
+                (
+                    "force_proxy_type".to_string(),
+                    Value::variant("Some", Composite::unnamed(vec![Value::variant("Any", Composite::unnamed(vec![]))])),
+                ),
+                ("call".to_string(), call),
+            ]),
+        )]),
+    )
+}
+
+// Abnormal: wrapping is total — a proxied call wrapped again nests unchanged:
+// the outer call's `call` field is the inner proxied call, itself carrying
+// the remark unchanged.
+// verifies: LLR-59kxsr, LLR-ywhd23
 #[test]
 fn proxied_wraps_any_call_unchanged_even_another_proxied_call() {
     let inner = proxied(acct(1), remark());
     let outer = proxied(acct(2), inner.clone());
+    assert_eq!(inner, expected_proxied(1, remark()));
+    assert_eq!(outer, expected_proxied(2, expected_proxied(1, remark())));
     assert_eq!(outer, proxied(acct(2), inner));
     assert_ne!(outer, proxied(acct(1), remark()));
 }

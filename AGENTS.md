@@ -64,10 +64,10 @@ check scripts in `.guardrails/scripts/`. Configuration: `.guardrails/config.yaml
    `.guardrails/scripts/new-id.sh <PREFIX>` and paste what it prints. The ID
    is a random six-character token — `a3k9z2`, say — allocated against nothing,
    so two worktrees and two GitHub PRs never contend for one and nothing is
-   renumbered at merge. Never invent an ID by hand. Document FILES are still
-   finalized at merge: new items go into `docs/<area>/DRAFT-<branch>-<slug>.md`,
-   renamed to `<finalize-date>-<slug>.md` by `finalize-docs.sh`; existing items
-   are edited in the dated file that defines them. Every new test declares
+   renumbered at merge. Never invent an ID by hand. A change names each ledger
+   file it creates `docs/<area>/<YYYY-MM-DD>-<slug>.md`, dated the day it
+   creates it, and nothing renames it; existing items are edited in the dated
+   file that defines them. Every new test declares
    what it verifies
    (`verifies: <IDs>` — annotate the lowest level present: LLR where one
    exists, else REQ/RC; the parent REQ is covered transitively).
@@ -108,11 +108,6 @@ in their setup notes.
 | Confirm work is done | `verify-before-merge` |
 | Integrate to the base branch | `merge-change` |
 
-## Code: names
-
-- No single-character names. No code golf.
-- Name in concrete terms.
-
 ## Check scripts (run from repo root)
 
 - `.guardrails/scripts/new-id.sh PREFIX [COUNT]` — mint item IDs
@@ -124,15 +119,19 @@ in their setup notes.
   working tree that names an ID as a whole word, except its definition lines.
   Read a ledger file whole only when this does not answer the question. It
   checks nothing: exit 1 states only that `show` found no definition
-- `.guardrails/scripts/check-ids.sh [--allow-draft-files]` — draft, duplicate and
-  malformed IDs
+- `.guardrails/scripts/check-ids.sh` — draft IDs, draft-named files,
+  duplicate and malformed IDs
 - `.guardrails/scripts/check-trace.sh` — traceability gates
 - `.guardrails/scripts/check-review.sh [--branch NAME]` — the change under merge
   has a verification record, written by this change, naming a reviewer, a
   verdict, what was reproduced, and a disposition per finding. Run from the
   change worktree (merge-change step 6c); on the base branch it exits 2, never 0
 - `.guardrails/scripts/check-signing.sh [--strict] [RANGE]` — signature verification
-- `.guardrails/scripts/finalize-docs.sh [--dry-run]` — rename draft ledger files
+- `.guardrails/scripts/prune-plans.sh [--dry-run] [--all] [--base REF]` —
+  replace each code block in a plan's task sections with a one-line pointer
+  naming its line count and the task's Files touched value (merge-change
+  step 1); `--all` takes every plan, not only this change's;
+  `--base` names the ref this change's plans are diffed against
 - `.guardrails/scripts/merge-preflight.sh [--before-review] [--local-base] BRANCH`
   — the mechanical merge checks, stopping at the first failure; `--local-base`
   checks the local base branch only, not `origin/<base>`, for a project that

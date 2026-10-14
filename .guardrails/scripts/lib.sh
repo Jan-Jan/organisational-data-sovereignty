@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Dr. Jan-Jan van der Vyver
-# guardrails shared helpers — POSIX sh, sourced by the check/finalize scripts.
+# guardrails shared helpers — POSIX sh, sourced by the scripts in this directory.
 # Scripts run from the target repo root. GR_CONFIG overrides the config path.
 #
 # Several helpers below call gr_die, which exits 2. A helper invoked inside a
@@ -77,7 +77,9 @@ problem_open_max
 depends_on
 segregated_from
 expectation_age_days
-expectation_open_max'
+expectation_open_max
+prune_plans
+review_cite'
 
 # The ID body vocabulary. An item ID is <PREFIX>-<body>, and a body is either
 # a minted token or a legacy sequential number.
@@ -737,6 +739,10 @@ GR_DRAFT_FILE_RE='(^|/)DRAFT-[^/]*$'
 # for the unanchored form. The verification record contains the measurement and
 # the corpus commit it was taken on; a bare number here could not be re-derived
 # and drifted into three different values.
+#
+# Two behavioural tests hold every gate to this one form: "poisoning gr_def_re"
+# (tests/check-ids.bats) and "widening GR_ID_BODY" (tests/check-trace.bats).
+# A scan with its own copy of the form fails both. Never spell it out again.
 gr_def_re() {
     printf '%s' "${2-^}\\*\\*(${1})-${GR_ID_BODY}\\*\\*:"
 }
@@ -1470,8 +1476,9 @@ gr_unit_engage() {
 #   EXP      exported: (raw value — the consumer judges it)
 #   EXPECTS  expects:  (raw value)
 #   OPENED   opened:   (raw value)
-#   RC       the block contains implements: RC-… (value 1)
 #   SAT      one line per satisfies: REQ entry (value the REQ id)
+# `implements:` is not read here: check-trace.sh's credit_scan is its one
+# reader, so the expectation severity and UNIMPLEMENTED-CONTROL agree.
 # Column one only, first occurrence per keyword per block — the same rules
 # the PR status reader follows, so ORPHAN-ANNOTATION sees what this sees.
 # Blocks open on every gated prefix, so exported: on an LLR is ATTRIBUTED and
@@ -1485,7 +1492,7 @@ gr_req_scan() {
             { line = $0; sub(/\r$/, "", line) }
             gr_block_closes(line) {
                 cur = gr_block_opens(line) ? gr_block_id(line) : ""
-                exp_seen = 0; expc_seen = 0; opd_seen = 0; rc_seen = 0
+                exp_seen = 0; expc_seen = 0; opd_seen = 0
                 if (cur != "") printf "%s\t%s\tDEF\t-\n", cur, fname
             }
             cur == "" { next }
@@ -1502,10 +1509,6 @@ gr_req_scan() {
                 printf "%s\t%s\tOPENED\t%s\n", cur, fname, gr_value(line, "opened:")
             }
             {
-                run = gr_id_run(line, "implements:")
-                n = split(run, a, " ")
-                for (i = 1; i <= n; i++)
-                    if (a[i] ~ /^RC-/ && !rc_seen) { rc_seen = 1; printf "%s\t%s\tRC\t1\n", cur, fname }
                 run = gr_id_run(line, "satisfies:")
                 n = split(run, a, " ")
                 for (i = 1; i <= n; i++)
@@ -1516,19 +1519,24 @@ gr_req_scan() {
     return 0
 }
 
-# gr_unit_srs UNIT — the unit's doc_srs files, one per line. The same
+# gr_unit_doc_files UNIT KEY — the unit's KEY files, one per line. The same
 # emptiness rules gr_doc_files applies, with the unit named in the error.
-gr_unit_srs() {
-    _uv=$(cfg_get doc_srs "$1/.guardrails/config.yaml")
+gr_unit_doc_files() {
+    _uv=$(cfg_get "$2" "$1/.guardrails/config.yaml")
     [ -n "$_uv" ] || return 0
     if [ -d "$_uv" ]; then
-        gr_md_files "$_uv" "doc_srs of unit $1 is configured as directory"
+        gr_md_files "$_uv" "$2 of unit $1 is configured as directory"
     elif [ -f "$_uv" ]; then
         printf '%s\n' "$_uv"
     else
-        gr_die "unit $1: doc_srs is configured as '$_uv', which does not exist"
+        gr_die "unit $1: $2 is configured as '$_uv', which does not exist"
     fi
     return 0
+}
+
+# gr_unit_srs UNIT — the unit's doc_srs files (gr_unit_doc_files above).
+gr_unit_srs() {
+    gr_unit_doc_files "$1" doc_srs
 }
 
 # gr_unit_req_scan UNIT — gr_req_scan over the unit's SRS. Call in a command

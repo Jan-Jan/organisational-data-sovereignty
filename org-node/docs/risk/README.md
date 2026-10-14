@@ -1,11 +1,10 @@
 # Risk management ledger
 
-This directory is a per-change ledger: each merged change contributes one
-dated file, `YYYY-MM-DD-<slug>.md` (the finalize date, assigned by `merge-change`
-from your worktree's `DRAFT-<branch>-<slug>.md`). **Edit existing items in
-the file that defines them.** This README contains the project-wide
-acceptability matrix; the dated files contain hazards, controls, derived
-assessments, and residual-risk statements.
+This directory is a per-change ledger: each change contributes one dated
+file, `YYYY-MM-DD-<slug>.md`, dated the day the change creates it and never
+renamed. **Edit existing items in the file that defines them.** This README
+contains the project-wide acceptability matrix; the dated files contain
+hazards, controls, derived assessments, and residual-risk statements.
 
 <!--
 Item grammar (enforced by .guardrails/scripts/check-trace.sh):
@@ -16,8 +15,15 @@ Item grammar (enforced by .guardrails/scripts/check-trace.sh):
   **RC-NNNNNN**: <risk control measure>. mitigates: HAZ-NNNNNN
 
 - Every hazard must have at least one risk control that `mitigates:` it.
+  `mitigates:` is read only inside the RC's block: on the definition line, as
+  above, or on a line below it before the block closes. A block closes at the
+  next markdown heading, the next bold line that contains an ASCII colon, or
+  the end of the file. A `mitigates:` anywhere else mitigates nothing, so the
+  hazard reports UNMITIGATED-HAZARD; at column one, after any list markers,
+  the line also reports ORPHAN-ANNOTATION.
 - Every risk control must be implemented by at least one requirement containing
-  `(implements: RC-...)` in the requirements ledger.
+  `(implements: RC-...)` inside that requirement's block in the requirements
+  ledger.
 - Derived REQ/LLR assessments live here too. Write the assessment under a
   heading and declare which items it covers on a line of its own:
   `assesses: REQ-…, LLR-…`. "No hazard impact because <reason>" is a valid

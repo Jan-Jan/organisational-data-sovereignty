@@ -155,6 +155,24 @@ only for the other two kinds. The last clause of the refusals ("a body of any
 of the three kinds with bytes left over after its last field") is added; the
 behaviour is unchanged.
 
+*Note 2026-10-14 (change worktree-guardrails-upgrade-6a9d6eb, guardrails
+6a9d6eb).* The trace gate now fails a test whose `verifies:` names only
+out-of-force items (OUT-OF-FORCE-VERIFIES). `wire_frame_bound.rs`'s
+`an_org_information_body_with_trailing_bytes_is_refused` was the one test
+still naming only this ID. It is pointed at LLR-tajh9d, which states the same
+leftover-bytes refusal, and is listed as inherited (coverage, not red-first
+evidence) in that change's verification record. The other tests the
+2026-10-08 note lists already name an item in force beside this one:
+`organisation_information_wire_message_is_pinned` names LLR-ayrdr8 and
+LLR-ms8njy; `revocation_wire_message_is_pinned` names LLR-ayrdr8, LLR-ms8njy
+and LLR-dc45ur; `the_three_kinds_round_trip_with_their_indices` and
+`malformed_revocations_and_acknowledgements_are_refused` name LLR-dc45ur and
+LLR-378cj4;
+`an_organisation_information_body_without_its_snapshot_or_key_does_not_decode`
+names REQ-c29s93; and the fuzz target names REQ-9g6as6, REQ-c29s93,
+LLR-dc45ur and LLR-378cj4. So the paragraphs above that say these tests name
+only this ID no longer hold.
+
 **LLR-ecxc76**: the `Debug` rendering of a `WireMessage` of either variant
 contains none of the bytes of the Organisation private key it holds, in any
 form: an `OrgInformation` renders its key as `OrgPrivateKey([REDACTED])`

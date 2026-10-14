@@ -254,21 +254,10 @@ jobs:
             GR_CONFIG="$u/.guardrails/config.yaml" .guardrails/scripts/check-trace.sh
           done
 
-      # --allow-draft-files on a pull request and NOT on a push, because the
-      # two ask different questions. A DRAFT-<branch>-<slug>.md ledger file is
-      # legitimate for the whole life of a change and is renamed by
-      # finalize-docs.sh at merge-change step 3 — so failing a PR for one would
-      # redden every change that adds an item. On the base branch a draft file
-      # means the rename did not happen, which is a real defect.
-      - if: github.event_name == 'pull_request'
-        run: |
-          set -e
-          units=$(.guardrails/scripts/check-units.sh --list) || exit 2
-          for u in $units; do
-            GR_CONFIG="$u/.guardrails/config.yaml" .guardrails/scripts/check-ids.sh --allow-draft-files
-          done
-      - if: github.event_name != 'pull_request'
-        run: |
+      # A ledger file is named YYYY-MM-DD-<slug>.md when it is created and is
+      # never renamed, so a DRAFT-named file is a defect on a pull request and
+      # on a push alike; check-ids.sh refuses --allow-draft-files.
+      - run: |
           set -e
           units=$(.guardrails/scripts/check-units.sh --list) || exit 2
           for u in $units; do

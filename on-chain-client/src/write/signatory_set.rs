@@ -98,15 +98,6 @@ fn decode_definition(chunk: &[u8]) -> Result<ProxyDefinition, SignatorySetError>
     })
 }
 
-/// `Proxy.Proxies`' value: the delegates, in stored order (LLR-a9bb7b), as
-/// `decode_proxy_definitions` decodes them.
-pub fn decode_proxy_delegates(bytes: &[u8]) -> Result<Vec<AccountId>, SignatorySetError> {
-    Ok(decode_proxy_definitions(bytes)?
-        .into_iter()
-        .map(|definition| definition.delegate)
-        .collect())
-}
-
 /// A storage value a signatory set is read from (LLR-sc79gq).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SignatorySetEntry {

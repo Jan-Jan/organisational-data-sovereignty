@@ -127,7 +127,7 @@ fn malformed_revocations_and_acknowledgements_are_refused() {
     }
 }
 
-/// verifies: LLR-js9dsu
+/// verifies: LLR-tajh9d, LLR-js9dsu
 ///
 /// Abnormal (review finding-3, 2026-10-07): an Organisation-information body
 /// with bytes left over after its Organisation private key is `Malformed`,

@@ -528,8 +528,8 @@ This control first required a first admission's sender to be the
 administrator's DevicePublicKey named by an imported Invite, and a later sender to
 be in the verified Membership record. The owner ruled that nothing about the
 sender is checked and that org-node has no administrator. What the control now
-states mitigates only the part of each hazard the root match already
-mitigates: HAZ-ep6uzs's substituted secret is unmitigated until the key-pair
+states mitigates only the part of each hazard the root match
+already mitigates: HAZ-ep6uzs's substituted secret is unmitigated until the key-pair
 change checks a received key against the chain (owner-accepted window), and
 HAZ-vxabf9's non-cooperative half rested on refusing messages the root match
 also refuses. The prose below describes the control before this amendment.

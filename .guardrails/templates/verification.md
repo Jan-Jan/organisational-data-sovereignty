@@ -24,7 +24,7 @@ measurement nobody made.
 
 Measured on: `<commit>` — `git rev-parse HEAD` — tree `<tree hash>`, from
 `git rev-parse HEAD^{tree}` on a clean worktree. Where `merge-change` step 3
-renamed nothing, this is the tree step 2 measured and the step 2 gate summary
+found the tree unchanged, this is the tree step 2 measured and the step 2 gate summary
 is what the rows below report.
 
 A figure that describes the repository rather than this change does not belong
@@ -53,10 +53,20 @@ merge — so this table is where that observation becomes durable evidence.
 | --- | --- | --- |
 | `<ID this change implements>` | `<the test that verifies it>` | <watched failing for the right reason before the implementation existed> |
 
+A test of a superseded item that this change pointed at its successor is
+inherited: list it below the table as `inherited: <test name> — from <old ID>`,
+or delete this paragraph. It is coverage, never a row in the table: the
+successor still has its own row.
+
 ## What was wrong, and what was built
 
 <the defect, measured; then the change. A record that only states that the
 tests pass records nothing about the defect.>
+
+Write this section and the Gaps once, after the final round, as the change
+stands at merge, with no round-by-round account. The finding blocks are the
+round history; prose rewritten each round restates them, goes stale against
+them, and draws findings of its own.
 
 ## Review
 
@@ -64,15 +74,58 @@ One block per finding the reviewer raised, in the toolkit item shape, each with
 its disposition. A review that raised nothing is legal, and `verdict:` above
 states that.
 
+Put each review round's blocks under its own `### Round <N>` heading. The
+`### Round <N>` headings and the `**finding-` blocks are the count. State no
+number of rounds, findings or dispositions in prose, here or elsewhere in this
+record: the next commit that adds a finding block falsifies it, the commit that
+writes it included.
+
+Where a `shared:` line at `merge-change` step 1 sent the change to a fresh
+reviewer, name the shared files and that review round here.
+
+### Round 1
+
 **finding-1**: <code | requirement>, <high | medium | low> — <what the
 reviewer found, in their terms>
-disposition: <what changed, and the test that reddens without it; or, for a
-finding recorded as an open problem item (`merge-change` step 6a), that item's
-ID, `PR-…`>
+disposition: <what changed, and the test that reddens without it. Cite at
+least one of: a file in the tree (not a directory, and not this record),
+with or without `:<line>`; a test's name in backticks or double quotes,
+exactly as the test declares it in a file under `test_paths`; or a defined
+item ID, such as the `PR-…` of a finding recorded as an open problem item
+(`merge-change` step 6a). A finding that needed no change reads
+`no change — <reason>`.>
 
 **finding-2**: record — <what the reviewer found in the record; a `record`
 finding states no severity>
-disposition: <what changed in the record>
+disposition: <what changed in the record, citing the record's own path,
+`docs/verification/<this file>`>
+
+## Guideline reviews
+
+One review per file `guidelines-file.sh TEST` or `guidelines-file.sh CODE`
+printed for the change diff (`develop-change`, "The conformance reviews"),
+each with its findings verbatim and a disposition for every one. This section
+is kept apart from `## Review` so compliance and preference findings stay
+distinguishable: a finding here is against the project's guidelines file,
+versioned in this tree, not against the floor a standard or a gate needs. A
+review that raised nothing is legal; say so under its heading.
+
+Under each review's heading, put each round's blocks under its own
+`### Round <N>` heading and number its findings from 1, replacing each
+`<N>` below. State no number of rounds, findings or dispositions in prose,
+as under `## Review`.
+
+### <guidelines file>
+
+Governs: <the paths of the diff this file governs, as `guidelines-file.sh`
+printed them>
+
+### Round <N>
+
+**finding-<N>**: guideline, <low | medium | high> — <clause cited as Heading N,
+quoted> — <file:line>
+disposition: <what changed on the change branch, cited (a file, a test name
+or an ID), or `no change — <why the clause does not apply here>`>
 
 ## Gaps
 
@@ -104,8 +157,10 @@ Field grammar (surfaced by .guardrails/scripts/check-review.sh):
   not a claim about the review.
 - A field with no value after it is an omission, not compliance.
 - A finding's value OPENS with its tag — `code`, `requirement` or `record`
-  (`merge-change` step 6a). A `code` or `requirement` tag is followed by its
-  severity, `high`, `medium` or `low`; a `record` finding states none.
+  (`merge-change` step 6a), or `guideline` under `## Guideline reviews`
+  (`review-conformance`), which takes a severity as `code` does. A `code` or
+  `requirement` tag is followed by its severity, `high`, `medium` or `low`;
+  a `record` finding states none.
   check-review.sh never reads the value, so the tag and the severity cost no
   field and add no malformed case. They exist for the convergence rule at
   `merge-change` step 6a: a round whose `code` and `requirement` findings are
@@ -135,6 +190,31 @@ Field grammar (surfaced by .guardrails/scripts/check-review.sh):
   question whatever this table states.
 - Only the record for the change under merge is checked. Records written before
   this schema existed are left alone.
+- With `--cite`, or with `review_cite: on` in `.guardrails/config.yaml`,
+  check-review.sh also checks what each credited disposition cites. The
+  disposition's text runs from `disposition:` to the first blank line, the end
+  of its block or the next credited disposition, so a citation on a wrapped
+  line counts. It must cite at least one of: a regular file, not a directory
+  or a symlink, that git tracks or lists as untracked and not ignored, written
+  bare, in backticks (which may hold a path with a space) or as a markdown
+  link `[<text>](<path>)`, where a trailing `:<line>`, `:<line>-<line>` or
+  `#<anchor>` is allowed; a span in backticks or double quotes that is a
+  test's whole name as a file matched by a `test_paths` pathspec declares it,
+  not in a comment: bats `@test "<name>"`; jest `it(`, `test(` or
+  `describe(` with the name as its first argument; `def test…`; Go
+  `func Test…` or a testify suite method `func (<receiver>) Test…`; or
+  Rust `fn`, any function name, since a line cannot see `#[test]`; or an
+  item ID that `find-items.sh show` finds. The record being checked is a
+  citation for a `record` finding only; a `code`, `requirement` or
+  `guideline` finding must cite something else. A disposition that opens
+  with `no change — ` (em dash) and goes on to give a reason cites nothing
+  and passes; `no change needed.` is not that form. Any other disposition
+  is reported as UNRESOLVABLE-DISPOSITION. The check is on only where
+  `review_cite: on` or `--cite` turns it on; an absent key is `off`. The key
+  is read from the root `.guardrails/config.yaml` only. A repository with
+  `.guardrails/units.yaml` has no root config, so neither the key nor
+  `--cite` works there yet: a unit config's `review_cite: on` is not read,
+  and `--cite` exits 2.
 - The placeholders above are in angle brackets and the illustrative forms are
   described rather than written flush left, for the reason the other templates
   give: a gate reads column one whatever the surrounding prose states, and no
