@@ -234,7 +234,8 @@ impl OrgService {
     /// require the epoch to be the update's Sequence number and the members
     /// to rebuild the root, then create the record with the chain's values,
     /// mark 1, the update's private key and `proxy_account`, consume the
-    /// update and bind the Persona, which must be unbound, with the MemberId
+    /// update with the Persona's other genesis updates (LLR-pk6mhv) and bind
+    /// the Persona, which must be unbound, with the MemberId
     /// of the genesis leaf listing its Device (LLR-hby4jr) (LLR-wzqqg9,
     /// LLR-qjz3q4, LLR-w3fhhg, LLR-dzte8x, LLR-eyc4ud). Any refusal changes and writes nothing (LLR-ewkg85); no
     /// endpoint is bound (LLR-4tcxsu).
@@ -290,7 +291,10 @@ impl OrgService {
             org_private_key,
             kept_change_set: None,
         });
-        data.provisional_updates.retain(|u| *u != update);
+        // The founding consumes its update and drops the Persona's other
+        // genesis updates, each with its private key (LLR-pk6mhv).
+        let founding = ProvisionalTarget::Genesis(persona_id.clone());
+        data.provisional_updates.retain(|u| !founding.names(u));
         Self::discard_orphans(data, org_id, state.root_hash);
         self.bind_persona(persona_id, org_id, founder_id)?;
         self.store.save(rng)?;

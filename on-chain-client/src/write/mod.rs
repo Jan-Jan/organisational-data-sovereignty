@@ -79,8 +79,29 @@ pub struct Genesis {
     pub admin: OrgAdmin,
 }
 
+/// How many blocks an update write stays valid for after its birth block
+/// (LLR-zfm3bf): a mortal era's period, so a power of two.
+pub const WRITE_MORTALITY_BLOCKS: u64 = 64;
+
+/// The block an update write is signed mortal from (REQ-4aq8zh): the latest
+/// finalised block when the write was prepared.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WriteWindow {
+    pub birth_number: u64,
+    pub birth_hash: [u8; 32],
+}
+
+impl WriteWindow {
+    /// The last block a write mortal from this birth block for
+    /// `WRITE_MORTALITY_BLOCKS` can be included in, saturating (LLR-zfm3bf).
+    pub fn last_valid_block(&self) -> u64 {
+        self.birth_number.saturating_add(WRITE_MORTALITY_BLOCKS)
+    }
+}
+
 /// The seam the composition is written against (SDD-yg7n55): create a pure
-/// proxy, fund an account, dispatch a call under the controller.
+/// proxy, fund an account, dispatch a call under the controller — mortal
+/// from `window`'s birth block when one is given (LLR-zj4jju).
 /// `SubxtWriteOps` implements it over subxt; a gated test substitutes it.
 #[allow(async_fn_in_trait)]
 pub trait WriteOps {
@@ -92,5 +113,6 @@ pub trait WriteOps {
         signatory: &Self::Signer,
         co_signatories: &[AccountId],
         call: Value,
+        window: Option<WriteWindow>,
     ) -> Result<DispatchOutcome, WriteError>;
 }

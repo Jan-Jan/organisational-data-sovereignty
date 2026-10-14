@@ -1952,6 +1952,7 @@ dependencies = [
  "jsonrpsee 0.26.0",
  "libc",
  "parity-scale-codec",
+ "scale-info",
  "serde_json",
  "subxt",
  "subxt-signer",

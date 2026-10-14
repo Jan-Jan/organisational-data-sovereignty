@@ -7,6 +7,7 @@ pub mod chain_read;
 pub mod connect;
 pub mod custody;
 pub mod preflight;
+pub mod publish;
 pub mod signatory;
 pub mod submit;
 #[cfg(feature = "test-support")]
@@ -17,6 +18,7 @@ pub mod view;
 /// 2026-10-06; S4 narrows it).
 pub use org_node as node;
 
+pub use crate::publish::{Reconciliation, Settled, Verification};
 pub use crate::view::{BuiltUpdate, NodeView, OrgSummary, PersonaSummary};
 use org_node::service::OrgService;
 use org_node::{CommitOutcome, DevicePublicKey, OrgId, OrgNodeError, PersonaId, Prepared, ReceiveOutcome, SelfDeleteOutcome};
@@ -51,6 +53,9 @@ pub struct OrgIo {
     /// The account of the signatory key this node holds; `None` when it holds none.
     own_account: Option<AccountId>,
     co_signers: Vec<AccountId>,
+    /// The writes whose outcome is unknown and each Organisation's
+    /// verification status (SDD-6mpmsw).
+    publish: publish::PublishState,
 }
 
 /// org-node's service as `OrgIo::node_mut` hands it out: the read surface
@@ -132,6 +137,7 @@ impl OrgIo {
             signatory_reader: Box::new(signatory::SignatorySetNotConfigured),
             own_account: None,
             co_signers: Vec::new(),
+            publish: publish::PublishState::default(),
         }
     }
 
@@ -190,6 +196,7 @@ impl OrgIo {
         let own_account = signatory.account_id();
         let writer = submit::OnChainWriter::new(
             SubxtWriteOps::new(api, FinalitySink),
+            registry.clone(),
             signatory,
             co_signatories.clone(),
             settings.contract_h160,
@@ -201,6 +208,7 @@ impl OrgIo {
             signatory_reader: Box::new(signatory::OnChainSignatorySetReader::new(registry)),
             own_account: Some(own_account),
             co_signers: co_signatories,
+            publish: publish::PublishState::default(),
         })
     }
 
@@ -222,6 +230,7 @@ impl OrgIo {
             signatory_reader: Box::new(chain.clone()),
             own_account: None,
             co_signers: Vec::new(),
+            publish: publish::PublishState::default(),
         }
     }
 
@@ -234,10 +243,10 @@ impl OrgIo {
         self
     }
 
-    /// Whether this node is an admin of `org_id` (LLR-c9fyun, REQ-f3eu9n):
-    /// `NotConfigured` when it holds no signatory key, `Read` when a
+    /// Whether this node is an admin of `org_id` (LLR-c9fyun, LLR-2hkqv2):
+    /// `NotConfigured` when it holds no signatory key, `Read` when the one
     /// signatory-set read fails (never `NotAdmin`), otherwise the rule of
-    /// `signatory::admin_status`. Nothing in S2 acts on the answer.
+    /// `signatory::admin_status`. Nothing in part 1 acts on the answer.
     pub async fn is_own_admin(&self, org_id: OrgId) -> Result<AdminStatus, OwnAdminError> {
         signatory::own_admin_status(&*self.signatory_reader, self.own_account, &self.co_signers, org_id).await
     }
@@ -277,9 +286,10 @@ impl OrgIo {
         submit::found_organisation(&mut self.service, &*self.writer, &*self.reader, rng, persona_id).await
     }
 
-    /// Submit the update `update` names, as org-node holds it: write, read
-    /// back, commit, send to `recipient` (LLR-qhjp6g, LLR-be3zv9,
-    /// LLR-9r2bxd).
+    /// Submit the update `update` names, as org-node holds it: settle an
+    /// earlier write whose outcome is unknown, then write, read back,
+    /// commit, send to `recipient` (LLR-qhjp6g, LLR-be3zv9, LLR-9r2bxd,
+    /// LLR-2yjuaj, LLR-nqvbb6).
     pub async fn submit_commit_send<R: RngCore + CryptoRng + Send>(
         &mut self,
         rng: &mut R,
@@ -287,8 +297,44 @@ impl OrgIo {
         recipient: DevicePublicKey,
         peer_addr: Option<iroh::EndpointAddr>,
     ) -> Result<CommitOutcome, String> {
-        submit::submit_commit_send(&mut self.service, &*self.writer, &*self.reader, rng, update, recipient, peer_addr)
-            .await
+        submit::submit_commit_send(
+            &mut self.service,
+            &mut self.publish,
+            &*self.writer,
+            &*self.reader,
+            rng,
+            update,
+            recipient,
+            peer_addr,
+        )
+        .await
+    }
+
+    /// Settle `org_id`'s chain write whose outcome is unknown, by reading
+    /// the chain (LLR-t98pk9).
+    pub async fn settle_unknown<R: RngCore + CryptoRng + Send>(&mut self, rng: &mut R, org_id: OrgId) -> Settled {
+        publish::settle_unknown(&mut self.publish, &mut self.service, &*self.reader, rng, org_id).await
+    }
+
+    /// Reconcile `org_id` with the chain: one read, handed to org-node's
+    /// `reconcile`; `Unverified` when the read fails or its parse refuses,
+    /// with nothing committed or deleted. Sends nothing but the update of a
+    /// write whose outcome was unknown, which it commits, to the Device its
+    /// submission named (LLR-k5pzsz, LLR-kp95ty).
+    pub async fn reconcile<R: RngCore + CryptoRng + Send>(&mut self, rng: &mut R, org_id: OrgId) -> Reconciliation {
+        publish::reconcile(&mut self.publish, &mut self.service, &*self.reader, rng, org_id).await
+    }
+
+    /// `reconcile` for every Organisation the store holds, in store order:
+    /// the app's call at start (LLR-k5pzsz).
+    pub async fn reconcile_held<R: RngCore + CryptoRng + Send>(&mut self, rng: &mut R) -> Vec<Reconciliation> {
+        publish::reconcile_held(&mut self.publish, &mut self.service, &*self.reader, rng).await
+    }
+
+    /// `org_id`'s verification status as its last reconcile left it; `None`
+    /// until one ran on this handle (LLR-kp95ty).
+    pub fn verification(&self, org_id: OrgId) -> Option<Verification> {
+        self.publish.verification(org_id)
     }
 
     /// Receive one message (LLR-7pj5af): its sender and the message go to

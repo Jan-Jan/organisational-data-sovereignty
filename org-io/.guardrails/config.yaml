@@ -64,7 +64,7 @@ test_paths:
 # header's final form gives it.
 # Since review round 3 (2026-10-08), `open` (`OrgIo::open`) joins the first line.
 verify_commands:
-  - cargo test -p org-io --features test-support --lib --test key_custody_config --test fuzz_seed_parse --test signatory_key --test absences --test chain_read_rule --test receive_order --test submit_flow --test signatory_rule --test app_boundary --test open
+  - cargo test -p org-io --features test-support --lib --test key_custody_config --test fuzz_seed_parse --test signatory_key --test absences --test chain_read_rule --test receive_order --test submit_flow --test signatory_rule --test app_boundary --test open --test publish_path --test startup_reconcile
   - cargo test -p org-io --features test-support,dev-seed --test key_custody_config --test signatory_key --test dev_seed_env
   - cargo build -p org-io
   - cargo clippy -p org-io --all-targets --features test-support,dev-seed -- -D warnings

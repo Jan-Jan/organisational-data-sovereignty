@@ -2,8 +2,9 @@
 
 use futures_util::future::{self, Either};
 use subxt::OnlineClient;
-use subxt::config::PolkadotConfig;
+use subxt::config::{DefaultExtrinsicParamsBuilder, PolkadotConfig};
 use subxt::dynamic::{self, Value};
+use subxt::utils::H256;
 use subxt::ext::scale_value::{Composite, Primitive, ValueDef};
 use subxt::extrinsics::ExtrinsicEvents;
 use subxt_signer::sr25519::Keypair;
@@ -11,7 +12,7 @@ use subxt_signer::sr25519::Keypair;
 use super::events::{observed_event, outcome_of, ObservedEvent};
 use super::multisig::build_dispatch_tx;
 use super::proxy::{create_pure_call, is_proxied};
-use super::{AccountId, DispatchOutcome, WriteError, WriteOps};
+use super::{AccountId, DispatchOutcome, WriteError, WriteOps, WriteWindow, WRITE_MORTALITY_BLOCKS};
 
 /// Makes the chain advance while a submitted extrinsic waits for finality.
 #[allow(async_fn_in_trait)]
@@ -41,20 +42,26 @@ impl<S: BlockSink> SubxtWriteOps<S> {
     }
 
     /// Sign and submit `tx`, settling blocks until it is finalised; an
-    /// `ExtrinsicFailed` is an error.
+    /// `ExtrinsicFailed` is an error. Signed mortal from `window`'s birth
+    /// block for `WRITE_MORTALITY_BLOCKS` when one is given, else with
+    /// subxt's default parameters (LLR-zj4jju's signing clause; shell).
     async fn submit_and_watch<Call: subxt::transactions::Payload>(
         &self,
         signer: &Keypair,
         tx: &Call,
+        window: Option<WriteWindow>,
     ) -> Result<ExtrinsicEvents<PolkadotConfig>, WriteError> {
-        let progress = self
-            .api
-            .tx()
-            .await
-            .map_err(|e| WriteError::Subxt(format!("tx_client: {e}")))?
-            .sign_and_submit_then_watch_default(tx, signer)
-            .await
-            .map_err(|e| WriteError::Subxt(format!("submit: {e}")))?;
+        let mut client = self.api.tx().await.map_err(|e| WriteError::Subxt(format!("tx_client: {e}")))?;
+        let submitted = match window {
+            Some(window) => {
+                let params = DefaultExtrinsicParamsBuilder::<PolkadotConfig>::new()
+                    .mortal_from_unchecked(WRITE_MORTALITY_BLOCKS, window.birth_number, H256(window.birth_hash))
+                    .build();
+                client.sign_and_submit_then_watch(tx, signer, params).await
+            }
+            None => client.sign_and_submit_then_watch_default(tx, signer).await,
+        };
+        let progress = submitted.map_err(|e| WriteError::Subxt(format!("submit: {e}")))?;
         let fin = progress.wait_for_finalized_success();
         futures_util::pin_mut!(fin);
         loop {
@@ -75,7 +82,7 @@ impl<S: BlockSink> WriteOps for SubxtWriteOps<S> {
 
     async fn create_pure(&self, signatory: &Keypair, co_signatories: &[AccountId]) -> Result<AccountId, WriteError> {
         let tx = build_dispatch_tx(co_signatories, create_pure_call())?.into_payload();
-        let events = self.submit_and_watch(signatory, &tx).await?;
+        let events = self.submit_and_watch(signatory, &tx, None).await?;
         for ev in events.iter() {
             let ev = ev.map_err(|e| WriteError::Subxt(format!("event iter: {e}")))?;
             if ev.pallet_name() == "Proxy" && ev.event_name() == "PureCreated" {
@@ -90,7 +97,7 @@ impl<S: BlockSink> WriteOps for SubxtWriteOps<S> {
     async fn fund(&self, signatory: &Keypair, dest: AccountId, amount: u128) -> Result<(), WriteError> {
         let dest = Value::variant("Id", Composite::unnamed(vec![Value::from_bytes(dest.0.as_slice())]));
         let tx = dynamic::tx("Balances", "transfer_keep_alive", vec![dest, Value::u128(amount)]);
-        self.submit_and_watch(signatory, &tx).await.map(|_| ())
+        self.submit_and_watch(signatory, &tx, None).await.map(|_| ())
     }
 
     async fn dispatch(
@@ -98,10 +105,11 @@ impl<S: BlockSink> WriteOps for SubxtWriteOps<S> {
         signatory: &Keypair,
         co_signatories: &[AccountId],
         call: Value,
+        window: Option<WriteWindow>,
     ) -> Result<DispatchOutcome, WriteError> {
         let proxied = is_proxied(&call);
         let tx = build_dispatch_tx(co_signatories, call)?.into_payload();
-        let events = self.submit_and_watch(signatory, &tx).await?;
+        let events = self.submit_and_watch(signatory, &tx, window).await?;
         outcome_of(proxied, &observe(&events)?)
     }
 }

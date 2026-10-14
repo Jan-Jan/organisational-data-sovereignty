@@ -43,6 +43,7 @@ pub fn run() {
             commands::list_orgs,
             commands::connection_status,
             commands::start_receiver,
+            commands::reconcile_organisations,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -24,7 +24,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use org_io::node::service::SelfDeleteOutcome;
 use org_io::node::store::PersonaDetails;
 use org_io::node::{CommitOutcome, MemberId, OrgId, OrgNodeError, PersonaId};
-use org_io::{OrgIo, OrgSummary, PersonaSummary};
+use org_io::{OrgIo, OrgSummary, PersonaSummary, Reconciliation, Verification};
 
 use crate::invitation::{self, Invite};
 use crate::parsing::parse_org_id;
@@ -60,22 +60,74 @@ impl From<&PersonaSummary> for PersonaDto {
     }
 }
 
-/// A serialisable view of an Organisation (org-io's `OrgSummary`).
+/// A serialisable view of an Organisation (org-io's `OrgSummary`), with the
+/// status its last reconcile left (LLR-8axx7h).
 #[derive(Debug, Serialize)]
 pub struct OrgDto {
     pub org_id: String,
     pub epoch: u64,
     pub root_hash: String,
     pub member_count: usize,
+    pub verification: VerificationDto,
 }
 
-impl From<&OrgSummary> for OrgDto {
-    fn from(o: &OrgSummary) -> Self {
+impl OrgDto {
+    /// `summary`, with `verification` as `OrgIo::verification` returned it.
+    pub fn new(summary: &OrgSummary, verification: Option<Verification>) -> Self {
         Self {
-            org_id: hex::encode(o.org_id.as_bytes()),
-            epoch: o.epoch.get(),
-            root_hash: hex::encode(o.root_hash.as_bytes()),
-            member_count: o.members.len(),
+            org_id: hex::encode(summary.org_id.as_bytes()),
+            epoch: summary.epoch.get(),
+            root_hash: hex::encode(summary.root_hash.as_bytes()),
+            member_count: summary.members.len(),
+            verification: verification.map_or(VerificationDto::NotChecked, |verification| match verification {
+                Verification::Verified => VerificationDto::Verified,
+                Verification::Unverified { reason } => VerificationDto::Unverified { reason },
+            }),
+        }
+    }
+}
+
+/// Whether an Organisation's last reconcile read its state from the chain
+/// (LLR-8axx7h); `NotChecked` until one ran.
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum VerificationDto {
+    NotChecked,
+    Verified,
+    Unverified { reason: String },
+}
+
+/// One Organisation's reconcile result as it crosses IPC (LLR-ekz4zn):
+/// org-io's `Reconciliation`, tagged by `result`, ids and keys as hex.
+#[derive(Debug, Serialize)]
+#[serde(tag = "result", rename_all = "snake_case")]
+pub enum ReconciliationDto {
+    InStep { org_id: String, epoch: u64 },
+    Committed { org_id: String, epoch: u64, recipients: Vec<String> },
+    Behind { org_id: String, chain_epoch: u64 },
+    Removed { org_id: String },
+    Refused { org_id: String, reason: String },
+    Unverified { org_id: String, reason: String },
+}
+
+impl From<&Reconciliation> for ReconciliationDto {
+    fn from(reconciliation: &Reconciliation) -> Self {
+        let hex_id = |org_id: &OrgId| hex::encode(org_id.as_bytes());
+        match reconciliation {
+            Reconciliation::InStep { org_id, epoch } => Self::InStep { org_id: hex_id(org_id), epoch: epoch.get() },
+            Reconciliation::Committed { org_id, epoch, recipients } => Self::Committed {
+                org_id: hex_id(org_id),
+                epoch: epoch.get(),
+                recipients: recipients.iter().map(|device| hex::encode(device.as_bytes())).collect(),
+            },
+            Reconciliation::Behind { org_id, chain_epoch } => {
+                Self::Behind { org_id: hex_id(org_id), chain_epoch: chain_epoch.get() }
+            }
+            Reconciliation::Removed { org_id } => Self::Removed { org_id: hex_id(org_id) },
+            Reconciliation::Refused { org_id, reason } => Self::Refused { org_id: hex_id(org_id), reason: reason.clone() },
+            Reconciliation::Unverified { org_id, reason } => {
+                Self::Unverified { org_id: hex_id(org_id), reason: reason.clone() }
+            }
         }
     }
 }
@@ -314,8 +366,24 @@ pub async fn list_personas(state: State<'_, AppState>) -> Result<Vec<PersonaDto>
 #[tauri::command]
 pub async fn list_orgs(state: State<'_, AppState>) -> Result<Vec<OrgDto>, String> {
     let io = state.org_io.lock().await;
-    Ok(io.view().organisations().iter().map(OrgDto::from).collect())
+    Ok(io.view().organisations().iter().map(|org| OrgDto::new(org, io.verification(org.org_id))).collect())
 }
+
+/// Ask org-io to reconcile every held Organisation with the chain
+/// (LLR-ekz4zn, REQ-363366): the webview calls it at start and on the
+/// user's request.
+#[tauri::command]
+pub async fn reconcile_organisations(state: State<'_, AppState>) -> Result<Vec<ReconciliationDto>, String> {
+    let mut io = state.org_io.lock().await;
+    Ok(reconcile_all(&mut io, &mut OsRng).await)
+}
+
+/// `reconcile_organisations`'s body: org-io's results, one per held
+/// Organisation, in org-io's order.
+pub async fn reconcile_all<R: RngCore + CryptoRng + Send>(io: &mut OrgIo, rng: &mut R) -> Vec<ReconciliationDto> {
+    io.reconcile_held(rng).await.iter().map(ReconciliationDto::from).collect()
+}
+
 
 /// Return the current connection status: what the running configuration was
 /// actually built from, not what the environment currently says.

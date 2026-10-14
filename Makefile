@@ -88,6 +88,22 @@
 #   new (+ the 8 relocated targets)              42.91%     43.47%   501 lines
 #   + the 9th (type_widths), re-measured         41.75%     42.45%   491 lines
 #   2026-10-07, +write (PR-b795an)               47.66%     48.53%   898 lines
+#   2026-10-13, publish T16a (before gate1fix)   44.49%     45.32%   998 lines
+#   2026-10-13, publish gate1fix                 48.47%     49.61%  1011 lines
+#
+# The 2026-10-13 rows are change worktree-org-io-publish. Its T14/T16a added
+# ~140 shell lines to client.rs (the pinned `signatory_set` read and the `Any`
+# lookup) and the mortal window to write/subxt_ops.rs, all unmeasured, which
+# took the figures under the floors (444 of 998 lines, 692 of 1527 regions).
+# Task gate1fix moved the chain-free half out of client.rs into
+# write/signatory_set.rs (`any_proxy_type_index` over `subxt::Metadata`,
+# `read_signatory_set` over a `SignatorySetSource`), behaviour unchanged, and
+# tested it with a metadata built from derived `TypeInfo`: 490 of 1011 lines,
+# 764 of 1540 regions; write/signatory_set.rs 93.41% lines, client.rs 12.61%
+# (436 lines), write/subxt_ops.rs still 0.00% (119 lines, shell). Floors
+# unchanged at 46 / 47 (one point below would be 47 / 48; left for a settled
+# re-baselining at merge, not raised in the same breath). Branches: 58 of 58,
+# 100%, unchanged.
 #
 # The 2026-10-07 row is PR-b795an's fix (worktree-org-io-create, T4): the
 # recipe now builds with `--features test-support,write` and runs the writer's
@@ -150,6 +166,10 @@ ORG_MEMBERS_REGIONS := 91
 # one point below the measured 47.66% / 48.53%, rounded down. Re-measured the
 # same day after the writer's two branch outcomes were covered: 47.88% / 48.75%
 # (430 of 898 lines, 661 of 1356 regions); floors unchanged.
+# Re-measured 2026-10-13 (worktree-org-io-publish, task gate1fix): 48.47% /
+# 49.61% (490 of 1011 lines, 764 of 1540 regions), after falling to 44.49% /
+# 45.32% under the change's new client shell; floors unchanged (see the
+# 2026-10-13 rows above).
 ON_CHAIN_CLIENT_LINES := 46
 ON_CHAIN_CLIENT_REGIONS := 47
 # person, first floors, 2026-10-04 — same rule: one point below the
@@ -296,6 +316,8 @@ ORG_MEMBERS_BRANCHES := 98
 # closure instantiations but not in a third (llvm-cov counts instantiations
 # apart) — tests/write_events.rs now passes one closure type, `fields_reader`,
 # to every call, so there is one instantiation. The floor stays at 99.
+# Re-measured 2026-10-13 (worktree-org-io-publish, task gate1fix), same
+# nightly: 58 of 58, 100%; the floor stays at 99.
 ON_CHAIN_CLIENT_BRANCHES := 99
 PERSON_BRANCHES := 99
 # org-io, first floor, 2026-10-08 (task T12): 17 of 26 branches, 65.38%, on
@@ -432,11 +454,14 @@ coverage-person:
 # org-io's verify_commands test targets, in one run with both features so
 # `dev_seed_env` (its own binary, so it races nothing) is measured beside the
 # `test-support` targets. The chopsticks-only `preflight` target is excluded, as
-# in verify_commands.
+# in verify_commands. 2026-10-13: `publish_path` and `startup_reconcile` added
+# by S3b-io part 1 (docs/plans/2026-10-08-org-io-publish.md), matching the verify
+# line; the floors are unchanged.
 ORG_IO_COVERAGE_ARGS := -p org-io --features test-support,dev-seed \
 	--lib --test key_custody_config --test fuzz_seed_parse --test signatory_key \
 	--test dev_seed_env --test absences --test chain_read_rule --test receive_order \
-	--test submit_flow --test signatory_rule --test app_boundary --test open
+	--test submit_flow --test signatory_rule --test app_boundary --test open \
+	--test publish_path --test startup_reconcile
 
 coverage-org-io:
 	cargo llvm-cov $(ORG_IO_COVERAGE_ARGS) \

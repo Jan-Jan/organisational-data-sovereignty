@@ -8,6 +8,8 @@ use org_node::{OrgId, OrgNodeError, OrgState};
 #[async_trait]
 pub trait StateReader: Send + Sync {
     async fn read_state(&self, org_id: OrgId) -> Result<Option<OrgState>, OrgNodeError>;
+    /// The latest finalised block's number (LLR-t98pk9).
+    async fn finalised_block(&self) -> Result<u64, OrgNodeError>;
 }
 
 /// The unparsed read, so the parse rule is tested without a chain.
@@ -57,5 +59,13 @@ impl RawStateSource for OnChainStateReader {
 impl StateReader for OnChainStateReader {
     async fn read_state(&self, org_id: OrgId) -> Result<Option<OrgState>, OrgNodeError> {
         read_org_state(self, org_id).await
+    }
+
+    async fn finalised_block(&self) -> Result<u64, OrgNodeError> {
+        self.registry
+            .write_window()
+            .await
+            .map(|window| window.birth_number)
+            .map_err(|error| OrgNodeError::Chain(format!("finalised block: {error}")))
     }
 }

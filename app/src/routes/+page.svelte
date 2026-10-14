@@ -6,16 +6,32 @@
 	import Admit from '$lib/components/Admit.svelte';
 	import Membership from '$lib/components/Membership.svelte';
 	import Revoke from '$lib/components/Revoke.svelte';
+	import { onMount } from 'svelte';
+	import { reconcileOrganisations, type ReconciliationDto } from '$lib/api';
 
 	type TabId = 'personas' | 's1' | 's2' | 's3' | 's4' | 's5';
 
 	let activeTab = $state<TabId>('personas');
 	/** Increment to signal PersonaList to reload */
 	let reloadToken = $state(0);
+	/** LLR-hwcj9n: the results of the reconcile the app asks for at start. */
+	let startupResults = $state<ReconciliationDto[] | null>(null);
+	let startupError = $state('');
 
 	function notifyReload() {
 		reloadToken += 1;
 	}
+
+	onMount(() => {
+		reconcileOrganisations()
+			.then((results) => {
+				startupResults = results;
+			})
+			.catch((e) => {
+				startupError = String(e);
+			})
+			.finally(notifyReload);
+	});
 
 	const tabs: { id: TabId; label: string }[] = [
 		{ id: 'personas', label: 'Personas / Orgs' },
@@ -49,7 +65,8 @@
 
 	<div class="content">
 		{#if activeTab === 'personas'}
-			<PersonaList {reloadToken} />
+			{#if startupError}<p class="err">reconcile at start failed: {startupError}</p>{/if}
+			<PersonaList {reloadToken} reconciled={startupResults} />
 		{:else if activeTab === 's1'}
 			<CreateOrg {notifyReload} />
 		{:else if activeTab === 's2'}
@@ -111,6 +128,8 @@
 	}
 	.tab:hover { color: #bbb; background: #181818; }
 	.tab.active { color: #7ec8e3; border-bottom-color: #7ec8e3; background: #0d0d18; }
+
+	.err { color: #f44336; font-size: 0.85rem; }
 
 	.content {
 		flex: 1;

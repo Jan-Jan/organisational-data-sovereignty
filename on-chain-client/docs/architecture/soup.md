@@ -158,6 +158,14 @@ dependencies behind the `write` feature, with rows above. They stay
 dev-dependencies too, for the chopsticks harness, for the reason
 `parity-scale-codec` and `tiny-keccak` do.
 
+*Amended 2026-10-13 (change `worktree-org-io-publish`, task gate1fix).*
+`scale-info` 2.11.6 (feature `derive`) is a dev-dependency too: the
+`signatory_set_decode` and `write_pure` targets build a minimal runtime type
+registry from derived `TypeInfo`, in place of a live chain's metadata, to
+test the `Any` proxy-type lookup and the forced `Any`'s encoding. It is the
+version already in `subxt`'s normal closure (above), so no new crate enters
+`Cargo.lock`; test-only, not SOUP.
+
 Two of them do more than they appear to. `bolero` 0.13.4 drives the three fuzz
 targets that carry LLR-2v5u4d and LLR-yhw34z — the only evidence in this unit
 that its decoders are total — so while it ships nothing, a defect in its input

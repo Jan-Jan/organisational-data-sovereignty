@@ -13,8 +13,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use on_chain_client::write::subxt_ops::{FinalitySink, SubxtWriteOps};
-use on_chain_client::write::{genesis, submit_update, AccountId};
-use on_chain_client::{OnChainRootHash, OrgPubKey};
+use on_chain_client::write::{genesis, submit_update, AccountId, WriteWindow};
+use on_chain_client::{OnChainRootHash, OrgPubKey, OrgRegistryClient};
 use org_node::service::OrgService;
 use org_node::{
     ChainAccount, CommitOutcome, DevicePublicKey, Epoch, OrgId, OrgNodeError, OrgPublicKey, PersonaId, RootHash,
@@ -23,6 +23,7 @@ use rand_core::{CryptoRng, RngCore};
 
 use crate::chain_read::StateReader;
 use crate::custody::SignatoryKey;
+use crate::publish::{self, PublishState, Reconciliation, Settled};
 use crate::view::BuiltUpdate;
 
 /// How long one chain write may take before org-io gives up on it
@@ -43,9 +44,19 @@ pub(crate) const NOT_CONFIGURED: &str = crate::connect::DEV_SEED_NOT_BUILT;
 pub trait ChainWriter: Send + Sync {
     /// Stand up the Organisation's slot: its id and its proxy account.
     async fn genesis(&self, root: RootHash, key: OrgPublicKey) -> Result<(OrgId, ChainAccount), String>;
-    /// Move the slot, through `proxy`, from `expected_epoch`.
-    async fn update(&self, proxy: ChainAccount, root: RootHash, key: OrgPublicKey, expected_epoch: Epoch)
-        -> Result<(), String>;
+    /// The block an update write is signed mortal from: the latest
+    /// finalised block (LLR-2yjuaj).
+    async fn write_window(&self) -> Result<WriteWindow, String>;
+    /// Move the slot, through `proxy`, from `expected_epoch`, mortal from
+    /// `window`'s birth block.
+    async fn update(
+        &self,
+        proxy: ChainAccount,
+        root: RootHash,
+        key: OrgPublicKey,
+        expected_epoch: Epoch,
+        window: WriteWindow,
+    ) -> Result<(), String>;
 }
 
 /// Why a bounded write did not succeed.
@@ -83,6 +94,8 @@ async fn bounded<T>(write: impl Future<Output = Result<T, String>>) -> Result<T,
 /// user's own signatory key, which only this value holds (LLR-u2pk5y).
 pub struct OnChainWriter {
     ops: SubxtWriteOps<FinalitySink>,
+    /// The finalised-block read the write window comes from.
+    registry: OrgRegistryClient,
     signatory: SignatoryKey,
     co_signatories: Vec<AccountId>,
     contract: [u8; 20],
@@ -94,11 +107,12 @@ impl OnChainWriter {
     #[cfg(feature = "dev-seed")]
     pub(crate) fn new(
         ops: SubxtWriteOps<FinalitySink>,
+        registry: OrgRegistryClient,
         signatory: SignatoryKey,
         co_signatories: Vec<AccountId>,
         contract: [u8; 20],
     ) -> Self {
-        Self { ops, signatory, co_signatories, contract }
+        Self { ops, registry, signatory, co_signatories, contract }
     }
 }
 
@@ -118,7 +132,18 @@ impl ChainWriter for OnChainWriter {
         Ok((OrgId::new(founded.admin.0), ChainAccount::new(founded.proxy.0)))
     }
 
-    async fn update(&self, proxy: ChainAccount, root: RootHash, key: OrgPublicKey, expected_epoch: Epoch) -> Result<(), String> {
+    async fn write_window(&self) -> Result<WriteWindow, String> {
+        self.registry.write_window().await.map_err(|error| error.to_string())
+    }
+
+    async fn update(
+        &self,
+        proxy: ChainAccount,
+        root: RootHash,
+        key: OrgPublicKey,
+        expected_epoch: Epoch,
+        window: WriteWindow,
+    ) -> Result<(), String> {
         submit_update(
             &self.ops,
             self.signatory.keypair(),
@@ -128,6 +153,7 @@ impl ChainWriter for OnChainWriter {
             OnChainRootHash(*root.as_bytes()),
             OrgPubKey(*key.as_bytes()),
             on_chain_client::Epoch(expected_epoch.get()),
+            window,
         )
         .await
         .map_err(|error| error.to_string())
@@ -143,7 +169,11 @@ impl ChainWriter for WriterNotConfigured {
         Err(NOT_CONFIGURED.into())
     }
 
-    async fn update(&self, _: ChainAccount, _: RootHash, _: OrgPublicKey, _: Epoch) -> Result<(), String> {
+    async fn write_window(&self) -> Result<WriteWindow, String> {
+        Err(NOT_CONFIGURED.into())
+    }
+
+    async fn update(&self, _: ChainAccount, _: RootHash, _: OrgPublicKey, _: Epoch, _: WriteWindow) -> Result<(), String> {
         Err(NOT_CONFIGURED.into())
     }
 }
@@ -190,15 +220,28 @@ pub(crate) const NOT_HELD_ON_CURRENT_ROOT: &str = "refused before any write: org
      built on the Organisation's current root (altered, discarded, or built before another update committed); \
      nothing written, committed or sent";
 
+/// The refusal of an update whose own earlier write, of unknown outcome, the
+/// settle has just found not executed and discarded (review round 1,
+/// finding-5): its window passed, or another update committed first (review
+/// round 2, finding-2), so the report names neither.
+pub(crate) const NOT_EXECUTED_RESUBMITTED: &str = "refused before any write: this update's earlier chain write, whose \
+     outcome was unknown, did not execute and the update was discarded; rebuild the update and submit it again; \
+     nothing written, committed or sent";
+
 /// Write the update `update` names, as org-node holds it, to the chain;
 /// only once that executed, read back the state it left, commit against it
 /// and send the committed update to `recipient` (LLR-qhjp6g, LLR-9r2bxd).
 /// Before any write it refuses an Organisation the store does not hold
 /// (`OrgNotHeld`), a record with no proxy account, and an update org-node
 /// does not hold built on the record's current root. org-node chooses the
-/// kind of message from its committed record.
+/// kind of message from its committed record. An earlier write for the
+/// Organisation whose outcome is unknown is settled first, and unless it
+/// was not executed nothing is written (LLR-nqvbb6); a write that times out
+/// is recorded as unknown (LLR-2yjuaj).
+#[allow(clippy::too_many_arguments)]
 pub async fn submit_commit_send<R: RngCore + CryptoRng + Send>(
     svc: &mut OrgService,
+    publish: &mut PublishState,
     writer: &dyn ChainWriter,
     reader: &dyn StateReader,
     rng: &mut R,
@@ -207,6 +250,14 @@ pub async fn submit_commit_send<R: RngCore + CryptoRng + Send>(
     peer_addr: Option<iroh::EndpointAddr>,
 ) -> Result<CommitOutcome, String> {
     let org_id = update.org_id;
+    let resubmitted = publish.is_unknown_write(update);
+    match publish::settle_unknown(publish, svc, reader, rng, org_id).await {
+        Settled::NotExecuted { .. } if resubmitted => return Err(NOT_EXECUTED_RESUBMITTED.into()),
+        // An executed write whose update was already committed is settled
+        // (review round 1, finding-1): the record is in step with the chain.
+        Settled::NoUnknownWrite | Settled::NotExecuted { .. } | Settled::Reconciled(Reconciliation::InStep { .. }) => {}
+        settled => return Err(settled.submission_report()),
+    }
     // Read by reference and copy only public fields: no record and no held
     // update, with the Organisation private key each holds, is cloned here
     // (review round 4, finding 2; org-node's `holds_provisional`).
@@ -225,9 +276,21 @@ pub async fn submit_commit_send<R: RngCore + CryptoRng + Send>(
     if !held || update.base_root != current_root {
         return Err(NOT_HELD_ON_CURRENT_ROOT.into());
     }
-    bounded(writer.update(proxy, update.resulting_root, update.org_pub_key, epoch))
-        .await
-        .map_err(|not_done| not_done.report("nothing committed or sent"))?;
+    // A refusal of the write step, reported as a failed write is (a handle
+    // with no chain refuses here, LLR-qhjp6g), and saying no write was made
+    // (LLR-2yjuaj).
+    let window = writer.write_window().await.map_err(|error| {
+        format!(
+            "chain write failed; nothing committed or sent: reading the chain's write window failed, so no write \
+             was made: {error}"
+        )
+    })?;
+    if let Err(not_done) = bounded(writer.update(proxy, update.resulting_root, update.org_pub_key, epoch, window)).await {
+        if matches!(not_done, WriteNotDone::TimedOut) {
+            publish.record_unknown(*update, recipient, peer_addr, window.last_valid_block(), epoch);
+        }
+        return Err(not_done.report("nothing committed or sent"));
+    }
     let chain_state = reader.read_state(org_id).await.map_err(|error| {
         format!("the chain write executed, but reading it back failed; nothing committed or sent: {error}")
     })?;

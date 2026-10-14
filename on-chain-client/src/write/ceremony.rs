@@ -3,7 +3,7 @@
 
 use super::calldata::revive_update_runtime_call;
 use super::proxy::{map_account_call, proxied};
-use super::{AccountId, DispatchOutcome, Genesis, GenesisStep, WriteError, WriteOps};
+use super::{AccountId, DispatchOutcome, Genesis, GenesisStep, WriteError, WriteOps, WriteWindow};
 use crate::h160::h160_of;
 use crate::types::{Epoch, OnChainRootHash, OrgAdmin, OrgPubKey};
 
@@ -41,15 +41,16 @@ pub async fn genesis<O: WriteOps>(
     ops.fund(signatory, proxy, FUND_AMOUNT).await.map_err(|e| failed(GenesisStep::Fund, e))?;
     executed(
         GenesisStep::MapAccount,
-        ops.dispatch(signatory, co_signatories, proxied(proxy, map_account_call())).await,
+        ops.dispatch(signatory, co_signatories, proxied(proxy, map_account_call()), None).await,
     )?;
     let record = revive_update_runtime_call(contract, root, key, Epoch(0));
-    executed(GenesisStep::RecordGenesis, ops.dispatch(signatory, co_signatories, proxied(proxy, record)).await)?;
+    executed(GenesisStep::RecordGenesis, ops.dispatch(signatory, co_signatories, proxied(proxy, record), None).await)?;
     Ok(Genesis { proxy, admin: OrgAdmin(h160_of(proxy.0)) })
 }
 
-/// Submit one update to the Organisation's slot through its proxy; `Ok` only
-/// when the dispatch executed (LLR-kv27gp, LLR-hun4wf).
+/// Submit one update to the Organisation's slot through its proxy, mortal
+/// from `window`'s birth block (LLR-zj4jju); `Ok` only when the dispatch
+/// executed (LLR-kv27gp, LLR-hun4wf).
 #[allow(clippy::too_many_arguments)]
 pub async fn submit_update<O: WriteOps>(
     ops: &O,
@@ -60,9 +61,10 @@ pub async fn submit_update<O: WriteOps>(
     root: OnChainRootHash,
     key: OrgPubKey,
     expected_epoch: Epoch,
+    window: WriteWindow,
 ) -> Result<(), WriteError> {
     let call = proxied(proxy, revive_update_runtime_call(contract, root, key, expected_epoch));
-    match ops.dispatch(signatory, co_signatories, call).await? {
+    match ops.dispatch(signatory, co_signatories, call, Some(window)).await? {
         DispatchOutcome::Executed => Ok(()),
         DispatchOutcome::ApprovalRecorded => Err(WriteError::PendingApproval),
     }

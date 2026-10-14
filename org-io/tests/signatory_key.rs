@@ -112,7 +112,6 @@ async fn a_build_without_dev_seed_never_asks_for_the_seed_on_a_write_or_a_read()
 #[cfg(not(feature = "dev-seed"))]
 #[tokio::test]
 async fn a_build_without_dev_seed_says_why_the_own_admin_check_is_not_configured() {
-    use on_chain_client::write::AccountId;
     use org_io::node::OrgId;
     use org_io::signatory::{OwnAdminError, SignatorySetNotConfigured, SignatorySetReader};
 
@@ -122,9 +121,8 @@ async fn a_build_without_dev_seed_says_why_the_own_admin_check_is_not_configured
 
     let refused = handle.is_own_admin(OrgId::new([7; 20])).await.unwrap_err();
     assert_eq!(refused, OwnAdminError::NotConfigured);
-    let original = SignatorySetNotConfigured.original_account(OrgId::new([7; 20])).await.unwrap_err();
-    let delegates = SignatorySetNotConfigured.proxy_delegates(AccountId([1; 32])).await.unwrap_err();
-    for message in [refused.to_string(), original, delegates] {
+    let read = SignatorySetNotConfigured.signatory_set(OrgId::new([7; 20])).await.unwrap_err();
+    for message in [refused.to_string(), read] {
         assert!(message.contains("read only by development builds"), "{message}");
         assert!(!message.contains("set ODS_CHAIN_WS"), "{message}");
     }

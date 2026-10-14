@@ -463,6 +463,21 @@ const HANDLE_RETURN_ALLOWLIST: &[&str] = &[
     "OrgId", "PersonaId", "MemberId", "DevicePublicKey", "PersonPublicKey", "OrgPublicKey", "RootHash", "Epoch",
     // Answers and errors.
     "AdminStatus", "OwnAdminError", "OrgNodeError", "CommitOutcome", "ReceiveOutcome", "SelfDeleteOutcome",
+    // The publish state's reports (SDD-6mpmsw, task T14), reviewed 2026-10-08:
+    // `Settled` holds an OrgId, an Epoch, strings and a `Reconciliation`
+    // (OrgIds, Epochs, DevicePublicKeys, strings). No private key, no seed,
+    // no acknowledgement. *2026-10-13 (task T15d):* `DiscardRefused` left the
+    // list with the public discards (owner ruling of that day).
+    "Settled",
+    // Task T15, reviewed 2026-10-13: `Reconciliation` holds OrgIds, Epochs,
+    // DevicePublicKeys and strings (a removal's acknowledgements stay in
+    // org-io's memory); `Verification` holds a string. No private key, no
+    // seed, no acknowledgement.
+    "Reconciliation", "Verification",
+    // Task T16a, reviewed 2026-10-13: `AdminStatus` (above) gained
+    // `DelegateCannotDispatch`, a variant holding nothing; the signatory set
+    // it is judged from (`SignatorySetView`: an account, proxy definitions
+    // and a type index, public chain data) is not returned by the handle.
 ];
 
 /// The identifiers a return type names, lifetimes dropped.
@@ -546,4 +561,54 @@ fn the_pre_write_guard_copies_no_record_and_no_held_update() {
         .collect();
     assert!(write > start + 5, "the scan found the guard ({start}..{write})");
     assert!(copies.is_empty(), "the pre-write guard copies:\n{}", copies.join("\n"));
+}
+
+/// The lines of `text` that are code, not comments, with their index.
+fn code_lines(text: &str) -> impl Iterator<Item = (usize, &str)> {
+    text.lines().enumerate().filter(|(_, line)| !line.trim_start().starts_with("//"))
+}
+
+// org-io deletes nothing itself (REQ-cz753a): no file of its source removes
+// a file or directory, forgets an Organisation, or drops a store's records or
+// Personas; and org-node's discard is reached only from `publish.rs`.
+// *Amended 2026-10-13 (owner ruling of that day, background discard):* the
+// clause that the two public discards take `&mut self` is replaced by
+// `no_public_method_discards_a_provisional_update`.
+// verifies: LLR-cc59ys
+#[test]
+fn org_io_removes_nothing_itself_and_discards_only_in_publish() {
+    let mut found = vec![];
+    for (path, text) in sources() {
+        let file = path.display().to_string();
+        for (index, line) in code_lines(&text) {
+            let removes = ["remove_file", "remove_dir", "forget_organisation"].iter().any(|call| line.contains(call));
+            let drops_records = ["orgs", "personas"].iter().any(|field| {
+                [".retain(", ".remove(", ".clear("].iter().any(|call| line.contains(&format!("{field}{call}")))
+            });
+            if removes || drops_records {
+                found.push(format!("{file}:{}: removes: {}", index + 1, line.trim()));
+            }
+            if line.contains("discard_provisional(") && !path.ends_with("publish.rs") {
+                found.push(format!("{file}:{}: discards outside publish.rs: {}", index + 1, line.trim()));
+            }
+        }
+    }
+    assert!(found.is_empty(), "org-io deletes outside org-node's verified paths:\n{}", found.join("\n"));
+}
+
+// The app discards nothing (owner ruling of 2026-10-13): no file of org-io's
+// source declares a public discard, only a private or crate-visible one.
+// verifies: LLR-cc59ys
+#[test]
+fn no_public_method_discards_a_provisional_update() {
+    let mut found = vec![];
+    for (path, text) in sources() {
+        let file = path.display().to_string();
+        for (index, line) in code_lines(&text) {
+            if ["pub fn discard", "pub async fn discard"].iter().any(|declared| line.contains(declared)) {
+                found.push(format!("{file}:{}: a public discard: {}", index + 1, line.trim()));
+            }
+        }
+    }
+    assert!(found.is_empty(), "org-io offers a public discard:\n{}", found.join("\n"));
 }

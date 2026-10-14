@@ -259,7 +259,16 @@ verify_commands:
 # change: PR-vt244s, PR-2dmjzj, PR-u4c2vp and PR-w88sr9 reach 30 days around
 # 2026-10-09 while the four-change chain-authority sequence that reworks their
 # code is under way.
-problem_age_days: 45
+# Raised from 45 to 60 on 2026-10-08 by owner ruling (decision D1 of
+# docs/plans/2026-10-08-org-io-publish.md): PR-vt244s is kept open until
+# S3b-io part 2 merges, which depends on S4 (worktree-org-io-transport).
+# PR-vt244s (opened 2026-09-09) would be stale after 2026-10-24 at 45; at 60
+# it is stale after 2026-11-08. The figure is the smallest that plausibly
+# covers S4 (18 tasks) and part 2 (8 tasks) at the pace of S2 and S3a (each
+# about two days from plan to merge), with a week for review rounds; it is
+# not a ruling not to fix, and it applies to every org-node report.
+# Confirmed by the owner on 2026-10-08: 60 days.
+problem_age_days: 60
 # Raised 2026-10-05 by owner ruling: the org-node type-safety change opens four
 # deferred reports (PR-szkat6, PR-vkw22m, PR-4b2v6p, PR-k2xxaq) on top of the
 # nine other reports open after tooth 4 (13 open in all); each is genuine

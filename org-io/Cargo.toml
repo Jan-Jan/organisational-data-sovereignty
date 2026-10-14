@@ -84,6 +84,20 @@ name = "submit_flow"
 path = "tests/submit_flow.rs"
 required-features = ["test-support"]
 
+# The publish state (SDD-6mpmsw): the unknown-outcome write, its settle, and
+# discard (LLR-2yjuaj, LLR-t98pk9, LLR-nqvbb6, LLR-fptp57, LLR-36zp69).
+[[test]]
+name = "publish_path"
+path = "tests/publish_path.rs"
+required-features = ["test-support"]
+
+# Reconcile at start and on request, the unverified state, and no deletion
+# but on a verified path (LLR-k5pzsz, LLR-kp95ty, LLR-cc59ys).
+[[test]]
+name = "startup_reconcile"
+path = "tests/startup_reconcile.rs"
+required-features = ["test-support"]
+
 [[test]]
 name = "receive_order"
 path = "tests/receive_order.rs"

@@ -22,12 +22,28 @@ export interface PersonaDto {
 	status: string;
 }
 
+/** LLR-8axx7h: whether the Organisation's last reconcile verified it. */
+export type VerificationDto =
+	| { status: 'verified' }
+	| { status: 'unverified'; reason: string }
+	| { status: 'not_checked' };
+
 export interface OrgDto {
 	org_id: string;    // 40 hex chars
 	epoch: number;
 	root_hash: string; // 64 hex chars
 	member_count: number;
+	verification: VerificationDto;
 }
+
+/** LLR-ekz4zn: one Organisation's reconcile result, tagged by `result`. */
+export type ReconciliationDto =
+	| { result: 'in_step'; org_id: string; epoch: number }
+	| { result: 'committed'; org_id: string; epoch: number; recipients: string[] }
+	| { result: 'behind'; org_id: string; chain_epoch: number }
+	| { result: 'removed'; org_id: string }
+	| { result: 'refused'; org_id: string; reason: string }
+	| { result: 'unverified'; org_id: string; reason: string };
 
 export interface InviteDto {
 	org_name: string;
@@ -187,6 +203,11 @@ export function listPersonas(): Promise<PersonaDto[]> {
 /** List all local org records. */
 export function listOrgs(): Promise<OrgDto[]> {
 	return invoke<OrgDto[]>('list_orgs');
+}
+
+/** REQ-363366: reconcile every held Organisation; one result each. */
+export function reconcileOrganisations(): Promise<ReconciliationDto[]> {
+	return invoke<ReconciliationDto[]>('reconcile_organisations');
 }
 
 /** Return the current connection status (chain env vars + data dir). */

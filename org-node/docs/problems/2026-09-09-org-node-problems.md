@@ -152,6 +152,16 @@ reconcile that calls this. The item stays `open` for S3b-io and is not
 then, the limit is raised deliberately, by owner ruling, not this item's
 status.
 
+*Progress 2026-10-13 (change `worktree-org-io-publish`, S3b-io part 1, task
+T17a).* Part 1 landed org-io's settlement of a chain write whose outcome is
+unknown (read until the chain decides it, then committed or discarded, no
+second write for the Organisation meanwhile) and its reconcile of every held
+Organisation at start and on request, which calls this unit's `reconcile`.
+The lock-out after a lost commit is gone. The item stays `open` by owner
+ruling D1 of 2026-10-08 (`docs/plans/2026-10-08-org-io-publish.md` §6): the
+delivery of a reconciled commit and the durable resend of a revocation are
+S3b-io part 2's (task T16d), and resolve it.
+
 Where: `org-node/src/service.rs` — in `admit_member`, the chain write
 (`submit_update`) and the record update at the end of the function, with the
 transport send between them returning early on error; the same shape in

@@ -2,18 +2,30 @@
 //! of the multisig that controls an Organisation's pure proxy. The chain can
 //! confirm a signatory set but cannot list one (pallet-multisig stores no
 //! member list), so the check is of this node's own status only, from its
-//! own account and its configured co-signers (REQ-f3eu9n).
+//! own account and its configured co-signers (REQ-ntkjk6).
 
 use async_trait::async_trait;
 use on_chain_client::write::multisig::multi_account_id;
+pub use on_chain_client::write::signatory_set::ProxyDefinition;
 use on_chain_client::write::AccountId;
 use on_chain_client::{OrgAdmin, OrgRegistryClient};
 use org_node::OrgId;
 
-/// Whether this node is an admin of an Organisation.
+/// An Organisation's signatory set as one read returns it (on-chain-client's
+/// `SignatorySet`): the mapped account, its proxy definitions in stored
+/// order, and the runtime's `Any` index, all at one finalised block. Public
+/// chain data only.
+pub type SignatorySetView = on_chain_client::write::signatory_set::SignatorySet;
+
+/// Whether this node is an admin of an Organisation (LLR-2hkqv2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdminStatus {
+    /// A definition `(controller, Any, 0)` exists: the chain dispatches this
+    /// node's writes at once.
     Admin,
+    /// The controller is a delegate only with another proxy type or a
+    /// non-zero delay: the chain would refuse its writes.
+    DelegateCannotDispatch,
     NotAdmin,
 }
 
@@ -58,27 +70,37 @@ pub fn controller_of(own: AccountId, co_signers: &[AccountId]) -> AccountId {
     }
 }
 
-/// `Admin` exactly when the H160 maps to an account and that account's
-/// delegates include `controller` (LLR-vyd5d3).
-pub fn admin_status(controller: AccountId, original_account: Option<AccountId>, delegates: &[AccountId]) -> AdminStatus {
-    if original_account.is_some() && delegates.contains(&controller) {
+/// `Admin` exactly when the H160 maps to an account and some definition is
+/// `(controller, Any, 0)`, with `Any` the index the read resolved from the
+/// runtime's metadata; `DelegateCannotDispatch` when the account is mapped
+/// and definitions name `controller`, but none that way; `NotAdmin`
+/// otherwise (LLR-2hkqv2).
+pub fn admin_status(controller: AccountId, set: &SignatorySetView) -> AdminStatus {
+    if set.original_account.is_none() {
+        return AdminStatus::NotAdmin;
+    }
+    let naming_controller: Vec<&ProxyDefinition> =
+        set.definitions.iter().filter(|definition| definition.delegate == controller).collect();
+    if naming_controller.iter().any(|definition| definition.proxy_type == set.any_proxy_type && definition.delay == 0) {
         AdminStatus::Admin
-    } else {
+    } else if naming_controller.is_empty() {
         AdminStatus::NotAdmin
+    } else {
+        AdminStatus::DelegateCannotDispatch
     }
 }
 
-/// The two signatory-set reads (on-chain-client's REQ-8p2veg, REQ-v8jczx).
+/// The one signatory-set read, at one finalised block (on-chain-client's
+/// REQ-b8x2py).
 #[async_trait]
 pub trait SignatorySetReader: Send + Sync {
-    /// The account the Organisation's H160 maps to, if any.
-    async fn original_account(&self, org_id: OrgId) -> Result<Option<AccountId>, String>;
-    /// `account`'s proxy delegates.
-    async fn proxy_delegates(&self, account: AccountId) -> Result<Vec<AccountId>, String>;
+    /// The account the Organisation's H160 maps to, that account's proxy
+    /// definitions, and the runtime's `Any` index, all at one block.
+    async fn signatory_set(&self, org_id: OrgId) -> Result<SignatorySetView, String>;
 }
 
-/// The check over a reader (LLR-c9fyun): the delegates are read only when
-/// the H160 maps to an account, and a failed read is an error.
+/// The check over a reader (LLR-c9fyun, LLR-2hkqv2): one signatory-set read,
+/// and a failed read is an error.
 pub(crate) async fn own_admin_status(
     reader: &dyn SignatorySetReader,
     own: Option<AccountId>,
@@ -86,12 +108,8 @@ pub(crate) async fn own_admin_status(
     org_id: OrgId,
 ) -> Result<AdminStatus, OwnAdminError> {
     let own = own.ok_or(OwnAdminError::NotConfigured)?;
-    let original_account = reader.original_account(org_id).await.map_err(OwnAdminError::Read)?;
-    let delegates = match original_account {
-        Some(account) => reader.proxy_delegates(account).await.map_err(OwnAdminError::Read)?,
-        None => Vec::new(),
-    };
-    Ok(admin_status(controller_of(own, co_signers), original_account, &delegates))
+    let set = reader.signatory_set(org_id).await.map_err(OwnAdminError::Read)?;
+    Ok(admin_status(controller_of(own, co_signers), &set))
 }
 
 /// The production reads (SDD-z85ux9's shell), over on-chain-client's
@@ -108,26 +126,18 @@ impl OnChainSignatorySetReader {
 
 #[async_trait]
 impl SignatorySetReader for OnChainSignatorySetReader {
-    async fn original_account(&self, org_id: OrgId) -> Result<Option<AccountId>, String> {
-        self.registry.original_account(OrgAdmin(*org_id.as_bytes())).await.map_err(|error| error.to_string())
-    }
-
-    async fn proxy_delegates(&self, account: AccountId) -> Result<Vec<AccountId>, String> {
-        self.registry.proxy_delegates(account).await.map_err(|error| error.to_string())
+    async fn signatory_set(&self, org_id: OrgId) -> Result<SignatorySetView, String> {
+        self.registry.signatory_set(OrgAdmin(*org_id.as_bytes())).await.map_err(|error| error.to_string())
     }
 }
 
-/// The reads when the chain is not configured: every read refused, with the
-/// same message as the unconfigured write and read (REQ-8zuka3).
+/// The read when the chain is not configured: refused, with the same message
+/// as the unconfigured write and read (REQ-8zuka3).
 pub struct SignatorySetNotConfigured;
 
 #[async_trait]
 impl SignatorySetReader for SignatorySetNotConfigured {
-    async fn original_account(&self, _org_id: OrgId) -> Result<Option<AccountId>, String> {
-        Err(crate::submit::NOT_CONFIGURED.into())
-    }
-
-    async fn proxy_delegates(&self, _account: AccountId) -> Result<Vec<AccountId>, String> {
+    async fn signatory_set(&self, _org_id: OrgId) -> Result<SignatorySetView, String> {
         Err(crate::submit::NOT_CONFIGURED.into())
     }
 }

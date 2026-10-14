@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use on_chain_client::write::calldata::revive_update_runtime_call;
 use on_chain_client::write::proxy::{map_account_call, proxied};
 use on_chain_client::write::{
-    genesis, submit_update, AccountId, DispatchOutcome, Genesis, GenesisStep, WriteError, WriteOps,
+    genesis, submit_update, AccountId, DispatchOutcome, Genesis, GenesisStep, WriteError, WriteOps, WriteWindow,
     FUND_AMOUNT,
 };
 use on_chain_client::{h160_of, Epoch, OnChainRootHash, OrgAdmin, OrgPubKey};
@@ -19,7 +19,7 @@ use subxt::dynamic::Value;
 enum Step {
     CreatePure(Vec<AccountId>),
     Fund(AccountId, u128),
-    Dispatch(Vec<AccountId>, Value),
+    Dispatch(Vec<AccountId>, Value, Option<WriteWindow>),
 }
 
 /// What the substitute does at step `n` (0-based, in the order asked).
@@ -37,6 +37,12 @@ struct FakeOps {
 
 const PROXY: AccountId = AccountId([0x5a; 32]);
 
+/// The pure proxy the substitute chain creates at its `n`th `create_pure`
+/// (0-based): `PROXY`, then a distinct account each time.
+fn nth_proxy(n: usize) -> AccountId {
+    AccountId([0x5a + u8::try_from(n).unwrap(); 32])
+}
+
 impl FakeOps {
     fn answering(answers: &[Answer]) -> Self {
         Self { steps: Mutex::new(vec![]), answers: answers.to_vec() }
@@ -53,10 +59,11 @@ impl FakeOps {
 
 impl WriteOps for FakeOps {
     type Signer = ();
+    /// The chain's answer: a new pure proxy per call, `PROXY` the first.
     async fn create_pure(&self, _: &(), co: &[AccountId]) -> Result<AccountId, WriteError> {
         match self.record(Step::CreatePure(co.to_vec())) {
             Answer::Fail => Err(WriteError::Subxt("create_pure refused".into())),
-            _ => Ok(PROXY),
+            _ => Ok(nth_proxy(self.steps().iter().filter(|s| matches!(s, Step::CreatePure(_))).count() - 1)),
         }
     }
     async fn fund(&self, _: &(), dest: AccountId, amount: u128) -> Result<(), WriteError> {
@@ -65,8 +72,14 @@ impl WriteOps for FakeOps {
             _ => Ok(()),
         }
     }
-    async fn dispatch(&self, _: &(), co: &[AccountId], call: Value) -> Result<DispatchOutcome, WriteError> {
-        match self.record(Step::Dispatch(co.to_vec(), call)) {
+    async fn dispatch(
+        &self,
+        _: &(),
+        co: &[AccountId],
+        call: Value,
+        window: Option<WriteWindow>,
+    ) -> Result<DispatchOutcome, WriteError> {
+        match self.record(Step::Dispatch(co.to_vec(), call, window)) {
             Answer::Fail => Err(WriteError::Subxt("dispatch refused".into())),
             Answer::Approval => Ok(DispatchOutcome::ApprovalRecorded),
             Answer::Ok => Ok(DispatchOutcome::Executed),
@@ -84,6 +97,9 @@ fn root() -> OnChainRootHash {
 fn key() -> OrgPubKey {
     OrgPubKey([0x22; 32])
 }
+fn window() -> WriteWindow {
+    WriteWindow { birth_number: 4_242, birth_hash: [0x77; 32] }
+}
 
 // Normal: the four steps, in order, each with its exact call, and the result.
 // verifies: LLR-a2acvh, REQ-6jefu2
@@ -97,10 +113,37 @@ async fn genesis_creates_funds_maps_and_records_in_that_order() {
         vec![
             Step::CreatePure(co()),
             Step::Fund(PROXY, FUND_AMOUNT),
-            Step::Dispatch(co(), proxied(PROXY, map_account_call())),
-            Step::Dispatch(co(), proxied(PROXY, revive_update_runtime_call(CONTRACT, root(), key(), Epoch(0)))),
+            Step::Dispatch(co(), proxied(PROXY, map_account_call()), None),
+            Step::Dispatch(co(), proxied(PROXY, revive_update_runtime_call(CONTRACT, root(), key(), Epoch(0))), None),
         ]
     );
+}
+
+// Each founding creates its own pure proxy: two ceremonies each start with
+// `create_pure`, each funds, maps and records through the proxy it created,
+// never an earlier founding's, and the two Organisations differ. Owner ruling
+// of 2026-10-13 (review round 1, finding-2, of change worktree-org-io-publish):
+// a timed-out founding that lands later founds a separate Organisation under
+// its own new proxy, so it cannot collide with the committed one.
+// verifies: LLR-a2acvh, REQ-6jefu2
+#[tokio::test]
+async fn each_genesis_creates_a_new_pure_proxy_and_writes_through_it() {
+    let ops = FakeOps::answering(&[]);
+    let first = genesis(&ops, &(), &co(), CONTRACT, root(), key()).await.unwrap();
+    let second = genesis(&ops, &(), &co(), CONTRACT, root(), key()).await.unwrap();
+    let (p1, p2) = (nth_proxy(0), nth_proxy(1));
+    assert_eq!(first, Genesis { proxy: p1, admin: OrgAdmin(h160_of(p1.0)) });
+    assert_eq!(second, Genesis { proxy: p2, admin: OrgAdmin(h160_of(p2.0)) });
+    assert_ne!(first.admin, second.admin, "two Organisations");
+    let ceremony = |proxy: AccountId| {
+        vec![
+            Step::CreatePure(co()),
+            Step::Fund(proxy, FUND_AMOUNT),
+            Step::Dispatch(co(), proxied(proxy, map_account_call()), None),
+            Step::Dispatch(co(), proxied(proxy, revive_update_runtime_call(CONTRACT, root(), key(), Epoch(0))), None),
+        ]
+    };
+    assert_eq!(ops.steps(), [ceremony(p1), ceremony(p2)].concat());
 }
 
 // Abnormal: a failure at each step is reported as that step, and no later
@@ -139,10 +182,14 @@ async fn an_approval_without_execution_fails_the_genesis_step() {
 #[tokio::test]
 async fn submit_update_dispatches_one_proxied_update_and_succeeds_when_it_executes() {
     let ops = FakeOps::answering(&[]);
-    submit_update(&ops, &(), &co(), CONTRACT, PROXY, root(), key(), Epoch(4)).await.unwrap();
+    submit_update(&ops, &(), &co(), CONTRACT, PROXY, root(), key(), Epoch(4), window()).await.unwrap();
     assert_eq!(
         ops.steps(),
-        vec![Step::Dispatch(co(), proxied(PROXY, revive_update_runtime_call(CONTRACT, root(), key(), Epoch(4))))]
+        vec![Step::Dispatch(
+            co(),
+            proxied(PROXY, revive_update_runtime_call(CONTRACT, root(), key(), Epoch(4))),
+            Some(window())
+        )]
     );
 }
 
@@ -153,12 +200,77 @@ async fn submit_update_dispatches_one_proxied_update_and_succeeds_when_it_execut
 async fn submit_update_reports_a_pending_approval_and_a_failed_dispatch() {
     let pending = FakeOps::answering(&[Answer::Approval]);
     assert_eq!(
-        submit_update(&pending, &(), &co(), CONTRACT, PROXY, root(), key(), Epoch(4)).await.unwrap_err(),
+        submit_update(&pending, &(), &co(), CONTRACT, PROXY, root(), key(), Epoch(4), window()).await.unwrap_err(),
         WriteError::PendingApproval
     );
     let failed = FakeOps::answering(&[Answer::Fail]);
     assert_eq!(
-        submit_update(&failed, &(), &co(), CONTRACT, PROXY, root(), key(), Epoch(4)).await.unwrap_err(),
+        submit_update(&failed, &(), &co(), CONTRACT, PROXY, root(), key(), Epoch(4), window()).await.unwrap_err(),
         WriteError::Subxt("dispatch refused".into())
     );
+}
+
+// Normal: the window the caller read reaches the one dispatch unchanged, so
+// the update is signed mortal from that block (LLR-zj4jju); two windows give
+// two dispatches that differ only in it.
+// verifies: LLR-zj4jju
+#[tokio::test]
+async fn submit_update_dispatches_with_the_window_it_was_given() {
+    let ops = FakeOps::answering(&[]);
+    let later = WriteWindow { birth_number: u64::MAX, birth_hash: [0xee; 32] };
+    submit_update(&ops, &(), &co(), CONTRACT, PROXY, root(), key(), Epoch(4), window()).await.unwrap();
+    submit_update(&ops, &(), &co(), CONTRACT, PROXY, root(), key(), Epoch(4), later).await.unwrap();
+    let windows: Vec<Option<WriteWindow>> = ops
+        .steps()
+        .into_iter()
+        .map(|step| match step {
+            Step::Dispatch(_, _, window) => window,
+            other => panic!("not a dispatch: {other:?}"),
+        })
+        .collect();
+    assert_eq!(windows, vec![Some(window()), Some(later)]);
+}
+
+// Abnormal: genesis is not settled by a window; each of its dispatches
+// carries none, so they are signed with subxt's defaults (LLR-zj4jju).
+// verifies: LLR-zj4jju
+#[tokio::test]
+async fn genesis_dispatches_with_no_window() {
+    let ops = FakeOps::answering(&[]);
+    genesis(&ops, &(), &co(), CONTRACT, root(), key()).await.unwrap();
+    let dispatches: Vec<Option<WriteWindow>> = ops
+        .steps()
+        .into_iter()
+        .filter_map(|step| match step {
+            Step::Dispatch(_, _, window) => Some(window),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(dispatches, vec![None, None]);
+}
+
+// Abnormal: a mortal dispatch that is refused, or only recorded as a pending
+// approval, is reported as such and never retried — in particular not
+// unwindowed, which would sign an immortal write the caller's window could
+// not settle. One dispatch is made, carrying the window.
+// verifies: LLR-zj4jju
+#[tokio::test]
+async fn a_refused_mortal_dispatch_is_reported_and_not_retried_without_its_window() {
+    for (answer, expected) in [
+        (Answer::Fail, WriteError::Subxt("dispatch refused".into())),
+        (Answer::Approval, WriteError::PendingApproval),
+    ] {
+        let ops = FakeOps::answering(&[answer]);
+        let err = submit_update(&ops, &(), &co(), CONTRACT, PROXY, root(), key(), Epoch(4), window()).await.unwrap_err();
+        assert_eq!(err, expected);
+        let windows: Vec<Option<WriteWindow>> = ops
+            .steps()
+            .into_iter()
+            .map(|step| match step {
+                Step::Dispatch(_, _, window) => window,
+                other => panic!("not a dispatch: {other:?}"),
+            })
+            .collect();
+        assert_eq!(windows, vec![Some(window())], "{expected:?}: one dispatch, with the window");
+    }
 }

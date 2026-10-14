@@ -1,22 +1,22 @@
 //! Test-only substitutes (the `test-support` feature; never in production
 //! builds). `FakeChain` stands in for the chain on both sides of org-io's
 //! seams: its writes (`ChainWriter`) move a set of `ChainSlots`, and its
-//! reads (`StateReader`) answer from them, counted; its signatory-set reads
-//! (`SignatorySetReader`) answer from a mapped account per Organisation and
-//! a delegate list per account, counted apart. It generalises the app's
-//! former `FakeWriter`.
+//! reads (`StateReader`) answer from them, counted; its signatory-set read
+//! (`SignatorySetReader`) answers from a mapped account per Organisation, a
+//! definition list per account and an `Any` index, counted apart. It
+//! generalises the app's former `FakeWriter`.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use async_trait::async_trait;
-use on_chain_client::write::AccountId;
+use on_chain_client::write::{AccountId, WriteWindow};
 use org_node::test_fixtures::ChainSlots;
 use org_node::{ChainAccount, Epoch, OrgId, OrgNodeError, OrgPublicKey, OrgState, RootHash};
 
 use crate::chain_read::StateReader;
-use crate::signatory::SignatorySetReader;
+use crate::signatory::{ProxyDefinition, SignatorySetReader, SignatorySetView};
 use crate::submit::ChainWriter;
 
 /// A substitute chain. Clones share everything. The switches:
@@ -28,14 +28,22 @@ use crate::submit::ChainWriter;
 ///   read finds the slot one epoch past where the writes left it (a state
 ///   org-node's commit refuses for a reason other than `OrgNotOnChain`).
 ///   Every read is counted (`reads`), whatever it answers.
-/// - `original_account_failing`, `delegates_failing`: the one signatory-set
-///   read or the other fails; those reads are counted together
-///   (`signatory_reads`).
+/// - `write_lands_then_hangs`: an update write moves the slot, then never
+///   returns (a write that executes after its bound); `write_window_failing`:
+///   the write window cannot be read. Every update write is counted
+///   (`update_writes`), whatever it answers.
+/// - The finalised block (`advance_finalised`, shared with
+///   `sharing_slots_with`): the write window is born at it and
+///   `finalised_block` answers it, counted apart (`finalised_reads`);
+///   `read_failing` fails that read too.
+/// - `original_account_failing`, `delegates_failing`: the signatory-set read
+///   fails at the mapped account, or (for a mapped H160) at its definitions;
+///   the storage values it reads are counted (`signatory_reads`).
 #[derive(Clone, Default)]
 pub struct FakeChain {
     slots: ChainSlots,
     proxies: Arc<Mutex<HashMap<[u8; 32], OrgId>>>,
-    signatory_set: Arc<Mutex<SignatorySet>>,
+    signatory_set: Arc<Mutex<SignatorySlots>>,
     pub write_failing: Arc<AtomicBool>,
     pub write_hanging: Arc<AtomicBool>,
     pub read_failing: Arc<AtomicBool>,
@@ -44,16 +52,23 @@ pub struct FakeChain {
     pub epoch_ahead: Arc<AtomicBool>,
     pub original_account_failing: Arc<AtomicBool>,
     pub delegates_failing: Arc<AtomicBool>,
+    pub write_lands_then_hangs: Arc<AtomicBool>,
+    pub write_window_failing: Arc<AtomicBool>,
     reads: Arc<AtomicUsize>,
     signatory_reads: Arc<AtomicUsize>,
+    finalised: Arc<AtomicU64>,
+    finalised_reads: Arc<AtomicUsize>,
+    update_writes: Arc<AtomicUsize>,
 }
 
-/// What the signatory-set reads answer from: `Revive.OriginalAccount` per
-/// Organisation and `Proxy.Proxies` per account.
+/// What the signatory-set read answers from: `Revive.OriginalAccount` per
+/// Organisation, `Proxy.Proxies` per account, and the runtime's `Any` index
+/// (0 unless set).
 #[derive(Default)]
-struct SignatorySet {
+struct SignatorySlots {
     original_accounts: HashMap<OrgId, AccountId>,
-    delegates: HashMap<AccountId, Vec<AccountId>>,
+    definitions: HashMap<AccountId, Vec<ProxyDefinition>>,
+    any_proxy_type: u8,
 }
 
 impl FakeChain {
@@ -69,6 +84,7 @@ impl FakeChain {
             slots: other.slots.clone(),
             proxies: other.proxies.clone(),
             signatory_set: other.signatory_set.clone(),
+            finalised: other.finalised.clone(),
             ..Self::default()
         }
     }
@@ -78,17 +94,33 @@ impl FakeChain {
         self.signatory_set().original_accounts.insert(org_id, account);
     }
 
-    /// Set `account`'s proxy delegates (`Proxy.Proxies`).
+    /// Set `account`'s proxy definitions to each delegate's founding
+    /// definition, `(delegate, Any, 0)`.
     pub fn set_delegates(&self, account: AccountId, delegates: Vec<AccountId>) {
-        self.signatory_set().delegates.insert(account, delegates);
+        let any = self.signatory_set().any_proxy_type;
+        let definitions =
+            delegates.into_iter().map(|delegate| ProxyDefinition { delegate, proxy_type: any, delay: 0 }).collect();
+        self.set_definitions(account, definitions);
     }
 
-    /// How many signatory-set reads this view has answered, both kinds.
+    /// Set `account`'s proxy definitions (`Proxy.Proxies`), in stored order.
+    pub fn set_definitions(&self, account: AccountId, definitions: Vec<ProxyDefinition>) {
+        self.signatory_set().definitions.insert(account, definitions);
+    }
+
+    /// Set the runtime's `Any` proxy-type index the read reports.
+    pub fn set_any_proxy_type(&self, index: u8) {
+        self.signatory_set().any_proxy_type = index;
+    }
+
+    /// How many signatory-set storage values this view has read:
+    /// `Revive.OriginalAccount` on every read, `Proxy.Proxies` only for a
+    /// mapped H160, as on-chain-client's pinned read fetches them.
     pub fn signatory_reads(&self) -> usize {
         self.signatory_reads.load(Ordering::SeqCst)
     }
 
-    fn signatory_set(&self) -> MutexGuard<'_, SignatorySet> {
+    fn signatory_set(&self) -> MutexGuard<'_, SignatorySlots> {
         self.signatory_set.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
@@ -100,6 +132,21 @@ impl FakeChain {
     /// How many reads this view has answered.
     pub fn reads(&self) -> usize {
         self.reads.load(Ordering::SeqCst)
+    }
+
+    /// Move the chain's finalised block on by `blocks`.
+    pub fn advance_finalised(&self, blocks: u64) {
+        self.finalised.fetch_add(blocks, Ordering::SeqCst);
+    }
+
+    /// How many finalised-block reads this view has answered.
+    pub fn finalised_reads(&self) -> usize {
+        self.finalised_reads.load(Ordering::SeqCst)
+    }
+
+    /// How many update writes this view has been asked for.
+    pub fn update_writes(&self) -> usize {
+        self.update_writes.load(Ordering::SeqCst)
     }
 
     /// How many Organisations have had a genesis written on this chain.
@@ -143,24 +190,36 @@ impl StateReader for FakeChain {
         }
         Ok(state)
     }
+
+    async fn finalised_block(&self) -> Result<u64, OrgNodeError> {
+        self.finalised_reads.fetch_add(1, Ordering::SeqCst);
+        if self.read_failing.load(Ordering::SeqCst) {
+            return Err(OrgNodeError::Chain("node unreachable".into()));
+        }
+        Ok(self.finalised.load(Ordering::SeqCst))
+    }
 }
 
 #[async_trait]
 impl SignatorySetReader for FakeChain {
-    async fn original_account(&self, org_id: OrgId) -> Result<Option<AccountId>, String> {
+    async fn signatory_set(&self, org_id: OrgId) -> Result<SignatorySetView, String> {
         self.signatory_reads.fetch_add(1, Ordering::SeqCst);
         if self.original_account_failing.load(Ordering::SeqCst) {
             return Err("node unreachable".into());
         }
-        Ok(self.signatory_set().original_accounts.get(&org_id).copied())
-    }
-
-    async fn proxy_delegates(&self, account: AccountId) -> Result<Vec<AccountId>, String> {
-        self.signatory_reads.fetch_add(1, Ordering::SeqCst);
-        if self.delegates_failing.load(Ordering::SeqCst) {
-            return Err("node unreachable".into());
-        }
-        Ok(self.signatory_set().delegates.get(&account).cloned().unwrap_or_default())
+        let slots = self.signatory_set();
+        let original_account = slots.original_accounts.get(&org_id).copied();
+        let definitions = match original_account {
+            None => Vec::new(),
+            Some(account) => {
+                self.signatory_reads.fetch_add(1, Ordering::SeqCst);
+                if self.delegates_failing.load(Ordering::SeqCst) {
+                    return Err("node unreachable".into());
+                }
+                slots.definitions.get(&account).cloned().unwrap_or_default()
+            }
+        };
+        Ok(SignatorySetView { original_account, definitions, any_proxy_type: slots.any_proxy_type })
     }
 }
 
@@ -175,9 +234,31 @@ impl ChainWriter for FakeChain {
         Ok((org_id, ChainAccount::new(proxy)))
     }
 
-    async fn update(&self, proxy: ChainAccount, root: RootHash, key: OrgPublicKey, expected_epoch: Epoch) -> Result<(), String> {
+    async fn write_window(&self) -> Result<WriteWindow, String> {
+        if self.write_window_failing.load(Ordering::SeqCst) {
+            return Err("node unreachable".into());
+        }
+        let birth_number = self.finalised.load(Ordering::SeqCst);
+        let mut birth_hash = [0u8; 32];
+        birth_hash[..8].copy_from_slice(&birth_number.to_le_bytes());
+        Ok(WriteWindow { birth_number, birth_hash })
+    }
+
+    async fn update(
+        &self,
+        proxy: ChainAccount,
+        root: RootHash,
+        key: OrgPublicKey,
+        expected_epoch: Epoch,
+        _window: WriteWindow,
+    ) -> Result<(), String> {
+        self.update_writes.fetch_add(1, Ordering::SeqCst);
         self.gate().await?;
         let org_id = *self.proxies().get(proxy.as_bytes()).ok_or("unknown proxy")?;
-        self.slots.apply_update(org_id, root, key, expected_epoch).map_err(|error| error.to_string())
+        self.slots.apply_update(org_id, root, key, expected_epoch).map_err(|error| error.to_string())?;
+        if self.write_lands_then_hangs.load(Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
+        Ok(())
     }
 }

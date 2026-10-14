@@ -93,7 +93,8 @@ async fn single_signatory_genesis_then_update_moves_the_slot() {
     let state = reader.get_org_state(g.admin, None).await.expect("read").expect("slot");
     assert_eq!((state.root_hash, state.epoch), (OnChainRootHash([0x33; 32]), Epoch(1)));
 
-    submit_update(&ops, &alice, &[], contract, g.proxy, OnChainRootHash([0x66; 32]), OrgPubKey([0x22; 32]), Epoch(1))
+    let window = reader.write_window().await.expect("write window");
+    submit_update(&ops, &alice, &[], contract, g.proxy, OnChainRootHash([0x66; 32]), OrgPubKey([0x22; 32]), Epoch(1), window)
         .await
         .expect("update");
     let state = reader.get_org_state(g.admin, None).await.expect("read").expect("slot");

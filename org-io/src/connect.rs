@@ -79,6 +79,10 @@ impl StateReader for StateReaderNotConfigured {
     async fn read_state(&self, _org_id: OrgId) -> Result<Option<OrgState>, OrgNodeError> {
         Err(OrgNodeError::Chain(crate::submit::NOT_CONFIGURED.into()))
     }
+
+    async fn finalised_block(&self) -> Result<u64, OrgNodeError> {
+        Err(OrgNodeError::Chain(crate::submit::NOT_CONFIGURED.into()))
+    }
 }
 
 /// Connect to a chain RPC over an explicit `LegacyBackend` (required for

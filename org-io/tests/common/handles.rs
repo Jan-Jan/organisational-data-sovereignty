@@ -1,21 +1,22 @@
 //! Handles, Personas and transport helpers for the tests that drive `OrgIo`
-//! (`submit_flow`, `receive_order`, `signatory_rule`). The relay and sink
-//! helpers are copied
-//! from org-node's `tests/support/mod.rs` (`spawn_recv_one`, `deliver_from`,
+//! (`submit_flow`, `receive_order`, `signatory_rule`, `publish_path`,
+//! `startup_reconcile`). The relay and sink helpers are copied from
+//! org-node's `tests/support/mod.rs` (`spawn_recv_one`, `deliver_from`,
 //! `dead_addr`), with the endpoint calls going through org-io's transitional
 //! re-export of org-node. A `DeviceSeed` in a test file is allowed: org-io's
 //! absence of device private keys (LLR-3zdw8v) is a scan of `org-io/src`.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use org_io::node::service::OrgService;
 use org_io::node::store::PersonaStore;
 use org_io::node::transport::endpoint::OrgEndpoint;
 use org_io::node::transport::wire::WireMessage;
-use org_io::node::{DeviceSeed, DevicePublicKey, Handle, Joiner, MemberSeed, Name, PersonaId, Surname};
+use org_io::node::{DeviceSeed, DevicePublicKey, Handle, Joiner, MemberSeed, Name, OrgId, PersonaId, Surname};
 use org_io::test_support::FakeChain;
-use org_io::OrgIo;
+use org_io::{BuiltUpdate, OrgIo};
 use rand::rngs::OsRng;
 
 /// How long a network step may take before the test gives up.
@@ -39,6 +40,49 @@ pub fn handle(tag: &str, party: &str, chain: &FakeChain) -> OrgIo {
     let _ = std::fs::remove_dir_all(dir);
     std::fs::create_dir_all(dir).unwrap();
     OrgIo::for_test(OrgService::new(PersonaStore::open(path, "pw").unwrap()), chain)
+}
+
+/// The bytes of `party`'s store file in test `tag`, as they are on disk.
+pub fn store_bytes(tag: &str, party: &str) -> Vec<u8> {
+    std::fs::read(store_path(tag, party)).unwrap()
+}
+
+/// Party `a`'s handle over a fresh chain whose first Persona founded an
+/// Organisation.
+pub async fn founded(tag: &str) -> (FakeChain, OrgIo, OrgId) {
+    let chain = FakeChain::new();
+    let mut io = handle(tag, "a", &chain);
+    let pid = persona(&mut io, "alice");
+    let org = io.found_organisation(&mut OsRng, &pid).await.unwrap();
+    (chain, io, org)
+}
+
+/// Whether org-node holds the provisional update `update` names.
+pub fn held(io: &OrgIo, update: &BuiltUpdate) -> bool {
+    io.node_for_test().holds_provisional(update.org_id, update.base_root, update.resulting_root, update.org_pub_key)
+}
+
+/// Submit `update` while every write never finishes, crossing the 90-second
+/// bound on a paused clock: the write's outcome is unknown. The runtime is
+/// current-thread; the clock is paused only while the bound is crossed, and
+/// resumed before any network step.
+pub async fn timed_out(
+    io: &mut OrgIo,
+    update: &BuiltUpdate,
+    recipient: DevicePublicKey,
+    peer_addr: Option<iroh::EndpointAddr>,
+) {
+    tokio::time::pause();
+    let err = io.submit_commit_send(&mut OsRng, update, recipient, peer_addr).await.unwrap_err();
+    tokio::time::resume();
+    assert!(err.contains("outcome unknown"), "{err}");
+}
+
+/// Submit `update` as a write that never finishes and never lands.
+pub async fn hung(chain: &FakeChain, io: &mut OrgIo, update: &BuiltUpdate, recipient: DevicePublicKey) {
+    chain.write_hanging.store(true, Ordering::SeqCst);
+    timed_out(io, update, recipient, None).await;
+    chain.write_hanging.store(false, Ordering::SeqCst);
 }
 
 /// Create a Persona on the handle's node.

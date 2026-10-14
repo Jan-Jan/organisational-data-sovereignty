@@ -1,4 +1,4 @@
-//! The calls a pure proxy is created, mapped and acted through (LLR-ywhd23).
+//! The calls a pure proxy is created, mapped and acted through (LLR-59kxsr).
 
 use subxt::dynamic::Value;
 use subxt::ext::scale_value::{Composite, ValueDef};
@@ -20,15 +20,19 @@ pub fn create_pure_call() -> Value {
     )
 }
 
-/// `Proxy.proxy { real: Id(proxy), force_proxy_type: None, call }`.
+/// `Proxy.proxy { real: Id(proxy), force_proxy_type: Some(Any), call }`
+/// (LLR-59kxsr). The type is forced by the variant's name, which the dynamic
+/// encoder resolves against the runtime's metadata, so the chain dispatches
+/// through the controller's `Any` definition wherever it sorts.
 pub fn proxied(proxy: AccountId, call: Value) -> Value {
+    let any = Value::variant("Any", Composite::unnamed(vec![]));
     Value::variant(
         "Proxy",
         Composite::unnamed(vec![Value::variant(
             "proxy",
             Composite::named(vec![
                 ("real".to_string(), Value::variant("Id", Composite::unnamed(vec![Value::from_bytes(proxy.0.as_slice())]))),
-                ("force_proxy_type".to_string(), Value::variant("None", Composite::unnamed(vec![]))),
+                ("force_proxy_type".to_string(), Value::variant("Some", Composite::unnamed(vec![any]))),
                 ("call".to_string(), call),
             ]),
         )]),

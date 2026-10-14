@@ -33,3 +33,16 @@ recorded only as recommended control 10, "Atomic store write", in
 `org-node/docs/risk/2026-09-09-org-node-hazards.md`, with no PR ID. A fix
 for this report (save to a copy, then swap memory only on success; a typed
 storage error) is worth doing together with it.
+
+*Scope widened 2026-10-13 (owner ruling; change `worktree-org-io-publish`,
+plan `docs/plans/2026-10-08-org-io-publish.md` §6a).* `discard_provisional`
+(`org-node/src/service.rs`; LLR-7cmp38) has the same shape: it removes the
+update from memory, then saves, and on a failed save returns `Err` without
+restoring it, so the Organisation private key the update holds stays on
+disk while memory says it is gone, until the next successful save. Found by
+S3b-io's task T15d, whose background discard (the settle of a write known
+not to have executed) reports a failed save as still unknown and retries.
+The whole memory-ahead-of-disk class — `commit_genesis`, `commit_update`
+and `discard_provisional` — is for S4 (its tasks T3 and T9, where org-node
+returns the store change instead of saving and org-io writes it) to fix;
+this change does not fix it.

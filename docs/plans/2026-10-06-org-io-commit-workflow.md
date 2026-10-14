@@ -1860,6 +1860,17 @@ worktree that works from this plan.
 
 ## S3b-io — org-io (after S2 merges)
 
+*Moved 2026-10-08 to `docs/plans/2026-10-08-org-io-publish.md` (branch
+`worktree-org-io-publish`, from master `e41cb09` with S2 merged).* That plan
+carries T13–T17 below, reconciled with S2's merged code and with S4's plan,
+split into part 1 (publish: T13a, T14, T15, T15a, T15b, T17a; merges before
+2026-10-24, independent of S4) and part 2 (revocation delivery: T13b,
+T16a–T16g, T17b; after S4 merges); its §1 maps the old task numbers to the
+new. Proposed 2, 3, 4 and 10 are minted there (REQ-by9k5q, REQ-77rh5a,
+REQ-dqbg9p, REQ-cz753a); proposed 1 is S2's REQ-nfr3n2 and is not minted;
+5–9 and 11 wait for part 2. The text below is kept as history; where it and
+the new plan disagree, the new plan wins.
+
 These tasks are named and scoped here; their `verifies:` lines name IDs
 that T13 mints, so their test code is written in T13 step 4, when those
 IDs exist.
@@ -2003,4 +2014,4 @@ unit's `verify_commands`, `check-units.sh`, `check-ids.sh` and
 | Review round 1 fixes — code (findings 1, 2, 3, 7). red -> green: every_commit_keeps_the_change_set_that_produced_the_record (rewritten: a first admission keeps the admitting Change set) — red on the old code, green after; a_genesis_listing_no_leaf_with_the_personas_device_is_refused (LLR-wzqqg9) — red with the lookup falling back to the first member; an_org_information_body_with_trailing_bytes_is_refused (LLR-js9dsu) — red with leftover bytes accepted; reconcile_of_a_crash_after_removing_another_device_returns_its_notice (LLR-a8z7r5) — red with revocations emptied; all green restored. Docs (findings 4, 5, 6, 8, 9): HAZ-ep6uzs and HAZ-p6xkuz residuals restated, PR-q8r32t resolved, interim key exposure stated under HAZ-45ucqx, PR-zf924s booked | done | `2324cbd`, `c454ed5` |
 | Review round 2 fixes (last round; findings 1, 3; 2 booked) — red -> green: a_chain_state_at_the_records_epoch_with_another_root_is_a_conflict (LLR-tx8ruv) — red on the code before the fix (the seed source was called), green after; accept_signs_then_forgets rewritten to later epochs (the equal-epoch case is now a conflict by design). Stale docs fixed; PR-m9betm booked (a bound Persona with no MemberId is skipped, unreachable today) | done | `d15ebf4` |
 | T1–T12 (S3a, org-node), then merge early, before S2 | T1–T12 done; verify-before-merge and merge-change next | |
-| T13–T17 (S3b-io, org-io), a follow-up change after S2 merges | blocked on S2 | |
+| T13–T17 (S3b-io, org-io), a follow-up change after S2 merges | moved 2026-10-08 to `docs/plans/2026-10-08-org-io-publish.md` (S2 merged as `e41cb09`) | |

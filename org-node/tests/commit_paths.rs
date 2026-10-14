@@ -693,6 +693,61 @@ fn a_genesis_update_is_discarded_only_under_its_own_persona() {
     }
 }
 
+// Normal: a failed founding (its genesis update never reached the chain), then
+// a successful one: the commit removes the Persona's other genesis update,
+// with the Organisation private key it holds, in the same save — the store
+// reopened from disk holds no genesis update of that Persona.
+// verifies: LLR-pk6mhv
+#[tokio::test]
+async fn a_founding_drops_the_personas_other_genesis_updates() {
+    let chain = ChainSlots::new();
+    let (mut svc, pid, failed) = genesis_built("founding-drops", &chain);
+    let founded = svc.create_organisation(&mut OsRng, &pid).unwrap();
+    let org_id = chain.apply_genesis(founded.resulting_root, founded.org_pub_key);
+    svc.commit_genesis(&mut OsRng, &pid, org_id, test_proxy()).await.unwrap();
+    assert!(svc.genesis_provisional_updates(&pid).is_empty(), "the failed founding's update is gone");
+    let disk = reopen_store("founding-drops", "a", "pw_a");
+    assert!(
+        !disk.data().provisional_updates.iter().any(|u| u.org_pub_key == failed.org_pub_key),
+        "the failed founding's update and its private key are gone from disk"
+    );
+    assert!(disk.data().provisional_updates.is_empty());
+    assert_eq!(disk.data().orgs.len(), 1);
+}
+
+// Abnormal: a refused founding removes no genesis update of the Persona, and
+// writes nothing.
+// verifies: LLR-pk6mhv
+#[tokio::test]
+async fn a_refused_founding_drops_no_genesis_update() {
+    let chain = ChainSlots::new();
+    let (mut svc, pid, first) = genesis_built("founding-refused-keeps", &chain);
+    let second = svc.create_organisation(&mut OsRng, &pid).unwrap();
+    let before = store_bytes("founding-refused-keeps", "a");
+    let not_on_chain = OrgId::new([0x99; 20]);
+    assert_eq!(
+        svc.commit_genesis(&mut OsRng, &pid, not_on_chain, test_proxy()).await.unwrap_err(),
+        OrgNodeError::OrgNotOnChain
+    );
+    assert_eq!(svc.genesis_provisional_updates(&pid), vec![first, second]);
+    assert_eq!(store_bytes("founding-refused-keeps", "a"), before, "nothing written");
+}
+
+// Abnormal: a founding drops only its own Persona's genesis updates; another
+// Persona's genesis update is kept, on disk too.
+// verifies: LLR-pk6mhv
+#[tokio::test]
+async fn a_founding_keeps_another_personas_genesis_update() {
+    let chain = ChainSlots::new();
+    let (mut svc, pid, founded) = genesis_built("founding-keeps-other", &chain);
+    let other = svc.create_persona(&mut OsRng, h("bob"), nm("Bob"), sn("Builder")).unwrap();
+    let kept = svc.create_organisation(&mut OsRng, &other).unwrap();
+    let org_id = chain.apply_genesis(founded.resulting_root, founded.org_pub_key);
+    svc.commit_genesis(&mut OsRng, &pid, org_id, test_proxy()).await.unwrap();
+    assert_eq!(svc.genesis_provisional_updates(&other), vec![kept.clone()]);
+    assert_eq!(reopen_store("founding-keeps-other", "a", "pw_a").data().provisional_updates, vec![kept]);
+}
+
 // LLR-95753m, LLR-7cmp38: two removals of the same Member have the same
 // resulting root and differ only in their fresh key pairs. Both are kept, and
 // discarding one by its root and key removes that one alone, with its private
@@ -912,7 +967,12 @@ async fn commit_genesis_refuses_a_persona_bound_to_another_organisation() {
     assert_eq!(err, OrgNodeError::PersonaAlreadyBound { persona_id: pid.clone() });
     assert_eq!(svc.list_orgs().len(), 1, "no second record");
     assert_eq!(persona_of(&svc, &pid).org_id, Some(org_1), "the binding stands");
-    assert_eq!(svc.genesis_provisional_updates(&pid), vec![second], "the update stays");
+    // *Amended 2026-10-13 (LLR-pk6mhv, owner ruling of that day, background
+    // discard):* this pinned `vec![second]`, "the update stays"; the first
+    // founding's commit now drops the Persona's other genesis updates, so the
+    // refused second commit finds none and removes none. *Accepted by the
+    // owner 2026-10-13: the refusal stays, in org-node.*
+    assert!(svc.genesis_provisional_updates(&pid).is_empty(), "the first founding dropped it");
     assert_eq!(store_bytes("genesis-bound", "a"), before, "nothing written");
 }
 

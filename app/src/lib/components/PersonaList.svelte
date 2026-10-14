@@ -1,12 +1,40 @@
 <script lang="ts">
-	import { listPersonas, listOrgs, type PersonaDto, type OrgDto } from '$lib/api';
+	import {
+		listPersonas,
+		listOrgs,
+		reconcileOrganisations,
+		type PersonaDto,
+		type OrgDto,
+		type ReconciliationDto
+	} from '$lib/api';
+	import { reconciliationLine, verificationLabel } from '$lib/reconcile';
 
 	interface Props {
 		/** Increment this to trigger a reload */
 		reloadToken?: number;
+		/** The results of the reconcile at start, once it has returned. */
+		reconciled?: ReconciliationDto[] | null;
 	}
 
-	let { reloadToken = 0 }: Props = $props();
+	let { reloadToken = 0, reconciled = null }: Props = $props();
+
+	/** LLR-hwcj9n: the results of the user's own reconcile, which replace the startup ones. */
+	let requested = $state<ReconciliationDto[] | null>(null);
+	let reconciling = $state(false);
+	let shown = $derived(requested ?? reconciled);
+
+	async function reconcile() {
+		reconciling = true;
+		try {
+			requested = await reconcileOrganisations();
+			error = '';
+		} catch (e) {
+			error = String(e);
+		} finally {
+			reconciling = false;
+		}
+		await reload();
+	}
 
 	let personas = $state<PersonaDto[]>([]);
 	let orgs = $state<OrgDto[]>([]);
@@ -81,7 +109,7 @@
 		<h3>Orgs</h3>
 		<table>
 			<thead>
-				<tr><th>Org ID</th><th>Epoch</th><th>Members</th><th>Root hash</th></tr>
+				<tr><th>Org ID</th><th>Epoch</th><th>Members</th><th>Root hash</th><th>Chain</th></tr>
 			</thead>
 			<tbody>
 				{#each orgs as o (o.org_id)}
@@ -90,13 +118,24 @@
 						<td>{o.epoch}</td>
 						<td>{o.member_count}</td>
 						<td class="mono small">…{o.root_hash.slice(-16)}</td>
+						<td class:unverified={o.verification.status !== 'verified'}>{verificationLabel(o.verification)}</td>
 					</tr>
 				{/each}
 			</tbody>
 		</table>
 	{/if}
 
+	{#if shown && shown.length > 0}
+		<h3>Last reconcile</h3>
+		<ul class="mono small">
+			{#each shown as result, index (index)}
+				<li>{reconciliationLine(result)}</li>
+			{/each}
+		</ul>
+	{/if}
+
 	<button onclick={reload}>Refresh</button>
+	<button onclick={reconcile} disabled={reconciling}>{reconciling ? 'Reconciling…' : 'Reconcile with chain'}</button>
 </section>
 
 <style>
@@ -114,6 +153,7 @@
 	.revoked { background: #4a1010; color: #f44336; }
 	.proposed { background: #2a2a10; color: #ff9800; }
 	.err { color: #f44336; font-size: 0.85rem; }
+	.unverified { color: #ff9800; }
 	.muted { color: #555; font-size: 0.85rem; }
 	button { margin-top: 0.5rem; cursor: pointer; background: #222; color: #aaa; border: 1px solid #444; border-radius: 3px; padding: 0.25rem 0.75rem; font-size: 0.8rem; }
 	button:hover { background: #333; }

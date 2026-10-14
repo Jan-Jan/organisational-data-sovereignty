@@ -112,14 +112,25 @@ the chain ahead of the node. org-node's `commit_update` could reach it from
 the provisional update the failure kept, but no app path retries that commit
 today: the only caller is the next submission's `submit_commit_send`, which
 can then commit the earlier, timed-out update in place of its own and send it
-to the new recipient — PR-924ftr
-(`app/docs/problems/2026-10-06-provisional-housekeeping.md`) records this.
+to the new recipient — the problem report on kept provisional updates
+records this.
 Either way nothing is committed that the chain does not carry.
 Two derived requirements of the 2026-10-05 decomposition are amended in place.
 
 *Amended 2026-10-06 (independent review round 2, finding-8).* This paragraph
 said the kept update is reached by `commit_update`, as though the app did so;
-it is qualified to what the app does today, with PR-924ftr cross-referenced.
+it is qualified to what the app does today, with the problem report on kept
+provisional updates cross-referenced.
+
+*Note 2026-10-13 (change `worktree-org-io-publish`, task T17a).* That problem
+report moved to org-io's problems ledger, with its ID, and is resolved there:
+org-io settles a write whose outcome is unknown before any second write for
+the Organisation, commits a late write and sends it to its own submission's
+recipient, and discards the other kept updates in the background. The
+paragraph above describes the code before that change.
+`app/docs/problems/2026-10-06-provisional-housekeeping.md` points to it; this
+file names the report by description because the app may cite only org-io's
+exported items.
 
 **LLR-ctrfz4** (`admit_member` reads the joiner's peer address from its own
 argument, blank meaning absent): no new hazard. It replaces reading the

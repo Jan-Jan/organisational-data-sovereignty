@@ -8,7 +8,8 @@ ran.
 **PR-ksm2ua**: The two signatory-set reads, `Revive.OriginalAccount` (REQ-8p2veg) and `Proxy.Proxies` (REQ-v8jczx), each resolve "latest finalised" separately, so one signatory-set answer can combine an original account from one block with proxy delegates from a later one.
 affects: REQ-8p2veg, REQ-v8jczx, SDD-rxfu6h
 opened: 2026-10-08
-status: open
+status: resolved
+resolution: 2026-10-13 (change worktree-org-io-publish, task T16a; owner ruling D5) — root cause: each read resolved the latest finalised block itself; fixed by `OrgRegistryClient::signatory_set` (REQ-b8x2py, LLR-sc79gq), which resolves the block once and reads both values and the `Any` index at it, org-io's only consumer now calling it alone; reproduced by `on-chain-client/tests/signatory_set_decode.rs` `the_signatory_set_is_read_at_one_block`.
 
 Where: `fetch_storage_raw` calls `self.api.at_current_block()` on every call
 (`on-chain-client/src/client.rs:263-268`), and each read calls it once. If a

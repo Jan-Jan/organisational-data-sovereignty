@@ -85,6 +85,7 @@ fn harness_at(
             commands::list_orgs,
             commands::connection_status,
             commands::start_receiver,
+            commands::reconcile_organisations,
         ])
         .build(mock_context(noop_assets()))
         .expect("build mock app");
@@ -416,7 +417,9 @@ fn product_registers_the_same_commands_as_the_harness() {
     assert_eq!(code.matches(".invoke_handler(").count(), 1, "lib.rs must call invoke_handler exactly once");
     let product = handler_list(&lib);
     let harness = handler_list(&read("tests/ipc.rs"));
-    assert_eq!(harness.len(), 12, "the harness registers twelve commands: {harness:?}");
+    // *Amended 2026-10-13 (task T15d, owner ruling of that day):* sixteen is
+    // thirteen; the three discard and listing commands left.
+    assert_eq!(harness.len(), 13, "the harness registers thirteen commands: {harness:?}");
     assert_eq!(product, harness, "lib.rs and the ipc harness register different commands");
 }
 
@@ -825,5 +828,74 @@ fn produce_invite_reply_refuses_without_confirmation_over_ipc() {
         serde_json::json!({ "inviteBlob": "x", "personaId": "p", "confirmed": false }),
     );
     assert!(err.starts_with("confirm first"), "{err}");
+}
+
+// ---------------------------------------------------------------------------
+// REQ-363366 — reconcile (S3b-io T15b; the discard removed by T15d)
+// ---------------------------------------------------------------------------
+
+/// Seed the store the harness will open in `data_dir` with an Organisation
+/// founded over a substitute chain; its id as hex. org-io over `FakeChain`
+/// writes it, and is dropped before the harness opens the same file with the
+/// chain not configured.
+fn seed_store(data_dir: &std::path::Path) -> String {
+    use org_io::node::service::OrgService;
+    use org_io::node::store::PersonaStore;
+    use org_io::node::{Handle, Name, Surname};
+    use org_io::test_support::FakeChain;
+    use rand::rngs::OsRng;
+
+    let runtime = tokio::runtime::Runtime::new().expect("runtime");
+    runtime.block_on(async {
+        let chain = FakeChain::new();
+        let store = PersonaStore::open(data_dir.join("persona_store.bin"), "ipc-suite-passphrase").expect("store");
+        let mut io = org_io::OrgIo::for_test(OrgService::new(store), &chain);
+        let alice = io
+            .node_mut()
+            .create_persona(&mut OsRng, Handle::parse("alice").unwrap(), Name::parse("Test").unwrap(), Surname::parse("User").unwrap())
+            .unwrap();
+        let org = io.found_organisation(&mut OsRng, &alice).await.expect("founded");
+        hex::encode(org.as_bytes())
+    })
+}
+
+/// A harness over a seeded store, and the seeded Organisation's id as hex.
+fn seeded_harness() -> (Harness, String) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_dir = dir.path().to_path_buf();
+    let org_id = seed_store(&data_dir);
+    (harness_at(dir, data_dir, TransportModeName::Networked, None), org_id)
+}
+
+// verifies: LLR-ekz4zn, LLR-8axx7h
+#[test]
+fn reconcile_organisations_with_the_chain_not_configured_reports_every_organisation_unverified() {
+    let (h, org_id) = seeded_harness();
+    let results = invoke(&h, "reconcile_organisations", serde_json::json!({})).expect("reconcile_organisations");
+    let results = results.as_array().expect("a list");
+    assert_eq!(results.len(), 1, "one result per held Organisation: {results:?}");
+    assert_eq!(results[0]["result"], "unverified", "{results:?}");
+    assert_eq!(results[0]["org_id"], org_id.as_str());
+    let reason = results[0]["reason"].as_str().expect("a reason");
+    assert!(!reason.is_empty());
+    let orgs = invoke(&h, "list_orgs", serde_json::json!({})).expect("list_orgs");
+    assert_eq!(orgs[0]["verification"], serde_json::json!({ "status": "unverified", "reason": reason }));
+}
+
+// verifies: LLR-ekz4zn
+#[test]
+fn reconcile_organisations_on_an_empty_store_reports_nothing() {
+    let h = harness();
+    let results = invoke(&h, "reconcile_organisations", serde_json::json!({})).expect("reconcile_organisations");
+    assert_eq!(results, serde_json::json!([]));
+}
+
+// verifies: LLR-8axx7h
+#[test]
+fn list_orgs_reports_not_checked_before_any_reconcile() {
+    let (h, org_id) = seeded_harness();
+    let orgs = invoke(&h, "list_orgs", serde_json::json!({})).expect("list_orgs");
+    assert_eq!(orgs[0]["org_id"], org_id.as_str());
+    assert_eq!(orgs[0]["verification"], serde_json::json!({ "status": "not_checked" }));
 }
 

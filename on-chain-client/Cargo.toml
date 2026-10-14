@@ -101,6 +101,12 @@ libc = "0.2"
 bolero = "0.13"
 parity-scale-codec = { version = "3", default-features = false, features = ["derive"] }
 tiny-keccak = { version = "2", default-features = false, features = ["keccak"] }
+# Type registries for the writer's and the signatory-set reads' metadata
+# tests (signatory_set_decode, write_pure): a minimal runtime type registry,
+# built from derived `TypeInfo`, that subxt's dynamic encoder and
+# `subxt::Metadata` take in place of a live chain's. The version subxt's
+# closure already resolves (scale-info 2.11.6); test-only.
+scale-info = { version = "2.11", default-features = false, features = ["derive"] }
 
 [lints.clippy]
 unwrap_used = "deny"

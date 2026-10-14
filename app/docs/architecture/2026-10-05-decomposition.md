@@ -472,7 +472,7 @@ here (LLR-4wcyqy).
 service, calls `OrgService`, maps its error to a string and returns a DTO
 that carries no secret key material. The commands named in SDD-6g3wnh carry
 no low-level requirement.
-traces: REQ-vgr7s2, REQ-sjkp8z, REQ-645jq9, REQ-prjja8, REQ-tcutr6, REQ-65xqp8, REQ-ab2mfz, REQ-m8sgjk
+traces: REQ-vgr7s2, REQ-sjkp8z, REQ-645jq9, REQ-prjja8, REQ-tcutr6, REQ-65xqp8, REQ-ab2mfz, REQ-m8sgjk, REQ-363366
 
 *Amended 2026-10-06 (change `worktree-org-node-chain-authority`).* The
 invitation exchange and the chain write moved into this unit, behind the
@@ -503,6 +503,38 @@ app's REQ-m8sgjk (the decision when to submit and to which Device). The
 surface is still twelve commands. Classification under the hybrid rule: a
 clarification, not a change of meaning.
 
+*Amended 2026-10-13 (change `worktree-org-io-publish`, task T15b).* The
+surface grows to fifteen commands: `reconcile_organisations`,
+`discard_update` and `discard_genesis` join it, each calling org-io
+(`OrgIo::reconcile_held`, `OrgIo::discard_update`, `OrgIo::discard_genesis`),
+and `OrgDto` gains `verification`. Their low-level requirements (LLR-ekz4zn,
+LLR-8axx7h, and one for each discard command) are in
+`2026-10-13-publish.md`, and `traces:` gains their parent
+requirements, REQ-363366 and the app's discard requirement. Classification
+under the hybrid rule: an extension of the surface; no existing command
+changes meaning. *(The discard items' IDs were removed from this note by
+task T15d, with the items: see the amendment below.)*
+
+*Amended 2026-10-13 (change `worktree-org-io-publish`, task T15c).* The
+surface grows to sixteen commands: `list_provisional_updates` joins it,
+calling org-io's `NodeView::provisional_updates`, so that the user can learn
+the name `discard_update` takes. Its low-level requirement is in
+`2026-10-13-publish.md`; its parent, the discard
+requirement, is already traced. Classification under the hybrid rule: an
+extension of the surface; no existing command changes meaning.
+
+*Amended 2026-10-13 (change `worktree-org-io-publish`, task T15d; owner
+ruling of that day, background discard).* The surface shrinks from sixteen
+commands to thirteen: `discard_update`, `discard_genesis` and
+`list_provisional_updates` leave it, with the discard view, because
+provisional updates are now discarded in the background, in org-io, and the
+app offers the user no discard. Their three low-level requirements and the
+app's discard requirement, minted only in this unmerged change, are deleted
+(`2026-10-13-publish.md`), and `traces:` loses that
+requirement; the two T15b and T15c amendments above are kept as the record of
+what was added and removed. The commands this item had before this change are
+unchanged.
+
 **LLR-4wcyqy**: the IPC suite's handler list registers the twelve commands
 under their snake_case names, and an invocation of any other name is refused
 rather than answered. The `generate_handler!` list in
@@ -529,6 +561,22 @@ first list: a second `invoke_handler` registering one command left it green.
 The test now also counts `generate_handler!` and `.invoke_handler(` in
 `lib.rs`, outside `//` comments, and requires one of each. It does not parse
 block comments or string literals.
+
+*Clarified 2026-10-13 (change `worktree-org-io-publish`, task T15b).* "The
+twelve commands" is now fifteen, the three of SDD-rmbr3t's amendment of that
+date; `product_registers_the_same_commands_as_the_harness` counts fifteen.
+The rule — one list, the same set in the product and the suite, anything
+else refused — is unchanged, so the test keeps its annotation.
+
+*Clarified 2026-10-13 (change `worktree-org-io-publish`, task T15c).*
+Fifteen is now sixteen: `list_provisional_updates` joins (SDD-rmbr3t's
+second amendment of that date); the test counts sixteen. The rule is
+unchanged, so the test keeps its annotation.
+
+*Clarified 2026-10-13 (change `worktree-org-io-publish`, task T15d).*
+Sixteen is now thirteen: the three discard and listing commands leave
+(SDD-rmbr3t's third amendment of that date); the test counts thirteen. The
+rule is unchanged, so the test keeps its annotation.
 
 **LLR-pguhw5**: each persona `list_personas` returns has exactly the fields
 `persona_id`, `org_id`, `handle`, `name`, `surname` and `status`. No seed or

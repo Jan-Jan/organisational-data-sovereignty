@@ -58,7 +58,12 @@ key is an argument of every call. The composition is written against a seam,
 controller), so the order of the steps, which step failed and whether a
 dispatch executed are decided by code a gated test reaches through a
 substitute; `SubxtWriteOps` implements the seam over subxt.
-traces: REQ-6jefu2, REQ-aat4yt
+traces: REQ-6jefu2, REQ-aat4yt, REQ-4aq8zh
+
+*Note 2026-10-08 (change worktree-org-io-publish, task T14):* the item also
+realises REQ-4aq8zh, mortal update writes from a reported window
+(LLR-zfm3bf, LLR-zj4jju in
+`on-chain-client/docs/architecture/2026-10-13-publish.md`).
 
 `SubxtWriteOps` and `FinalitySink` carry no low-level requirement, for the
 reason SDD-3b8zef carries none (the section "The item with no low-level
@@ -99,6 +104,12 @@ revive_update_runtime_call(contract, root, key, expected_epoch))`, under the
 controller, and returns `Ok(())` only when that dispatch's outcome is
 `Executed`.
 satisfies: REQ-aat4yt
+
+*Clarified 2026-10-08 (change `worktree-org-io-publish`, task T14).*
+`submit_update` gains a last argument, `window: WriteWindow`, which it hands
+to its one dispatch so the update is signed mortal from that block
+(LLR-zj4jju); the dispatch, the call and the outcome rule above are
+unchanged.
 
 **LLR-hun4wf**: `submit_update` returns `WriteError::PendingApproval` when the
 dispatch's outcome is `ApprovalRecorded` — a multisig approval that did not
@@ -175,6 +186,20 @@ satisfies: REQ-aat4yt
 call given, and `map_account_call()` builds `Revive.map_account` with no
 arguments.
 satisfies: REQ-aat4yt, REQ-6jefu2
+superseded-by: LLR-59kxsr
+
+*Superseded 2026-10-08 (change worktree-org-io-publish, task T16a; owner
+ruling D4, hybrid: a change of meaning mints a new ID).* LLR-59kxsr
+(`on-chain-client/docs/architecture/2026-10-13-publish.md`)
+forces the `Any` proxy type instead of `None`.
+
+*Test retired 2026-10-13 (task T16a, hybrid rule).*
+`proxied_and_map_account_build_the_named_calls` (`on-chain-client/tests/write_pure.rs`)
+asserted `force_proxy_type` `None`, this item's superseded meaning, and failed
+once the writer forced `Any`; it was deleted, and its `map_account_call`
+assertion carried into `proxied_forces_the_any_proxy_type_by_name`
+(LLR-59kxsr, LLR-ywhd23). `proxied_wraps_any_call_unchanged_even_another_proxied_call`
+still passes and keeps its annotation.
 
 **LLR-gjx3jn**: `multi_account_id(signatories, threshold)` returns the
 blake2-256 of the SCALE encoding of `("modlpy/utilisuba", sorted signatories,

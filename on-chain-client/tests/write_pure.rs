@@ -11,7 +11,7 @@ use on_chain_client::write::calldata::{
 };
 use on_chain_client::write::multisig::{build_dispatch_tx, multi_account_id};
 use on_chain_client::write::proxy::{map_account_call, proxied};
-use on_chain_client::write::{AccountId, WriteError};
+use on_chain_client::write::{AccountId, WriteError, WriteWindow, WRITE_MORTALITY_BLOCKS};
 use on_chain_client::{Epoch, OnChainRootHash, OrgPubKey};
 use subxt::dynamic::Value;
 use subxt::ext::scale_value::Composite;
@@ -150,17 +150,33 @@ fn a_different_epoch_changes_only_the_data_field() {
     assert_eq!(at_8, expected_call(contract, build_update_calldata(root, key, Epoch(8))));
 }
 
-// Normal: `proxied` and `map_account_call` build the named calls.
-// verifies: LLR-ywhd23, REQ-aat4yt, REQ-6jefu2
+// Abnormal: wrapping is total — a proxied call wrapped again nests unchanged.
+// verifies: LLR-ywhd23
 #[test]
-fn proxied_and_map_account_build_the_named_calls() {
+fn proxied_wraps_any_call_unchanged_even_another_proxied_call() {
+    let inner = proxied(acct(1), remark());
+    let outer = proxied(acct(2), inner.clone());
+    assert_eq!(outer, proxied(acct(2), inner));
+    assert_ne!(outer, proxied(acct(1), remark()));
+}
+
+// Normal: `proxied` forces the proxy type by the variant's NAME, `Any`, which
+// the dynamic encoder resolves against the runtime's metadata (never a
+// constant index); `map_account_call` is `Revive.map_account` with no
+// arguments.
+// verifies: LLR-59kxsr, LLR-ywhd23
+#[test]
+fn proxied_forces_the_any_proxy_type_by_name() {
     let expected = Value::variant(
         "Proxy",
         Composite::unnamed(vec![Value::variant(
             "proxy",
             Composite::named(vec![
                 ("real".to_string(), Value::variant("Id", Composite::unnamed(vec![Value::from_bytes([7u8; 32])]))),
-                ("force_proxy_type".to_string(), Value::variant("None", Composite::unnamed(vec![]))),
+                (
+                    "force_proxy_type".to_string(),
+                    Value::variant("Some", Composite::unnamed(vec![Value::variant("Any", Composite::unnamed(vec![]))])),
+                ),
                 ("call".to_string(), remark()),
             ]),
         )]),
@@ -172,14 +188,129 @@ fn proxied_and_map_account_build_the_named_calls() {
     );
 }
 
-// Abnormal: wrapping is total — a proxied call wrapped again nests unchanged.
-// verifies: LLR-ywhd23
+// Abnormal: no other proxy type and no absent type is ever forced — the
+// writer's call is not the unforced `None` shape, nor a type given by index.
+// verifies: LLR-59kxsr, LLR-ywhd23
 #[test]
-fn proxied_wraps_any_call_unchanged_even_another_proxied_call() {
-    let inner = proxied(acct(1), remark());
-    let outer = proxied(acct(2), inner.clone());
-    assert_eq!(outer, proxied(acct(2), inner));
-    assert_ne!(outer, proxied(acct(1), remark()));
+fn proxied_never_leaves_the_proxy_type_unforced_or_forced_by_index() {
+    let call = proxied(acct(7), remark());
+    let unforced = Value::variant(
+        "Proxy",
+        Composite::unnamed(vec![Value::variant(
+            "proxy",
+            Composite::named(vec![
+                ("real".to_string(), Value::variant("Id", Composite::unnamed(vec![Value::from_bytes([7u8; 32])]))),
+                ("force_proxy_type".to_string(), Value::variant("None", Composite::unnamed(vec![]))),
+                ("call".to_string(), remark()),
+            ]),
+        )]),
+    );
+    assert_ne!(call, unforced);
+    let rendered = format!("{call:?}");
+    assert!(rendered.contains("\"Any\""), "the type is named: {rendered}");
+}
+
+/// The runtime types the encoding tests describe: a minimal `RuntimeCall`
+/// with `System.remark` and `Proxy.proxy`, once with a proxy type whose `Any`
+/// the runtime gives index 5 and once with a proxy type that has no `Any`.
+#[allow(dead_code, non_camel_case_types)]
+mod runtime {
+    use parity_scale_codec::Encode;
+    use scale_info::TypeInfo;
+
+    #[derive(TypeInfo, Encode)]
+    pub enum MultiAddress {
+        Id([u8; 32]),
+    }
+    #[derive(TypeInfo, Encode)]
+    pub enum SystemCall {
+        remark { remark: Vec<u8> },
+    }
+    #[derive(TypeInfo, Encode)]
+    pub enum ProxyType {
+        NonTransfer,
+        #[codec(index = 5)]
+        Any,
+    }
+    #[derive(TypeInfo, Encode)]
+    pub enum ProxyCall {
+        proxy { real: MultiAddress, force_proxy_type: Option<ProxyType>, call: Box<RuntimeCall> },
+    }
+    #[derive(TypeInfo, Encode)]
+    pub enum RuntimeCall {
+        System(SystemCall),
+        Proxy(ProxyCall),
+    }
+
+    #[derive(TypeInfo)]
+    pub enum ProxyTypeWithoutAny {
+        NonTransfer,
+        CancelProxy,
+    }
+    #[derive(TypeInfo)]
+    pub enum ProxyCallWithoutAny {
+        proxy { real: MultiAddress, force_proxy_type: Option<ProxyTypeWithoutAny>, call: Box<RuntimeCallWithoutAny> },
+    }
+    #[derive(TypeInfo)]
+    pub enum RuntimeCallWithoutAny {
+        System(SystemCall),
+        Proxy(ProxyCallWithoutAny),
+    }
+}
+
+/// `call` encoded as the runtime type `T`, as subxt's dynamic encoder encodes
+/// a call against a runtime's metadata before it is signed.
+fn encode_as<T: scale_info::TypeInfo + 'static>(call: &Value) -> Result<Vec<u8>, subxt::ext::scale_encode::Error> {
+    use subxt::ext::scale_encode::EncodeAsType;
+    let mut registry = scale_info::Registry::new();
+    let id = registry.register_type(&scale_info::MetaType::new::<T>()).id;
+    let types: scale_info::PortableRegistry = registry.into();
+    call.encode_as_type(id, &types)
+}
+
+// Normal: against a runtime whose `Any` has index 5, the proxied call encodes
+// exactly as that runtime's own `Proxy.proxy { force_proxy_type: Some(Any) }`
+// — the index is the runtime's, resolved by name.
+// verifies: LLR-59kxsr
+#[test]
+fn proxied_encodes_any_at_the_index_the_runtime_gives_it() {
+    use parity_scale_codec::Encode;
+    use runtime::{MultiAddress, ProxyCall, ProxyType, RuntimeCall, SystemCall};
+    let expected = RuntimeCall::Proxy(ProxyCall::proxy {
+        real: MultiAddress::Id([7u8; 32]),
+        force_proxy_type: Some(ProxyType::Any),
+        call: Box::new(RuntimeCall::System(SystemCall::remark { remark: vec![1u8; 4] })),
+    })
+    .encode();
+    let encoded = encode_as::<RuntimeCall>(&proxied(acct(7), remark())).unwrap();
+    assert_eq!(encoded, expected);
+    // Two call indices and `Id`'s, then the 32-byte account: then the option.
+    assert_eq!(&encoded[3 + 32..3 + 32 + 2], &[0x01, 0x05], "Some(Any) at index 5");
+}
+
+// Abnormal: against a runtime whose proxy type has no `Any`, the proxied call
+// does not encode — it is refused rather than forced to some other type, and
+// a call that does not encode is never signed, so nothing is dispatched
+// (`SubxtWriteOps` encodes the call against the chain's metadata before it
+// signs; that half is shell).
+// verifies: LLR-59kxsr
+#[test]
+fn a_runtime_without_any_refuses_the_proxied_call() {
+    assert!(encode_as::<runtime::RuntimeCallWithoutAny>(&proxied(acct(7), remark())).is_err());
+    // The same call with no proxy type forced would have encoded: the refusal
+    // is the forced `Any`'s.
+    let unforced = Value::variant(
+        "Proxy",
+        Composite::unnamed(vec![Value::variant(
+            "proxy",
+            Composite::named(vec![
+                ("real".to_string(), Value::variant("Id", Composite::unnamed(vec![Value::from_bytes([7u8; 32])]))),
+                ("force_proxy_type".to_string(), Value::variant("None", Composite::unnamed(vec![]))),
+                ("call".to_string(), remark()),
+            ]),
+        )]),
+    );
+    assert!(encode_as::<runtime::RuntimeCallWithoutAny>(&unforced).is_ok());
 }
 
 // Normal: the derived account ignores the order the signatories came in.
@@ -259,4 +390,34 @@ fn a_value_that_is_not_a_runtime_call_is_refused_on_each_arm() {
         build_dispatch_tx(&[], Value::variant("System", Composite::unnamed(vec![Value::u128(1)]))).unwrap_err(),
         WriteError::MalformedCall("inner call is not a variant")
     );
+}
+
+// Normal: a mortal write born at block N is valid through N + 64 at most.
+// verifies: LLR-zfm3bf
+#[test]
+fn the_last_valid_block_is_the_birth_plus_the_mortality() {
+    let window = WriteWindow { birth_number: 1_000, birth_hash: [7u8; 32] };
+    assert_eq!(WRITE_MORTALITY_BLOCKS, 64);
+    assert_eq!(window.last_valid_block(), 1_064);
+    assert_eq!(WriteWindow { birth_number: 0, birth_hash: [0u8; 32] }.last_valid_block(), WRITE_MORTALITY_BLOCKS);
+}
+
+// Abnormal (boundary): a birth block near the top of the range saturates at
+// u64::MAX instead of wrapping to a small block number.
+// verifies: LLR-zfm3bf
+#[test]
+fn the_last_valid_block_saturates() {
+    for birth_number in [u64::MAX - WRITE_MORTALITY_BLOCKS + 1, u64::MAX - 1, u64::MAX] {
+        assert_eq!(WriteWindow { birth_number, birth_hash: [1u8; 32] }.last_valid_block(), u64::MAX, "{birth_number}");
+    }
+    let last_exact = u64::MAX - WRITE_MORTALITY_BLOCKS;
+    assert_eq!(WriteWindow { birth_number: last_exact, birth_hash: [1u8; 32] }.last_valid_block(), u64::MAX);
+}
+
+// A mortal era's period is a power of two between 4 and 65536.
+// verifies: LLR-zfm3bf
+#[test]
+fn the_mortality_is_a_power_of_two() {
+    assert!(WRITE_MORTALITY_BLOCKS.is_power_of_two());
+    assert!((4..=65_536).contains(&WRITE_MORTALITY_BLOCKS));
 }
