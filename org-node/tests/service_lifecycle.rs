@@ -2,17 +2,24 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 //! The chain-operations boundary (SDD-ueh4tm: since 2026-10-08 the state
 //! value each chain-judging operation takes, and the test-side
-//! `ChainSlots`), persona and Organisation genesis
-//! (SDD-89es4z), and the endpoint lifecycle (SDD-b8tuv3).
+//! `ChainSlots`), and persona and Organisation genesis (SDD-89es4z). The
+//! endpoint lifecycle's tests moved to org-io with the endpoint (S4, task
+//! T10).
 //!
 //! Relocated from the `#[cfg(test)]` module in `org-node/src/service.rs` so
 //! the `verifies:` annotations sit under `test_paths`. The seam cases and the
 //! endpoint-lifecycle cases are new.
+//!
+//! *Adapted 2026-10-08 (S4, task T3):* the service writes no file and keeps
+//! no device seed. "The disk" is the `StoreWrite` an operation returns, and
+//! the endpoint is bound from the `DeviceSecret` `create_persona` returned
+//! (the transitional `bind_endpoint`). Annotations unchanged.
 
 use org_node::chain::OrgState;
 use org_node::ids::OrgId;
-use org_node::store::{PersonaStatus, PersonaStore};
-use org_node::transport::TransportMode;
+use org_node::store::{PersonaStatus, PersonaStore, StoreWrite};
+use org_node::DeviceSecret;
+use zeroize::Zeroizing;
 use org_node::test_fixtures::ChainSlots;
 use org_node::OrgService;
 use org_node::{Epoch, OrgPublicKey, RootHash};
@@ -28,25 +35,38 @@ fn org_key() -> OrgPublicKey {
     org_node::OrgPrivateKey::from([2u8; 32]).x25519_keypair().org_public_key().unwrap()
 }
 
-fn store_at(tag: &str) -> (PersonaStore, std::path::PathBuf) {
-    let dir = std::env::temp_dir()
-        .join(format!("ods-svc-lifecycle-{}-{}", std::process::id(), tag));
-    // Cleared first: the directory is keyed on the process id, and a reused
-    // pid would otherwise open a store an earlier run left behind. Review
-    // round 6 measured exactly that: three unrelated tests failing with a
-    // populated store on a mutation run, and the same mutation clean on re-run.
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("store.bin");
-    (PersonaStore::open(path.clone(), "pw").unwrap(), path)
+/// A service with no Persona.
+fn service() -> OrgService {
+    OrgService::new(vec![]).unwrap()
+}
+
+/// The seed bytes of `secret`, as org-io's keychain would hold them.
+fn bytes_of(secret: &DeviceSecret) -> Vec<u8> {
+    let mut bytes = vec![];
+    secret
+        .lend_to_keychain(|seed| {
+            bytes.extend_from_slice(seed);
+            Ok::<(), std::convert::Infallible>(())
+        })
+        .unwrap();
+    bytes
+}
+
+/// A secret re-made from keychain bytes.
+fn secret_from(bytes: &[u8]) -> DeviceSecret {
+    DeviceSecret::from_keychain_bytes(Zeroizing::new(bytes.to_vec())).unwrap()
+}
+
+/// What `write` sealed, opened with the secret of `bytes`.
+fn reload(write: &StoreWrite, bytes: &[u8]) -> PersonaStore {
+    PersonaStore::unseal(&write.sealed, write.device_key, secret_from(bytes)).unwrap()
 }
 
 // verifies: REQ-hzm4kt, LLR-tev8h8, LLR-s7yu4k, LLR-v82xds
 #[test]
 fn a_new_persona_is_proposed_with_an_id_derived_from_its_member_key() {
-    let (store, path) = store_at("persona");
-    let mut svc = OrgService::new(store);
-    let pid = svc.create_persona(&mut OsRng, h("alice"), nm("Alice"), sn("Smith")).unwrap();
+    let mut svc = service();
+    let (pid, secret, write) = svc.create_persona(&mut OsRng, h("alice"), nm("Alice"), sn("Smith")).unwrap();
 
     assert!(!pid.as_str().is_empty());
     assert_eq!(svc.list_personas().len(), 1);
@@ -69,11 +89,11 @@ fn a_new_persona_is_proposed_with_an_id_derived_from_its_member_key() {
     assert_eq!(pid.as_str(), expected);
 
     // The member and device keypairs are independent of each other.
-    assert_ne!(rec.member_seed_for_test().expose_secret(), rec.device_seed_for_test().expose_secret());
+    assert_ne!(rec.member_seed_for_test().expose_secret().as_slice(), bytes_of(&secret).as_slice());
 
-    // It survives a reload from disk.
-    let reopened = PersonaStore::open(path, "pw").unwrap();
-    let svc2 = OrgService::new(reopened);
+    // It survives a reload from what it wrote.
+    let reopened = reload(&write, &bytes_of(&secret));
+    let svc2 = OrgService::new(vec![reopened]).unwrap();
     assert_eq!(svc2.list_personas().len(), 1);
     assert_eq!(svc2.list_personas()[0].handle.as_str(), "alice");
 }
@@ -86,13 +106,12 @@ fn a_new_persona_is_proposed_with_an_id_derived_from_its_member_key() {
 // verifies: LLR-68yd3j, REQ-xs4ab8
 #[test]
 fn creating_an_organisation_writes_only_a_genesis_update() {
-    let (store, path) = store_at("org");
     let chain = ChainSlots::new();
     let chain_view = chain.clone();
-    let mut svc = OrgService::new(store);
+    let mut svc = service();
 
-    let pid = svc.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    let update = svc.create_organisation(&mut OsRng, &pid).unwrap();
+    let (pid, secret, _) = svc.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
+    let (update, write) = svc.create_organisation(&mut OsRng, &pid).unwrap();
 
     assert!(svc.list_orgs().is_empty(), "no record");
     assert_eq!(svc.list_personas()[0].status, PersonaStatus::Proposed);
@@ -102,9 +121,10 @@ fn creating_an_organisation_writes_only_a_genesis_update() {
     would_be.copy_from_slice(&update.resulting_root.as_bytes()[..20]);
     assert!(chain_view.get(&OrgId::new(would_be)).is_none(), "the chain is unchanged");
 
-    // "…and the store is written before it returns." Read back from DISK, so
-    // an update that only ever existed in memory fails here.
-    let reloaded = PersonaStore::open(path, "pw").unwrap();
+    // "…and the store is written before it returns." Read back from the
+    // write it returned, so an update that only ever existed in memory fails
+    // here.
+    let reloaded = reload(&write, &bytes_of(&secret));
     assert!(reloaded.data().orgs.is_empty(), "no record reaches the disk");
     assert_eq!(reloaded.data().provisional_updates.len(), 1, "the genesis update must reach the disk");
 }
@@ -161,14 +181,13 @@ fn the_mock_chain_refuses_an_update_at_the_wrong_epoch() {
 fn two_services_over_one_set_of_chain_slots_see_the_same_state() {
     let chain = ChainSlots::new();
     let other_view = chain.clone();
-    let (store, _) = store_at("seam");
-    let (other_store, _) = store_at("seam-other");
-    let mut svc = OrgService::new(store);
-    let other = OrgService::new(other_store);
-    let pid = svc.create_persona(&mut OsRng, h("s"), nm("S"), sn("T")).unwrap();
-    let update = svc.create_organisation(&mut OsRng, &pid).unwrap();
+    let mut svc = service();
+    let other = service();
+    let (pid, _, _) = svc.create_persona(&mut OsRng, h("s"), nm("S"), sn("T")).unwrap();
+    let (update, _) = svc.create_organisation(&mut OsRng, &pid).unwrap();
     let org = chain.apply_genesis(update.resulting_root, update.org_pub_key);
-    let committed = svc.commit_genesis(&mut OsRng, &pid, org, org_node::ChainAccount::new([1; 32]), chain.get(&org)).unwrap();
+    let (committed, _) =
+        svc.commit_genesis(&mut OsRng, &pid, org, org_node::ChainAccount::new([1; 32]), chain.get(&org)).unwrap();
     assert!(other.list_orgs().is_empty(), "the other service holds no record");
     let seen = other_view.get(&org).expect("the other view sees the slot");
     assert_eq!((seen.root_hash, seen.epoch), (committed.root, committed.epoch));
@@ -189,99 +208,8 @@ fn the_mock_genesis_makes_a_slot_at_epoch_one() {
     assert_eq!(chain.get(&first).unwrap().epoch, Epoch::new(1));
 }
 
-// Rewritten 2026-10-04 after review round 2. The previous body compared the
-// DEVICE KEY returned by the first and second call, which is derived from the
-// persona's seed and is therefore the same key whether or not a second
-// endpoint was bound: removing the `if self.endpoint.is_none()` guard left
-// this test green. The bound socket addresses are what distinguishes one
-// endpoint from two — a second bind takes a fresh ephemeral port.
-// verifies: LLR-6zjzn2
-#[tokio::test]
-async fn the_endpoint_is_bound_once_and_the_same_one_is_returned_after() {
-    let (store, _) = store_at("endpoint");
-    let mut svc = OrgService::new(store);
-    svc.set_transport_mode(TransportMode::Loopback);
-    let pid = svc.create_persona(&mut OsRng, h("ep"), nm("Ep"), sn("User")).unwrap();
+// *Moved 2026-10-13 (S4, task T10 of docs/plans/2026-10-06-org-io-transport.md):*
+// the three endpoint-lifecycle tests that stood here moved to org-io
+// (`org-io/tests/endpoints.rs`) with the endpoint, rewritten onto org-io's
+// endpoints, one per Persona, each bound from its keychain item.
 
-    let device_seed = svc.list_personas()[0].device_seed_for_test().clone();
-    let expected = device_seed.signing_keypair().device_key().unwrap();
-
-    let first_ep = svc.ensure_endpoint(&pid).await.unwrap();
-    let first_key = first_ep.device_key();
-    let first_sockets = first_ep.inner().bound_sockets();
-    assert_eq!(first_key.as_bytes(), expected.as_bytes());
-    assert!(!first_sockets.is_empty(), "no sockets bound");
-
-    // A second call returns the SAME endpoint rather than binding another, so
-    // it is listening on the same ports. Two binds would differ here.
-    let second_ep = svc.ensure_endpoint(&pid).await.unwrap();
-    assert_eq!(
-        second_ep.inner().bound_sockets(),
-        first_sockets,
-        "the second call bound a new endpoint instead of returning the first"
-    );
-    assert_eq!(second_ep.device_key().as_bytes(), first_key.as_bytes());
-}
-
-// Added 2026-10-04 after review round 2, which found that LLR-cns6q6's
-// load-bearing word — the NAMED persona's device seed — rested on nothing:
-// every gated test gave its service exactly one persona, so replacing
-// `find_persona(persona_id)` with "the first persona in the store" left the
-// whole gate green. The clause that matters is that a device holding more
-// than one persona binds the transport identity the caller asked for.
-// verifies: LLR-cns6q6
-#[tokio::test]
-async fn the_endpoint_binds_the_named_personas_device_not_the_first_personas() {
-    let (store, _) = store_at("endpoint-named");
-    let mut svc = OrgService::new(store);
-    svc.set_transport_mode(TransportMode::Loopback);
-
-    let first_pid = svc.create_persona(&mut OsRng, h("one"), nm("One"), sn("User")).unwrap();
-    let second_pid = svc.create_persona(&mut OsRng, h("two"), nm("Two"), sn("User")).unwrap();
-    assert_eq!(svc.list_personas().len(), 2);
-
-    let first_seed = svc.list_personas()[0].device_seed_for_test().clone();
-    let second_seed = svc.list_personas()[1].device_seed_for_test().clone();
-    assert_ne!(first_seed, second_seed, "two personas must hold distinct device seeds");
-    let first_key = first_seed.signing_keypair().device_key().unwrap();
-    let second_key = second_seed.signing_keypair().device_key().unwrap();
-
-    // Bind for the SECOND persona, which is not the first in the store.
-    assert_ne!(second_pid, first_pid);
-    let bound = svc.ensure_endpoint(&second_pid).await.unwrap().device_key();
-    assert_eq!(
-        bound.as_bytes(),
-        second_key.as_bytes(),
-        "the endpoint must authenticate the named persona's device key"
-    );
-    assert_ne!(
-        bound.as_bytes(),
-        first_key.as_bytes(),
-        "the endpoint bound the first persona's device key, not the named one"
-    );
-}
-
-// LLR-ecz9a6 states only the Loopback clause: what this test observes is that
-// a service in Loopback mode binds loopback sockets and nothing else. That
-// `ensure_endpoint` reads `self.transport_mode` rather than a constant is NOT
-// evidenced here and cannot be at this gate — review round 2 found that
-// hard-coding `TransportMode::Loopback` in `ensure_endpoint` leaves the whole
-// gate green, because `OrgService::new` already sets Loopback and no gated
-// test may set Networked (it would reach the public internet). Recorded as a
-// gap; the `test-support` relay-injecting constructor closes it.
-// verifies: REQ-db6s7q, LLR-ecz9a6
-#[tokio::test]
-async fn a_service_in_loopback_mode_binds_loopback_sockets_only() {
-    let (store, _) = store_at("mode");
-    let mut svc = OrgService::new(store);
-    svc.set_transport_mode(TransportMode::Loopback);
-    let pid = svc.create_persona(&mut OsRng, h("m"), nm("M"), sn("User")).unwrap();
-
-    let ep = svc.ensure_endpoint(&pid).await.unwrap();
-    // Loopback mode: every bound socket is a loopback address.
-    let sockets = ep.inner().bound_sockets();
-    assert!(!sockets.is_empty(), "no sockets bound");
-    for s in sockets {
-        assert!(s.ip().is_loopback(), "bound a non-loopback address: {s}");
-    }
-}

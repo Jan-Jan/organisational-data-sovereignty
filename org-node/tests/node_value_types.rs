@@ -8,10 +8,11 @@
 //! identifier and rejection vocabulary).
 
 use ed25519_dalek::SigningKey;
-use org_node::keys::{SigningKeypair, X25519Keypair};
+use org_node::keys::X25519Keypair;
+use org_node::test_fixtures::device_secret;
 use org_node::{implements_copy, implements_display};
 use org_node::{
-    ChainAccount, DeviceSeed, Epoch, MemberSeed, OrgNodeError, OrgPrivateKey, OrgPublicKey,
+    ChainAccount, Epoch, MemberSeed, OrgNodeError, OrgPrivateKey, OrgPublicKey,
     PersonaId, SequenceNumber,
 };
 use rand::rngs::OsRng;
@@ -40,40 +41,44 @@ fn plain<T: serde::Serialize>(v: &T) -> Vec<u8> {
     postcard::to_allocvec(v).unwrap()
 }
 
+// *Adapted 2026-10-08 (S4, task T3):* `DeviceSeed` is gone; the device
+// seed is held only as the move-only `DeviceSecret` (LLR-37k2s3, tested in
+// key_custody.rs), so its cases here are removed and the Member seed's kept.
 /// verifies: LLR-sz4xhc
 #[test]
 fn secret_types_redact_debug_and_give_bytes_only_through_the_accessor() {
     let bytes = [0x5au8; 32];
     let member = MemberSeed::from(bytes);
-    let device = DeviceSeed::from(bytes);
     assert_eq!(member.expose_secret(), &bytes);
-    assert_eq!(device.expose_secret(), &bytes);
     assert_eq!(format!("{member:?}"), "MemberSeed([REDACTED])");
-    assert_eq!(format!("{device:?}"), "DeviceSeed([REDACTED])");
     assert_eq!(member.clone(), member);
     assert_ne!(MemberSeed::from([1u8; 32]), member);
     assert!(implements_display!(String) && implements_copy!(u8), "the probe itself works");
     assert!(!implements_display!(MemberSeed) && !implements_copy!(MemberSeed));
-    assert!(!implements_display!(DeviceSeed) && !implements_copy!(DeviceSeed));
 }
 
+// *Adapted 2026-10-08 (S4, task T3):* `DeviceSeed` is gone; the device
+// seed is held only as the move-only `DeviceSecret` (LLR-37k2s3, tested in
+// key_custody.rs), so its cases here are removed and the Member seed's kept.
 /// verifies: LLR-sz4xhc
 #[test]
 fn secret_debug_is_the_same_whatever_the_bytes() {
     // Boundary bytes, and bytes that spell the marker itself.
     for bytes in [[0u8; 32], [0xffu8; 32], *b"MemberSeed([REDACTED])0123456789"] {
         assert_eq!(format!("{:?}", MemberSeed::from(bytes)), "MemberSeed([REDACTED])");
-        assert_eq!(format!("{:#?}", DeviceSeed::from(bytes)), "DeviceSeed([REDACTED])");
-        assert_eq!(format!("{:?}", Some(DeviceSeed::from(bytes))), "Some(DeviceSeed([REDACTED]))");
+        assert_eq!(format!("{:#?}", MemberSeed::from(bytes)), "MemberSeed([REDACTED])");
+        assert_eq!(format!("{:?}", Some(MemberSeed::from(bytes))), "Some(MemberSeed([REDACTED]))");
     }
 }
 
+// *Adapted 2026-10-08 (S4, task T3):* `DeviceSeed` is gone; the device
+// seed is held only as the move-only `DeviceSecret` (LLR-37k2s3, tested in
+// key_custody.rs), so its cases here are removed and the Member seed's kept.
 /// verifies: LLR-sz4xhc
 #[test]
 fn secret_types_serialise_as_the_plain_bytes() {
     let bytes = [0xa5u8; 32];
     assert_eq!(plain(&MemberSeed::from(bytes)), plain(&bytes));
-    assert_eq!(plain(&DeviceSeed::from(bytes)), plain(&bytes));
     let back: MemberSeed = postcard::from_bytes(&plain(&bytes)).unwrap();
     assert_eq!(back, MemberSeed::from(bytes));
     // Abnormal: 31 bytes are not a secret.
@@ -91,13 +96,13 @@ fn secret_types_serialise_as_the_plain_bytes() {
 fn a_seed_yields_its_key_pair_and_a_key_pair_its_seed() {
     let member_kp = X25519Keypair::generate(&mut OsRng);
     assert_eq!(member_kp.member_seed().x25519_keypair().public_bytes(), member_kp.public_bytes());
-    let device_kp = SigningKeypair::generate(&mut OsRng);
-    assert_eq!(device_kp.device_seed().signing_keypair().verifying_key(), device_kp.verifying_key());
     // The device seed is the RFC 8032 secret key: any ed25519 implementation
-    // derives the same key pair from it.
+    // derives the same key pair from it. *Adapted 2026-10-08 (S4, task T3):*
+    // the seed is held as a `DeviceSecret`, which hands out its public key
+    // only; `SigningKeypair::device_seed` is gone (LLR-37k2s3).
     assert_eq!(
-        DeviceSeed::from([0x11; 32]).signing_keypair().verifying_key(),
-        SigningKey::from_bytes(&[0x11; 32]).verifying_key()
+        device_secret([0x11; 32]).device_key().as_bytes(),
+        SigningKey::from_bytes(&[0x11; 32]).verifying_key().as_bytes()
     );
 }
 
@@ -109,9 +114,10 @@ fn a_seed_yields_its_key_pair_and_a_key_pair_its_seed() {
 fn seeds_at_the_byte_bounds_yield_working_key_pairs() {
     for bytes in [[0u8; 32], [0xffu8; 32]] {
         let member = MemberSeed::from(bytes).x25519_keypair();
-        let device = DeviceSeed::from(bytes).signing_keypair();
         assert!(member.member_key().is_ok(), "a valid Member-as-a-group key");
-        assert!(device.device_key().is_ok(), "a valid DevicePublicKey");
+        // A `DeviceSecret` parses its DevicePublicKey when it is built (S4, task T3).
+        let device = device_secret(bytes);
+        assert_eq!(device.device_key().as_bytes(), SigningKey::from_bytes(&bytes).verifying_key().as_bytes());
     }
 }
 

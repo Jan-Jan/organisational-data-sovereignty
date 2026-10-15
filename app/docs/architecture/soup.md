@@ -90,12 +90,9 @@ Requirements are from `app/docs/requirements/`.
 | `serde_json` | normal | 1.0.151 | `serde_json::Value` event payloads emitted to the webview. `events.rs` | REQ-affyf5, REQ-dp95pv, REQ-tw4cb5, REQ-kn5rtx, REQ-jfxah3 | `events.rs:180` `.expect`s `to_value`; it relies on every payload being a plain struct of owned scalars. |
 | `tokio` | normal | 1.53.1 | `tokio::sync::Mutex` around the org-io handle (`state.rs`; around `OrgService` until 2026-10-08); `tokio::spawn` of the receiver loop (`commands.rs:420`) | REQ-3hfggn, REQ-6hgm8r, REQ-jfxah3 | `sync`, `rt-multi-thread`, `macros`. The mutex serialises every command's access to the service. |
 | `hex` | normal | 0.4.3 | Hex encoding and decoding of keys, ids and addresses crossing IPC. `commands.rs`, `parsing.rs`, `state.rs` | REQ-sjkp8z, REQ-vgr7s2 | Unlike org-node, the app **parses** hex from untrusted input: `parsing.rs` and the revoke and admit handlers decode strings from the webview, and `state.rs` decodes `ODS_*` environment values. |
-| `base64` | normal | 0.22.1 | Standard-alphabet armour around the postcard bytes of the Invite and Invite-reply Blobs. `invitation.rs` | REQ-yazum3 (and REQ-prjja8, REQ-65xqp8 through the same Blobs) | *Added 2026-10-06 (change `worktree-org-node-chain-authority`).* **Decodes untrusted text** pasted into the webview: a decode failure is a named refusal (`"<Blob>: not a Blob: …"`), never a panic. Was org-node's (`blobs.rs`) until the invitation exchange moved to the app; org-node no longer depends on it. |
 | `rand` | normal | 0.8.8 | `rand::rngs::OsRng`, passed into org-node's key generation and store nonces. `commands.rs:19` and every handler that creates keys or saves the store | REQ-vgr7s2 (revoke), plus the onboarding commands | **Used in production here**; in org-node `rand` is dev-only. This is the one place the shipped product supplies the `CryptoRng` that org-node's `rand_core` row says the compiler cannot vouch for. |
-| `postcard` | normal | 1.1.3 | `postcard::from_bytes` of `iroh::EndpointAddr` bytes from a join request (`commands.rs:219`) and from the revoke handler's `peer_addr` (`commands.rs:283`) | REQ-vgr7s2 | **Decodes untrusted bytes** that arrive hex-encoded over IPC from the webview or inside a join-request blob. A decode failure is mapped to an error string, not a panic. No fuzz target in this unit reaches these two calls. *Amended 2026-10-06 (change `worktree-org-node-chain-authority`): the Join request is gone; the peer address is decoded once, by `commands.rs:253` for both the admit and the revoke handlers, and postcard now also encodes and decodes the Invite and Invite-reply Blobs inside their Base64 armour (`invitation.rs`, REQ-yazum3).* |
-| `iroh` | normal | 0.98.2 | `EndpointAddr` and `EndpointId::from_bytes` for the peer to dial. `commands.rs:204,215,263` | REQ-vgr7s2 | Types only; the endpoint itself is org-node's. Pinned 0.98 with org-node. |
 | `tauri` (`test`) | dev | 2.11.5 | `tauri::test::mock_builder`, `mock_context`, `get_ipc_response` in `tests/ipc.rs` | — | Feature unification means a dev build of the lib also sees `test`. |
-| `tempfile` | dev | 3.27.0 | Temporary data directories in `tests/ipc.rs` and `tests/state_assembly.rs` | — | Test-only. |
+| `tempfile` | dev | 3.27.0 | Temporary data directories in `tests/ipc.rs` (`tests/state_assembly.rs`, which also used it, deleted 2026-10-15) | — | Test-only. |
 
 `on-chain-client` (normal, path) selects `dev-rpc` and `write`. *Amended
 2026-10-06 (change `worktree-org-node-chain-authority`): this said it was
@@ -122,6 +119,18 @@ org-io's use). The paragraph above is history: the app no longer enables
 on-chain-client's `write` feature, holds no signatory key, and submits
 nothing itself; org-io does, and REQ-nfr3n2 is org-io's. The app's own
 `dev-seed` feature only enables org-io's.
+
+*Amended 2026-10-14 (change `worktree-org-io-transport`, S4 task T15).* The
+rows for `base64`, `postcard` and `iroh` are removed with the dependencies
+(`ipc.rs`, `the_app_manifest_names_no_iroh_base64_or_postcard`). The Base64
+armour and the postcard encoding of the Invite and Invite-reply Blobs are
+org-node's (`org-node/docs/architecture/soup.md`), since S4 task T6. The
+peer-address parse (hex, then postcard of an iroh `EndpointAddr`) and the
+transport are org-io's (`org-io/docs/architecture/soup.md`), since S4 tasks
+T12 and T10. The app names none of them. Its `test-support` feature now
+enables org-io's, for `AppState::for_test` and `for_test_over` (org-io's
+in-memory keychain and substitute chain), so "`test-support = []` enables
+nothing in any dependency" above is history.
 
 ## npm packages
 
@@ -159,6 +168,8 @@ no longer direct crates of the app; they reach it through org-io)*. The crates t
 now a direct dependency of the app (row above), and `parity-scale-codec`
 3.7.5 and `blake2` 0.10.6 are reached through on-chain-client's `write`
 feature, not org-node; org-node no longer depends on any of the three.)*
+*(2026-10-14, S4 task T15: `iroh`, `postcard` and `base64` are no longer
+direct crates of the app; they reach it through org-io and org-node.)*
 Their roles and anomalies are in `org-node/docs/architecture/soup.md` and are not
 repeated here. The rows above record only what differs in the app's use.
 

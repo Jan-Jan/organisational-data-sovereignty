@@ -47,6 +47,11 @@ satisfies: derived
 The item named the Organisation secret, which that change removes in favour of
 the Organisation private key (REQ-szq3ud).
 
+*Clarified 2026-10-08 (S4, task T3 of
+docs/plans/2026-10-06-org-io-transport.md):* unchanged in substance; it covers
+the device secret (`DeviceSecret`, `Debug` `DeviceSecret([REDACTED])`,
+LLR-37k2s3) and the HKDF-derived store key (LLR-scgk5j).
+
 ## Persona details
 
 Before this change `create_persona` stored the handle, name and surname as
@@ -86,3 +91,7 @@ device key set — at most four keys, none repeated, at least one for a member
 admitted through `MemberLeaf::new` — are not applied when a record is loaded or
 decoded; org-members enforces them when the members are rebuilt
 (`trie_from_snapshots`), reporting its own errors.)
+
+*Amended 2026-10-08 (S4, task T3 of
+docs/plans/2026-10-06-org-io-transport.md):* "open a Persona store" is "unseal
+a Persona store" (LLR-bg538c); the Invite and reply parse returns in task T6.

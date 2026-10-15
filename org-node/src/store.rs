@@ -1,21 +1,24 @@
-//! Encrypted-at-rest persistence for personas and org records (spec §4.2–4.5).
-//! PoC simplification S9: passphrase-derived key, not OS keychain.
-use std::path::PathBuf;
-
-use argon2::Argon2;
+//! The sealed per-Persona store (SDD-asxwp8; spec §4.2–4.5): one Persona's
+//! records, AEAD-sealed under a key derived from that Persona's device secret
+//! (LLR-2qqqx6), given out as `StoreWrite` bytes and taken back in by
+//! `PersonaStore::unseal` (LLR-bg538c). org-node names no path and touches no
+//! file: org-io writes and reads the bytes.
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
+use hkdf::Hkdf;
 use rand_core::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
+use zeroize::Zeroizing;
 
 use org_members::{DevicePublicKey, Handle, MemberId, Name, PersonPublicKey, RootHash, Surname};
 
 use crate::chain::OrgState;
+pub use crate::error::StoreRefusal;
 use crate::ids::OrgId;
-use crate::types::{
-    ChainAccount, DeviceSeed, Epoch, MemberSeed, OrgPrivateKey, OrgPublicKey, PersonaId,
-    SequenceNumber,
-};
+use crate::invitation::InviteId;
+use crate::keys::DeviceSecret;
+use crate::types::{ChainAccount, Epoch, MemberSeed, OrgPrivateKey, OrgPublicKey, PersonaId, SequenceNumber};
 use crate::OrgNodeError;
 
 /// Names the field whose parse refused a decoded value (LLR-8bum44).
@@ -52,12 +55,13 @@ impl PersonaDetails {
     }
 }
 
-/// A locally-held identity, one per org (spec §4.2). Seeds held in their secret
-/// types; `Debug` redacts them (PR-hqwpg9). Both seeds are crate-private
+/// A locally-held identity, one per org (spec §4.2). The Member seed is held
+/// in its secret type; `Debug` redacts it (PR-hqwpg9). It is crate-private
 /// and the record is not `Serialize` outside test builds: no public path
-/// hands out a stored private key, device ed25519 or Member X25519 (owner
-/// ruling 2026-10-06, as org-io states it; closed 2026-10-08);
-/// the store encodes it through `PersonaRecordEncoding`.
+/// hands out a stored private key (owner ruling 2026-10-06, as org-io states
+/// it); the store encodes it through
+/// `PersonaRecordEncoding`. The record holds the Device public key, not the
+/// device seed, which never enters the store (LLR-bvt5up).
 #[derive(Clone, Debug, Deserialize)]
 #[serde(try_from = "RawPersonaRecord")]
 pub struct PersonaRecord {
@@ -67,7 +71,7 @@ pub struct PersonaRecord {
     pub name: Name,
     pub surname: Surname,
     pub(crate) member_seed: MemberSeed,
-    pub(crate) device_seed: DeviceSeed,
+    pub device_key: DevicePublicKey,
     pub member_id: Option<MemberId>,
     pub status: PersonaStatus,
 }
@@ -82,7 +86,7 @@ pub struct PersonaRecordParts {
     pub name: Name,
     pub surname: Surname,
     pub member_seed: MemberSeed,
-    pub device_seed: DeviceSeed,
+    pub device_key: DevicePublicKey,
     pub member_id: Option<MemberId>,
     pub status: PersonaStatus,
 }
@@ -97,7 +101,7 @@ impl From<PersonaRecordParts> for PersonaRecord {
             name: parts.name,
             surname: parts.surname,
             member_seed: parts.member_seed,
-            device_seed: parts.device_seed,
+            device_key: parts.device_key,
             member_id: parts.member_id,
             status: parts.status,
         }
@@ -106,11 +110,6 @@ impl From<PersonaRecordParts> for PersonaRecord {
 
 #[cfg(feature = "test-support")]
 impl PersonaRecord {
-    /// The stored device seed (test builds only).
-    pub fn device_seed_for_test(&self) -> &DeviceSeed {
-        &self.device_seed
-    }
-
     /// The stored Member seed (test builds only).
     pub fn member_seed_for_test(&self) -> &MemberSeed {
         &self.member_seed
@@ -128,7 +127,7 @@ struct PersonaRecordEncoding<'a> {
     name: &'a Name,
     surname: &'a Surname,
     member_seed: &'a MemberSeed,
-    device_seed: &'a DeviceSeed,
+    device_key: &'a DevicePublicKey,
     member_id: &'a Option<MemberId>,
     status: &'a PersonaStatus,
 }
@@ -142,7 +141,7 @@ impl<'a> From<&'a PersonaRecord> for PersonaRecordEncoding<'a> {
             name: &record.name,
             surname: &record.surname,
             member_seed: &record.member_seed,
-            device_seed: &record.device_seed,
+            device_key: &record.device_key,
             member_id: &record.member_id,
             status: &record.status,
         }
@@ -166,7 +165,7 @@ pub(crate) struct RawPersonaRecord {
     name: String,
     surname: String,
     member_seed: MemberSeed,
-    device_seed: DeviceSeed,
+    device_key: [u8; 32],
     member_id: Option<MemberId>,
     status: PersonaStatus,
 }
@@ -184,7 +183,7 @@ impl TryFrom<RawPersonaRecord> for PersonaRecord {
             name,
             surname,
             member_seed: raw.member_seed,
-            device_seed: raw.device_seed,
+            device_key: parse_field("persona.device_key", DevicePublicKey::parse(&raw.device_key))?,
             member_id: raw.member_id,
             status: raw.status,
         })
@@ -388,7 +387,7 @@ impl TryFrom<RawMemberSnapshot> for MemberSnapshot {
 
 /// The bound on one Organisation's provisional updates in their stored form:
 /// the wire frame's 1 MiB (LLR-jq7qh7). A separate constant from
-/// `transport::MAX_FRAME`, so changing one is a decision about the other.
+/// `wire::MAX_MESSAGE`, so changing one is a decision about the other.
 pub const MAX_PROVISIONAL_BYTES: usize = 1 << 20;
 
 /// An update this node built and keeps until the chain agrees with it
@@ -594,18 +593,25 @@ impl TryFrom<RawProvisionalUpdate> for ProvisionalUpdate {
     }
 }
 
-/// Not `Serialize` outside test builds: it holds the device seeds
-/// (owner ruling 2026-10-06; closed 2026-10-08); `save` encodes it through
-/// `StoreDataEncoding`.
-#[derive(Clone, Debug, Default, Deserialize)]
+/// One Persona's data (owner ruling 2026-10-06: one store per Persona): the
+/// Persona, the record of the Organisation it is bound to, the
+/// provisional updates it built and the expectations it declared. Not
+/// `Serialize` outside test builds: it holds the Member seed and Organisation
+/// private keys (owner ruling 2026-10-06); `seal` encodes
+/// it through `StoreDataEncoding`.
+#[derive(Clone, Debug, Deserialize)]
 pub struct StoreData {
-    pub personas: Vec<PersonaRecord>,
+    pub persona: PersonaRecord,
     pub orgs: Vec<OrgRecord>,
     /// Updates this node built and keeps until the chain agrees with them
     /// (LLR-95753m); kept through `insert_provisional`.
     pub provisional_updates: Vec<ProvisionalUpdate>,
     /// Expectations the app declared, at most once each (LLR-9zfnmb).
     pub expected_admissions: Vec<ExpectedAdmission>,
+    /// The Invites this store's Persona issued and not yet settled, each as
+    /// the (Organisation, invite identifier) pair it was issued for
+    /// (LLR-nr8df3, LLR-d55brn).
+    pub outstanding_invites: Vec<(OrgId, InviteId)>,
 }
 
 impl StoreData {
@@ -620,7 +626,7 @@ impl StoreData {
         let same_identity = |u: &ProvisionalUpdate| {
             target.names(u) && u.resulting_root == update.resulting_root && u.org_pub_key == update.org_pub_key
         };
-        // The group in its stored form: each update as `save` encodes it.
+        // The group in its stored form: each update as `seal` encodes it.
         let mut group: Vec<ProvisionalUpdateEncoding<'_>> = self
             .provisional_updates
             .iter()
@@ -653,22 +659,18 @@ impl StoreData {
     }
 
     /// The store without anything of `org_id` (LLR-pba7yu): its record, its
-    /// provisional updates, its expectations, its Personas and the genesis
-    /// updates they built. Adds nothing in their place; everything else keeps
-    /// its order.
-    pub fn forget_organisation(&self, org_id: OrgId) -> StoreData {
-        let forgotten_personas: Vec<&PersonaId> = self
-            .personas
-            .iter()
-            .filter(|persona| persona.org_id == Some(org_id))
-            .map(|persona| &persona.persona_id)
-            .collect();
-        let keeps_update = |update: &&ProvisionalUpdate| match update.org_id {
-            Some(update_org_id) => update_org_id != org_id,
-            None => !forgotten_personas.contains(&&update.persona_id),
-        };
-        StoreData {
-            personas: self.personas.iter().filter(|persona| persona.org_id != Some(org_id)).cloned().collect(),
+    /// provisional updates, its expectations, its outstanding Invites, its
+    /// Persona and the genesis updates it built. Adds nothing in their place;
+    /// everything else keeps its order. A store holds one Persona, so when that Persona is bound to `org_id`
+    /// nothing of the store is left: `None`, which the caller applies as the
+    /// store's removal (`StoreChange::Forgotten`).
+    pub fn forget_organisation(&self, org_id: OrgId) -> Option<StoreData> {
+        if self.persona.org_id == Some(org_id) {
+            return None;
+        }
+        let keeps_update = |update: &&ProvisionalUpdate| update.org_id != Some(org_id);
+        Some(StoreData {
+            persona: self.persona.clone(),
             orgs: self.orgs.iter().filter(|record| record.org_id != org_id).cloned().collect(),
             provisional_updates: self.provisional_updates.iter().filter(keeps_update).cloned().collect(),
             expected_admissions: self
@@ -677,7 +679,13 @@ impl StoreData {
                 .filter(|expectation| expectation.org_id != org_id)
                 .copied()
                 .collect(),
-        }
+            outstanding_invites: self
+                .outstanding_invites
+                .iter()
+                .filter(|(invited_to, _)| *invited_to != org_id)
+                .copied()
+                .collect(),
+        })
     }
 }
 
@@ -691,10 +699,11 @@ pub struct ExpectedAdmission {
 /// The store plaintext as decoded, before parsing (LLR-8bum44).
 #[derive(Deserialize)]
 pub(crate) struct RawStoreData {
-    personas: Vec<RawPersonaRecord>,
+    persona: RawPersonaRecord,
     orgs: Vec<RawOrgRecord>,
     provisional_updates: Vec<RawProvisionalUpdate>,
     expected_admissions: Vec<ExpectedAdmission>,
+    outstanding_invites: Vec<(OrgId, InviteId)>,
 }
 
 impl TryFrom<RawStoreData> for StoreData {
@@ -702,7 +711,7 @@ impl TryFrom<RawStoreData> for StoreData {
 
     fn try_from(raw: RawStoreData) -> Result<Self, Self::Error> {
         Ok(Self {
-            personas: raw.personas.into_iter().map(PersonaRecord::try_from).collect::<Result<_, _>>()?,
+            persona: PersonaRecord::try_from(raw.persona)?,
             orgs: raw.orgs.into_iter().map(OrgRecord::try_from).collect::<Result<_, _>>()?,
             provisional_updates: raw
                 .provisional_updates
@@ -710,6 +719,7 @@ impl TryFrom<RawStoreData> for StoreData {
                 .map(ProvisionalUpdate::try_from)
                 .collect::<Result<_, _>>()?,
             expected_admissions: raw.expected_admissions,
+            outstanding_invites: raw.outstanding_invites,
         })
     }
 }
@@ -717,24 +727,26 @@ impl TryFrom<RawStoreData> for StoreData {
 /// `StoreData` as the store encodes it (see `PersonaRecordEncoding`).
 #[derive(Serialize)]
 struct StoreDataEncoding<'a> {
-    personas: Vec<PersonaRecordEncoding<'a>>,
+    persona: PersonaRecordEncoding<'a>,
     orgs: Vec<OrgRecordEncoding<'a>>,
     provisional_updates: Vec<ProvisionalUpdateEncoding<'a>>,
     expected_admissions: &'a [ExpectedAdmission],
+    outstanding_invites: &'a [(OrgId, InviteId)],
 }
 
 impl<'a> From<&'a StoreData> for StoreDataEncoding<'a> {
     fn from(data: &'a StoreData) -> Self {
         Self {
-            personas: data.personas.iter().map(PersonaRecordEncoding::from).collect(),
+            persona: PersonaRecordEncoding::from(&data.persona),
             orgs: data.orgs.iter().map(OrgRecordEncoding::from).collect(),
             provisional_updates: data.provisional_updates.iter().map(ProvisionalUpdateEncoding::from).collect(),
             expected_admissions: &data.expected_admissions,
+            outstanding_invites: &data.outstanding_invites,
         }
     }
 }
 
-/// Test builds encode the store's data as `save` does.
+/// Test builds encode the store's data as `seal` does.
 #[cfg(feature = "test-support")]
 impl Serialize for StoreData {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -742,22 +754,48 @@ impl Serialize for StoreData {
     }
 }
 
-/// Encrypted file store. On-disk layout: `nonce(24) ‖ ciphertext`.
+/// A sealed Persona store: `nonce(24) ‖ ciphertext`, the bytes org-io writes
+/// to and reads from that Persona's file (LLR-bg538c, LLR-bvt5up).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SealedStore(Vec<u8>);
+
+impl SealedStore {
+    pub fn from_bytes(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+/// One store's change, sealed (LLR-bvt5up): the bytes org-io writes to the
+/// file of the Persona whose Device key it names.
+#[must_use = "org-io must write the sealed store before reporting success (org-io's write-before-success requirement)"]
+#[derive(Debug)]
+pub struct StoreWrite {
+    pub device_key: DevicePublicKey,
+    pub sealed: SealedStore,
+}
+
+/// The nonce, then the authentication tag: the shortest sealed store.
+const NONCE_LENGTH: usize = 24;
+const TAG_LENGTH: usize = 16;
+
+/// The HKDF info string of the store key (LLR-2qqqx6): versioned, so a
+/// change of derivation is a new label.
+const STORE_KEY_INFO: &[u8] = b"ods/persona-store/v1";
+
+/// One Persona's open store: the store key, held only as the cipher
+/// (LLR-2qqqx6), and the data. No path: org-node touches no file.
 pub struct PersonaStore {
-    path: PathBuf,
     key: XChaCha20Poly1305,
     data: StoreData,
 }
 
 /// The store encryption key (LLR-scgk5j): private to this file, no
-/// `Display`, not `Copy`, redacted `Debug`.
-struct StoreKey([u8; 32]);
-
-impl StoreKey {
-    fn expose_secret(&self) -> &[u8; 32] {
-        &self.0
-    }
-}
+/// `Display`, not `Copy`, redacted `Debug`, wiped on drop.
+struct StoreKey(Zeroizing<[u8; 32]>);
 
 impl core::fmt::Debug for StoreKey {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -765,19 +803,27 @@ impl core::fmt::Debug for StoreKey {
     }
 }
 
-fn derive_key(passphrase: &str, salt: &[u8]) -> Result<StoreKey, OrgNodeError> {
-    let mut key = [0u8; 32];
-    Argon2::default()
-        .hash_password_into(passphrase.as_bytes(), salt, &mut key)
-        .map_err(|e| OrgNodeError::Chain(format!("kdf failed: {e}")))?;
+/// HKDF-SHA-256 of the device seed, salted with the Device public key, under
+/// `STORE_KEY_INFO` (LLR-2qqqx6).
+fn derive_key(secret: &DeviceSecret, device_key: &DevicePublicKey) -> Result<StoreKey, OrgNodeError> {
+    let mut key = Zeroizing::new([0u8; 32]);
+    Hkdf::<Sha256>::new(Some(device_key.as_bytes()), secret.seed())
+        .expand(STORE_KEY_INFO, key.as_mut())
+        .map_err(|_| OrgNodeError::Chain("store key derivation failed".into()))?;
     Ok(StoreKey(key))
 }
 
-/// The `Debug` rendering of the key `passphrase` derives (LLR-scgk5j).
+/// The cipher of the store key `secret` derives for `device_key`.
+pub(crate) fn cipher(secret: &DeviceSecret, device_key: &DevicePublicKey) -> Result<XChaCha20Poly1305, OrgNodeError> {
+    let key = derive_key(secret, device_key)?;
+    XChaCha20Poly1305::new_from_slice(key.0.as_ref()).map_err(|error| OrgNodeError::Chain(format!("bad key length: {error}")))
+}
+
+/// The `Debug` rendering of the store key `secret` derives (LLR-scgk5j).
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
-pub fn store_key_debug_for_test(passphrase: &str) -> Result<String, OrgNodeError> {
-    Ok(format!("{:?}", derive_key(passphrase, APP_SALT)?))
+pub fn store_key_debug_for_test(secret: &DeviceSecret) -> Result<String, OrgNodeError> {
+    Ok(format!("{:?}", derive_key(secret, &secret.device_key())?))
 }
 
 /// Whether `StoreKey` implements `Display` and whether it is `Copy`, in that
@@ -788,71 +834,79 @@ pub fn store_key_traits_for_test() -> (bool, bool) {
     (crate::implements_display!(StoreKey), crate::implements_copy!(StoreKey))
 }
 
-/// 32-byte fixed app salt — PoC simplification S9.
-const APP_SALT: &[u8] = b"ods-phase2-personastore-v1______";
-
-fn cipher(passphrase: &str) -> Result<XChaCha20Poly1305, OrgNodeError> {
-    XChaCha20Poly1305::new_from_slice(derive_key(passphrase, APP_SALT)?.expose_secret())
-        .map_err(|e| OrgNodeError::Chain(format!("bad key length: {e}")))
-}
-
 /// `nonce(24) ‖ ciphertext` of `plaintext`, with a fresh random nonce.
-fn seal<R: RngCore + CryptoRng>(
+pub(crate) fn seal_bytes<R: RngCore + CryptoRng>(
     key: &XChaCha20Poly1305,
     plaintext: &[u8],
     rng: &mut R,
-) -> Result<Vec<u8>, OrgNodeError> {
-    let mut nonce = [0u8; 24];
+) -> Result<SealedStore, OrgNodeError> {
+    let mut nonce = [0u8; NONCE_LENGTH];
     rng.fill_bytes(&mut nonce);
     let ct = key
         .encrypt(XNonce::from_slice(&nonce), plaintext)
         .map_err(|e| OrgNodeError::Chain(format!("encrypt failed: {e}")))?;
-    let mut out = Vec::with_capacity(24 + ct.len());
+    let mut out = Vec::with_capacity(NONCE_LENGTH + ct.len());
     out.extend_from_slice(&nonce);
     out.extend_from_slice(&ct);
-    Ok(out)
-}
-
-/// Writes `plaintext` to `path` encrypted exactly as `save` writes a store,
-/// so a test can present content this software never writes (LLR-8bum44).
-#[cfg(feature = "test-support")]
-#[doc(hidden)]
-pub fn seal_for_test<R: RngCore + CryptoRng>(
-    path: &std::path::Path,
-    passphrase: &str,
-    plaintext: &[u8],
-    rng: &mut R,
-) -> Result<(), OrgNodeError> {
-    let sealed = seal(&cipher(passphrase)?, plaintext, rng)?;
-    std::fs::write(path, sealed).map_err(|e| OrgNodeError::Chain(e.to_string()))
+    Ok(SealedStore(out))
 }
 
 impl PersonaStore {
-    /// Open or create a store at `path` using `passphrase`.
-    /// PoC uses a fixed application salt constant (simplification S9).
-    /// A store holding a value its type's parse refuses is refused whole,
-    /// naming the field (LLR-8bum44).
-    pub fn open(path: PathBuf, passphrase: &str) -> Result<Self, OrgNodeError> {
-        let key = cipher(passphrase)?;
-        let data = if path.exists() {
-            let blob =
-                std::fs::read(&path).map_err(|e| OrgNodeError::Chain(e.to_string()))?;
-            if blob.len() < 24 {
-                return Err(OrgNodeError::Chain("store file too short".into()));
-            }
-            let (nonce_bytes, ct) = blob.split_at(24);
-            let pt = key
-                .decrypt(XNonce::from_slice(nonce_bytes), ct)
-                .map_err(|_| {
-                    OrgNodeError::Chain("decrypt failed (wrong passphrase?)".into())
-                })?;
-            let raw: RawStoreData = postcard::from_bytes(&pt)
-                .map_err(|e| OrgNodeError::Chain(format!("store decode: {e}")))?;
-            StoreData::try_from(raw)?
-        } else {
-            StoreData::default()
-        };
-        Ok(Self { path, key, data })
+    /// Open the sealed store of the Persona whose Device key is `device_key`
+    /// with its secret, which is consumed (LLR-bg538c). Refused, each with
+    /// its own error and changing nothing: a secret of another Device
+    /// (`DeviceSecretMismatch`, before any decryption); fewer bytes than a
+    /// nonce and a tag (`TooShort`); a ciphertext that does not authenticate
+    /// (`NotAuthentic`); a plaintext that does not decode (`Undecodable`) or
+    /// holds a value its type's parse refuses (`InvalidField`, LLR-8bum44);
+    /// and a store whose Persona names another Device (`DeviceSecretMismatch`).
+    pub fn unseal(sealed: &SealedStore, device_key: DevicePublicKey, secret: DeviceSecret) -> Result<Self, OrgNodeError> {
+        if secret.device_key() != device_key {
+            return Err(OrgNodeError::DeviceSecretMismatch);
+        }
+        let bytes = sealed.as_bytes();
+        if bytes.len() < NONCE_LENGTH + TAG_LENGTH {
+            return Err(OrgNodeError::StoreRefused(StoreRefusal::TooShort));
+        }
+        let key = cipher(&secret, &device_key)?;
+        drop(secret);
+        let (nonce, ciphertext) = bytes.split_at(NONCE_LENGTH);
+        let plaintext = Zeroizing::new(
+            key.decrypt(XNonce::from_slice(nonce), ciphertext)
+                .map_err(|_| OrgNodeError::StoreRefused(StoreRefusal::NotAuthentic))?,
+        );
+        let raw: RawStoreData =
+            postcard::from_bytes(&plaintext).map_err(|_| OrgNodeError::StoreRefused(StoreRefusal::Undecodable))?;
+        let data = StoreData::try_from(raw)?;
+        if data.persona.device_key != device_key {
+            return Err(OrgNodeError::DeviceSecretMismatch);
+        }
+        Ok(Self { key, data })
+    }
+
+    /// A new store for `persona`, keyed from `secret`, whose Device key must
+    /// be the Persona's (LLR-e5kqhg). The secret is borrowed: `create_persona`
+    /// returns it to its caller.
+    pub(crate) fn create(secret: &DeviceSecret, persona: PersonaRecord) -> Result<Self, OrgNodeError> {
+        if secret.device_key() != persona.device_key {
+            return Err(OrgNodeError::DeviceSecretMismatch);
+        }
+        let key = cipher(secret, &persona.device_key)?;
+        Ok(Self {
+            key,
+            data: StoreData {
+                persona,
+                orgs: Vec::new(),
+                provisional_updates: Vec::new(),
+                expected_admissions: Vec::new(),
+                outstanding_invites: Vec::new(),
+            },
+        })
+    }
+
+    /// The Device public key of this store's Persona.
+    pub fn device_key(&self) -> DevicePublicKey {
+        self.data.persona.device_key
     }
 
     pub fn data(&self) -> &StoreData {
@@ -863,11 +917,18 @@ impl PersonaStore {
         &mut self.data
     }
 
-    /// Encrypt and write the store. Generates a fresh 24-byte random nonce per save.
-    pub fn save<R: RngCore + CryptoRng>(&self, rng: &mut R) -> Result<(), OrgNodeError> {
-        let pt = postcard::to_allocvec(&StoreDataEncoding::from(&self.data))
-            .map_err(|e| OrgNodeError::Chain(format!("store encode: {e}")))?;
-        let out = seal(&self.key, &pt, rng)?;
-        std::fs::write(&self.path, out).map_err(|e| OrgNodeError::Chain(e.to_string()))
+    /// This store, sealed with a fresh 24-byte nonce (LLR-bvt5up).
+    pub(crate) fn seal<R: RngCore + CryptoRng>(&self, rng: &mut R) -> Result<StoreWrite, OrgNodeError> {
+        self.seal_data(&self.data, rng)
+    }
+
+    /// `data`, sealed under this store's key as this store's write: what a
+    /// change would write, before it is adopted.
+    pub(crate) fn seal_data<R: RngCore + CryptoRng>(&self, data: &StoreData, rng: &mut R) -> Result<StoreWrite, OrgNodeError> {
+        let plaintext = Zeroizing::new(
+            postcard::to_allocvec(&StoreDataEncoding::from(data))
+                .map_err(|error| OrgNodeError::Chain(format!("store encode: {error}")))?,
+        );
+        Ok(StoreWrite { device_key: self.device_key(), sealed: seal_bytes(&self.key, &plaintext, rng)? })
     }
 }

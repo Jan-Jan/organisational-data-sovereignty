@@ -196,6 +196,16 @@ ruled that the invite identifier travels only in the Invite and its reply,
 never between peers (REQ-8amu2a as amended), so the field and the type are
 removed and the item states their absence.
 
+*Amended 2026-10-13 (S4, task T6 of docs/plans/2026-10-06-org-io-transport.md):*
+**narrowed.** No Wire message and no expectation carries an invite
+identifier; the clause "org-node defines no `InviteId` type" is withdrawn,
+because the Invite returns to org-node (owner ruling 1 on the chain-authority
+sweep) and `InviteId` lives in `org-node/src/invitation.rs` and in the sealed
+store's outstanding pairs. `absences::org_node_holds_no_invite_identifier`
+is narrowed to `wire.rs` and the `ExpectedAdmission` struct body.
+Classification under the hybrid rule: a narrowing, owner-ruled; what is
+still asserted is unchanged.
+
 ## SDD-af5vnt — The encrypted persona store
 
 `org-node/src/store.rs`: the provisional updates and the expected admissions a
@@ -233,6 +243,20 @@ member has the same root, so identity by root alone would let the rebuild
 replace an update whose public key the app may already have written to the
 chain, losing the only copy of that key's private half. The identity now
 includes `org_pub_key`.
+
+*Amended 2026-10-08 (S4, task T3 of
+docs/plans/2026-10-06-org-io-transport.md):* one store per Persona: a
+`StoreData` holds one Persona's provisional updates and expectations, and
+reaches org-io as a sealed store (`StoreWrite`) rather than an encrypted file;
+the identity and replacement rule are unchanged. `outstanding_invites` joins
+it in task T6.
+
+*Amended 2026-10-13 (S4, task T6):* `StoreData` also holds
+`outstanding_invites: Vec<(OrgId, InviteId)>`, the Invites its Persona issued
+and has not settled (LLR-nr8df3, LLR-d55brn), encoded last, after the
+expectations; "no pending Invites" still holds (an outstanding pair is not
+the old pending Invite: it carries no address and no keys). The pinned
+plaintext is re-pinned with one pair (LLR-ayrdr8).
 
 **LLR-jq7qh7**: `StoreData::insert_provisional(update) -> Result<(),
 OrgNodeError>` measures the postcard encoding of the `Vec<ProvisionalUpdate>`
@@ -296,6 +320,12 @@ and `resulting_root`, and only a genesis update held a private key. Every
 provisional update now holds a fresh key pair, and its identity includes its
 `org_pub_key` (LLR-95753m), so the operation takes the key too and discards
 exactly one update and its private key.
+
+*Amended 2026-10-08 (S4, task T3 of
+docs/plans/2026-10-06-org-io-transport.md):* `discard_provisional` returns
+`Result<StoreWrite, _>`: "saves the store before returning" becomes "returns
+the write of the store that held the update", which org-io writes; a refusal
+returns no write and changes nothing (LLR-bvt5up).
 
 ## SDD-89es4z — Persona and Organisation genesis
 
@@ -416,8 +446,34 @@ no Organisation key, secret or invite identifier, binds the endpoint, when none 
 the first Persona in the store bound to the Organisation
 `outgoing.envelope.org_id` names, and refuses with a typed error, sending
 nothing, when no Persona is bound to it; an endpoint already bound is used as
-it is (LLR-6zjzn2, PR-8qsnhx).
+it is (the bind-once item and the endpoint-bound-once report, both org-io's
+since S4 task T10).
 satisfies: derived
+
+*Amended 2026-10-13 (S4, task T5 of `docs/plans/2026-10-06-org-io-transport.md`):*
+org-node names the sending Persona, org-io binds. `CommitOutcome.sender` is
+the Persona whose store committed the update; `send_update` is gone, and the
+transitional `send_body(sender, recipient, body, peer_addr)` (removed in T14)
+refuses an unknown Persona and sends from the endpoint org-io bound with the
+transitional `bind_endpoint`, refusing with a typed error, sending nothing,
+when none is bound; it binds nothing itself. One endpoint per service until
+T10 (the endpoint-bound-once report).
+
+*Note 2026-10-13 (S4, task T10):* org-io sends from its own endpoint of the
+sending Persona's Device (one per Persona, org-io's design ledger) and no
+longer calls `send_body`, which is dead code until T14; the report moved to
+org-io and is resolved there.
+
+*Narrowed 2026-10-14 (S4, task T14):* `send_body` is deleted with the rest
+of org-node's transport. What remains of this item is that org-node names
+the sending Persona: `CommitOutcome.sender` is the Persona whose store
+committed the update (the first bound to the Organisation). The refusals
+(no Persona bound, no endpoint bound) went with the send; org-io's send
+refuses with its own typed errors. The test of those refusals,
+`send_update_refuses_without_a_bound_persona_or_a_loopback_address`, is
+deleted; the naming is asserted by
+`send_update_sends_organisation_information_to_a_listed_device_and_a_revocation_to_any_other`
+(`org-node/tests/commit_paths.rs`).
 
 *Amended 2026-10-06:* the signature gains `invite_id` (LLR-48jakr).
 
@@ -428,10 +484,27 @@ Organisation key: the Organisation private key a message carries is the one
 the node's record holds (REQ-szq3ud, LLR-6ymd6d). The invite identifier no
 longer travels between peers (LLR-48jakr).
 
+*Amended 2026-10-08 (S4, task T3 of
+docs/plans/2026-10-06-org-io-transport.md):* `send_update` binds no endpoint:
+it sends from the endpoint bound through the transitional `bind_endpoint` and
+is refused, nothing sent, when none is bound. The Persona named is still the
+one bound to the Organisation; task T10 gives the binding to org-io (one
+endpoint per Persona, org-io's design ledger).
+
 **LLR-48jakr**: `send_update` takes no invite identifier, and no Wire message
 it sends carries one (LLR-ms8njy); `send_update` neither reads nor stores an
 invite identifier.
 satisfies: REQ-8amu2a
+
+*Amended 2026-10-13 (S4, task T5 of `docs/plans/2026-10-06-org-io-transport.md`):*
+`send_update` is gone: no outgoing body the commit builds carries an invite
+identifier (LLR-gdfqn9, LLR-ms8njy), and the commit neither reads nor stores
+one.
+
+*Note 2026-10-13 (S4, task T6):* unchanged by the Invite's return: the
+invite identifier lives in the Invite, the reply and the store's outstanding
+pairs, none of which is an outgoing body; the absence scan reads `wire.rs`,
+which every outgoing body encodes.
 
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 This said the Wire message carries in `invite_id` exactly the invite
@@ -452,6 +525,11 @@ of, `receive_and_verify` and `receive_and_self_delete_if_revoked` call
 the provisional updates and the expected admissions unchanged; the early
 `read_state` that existed to obtain a signing key is removed.
 satisfies: REQ-f2k4tr
+
+*Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
+The chain-free checks are `check_received`'s, on the one receive path; a
+refusal there returns no `CheckedMessage`, so org-io reads no chain state.
+The rule is unchanged.
 
 *Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
 org-node's part of the same guarantee. org-node no longer reads the chain;
@@ -475,6 +553,10 @@ reads the chain once. Every refusal leaves every expectation in place. (A
 revocation about such an Organisation is refused before this check,
 LLR-38e2kn.)
 satisfies: REQ-8amu2a
+
+*Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
+The expectation gate is `check_received`'s, before the snapshot is decoded
+and before org-io reads any chain state. The rule is unchanged.
 
 *Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
 `prepare_receive` makes the refusal and the snapshot decode and
@@ -555,6 +637,14 @@ send and its outcome does not depend on whether the committed update is ever
 sent.
 satisfies: REQ-tqap3r
 
+*Amended 2026-10-14 (S4, task T14 of `docs/plans/2026-10-06-org-io-transport.md`),
+a narrowing of the evidence, not of the claim:* "bind no endpoint and send
+nothing" is now an absence. org-node has no endpoint, no transport and no
+async operation, so no commit can bind or send; each returns its store
+change and the bodies for org-io to write and send. The evidence is
+`org_node_is_sans_io` (`org-node/tests/absences.rs`); the commit tests'
+former "no endpoint bound" assertions are replaced by dated pointers to it.
+
 **LLR-mkj4bz**: whenever an update for an Organisation commits — through
 `receive_and_verify`, `receive_and_self_delete_if_revoked`, `commit_update`
 or `commit_genesis` — the record's previous root, epoch, Sequence number and
@@ -579,6 +669,12 @@ update, signs the acknowledgements and forgets the Organisation as
 provisional update and expected admission for it and every Persona bound to
 it are removed (LLR-pba7yu), and the acknowledgements are returned.
 satisfies: REQ-uxv2x2
+
+*Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
+On the receive path the removal step runs in `commit_checked` (one path; the
+self-delete path is gone), reported as `ReceiveKind::Removed` with
+`StoreChange::Forgotten` when the store's Persona goes with the
+Organisation. The rule is unchanged.
 
 *Amended 2026-10-06 (change `worktree-org-io-commit-workflow`; REQ-uxv2x2 as
 amended there).* This said the node marks every Persona bound to the
@@ -606,6 +702,11 @@ Persona, keeping every expectation and writing nothing. `commit_update` and
 Organisation (LLR-b27jr6, LLR-6p4pj2) deletes the Personas bound to it, so no
 binding of a forgotten Organisation survives to be reused.
 satisfies: REQ-yp75u9
+
+*Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
+On the receive path the binding is made by `commit_checked` (a first
+admission, `ReceiveKind::Admitted`; an update, `ReceiveKind::Updated`). The
+rule is unchanged.
 
 *Amended 2026-10-06 (change `worktree-org-io-commit-workflow`).* The last
 sentence said forgetting an Organisation marks its Personas Revoked and leaves

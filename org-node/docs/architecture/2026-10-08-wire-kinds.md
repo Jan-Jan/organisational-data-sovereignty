@@ -41,3 +41,8 @@ the new test of this item names both (`wire_frame_bound.rs`'s
 `exactly_three_kinds_round_trip_and_an_unknown_kind_or_leftover_bytes_are_refused`).
 No `satisfies:` or `traces:` line names LLR-js9dsu: SDD-kwncn7's `traces:`
 names requirements only, so no pointer moves.
+
+*Amended 2026-10-08 (S4, task T2 of `docs/plans/2026-10-06-org-io-transport.md`),
+a clarification:* `decode_body` and its `Malformed` read `decode_message`
+(`org-node/src/wire.rs`) and `OrgNodeError::MalformedMessage`. The codec left
+`transport/wire.rs`; the rule is unchanged.

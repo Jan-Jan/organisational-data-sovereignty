@@ -174,6 +174,12 @@ any other first admission with a typed error and without reading the chain,
 leaving every declared expectation in place. (implements: RC-2ferct)
 satisfies: derived
 
+*Note 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
+"Reading the chain" is org-io's read, made only for the message
+`check_received` hands back as `Checked::ReadChain`; an unexpected first
+admission is refused there, so org-io reads nothing. The requirement is
+unchanged.
+
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 The item also required the Wire message's invite identifier to match the
 expectation's. The owner ruled that the invite identifier never travels
@@ -272,6 +278,13 @@ replaced by the org-io roadmap (`docs/plans/2026-10-06-org-io-roadmap.md`,
 ADR `docs/adr/2026-10-06-org-io-unit.md`): change 2's transport moves to
 org-io in its stage S4, not to the app, and the signatory read of item 4 is
 org-io's own-admin check (stage S2).
+
+*Note 2026-10-14 (S4, task T14 of `docs/plans/2026-10-06-org-io-transport.md`).*
+Change 2 is done on the S4 branch: iroh and all peer communication are
+org-io's, and org-node keeps serialisation, deserialisation and
+verification. org-node has no transport, no file IO and no async; its
+`transport` feature, endpoint, transitional send, receive and bind, and the
+transport-only preflight are deleted.
 
 The rulings above on the key pair are recorded here so change 3 starts from
 them; this change implements only those that belong to change 1.

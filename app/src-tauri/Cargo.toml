@@ -20,11 +20,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "time"] }
 hex = "0.4"
-# The invitation Blobs (`src/invitation.rs`): Base64 of postcard.
-base64 = "0.22"
 rand = "0.8"
-postcard = { version = "1", features = ["use-std"] }
-iroh = { version = "0.98" }
+# *S4, task T15 (2026-10-14):* `base64`, `postcard` and `iroh` left with the
+# invitation Blobs (org-node's), the peer-address parse and the transport
+# (org-io's); the app names no iroh type and no Blob format.
 # The app's one way in to org-node, the chain and the signatory key
 # (docs/adr/2026-10-06-org-io-unit.md). Since S2 the app names no other unit
 # and no chain library (org-io/tests/app_boundary.rs).
@@ -34,8 +33,11 @@ org-io = { path = "../../org-io" }
 # Gates the test-only constructors and the integration test targets below.
 # Every `[[test]]` entry declares it via `required-features`, so naming a
 # target with the feature off is a cargo ERROR rather than a silent skip —
-# the property on-chain-client's nine targets rely on.
-test-support = []
+# the property on-chain-client's nine targets rely on. *S4, task T15:* it
+# turns on org-io's test-support too, for `AppState`'s test constructors,
+# which open the handle over org-io's in-memory keychain and substitute
+# chain.
+test-support = ["org-io/test-support"]
 # A development build: org-io reads the signing seed (ODS_ADMIN_SEED) only
 # with this feature (`npm run tauri dev -- --features dev-seed`). No release
 # build enables it.
@@ -80,18 +82,19 @@ required-features = ["test-support"]
 name = "csp_policy"
 required-features = ["test-support"]
 
-[[test]]
-name = "state_assembly"
-required-features = ["test-support"]
+# The state_assembly target left on 2026-10-15 (S4, owner ruling of that
+# day): its one remaining test,
+# `init_opens_the_store_once_even_when_the_connect_is_refused`, was
+# "Deleted 2026-10-15 by owner ruling: no app item states it; covered by
+# org-io's store-opening tests and the app's startup-refusal tests." With no
+# test left in `tests/state_assembly.rs`, the file and this target went too.
 
-[[test]]
-name = "submit_flow"
-required-features = ["test-support"]
+# The invitation target left on 2026-10-14 (S4 task T13 of
+# docs/plans/2026-10-06-org-io-transport.md): its fourteen exchange tests
+# moved to org-io's `invitation_exchange` with the exchange.
 
-[[test]]
-name = "invitation"
-required-features = ["test-support"]
-
+# S3b-io part 1's reconcile target (merged into S4 2026-10-14; S3b-io's
+# `submit_flow` and `invitation` entries are S4's removed targets, T12, T13).
 [[test]]
 name = "reconcile"
 required-features = ["test-support"]

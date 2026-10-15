@@ -4,7 +4,7 @@
 
 use on_chain_client::{Epoch as ChainEpoch, OnChainRootHash, OrgPubKey, OrgState as ChainOrgState};
 use org_io::chain_read::{org_state_from_chain, read_org_state};
-use org_io::node::{Epoch, OrgId, OrgNodeError, OrgPrivateKey, RootHash};
+use org_node::{Epoch, OrgId, OrgNodeError, OrgPrivateKey, RootHash};
 
 fn x25519_key(seed: u8) -> [u8; 32] {
     *OrgPrivateKey::from([seed; 32]).x25519_keypair().org_public_key().unwrap().as_bytes()

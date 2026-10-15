@@ -9,16 +9,12 @@ publish = false
 
 [features]
 default = []
-# Device-to-device transport over iroh QUIC (EndpointId = DevicePublicKey).
-transport = ["dep:iroh", "dep:tokio"]
-# Full node-app integration: transport + encrypted persistence.
-app = ["transport", "dep:chacha20poly1305", "dep:argon2"]
-# Test-only seams (e.g. binding an iroh endpoint against an in-process relay).
-# Never enabled in production builds; gated constructors live behind this.
-# Pulls iroh's `test-utils` so `run_relay_server()` and the self-signed-relay
-# `CaRootsConfig::insecure_skip_verify()` are available in any build that
-# enables this feature (not just dev/test builds via the dev-dependency).
-test-support = ["transport", "iroh/test-utils"]
+# The service and the sealed per-Persona store. org-node is sans-IO (S4 task
+# T14): the device-to-device link, the files and the keychain are org-io's.
+app = ["dep:chacha20poly1305", "dep:hkdf", "dep:sha2", "dep:base64"]
+# Test-only seams: the deterministic fixtures in `test_fixtures` and the
+# test-only accessors. Never enabled in production builds.
+test-support = []
 
 [dependencies]
 org-members = { path = "../org-members", default-features = false, features = ["std", "serde"] }
@@ -38,10 +34,14 @@ postcard = { version = "1", features = ["alloc", "use-std"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = { version = "2", default-features = false }
 rand_core = "0.6"
-tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
-iroh = { version = "0.98", optional = true }
 chacha20poly1305 = { version = "0.10", optional = true }
-argon2 = { version = "0.5", optional = true }
+# The store key: HKDF-SHA-256 of the device seed (LLR-2qqqx6, S4 task T3).
+# Same 0.12.4 and 0.10.9 the lockfile already resolves through other crates.
+hkdf = { version = "0.12", optional = true }
+sha2 = { version = "0.10", optional = true }
+# The armour of the Invite and Invite-reply Blobs (LLR-b7wgpf), back in
+# org-node with the invitation (S4 task T6); the app's 0.22.
+base64 = { version = "0.22", optional = true }
 
 [dev-dependencies]
 rand = "0.8"
@@ -49,12 +49,8 @@ rand = "0.8"
 # below: an integration test crate cannot see the library's normal deps, and
 # the relocated unit tests in tests/value_types.rs name them directly.
 postcard = { version = "1", features = ["alloc", "use-std"] }
-# The async tests need tokio's macros and timers whatever features are on.
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 # bolero 0.13 matches the version used in on-chain-client (the repo's other fuzz targets).
 bolero = "0.13"
-# Enables iroh::test_utils::run_relay_server() for the hermetic Networked test.
-iroh = { version = "0.98", features = ["test-utils"] }
 # org-members is also a normal [dependency], but integration test crates cannot
 # see the library's normal deps directly — re-declared here so fuzz_verify_against_chain
 # can name org_members::trie::OrgTrie, org_members::MemberLeaf, etc.
@@ -65,13 +61,8 @@ serde_json = { version = "1", default-features = false, features = ["alloc"] }
 [lints]
 workspace = true
 
-# The preflight binary (the transport check only, until S4) is
-# #![cfg(feature = "transport")]; without this gate cargo would try to build
-# it under feature sets lacking `transport` and fail with E0601 (empty file,
-# no `main`).
-[[bin]]
-name = "preflight"
-required-features = ["transport"]
+# The preflight binary and its test target left with the transport check,
+# which org-io runs (S4 task T14; owner ruling 7).
 
 [[test]]
 name = "fuzz_envelope_decode"
@@ -82,6 +73,9 @@ harness = false
 name = "fuzz_verify_against_chain"
 path = "tests/fuzz_verify_against_chain/fuzz_target.rs"
 harness = false
+# Its device key pairs come from `test_fixtures::device_keypair` since S4
+# task T3 removed `DeviceSeed`.
+required-features = ["test-support"]
 
 # `first_admission_base` lives in `service`, which only exists under `app`.
 [[test]]
@@ -90,33 +84,20 @@ path = "tests/fuzz_first_admission_base/fuzz_target.rs"
 harness = false
 required-features = ["app"]
 
-# `decode_body` on arbitrary bytes and on bytes after an Organisation-information
-# prefix (LLR-js9dsu), change worktree-org-node-org-key-pair.
+# `decode_message` on arbitrary bytes and on bytes after an Organisation-information
+# prefix (LLR-js9dsu), change worktree-org-node-org-key-pair. No feature since
+# S4 task T2: the codec left `transport/`.
 [[test]]
 name = "fuzz_wire_decode"
 path = "tests/fuzz_wire_decode/fuzz_target.rs"
 harness = false
-required-features = ["transport"]
 
-[[test]]
-name = "transport_handshake"
-path = "tests/transport_handshake.rs"
-required-features = ["transport"]
-
+# The targets `transport_handshake` and `transport_networked` moved to org-io
+# with the transport (S4 task T10).
 [[test]]
 name = "service_stories"
 path = "tests/service_stories.rs"
 required-features = ["app", "test-support"]
-
-[[test]]
-name = "preflight"
-path = "tests/preflight.rs"
-required-features = ["transport"]
-
-[[test]]
-name = "transport_networked"
-path = "tests/transport_networked.rs"
-required-features = ["transport", "test-support"]
 
 # The four targets below were added 2026-09-09 by org-node's risk analysis
 # (docs/plans/2026-09-09-org-node-risk-analysis.md). They carry the
@@ -133,7 +114,7 @@ required-features = ["test-support"]
 [[test]]
 name = "wire_frame_bound"
 path = "tests/wire_frame_bound.rs"
-required-features = ["transport", "test-support"]
+required-features = ["test-support"]
 
 [[test]]
 name = "store_at_rest"
@@ -146,7 +127,7 @@ path = "tests/admission_sender.rs"
 required-features = ["app", "test-support"]
 
 # Golden bytes pinned before the org-node type-safety refactor (LLR-ayrdr8).
-# The store is `app`; `app` implies `transport` (wire).
+# The store is `app`; the Wire message needs no feature since S4 task T2.
 [[test]]
 name = "encoding_golden"
 path = "tests/encoding_golden.rs"
@@ -256,4 +237,45 @@ required-features = ["app", "test-support"]
 [[test]]
 name = "commit_workflow_errors"
 path = "tests/commit_workflow_errors.rs"
+required-features = ["app", "test-support"]
+
+# The sealed per-Persona store (SDD-asxwp8), S4 task T3 of
+# docs/plans/2026-10-06-org-io-transport.md.
+[[test]]
+name = "sealed_store"
+path = "tests/sealed_store.rs"
+required-features = ["app", "test-support"]
+
+# `PersonaStore::unseal` on arbitrary bytes (LLR-bg538c), S4 task T3.
+[[test]]
+name = "fuzz_unseal"
+path = "tests/fuzz_unseal/fuzz_target.rs"
+harness = false
+required-features = ["app", "test-support"]
+
+# The one receive path by values, `check_received` then `commit_checked`
+# (SDD-esg2kc), S4 task T4.
+[[test]]
+name = "receive_path"
+path = "tests/receive_path.rs"
+required-features = ["app", "test-support"]
+
+# The commit returns every recipient's body (SDD-bm27xt), S4 task T5.
+[[test]]
+name = "outgoing_bodies"
+path = "tests/outgoing_bodies.rs"
+required-features = ["app", "test-support"]
+
+# The Invite, the reply and their bookkeeping (SDD-xshv5b), S4 task T6.
+[[test]]
+name = "invitation"
+path = "tests/invitation.rs"
+required-features = ["app", "test-support"]
+
+# `Invite::parse` and `InviteReply::parse` on arbitrary text (LLR-b7wgpf),
+# S4 task T6.
+[[test]]
+name = "fuzz_invitation_parse"
+path = "tests/fuzz_invitation_parse/fuzz_target.rs"
+harness = false
 required-features = ["app", "test-support"]

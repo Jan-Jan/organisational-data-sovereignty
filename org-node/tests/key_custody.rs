@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Device and member key custody (SDD-sxp8hb).
 //!
 //! Relocated from the `#[cfg(test)]` module in `org-node/src/keys.rs` so the
@@ -18,9 +18,10 @@
 //! place to this branch's key custody, and the tests below verify them as
 //! amended.
 
-use org_node::keys::{SigningKeypair, X25519Keypair};
-use org_node::{DeviceSeed, MemberSeed};
+use org_node::keys::{DeviceSecret, SigningKeypair, X25519Keypair};
+use org_node::MemberSeed;
 use rand::rngs::OsRng;
+use zeroize::Zeroizing;
 
 // Ported 2026-10-05 to master's org-node type-safety change: no keypair takes
 // or returns a plain-array seed (LLR-56hc77), so each keypair here is built
@@ -38,13 +39,23 @@ fn hex32(s: &str) -> [u8; 32] {
 // Was `a_keypair_rebuilt_from_its_seed_signs_identically` (REQ-ag6kqm,
 // LLR-e58j8m): the signature half is gone with `sign`; the verifying-key half
 // is what remains, and LLR-e58j8m, as amended, states it.
+// *Adapted 2026-10-08 (S4, task T3):* `DeviceSeed` and
+// `SigningKeypair::device_seed` are gone (LLR-37k2s3); the device seed leaves
+// a `DeviceSecret` only through `lend_to_keychain`, so the rebuild goes
+// through those bytes.
 // verifies: LLR-e58j8m
 #[test]
 fn a_device_keypair_rebuilt_from_its_seed_has_the_same_device_key() {
-    let original = DeviceSeed::from([3u8; 32]).signing_keypair();
-    let rebuilt = original.device_seed().signing_keypair();
-    assert_eq!(original.verifying_key(), rebuilt.verifying_key());
-    assert_eq!(original.device_key().unwrap(), rebuilt.device_key().unwrap());
+    let original = secret_of(3);
+    let mut seed = Zeroizing::new(vec![]);
+    original
+        .lend_to_keychain(|bytes| {
+            seed.extend_from_slice(bytes);
+            Ok::<(), std::convert::Infallible>(())
+        })
+        .unwrap();
+    let rebuilt = DeviceSecret::from_keychain_bytes(seed).unwrap();
+    assert_eq!(original.device_key(), rebuilt.device_key());
 }
 
 // Relocated from `src/keys.rs` (`device_key_wraps_the_verifying_key`).
@@ -61,9 +72,7 @@ fn device_key_wraps_the_verifying_key() {
 // REQ-ztdza4's amendment; kept as a regression check.
 #[test]
 fn two_different_keypairs_do_not_share_a_device_key() {
-    let a = DeviceSeed::from([5u8; 32]).signing_keypair();
-    let b = DeviceSeed::from([6u8; 32]).signing_keypair();
-    assert_ne!(a.device_key().unwrap().as_bytes(), b.device_key().unwrap().as_bytes());
+    assert_ne!(secret_of(5).device_key().as_bytes(), secret_of(6).device_key().as_bytes());
 }
 
 // RFC 7748 §6.1: Alice's and Bob's private keys and X25519(k, 9).
@@ -110,8 +119,8 @@ fn degenerate_seeds_still_give_valid_keys() {
         let member = MemberSeed::from([b; 32]).x25519_keypair();
         let key = member.member_key().expect("a degenerate seed still gives a valid PersonPublicKey");
         assert_eq!(key.as_bytes(), &member.public_bytes());
-        let device = DeviceSeed::from([b; 32]).signing_keypair();
-        assert_eq!(device.device_key().unwrap().as_bytes(), device.verifying_key().as_bytes());
+        let verifying_key = ed25519_dalek::SigningKey::from_bytes(&[b; 32]).verifying_key();
+        assert_eq!(secret_of(b).device_key().as_bytes(), verifying_key.as_bytes());
     }
 }
 
@@ -138,7 +147,9 @@ trait NotCloneFallback {
 
 impl<T: ?Sized> NotCloneFallback for CloneProbe<T> {}
 
-impl<T: ?Sized + Clone> CloneProbe<T> {
+// `Clone` implies `Sized`, so this impl takes no `?Sized` (clippy, 2026-10-14,
+// S4 task T18); the probe's answer for every type tested below is unchanged.
+impl<T: Clone> CloneProbe<T> {
     const IS_CLONE: bool = true;
 }
 
@@ -152,6 +163,10 @@ const _: () = assert!(!CloneProbe::<X25519Keypair>::IS_CLONE, "X25519Keypair imp
 // `Clone`, `X25519Keypair` is not.
 // verifies: LLR-98ufry
 #[test]
+#[allow(
+    clippy::assertions_on_constants,
+    reason = "the probe's answers are compile-time constants by design; asserting them at run time is the test"
+)]
 fn an_x25519_key_pair_cannot_be_cloned() {
     assert!(CloneProbe::<[u8; 32]>::IS_CLONE, "the probe sees a Clone type");
     assert!(CloneProbe::<MemberSeed>::IS_CLONE, "the probe sees a Clone secret type");
@@ -184,4 +199,223 @@ fn an_x25519_key_pair_declares_zeroize_on_drop_and_zeroize_clears_its_secret() {
     let mut kp = MemberSeed::from([0xabu8; 32]).x25519_keypair();
     kp.zeroize();
     assert_eq!(kp.member_seed().expose_secret(), &[0u8; 32], "no secret byte is left");
+}
+
+// --- DeviceSecret, the move-only device seed (S4, plan task T1) ---
+
+fn secret_of(byte: u8) -> DeviceSecret {
+    DeviceSecret::from_keychain_bytes(Zeroizing::new(vec![byte; 32])).unwrap()
+}
+
+// verifies: LLR-37k2s3
+#[test]
+fn a_device_secret_debug_renders_only_the_marker() {
+    assert_eq!(format!("{:?}", secret_of(0xab)), "DeviceSecret([REDACTED])");
+}
+
+// verifies: LLR-37k2s3
+#[test]
+fn a_device_secret_declares_zeroize_on_drop() {
+    declares_zeroize_on_drop::<DeviceSecret>();
+}
+
+/// The text of `src/keys.rs`.
+fn keys_source() -> String {
+    std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/keys.rs")).unwrap()
+}
+
+/// Every block of `source` that opens with the line `opening` (at column
+/// one), each up to its closing `}` at column one.
+fn blocks_opening_with<'a>(source: &'a str, opening: &str) -> Vec<&'a str> {
+    let mut blocks = vec![];
+    let mut rest = source;
+    while let Some(start) = rest.find(&format!("\n{opening}\n")) {
+        let block = &rest[start + 1..];
+        let end = block.find("\n}\n").unwrap();
+        blocks.push(&block[..end]);
+        rest = &block[end..];
+    }
+    blocks
+}
+
+// The seed's wipe on drop is structural: the field that holds it is
+// `Zeroizing`, whose `Drop` overwrites it with zeros. A dropped value's
+// memory cannot be read by a safe test, so this checks the field's type: the
+// test fails if the seed is held in any other form (review round 1 of S4,
+// finding-8).
+// verifies: LLR-37k2s3
+#[test]
+fn a_device_secrets_seed_is_held_in_zeroizing() {
+    let source = keys_source();
+    let definitions = blocks_opening_with(&source, "pub struct DeviceSecret {");
+    assert_eq!(definitions.len(), 1, "one definition of DeviceSecret");
+    let fields: Vec<&str> = definitions[0].lines().skip(1).map(str::trim).filter(|line| !line.starts_with("//")).collect();
+    let seed_types: Vec<&str> = fields
+        .iter()
+        .filter(|field| field.contains("[u8"))
+        .map(|field| field.split_once(':').unwrap().1.trim().trim_end_matches(','))
+        .collect();
+    assert_eq!(seed_types.len(), 1, "one field holds seed bytes: {seed_types:?}");
+    assert!(
+        ["Zeroizing<[u8; 32]>", "zeroize::Zeroizing<[u8; 32]>"].contains(&seed_types[0]),
+        "the seed is held directly in Zeroizing: {seed_types:?}"
+    );
+    assert!(!source.contains("impl Drop for DeviceSecret"), "no hand-written Drop stands beside Zeroizing's");
+}
+
+// verifies: LLR-37k2s3
+#[test]
+fn the_device_key_is_the_ed25519_verifying_key_of_the_seed() {
+    let expected = ed25519_dalek::SigningKey::from_bytes(&[0x07; 32]).verifying_key();
+    assert_eq!(secret_of(0x07).device_key().as_bytes(), expected.as_bytes());
+}
+
+// verifies: LLR-37k2s3
+#[test]
+fn a_generated_secret_differs_from_the_next_one() {
+    let first = DeviceSecret::generate(&mut OsRng).device_key();
+    let second = DeviceSecret::generate(&mut OsRng).device_key();
+    assert_ne!(first, second);
+}
+
+// verifies: LLR-yp69jg
+#[test]
+fn from_keychain_bytes_refuses_any_length_but_32_and_echoes_no_byte() {
+    for length in [0usize, 31, 33, 64] {
+        match DeviceSecret::from_keychain_bytes(Zeroizing::new(vec![0xab; length])) {
+            Err(org_node::OrgNodeError::InvalidField { field, reason }) => {
+                assert_eq!(field, "Device seed");
+                assert!(!reason.contains("171") && !reason.to_lowercase().contains("ab, "), "{reason}");
+            }
+            other => panic!("length {length}: expected InvalidField, got {other:?}"),
+        }
+    }
+}
+
+// verifies: LLR-yp69jg
+#[test]
+fn lend_to_keychain_calls_the_writer_exactly_once_with_the_seed() {
+    // *Rewritten 2026-10-15 (PR-aa7prn):* the seed is compared inside the
+    // writer, not copied out of the lend; the writer's refusal comes back.
+    let secret = secret_of(0x07);
+    let mut calls = 0;
+    let mut saw_the_seed = false;
+    let lent = secret.lend_to_keychain(|bytes| {
+        calls += 1;
+        saw_the_seed = *bytes == [0x07; 32];
+        Ok::<(), std::io::Error>(())
+    });
+    assert_eq!((calls, saw_the_seed, lent.is_ok()), (1, true, true));
+    let refused = secret.lend_to_keychain(|_| Err(std::io::Error::other("keychain refused")));
+    assert_eq!(refused.unwrap_err().to_string(), "keychain refused");
+}
+
+// PR-aa7prn (review round 2 of S4, finding-3): the lend's return must not be
+// a channel for the bytes. The writer returns `Result<(), E>` and the lend
+// returns exactly that, with `E` bound to `std::error::Error` (which no byte
+// array implements), so neither `|seed| *seed` nor `|seed| Err(*seed)`
+// compiles. A generic return over the writer's output (the shape before the
+// fix) fails this scan. The test checks the signature only: a caller-defined
+// error type wrapping the bytes is outside it and rests on review (LLR-yp69jg,
+// corrected 2026-10-15).
+// verifies: LLR-yp69jg, LLR-37k2s3
+#[test]
+fn lend_to_keychain_returns_no_value_the_writer_could_carry_the_bytes_in() {
+    let source = keys_source();
+    let start = source.find("pub fn lend_to_keychain").expect("keys.rs declares lend_to_keychain");
+    let end = start + source[start..].find('{').unwrap();
+    // Layout-free: whitespace and rustfmt's trailing commas dropped.
+    let signature = source[start..end].split_whitespace().collect::<String>().replace(",)", ")");
+    assert_eq!(
+        signature,
+        "pubfnlend_to_keychain<E:std::error::Error>(&self,write:implFnOnce(&[u8;32])->Result<(),E>)->Result<(),E>",
+    );
+}
+
+// *Strengthened 2026-10-14 (review round 1 of S4, finding-8):* every
+// `impl DeviceSecret` block is read, not only the first.
+// verifies: LLR-37k2s3
+#[test]
+fn device_secret_offers_only_its_four_public_operations() {
+    let source = keys_source();
+    let blocks = blocks_opening_with(&source, "impl DeviceSecret {");
+    assert!(!blocks.is_empty(), "keys.rs implements DeviceSecret");
+    // `pub fn`, `pub const fn`, `pub async fn` …; `pub(crate)` is not public.
+    let public: Vec<&str> = blocks
+        .iter()
+        .flat_map(|block| block.lines())
+        .filter(|line| line.trim_start().starts_with("pub ") && line.contains("fn "))
+        .collect();
+    assert_eq!(public.len(), 4, "{public:#?}");
+    for name in ["fn generate", "fn from_keychain_bytes", "fn device_key", "fn lend_to_keychain"] {
+        assert!(public.iter().any(|line| line.contains(name)), "{name} missing");
+    }
+    for line in &public {
+        assert!(!line.contains("-> &[u8") && !line.contains("-> [u8") && !line.contains("SigningKeypair"), "{line}");
+    }
+}
+
+/// Trait probes for `Copy`, `Display` and `Serialize`, in `CloneProbe`'s
+/// form: the inherent constant answers `true` when the bound holds, the
+/// trait's default `false` otherwise.
+struct CopyProbe<T: ?Sized>(std::marker::PhantomData<T>);
+trait NotCopyFallback {
+    const IS_COPY: bool = false;
+}
+impl<T: ?Sized> NotCopyFallback for CopyProbe<T> {}
+impl<T: Copy> CopyProbe<T> {
+    const IS_COPY: bool = true;
+}
+
+struct DisplayProbe<T: ?Sized>(std::marker::PhantomData<T>);
+trait NotDisplayFallback {
+    const IS_DISPLAY: bool = false;
+}
+impl<T: ?Sized> NotDisplayFallback for DisplayProbe<T> {}
+impl<T: ?Sized + std::fmt::Display> DisplayProbe<T> {
+    const IS_DISPLAY: bool = true;
+}
+
+struct SerializeProbe<T: ?Sized>(std::marker::PhantomData<T>);
+trait NotSerializeFallback {
+    const IS_SERIALIZE: bool = false;
+}
+impl<T: ?Sized> NotSerializeFallback for SerializeProbe<T> {}
+impl<T: ?Sized + serde::Serialize> SerializeProbe<T> {
+    const IS_SERIALIZE: bool = true;
+}
+
+struct DeserializeProbe<T: ?Sized>(std::marker::PhantomData<T>);
+trait NotDeserializeFallback {
+    const IS_DESERIALIZE: bool = false;
+}
+impl<T: ?Sized> NotDeserializeFallback for DeserializeProbe<T> {}
+impl<T: serde::de::DeserializeOwned> DeserializeProbe<T> {
+    const IS_DESERIALIZE: bool = true;
+}
+
+// Each probe is first checked against a type whose answer is known, so a
+// probe that always answered `false` fails here.
+// *Strengthened 2026-10-14 (review round 1 of S4, finding-8):* `Deserialize`,
+// which LLR-37k2s3 names, is probed too.
+// verifies: LLR-37k2s3
+#[test]
+fn a_device_secret_cannot_be_cloned_copied_displayed_or_serialised() {
+    // (probe answer, expected answer, what is probed), checked in a loop so
+    // each answer is read at run time.
+    let answers = [
+        (CloneProbe::<[u8; 32]>::IS_CLONE, true, "the Clone probe on [u8; 32]"),
+        (CopyProbe::<[u8; 32]>::IS_COPY, true, "the Copy probe on [u8; 32]"),
+        (DisplayProbe::<u8>::IS_DISPLAY, true, "the Display probe on u8"),
+        (SerializeProbe::<[u8; 32]>::IS_SERIALIZE, true, "the Serialize probe on [u8; 32]"),
+        (CloneProbe::<DeviceSecret>::IS_CLONE, false, "DeviceSecret: Clone"),
+        (CopyProbe::<DeviceSecret>::IS_COPY, false, "DeviceSecret: Copy"),
+        (DisplayProbe::<DeviceSecret>::IS_DISPLAY, false, "DeviceSecret: Display"),
+        (SerializeProbe::<DeviceSecret>::IS_SERIALIZE, false, "DeviceSecret: Serialize"),
+        (DeserializeProbe::<[u8; 32]>::IS_DESERIALIZE, true, "the Deserialize probe on [u8; 32]"),
+        (DeserializeProbe::<DeviceSecret>::IS_DESERIALIZE, false, "DeviceSecret: Deserialize"),
+    ];
+    for (answer, expected, probed) in answers {
+        assert_eq!(answer, expected, "{probed}");
+    }
 }

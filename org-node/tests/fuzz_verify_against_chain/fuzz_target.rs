@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Fuzz target: `verify_envelope_against_chain` must never panic on a malformed
 //! envelope, and any accepted update must match the on-chain root.
 //!
@@ -47,7 +48,8 @@ use org_node::ids::OrgId;
 use org_node::keys::{SigningKeypair, X25519Keypair};
 use org_node::sequence::SeqGuard;
 use org_node::verify::{verify_envelope_against_chain, VerifyContext};
-use org_node::{DeviceSeed, Epoch, MemberSeed, OrgPrivateKey, SequenceNumber};
+use org_node::{Epoch, MemberSeed, OrgPrivateKey, SequenceNumber};
+use org_node::test_fixtures::device_keypair;
 
 // The admin's device is a keypair of its own: org-members refuses a leaf whose
 // member key is also an enrolled device key (`DuplicateKey`).
@@ -67,7 +69,7 @@ fn fixed_trie(admin: &X25519Keypair, admin_device: &SigningKeypair) -> OrgTrie<B
 fn main() {
     // Same seed as `test_fixtures::ADMIN_DEVICE_SEED`; this target builds
     // without `test-support`, so it cannot import it.
-    let admin_device = DeviceSeed::from([4u8; 32]).signing_keypair();
+    let admin_device = device_keypair([4u8; 32]);
     let member = MemberSeed::from([1u8; 32]).x25519_keypair();
     let local = fixed_trie(&member, &admin_device);
     let org = OrgId::new([5u8; 20]);
@@ -79,7 +81,7 @@ fn main() {
     // check 5 — a `panic!()` immediately after the decode left this target
     // passing after 2 479 iterations.
     let joiner = MemberSeed::from([7u8; 32]).x25519_keypair();
-    let joiner_device = DeviceSeed::from([8u8; 32]).signing_keypair();
+    let joiner_device = device_keypair([8u8; 32]);
     let (honest_root, honest_bytes) = {
         let leaf = MemberLeaf::new(
             MemberId::new([2u8; 32]),
@@ -119,7 +121,7 @@ fn main() {
             last_committed_epoch: Epoch::new(0),
         };
         let run = |env: &Envelope| {
-            if let Ok(out) = verify_envelope_against_chain(&*local, env, &ctx(), Some(chain_state)) {
+            if let Ok(out) = verify_envelope_against_chain(&local, env, &ctx(), Some(chain_state)) {
                 // Any accepted update must equal the chain root it verified against.
                 assert_eq!(out.trie.root_hash().unwrap(), chain_state.root_hash);
             }

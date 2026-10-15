@@ -17,42 +17,30 @@ item states which recipient each command chooses. No software item is added.
 Safety class C, no per-item override, as in `2026-10-05-decomposition.md`.
 
 The amendments this change makes to existing app items (LLR-8krgzj,
-LLR-ctrfz4, LLR-gha5f6, LLR-w4mhd4, and a note on LLR-f35pda) are in the files
-that define them.
+LLR-ctrfz4 — org-io's from 2026-10-13, back in this unit since
+2026-10-15 —, the reply's
+check and admission, `produce_reply`, and a note on the outstanding pairs —
+those three org-io's since 2026-10-14, S4 task T13) are in the files that
+define them.
 
 ## Under SDD-rmbr3t — The command surface
 
-**LLR-q225ws**: each command that submits an admission or a revocation asks
-org-node, once the update has committed, for exactly one `send_update`, to
-exactly one DevicePublicKey, and passes it no Organisation secret, key or
-invite identifier. `admit_reply` (`admit_member`) sends to the DevicePublicKey
-the Invite reply carries, which the committed record lists, so org-node sends
-that Device Organisation information. `revoke_member` sends to the first
-DevicePublicKey (`device_keys.first()`) of the revoked member's snapshot in
-the record as it stood before the revocation, which the committed record no
-longer lists, so org-node sends that Device a revocation. Neither command
-sends the committed update to any other Device, whether of another Member
-or another Device of the same Member.
-satisfies: REQ-m8sgjk
-
-*Amended 2026-10-07 (S3): `send_update` takes the `CommitOutcome`; a revoked Device is sent its notice, and a Device neither record lists nothing.*
-
-*Amended 2026-10-08 (change `worktree-org-io-create`, task T9).* `satisfies:`
-was REQ-nfr3n2, which moved to org-io: an app low-level requirement does not
-decompose another unit's requirement, so it is re-parented to the app's
-REQ-m8sgjk, the decision of which Device receives the committed update. The
-command now hands its one recipient to org-io's `OrgIo::submit_commit_send`,
-which asks org-node for that one `send_update` after the commit; the
-recipient each command chooses, and that there is exactly one, are
-unchanged. Classification under the hybrid rule: a clarification, not a
-change of meaning; its two tests stay in `app/src-tauri/tests/submit_flow.rs`
-with their annotations unchanged.
-
-This states the app's behaviour as it is, not as the ruling would have it
-broadly: the other Members' Devices, which the ruling says receive
-Organisation information whatever the change, are sent nothing by the app
-today, and a revoked Member's second and later Devices are sent nothing.
-That defect is PR-3ue4va: in the owner's model a change in Organisation
-information goes to every Device of every new and current Member, and a
-revocation to every Device of a revoked Member; by owner ruling the fan-out is
-the `org-io` session's work, not this change's.
+*Retired 2026-10-13 (S4, task T12 of `docs/plans/2026-10-06-org-io-transport.md`;
+the owner's retirement ruling of that day, task T6 step 6):* the item this
+section defined — each command that submits an admission or a revocation
+asks for exactly one send, to exactly one Device (the reply's Device for an
+admission; the revoked Member's first Device for a revocation), and no
+other Device is sent the committed update — is retired, superseded by
+org-io's fan-out: org-io's `submit_commit_send` names no recipient and sends
+every body the commit builds, to every Device the committed record lists
+but the sender's and a revocation to every Device the update removed
+(`org-io/docs/architecture/2026-10-07-transport.md`,
+"Sending, and the peer address"). Its definition is deleted; its ID is
+listed in the S4 verification record. The defect it stated, the app's
+report on the update fan-out, moved to org-io
+(`org-io/docs/problems/2026-10-13-update-fan-out.md`)
+and is resolved there. Its two tests moved to org-io's
+`tests/submit_flow.rs`, rewritten onto org-io's handle, with no `verifies:`
+line. History, as it read before: it was re-parented on 2026-10-08 from
+the submission requirement org-io took to the app's REQ-m8sgjk, and amended
+on 2026-10-07 for S3's revocation notices.

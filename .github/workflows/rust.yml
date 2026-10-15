@@ -70,24 +70,41 @@ jobs:
             --test type_widths
       # org-node's verify_commands entry. The chopsticks-dependent targets are
       # excluded there too, and the feature flags are required by the targets'
-      # `required-features`.
+      # `required-features`. Brought back to verbatim 2026-10-14 (S4 task T18):
+      # the transport targets left with the transport (to org-io, below), and
+      # the targets added since 2026-10-05 had not been copied here.
       - run: |
           cargo test -p org-node --features app,test-support --lib \
-            --test service_stories --test transport_handshake --test transport_networked \
-            --test fuzz_envelope_decode --test fuzz_verify_against_chain \
-            --test verify_against_chain --test wire_frame_bound --test store_at_rest \
-            --test admission_sender
+            --test service_stories --test fuzz_envelope_decode --test fuzz_verify_against_chain \
+            --test fuzz_first_admission_base --test fuzz_wire_decode --test verify_against_chain \
+            --test wire_frame_bound --test store_at_rest --test admission_sender \
+            --test value_types --test key_custody --test envelope_binding \
+            --test service_lifecycle --test encoding_golden --test node_value_types \
+            --test persona_records --test secret_redaction --test organisation_key \
+            --test receive_chain_reads --test expected_admission --test absences \
+            --test provisional_store --test commit_paths --test revocation --test reconcile \
+            --test commit_workflow_errors --test sealed_store --test fuzz_unseal \
+            --test receive_path --test outgoing_bodies --test invitation \
+            --test fuzz_invitation_parse --test stale_check
       # person's verify_commands test entry: every target, none excluded.
       - run: cargo test -p person
       # org-io's two verify_commands test entries (since 2026-10-08). The
       # chopsticks-dependent `preflight` target is excluded there too; the
       # second line is the dev-seed build, whose `dev_seed_env` target is its
-      # own binary because it sets the environment.
+      # own binary because it sets the environment. Brought back to verbatim
+      # 2026-10-14 (S4 task T18): S2's `open`, S4's thirteen targets and
+      # S3b-io's two. 2026-10-14 (S4 task T19): `expectations_met`.
       - run: |
           cargo test -p org-io --features test-support --lib \
             --test key_custody_config --test fuzz_seed_parse --test signatory_key \
             --test absences --test chain_read_rule --test receive_order \
-            --test submit_flow --test signatory_rule --test app_boundary
+            --test submit_flow --test signatory_rule --test app_boundary --test open \
+            --test keychain --test store_files --test transport_handshake \
+            --test transport_networked --test endpoints --test preflight_transport \
+            --test receive_step --test acknowledgement_inbound --test send_fanout \
+            --test peer_addr --test fuzz_peer_addr --test invitation_exchange \
+            --test node_stories --test publish_path --test startup_reconcile \
+            --test expectations_met
       - run: |
           cargo test -p org-io --features test-support,dev-seed \
             --test key_custody_config --test signatory_key --test dev_seed_env
@@ -159,6 +176,10 @@ jobs:
       # org-io's verify_commands clippy entry, verbatim (since 2026-10-08):
       # --all-targets under both features, as person's.
       - run: cargo clippy -p org-io --all-targets --features test-support,dev-seed -- -D warnings
+      # org-io's no-feature clippy entry and org-node's all-targets entry,
+      # verbatim (since 2026-10-14, S4 task T18).
+      - run: cargo clippy -p org-io --all-targets -- -D warnings
+      - run: cargo clippy -p org-node --all-targets --features app,test-support -- -D warnings
 
   # org-members' documented build matrix (org-members/AGENTS.md), and person's
   # wasm32 checks. no_std is a hard requirement for both, but

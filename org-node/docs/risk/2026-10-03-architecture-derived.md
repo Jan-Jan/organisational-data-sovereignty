@@ -29,7 +29,7 @@ section that last changed them.*
 *And a fifth time, found by review round 5: the opening said ninety-four and
 sixty-eight after round 4 had written two more requirements. Re-counted
 2026-10-04 after round 5 wrote four more, none of them derived: 100 and 26, so
-74. The three problem reports round 5 opened (PR-mdv38y, PR-8qsnhx, PR-xwek5e)
+74. The three problem reports round 5 opened (PR-mdv38y, the endpoint-bound-once report — org-io's since 2026-10-13 — and PR-xwek5e)
 carry their own hazard notes and change no assessment in this file. They are
 defects against requirements that refine assessed high-level requirements, not
 new derived behaviour.* *(That last claim was wrong for three of round 5's
@@ -525,8 +525,9 @@ these requirements govern are evidenced on a two-Organisation store on both
 sides: `a_second_organisation_is_admitted_into_without_touching_the_first` for
 the administrator, and the three two-Organisation receiver tests round 4
 wrote. The multi-Organisation defects review round 5 found are booked with
-their own hazard notes, not assessed here: PR-mdv38y, PR-8qsnhx and
-PR-xwek5e. Of those, PR-8qsnhx is reachable through the app, whose admission
+their own hazard notes, not assessed here: PR-mdv38y, the endpoint-bound-once
+report (moved to org-io and resolved there, 2026-10-13) and
+PR-xwek5e. Of those, the endpoint-bound-once report is reachable through the app, whose admission
 command calls `admit_member`. PR-mdv38y's rebinding step is not, because the
 app receives only on `receive_and_self_delete_if_revoked`
 (`app/src-tauri/src/commands.rs:339`).*
@@ -542,9 +543,15 @@ rather than on "a valid signature"; nothing about the sending device is
 checked. The root is correct for the change actually made. The conclusion is
 unchanged.*
 
-### G. The revocation dial — LLR-pw369n
+### G. The revocation dial (moved)
 
-assesses: LLR-pw369n
+*Moved 2026-10-13 (S4, task T12 of `docs/plans/2026-10-06-org-io-transport.md`,
+ruling A):* the item this section assessed (a Loopback revocation is dialled
+at the full address the call carries, and one offered no address is refused)
+moved to org-io with the send, re-parented there to org-io's Loopback-send
+requirement (no longer derived), and this assessment with it, to
+`org-io/docs/risk/2026-10-06-transport.md`. Kept below
+as history.
 
 **What it states.** In Loopback mode the Member being revoked is dialled at the full
 `EndpointAddr` the call carries, and a Loopback revocation offered no address
@@ -765,11 +772,15 @@ Invite is required (REQ-xa6smf). LLR-mbjfq8 is amended in place to the
 chain-anchor rule without the signature. The first of the three places where
 RC-b6mydy was weaker than its wording is now its wording.
 
-### LLR-379hnv — the self-delete path and a missing record
+### The self-delete path and a missing record
 
-assesses: LLR-379hnv
+*Retired 2026-10-13 (S4, tasks T4 and T6 of
+docs/plans/2026-10-06-org-io-transport.md; owner ruling of that day on retired
+items).* The item this section assessed went with the self-delete path; its
+definition and its `assesses:` entry are deleted, and its ID is listed in the
+S4 verification record. The assessment is kept as history.
 
-**What it states.** A change about an Organisation the node holds no record of
+**What it stated.** A change about an Organisation the node holds no record of
 is refused, and nothing is written.
 
 **The hazard it bears on.** None of safety. The refusal is fail-closed, so
@@ -823,7 +834,7 @@ whichever Persona bound it, or none.
 admission's sender to the Invite's device key (LLR-j83kc8), not to its address,
 so a wrong address cannot make a joiner accept a wrong sender. A wrong address
 makes the joiner's dial-back fail, which is availability. Where the endpoint
-was bound from another Persona, that failure is PR-8qsnhx's, already booked.
+was bound from another Persona, that failure is the endpoint-bound-once report's, already booked.
 
 **Assessment.** No new hazard and no new control.
 
@@ -884,9 +895,14 @@ now the test-support value store `test_fixtures::ChainSlots`, whose
 
 **Assessment.** No new hazard and no new control.
 
-### LLR-2smrvx — the unchecked length prefix
+### The unchecked length prefix (moved)
 
-assesses: LLR-2smrvx
+*Moved 2026-10-13 (S4, task T10 of `docs/plans/2026-10-06-org-io-transport.md`,
+ruling A):* the item this section assessed moved to org-io with the
+transport, re-parented there to org-io's stream requirement (no longer
+derived), and this assessment with it, to
+`org-io/docs/risk/2026-10-06-transport.md`. Kept below
+as history, the items named in prose.
 
 **What it states.** `recv_one` discards the four-byte prefix without
 comparing it with the body, and a stream shorter than four bytes is decoded
@@ -894,7 +910,7 @@ whole.
 
 **The hazard it bears on.** HAZ-5f9jcm, the malformed or oversized frame, and it
 does not weaken it. The read is bounded before anything is decoded
-(LLR-k2y6nn), and `decode_body` refuses an oversize or malformed body with a
+(the stream read cap, org-io's since 2026-10-13), and `decode_body` refuses an oversize or malformed body with a
 typed error. A prefix that disagrees with the body changes neither the bytes
 read nor the bytes decoded. A peer cannot use it to make the receiver
 allocate more, accept a body it would otherwise refuse, or read a second

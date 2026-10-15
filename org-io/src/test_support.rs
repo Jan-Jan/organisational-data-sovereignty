@@ -39,6 +39,7 @@ use crate::submit::ChainWriter;
 /// - `original_account_failing`, `delegates_failing`: the signatory-set read
 ///   fails at the mapped account, or (for a mapped H160) at its definitions;
 ///   the storage values it reads are counted (`signatory_reads`).
+/// - `hold_next_read`: the next state read waits until the test releases it.
 #[derive(Clone, Default)]
 pub struct FakeChain {
     slots: ChainSlots,
@@ -59,6 +60,29 @@ pub struct FakeChain {
     finalised: Arc<AtomicU64>,
     finalised_reads: Arc<AtomicUsize>,
     update_writes: Arc<AtomicUsize>,
+    read_hold: Arc<Mutex<Option<ReadHold>>>,
+}
+
+/// A state read held open: `hold_next_read` arms it; the next
+/// state read signals `arrived` and then waits for `release` before it
+/// answers, so a test can act while a caller is between its check and its
+/// commit.
+#[derive(Clone, Default)]
+pub struct ReadHold {
+    arrived: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+impl ReadHold {
+    /// Wait until the held read has started.
+    pub async fn arrived(&self) {
+        self.arrived.notified().await;
+    }
+
+    /// Let the held read answer.
+    pub fn release(&self) {
+        self.release.notify_one();
+    }
 }
 
 /// What the signatory-set read answers from: `Revive.OriginalAccount` per
@@ -129,6 +153,14 @@ impl FakeChain {
         &self.slots
     }
 
+    /// Hold this view's next state read open until the returned hold is
+    /// released.
+    pub fn hold_next_read(&self) -> ReadHold {
+        let hold = ReadHold::default();
+        *self.read_hold.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(hold.clone());
+        hold
+    }
+
     /// How many reads this view has answered.
     pub fn reads(&self) -> usize {
         self.reads.load(Ordering::SeqCst)
@@ -173,6 +205,11 @@ impl FakeChain {
 impl StateReader for FakeChain {
     async fn read_state(&self, org_id: OrgId) -> Result<Option<OrgState>, OrgNodeError> {
         self.reads.fetch_add(1, Ordering::SeqCst);
+        let hold = self.read_hold.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
+        if let Some(hold) = hold {
+            hold.arrived.notify_one();
+            hold.release.notified().await;
+        }
         if self.read_failing.load(Ordering::SeqCst) {
             return Err(OrgNodeError::Chain("node unreachable".into()));
         }
@@ -260,5 +297,219 @@ impl ChainWriter for FakeChain {
             std::future::pending::<()>().await;
         }
         Ok(())
+    }
+}
+
+/// The most a dialler reads back after its body: the verdict is one byte,
+/// and a few more show a receiver that wrote anything else.
+const READ_BACK_BOUND: usize = 64;
+
+/// A relay-free test dialler holding a Device's identity:
+/// bind a Loopback endpoint (relay disabled) from `device_key`'s keychain
+/// item, dial `addr`'s direct addresses only, send `body` framed as a send
+/// does, finish, and return every byte the receiver wrote back, up to its
+/// end of stream (at most `READ_BACK_BOUND`). The sending side of a revoked
+/// Device's acknowledgement is S3b-io's; this stands in for it.
+pub async fn dial_direct_as(
+    device_key: &org_node::DevicePublicKey,
+    addr: iroh::EndpointAddr,
+    body: &[u8],
+) -> Result<Vec<u8>, crate::transport::TransportError> {
+    use crate::transport::{BindPlan, OrgEndpoint, TransportError, ALPN};
+    let stream_error = |error: &dyn std::fmt::Display| TransportError::Stream(error.to_string());
+    let endpoint = OrgEndpoint::bind_from_keychain(device_key, BindPlan::Loopback).await?;
+    let direct = iroh::EndpointAddr::from_parts(addr.id, addr.addrs.into_iter().filter(|address| matches!(address, iroh::TransportAddr::Ip(_))));
+    let conn = endpoint.inner().connect(direct, ALPN).await.map_err(|error| TransportError::Connect(error.to_string()))?;
+    let (mut send, mut recv) = conn.open_bi().await.map_err(|error| stream_error(&error))?;
+    send.write_all(&crate::transport::frame::frame_body(body)?).await.map_err(|error| stream_error(&error))?;
+    send.finish().map_err(|error| stream_error(&error))?;
+    let read_back = recv.read_to_end(READ_BACK_BOUND).await.map_err(|error| stream_error(&error))?;
+    conn.close(0u32.into(), b"done");
+    Ok(read_back)
+}
+
+/// The keychain module's functions, for the keychain's own tests
+/// (`tests/keychain.rs`).
+pub use crate::keychain::for_test as keychain;
+
+/// Make this thread's next store file write fail after its temporary file is
+/// written, before it replaces the store file (LLR-b9bm36's interruption).
+pub fn fail_next_write_after_temporary() {
+    crate::store_file::test_hook::fail_next_write_after_temporary();
+}
+
+/// `store_file::write_store`, crate-visible in every build, for the store
+/// files' own tests (`tests/store_files.rs`; test builds only).
+pub fn write_store(
+    data_dir: &std::path::Path,
+    write: &org_node::StoreWrite,
+) -> Result<(), crate::store_file::StoreFileError> {
+    crate::store_file::write_store(data_dir, write)
+}
+
+/// The sealed bytes of every store file write that landed for
+/// `device_key` in `data_dir`, in the order they landed, in this process
+/// (the order of an admission's store writes).
+pub fn store_writes_to(data_dir: &std::path::Path, device_key: &org_node::DevicePublicKey) -> Vec<Vec<u8>> {
+    crate::store_file::test_hook::writes_to(&crate::store_file::store_path(data_dir, device_key))
+}
+
+/// Whether a `MemoryKeychain` was installed in this process: until one is,
+/// the keychain module refuses every call in a test build, so no test reaches
+/// the OS keychain.
+static IN_MEMORY_KEYCHAIN_INSTALLED: AtomicBool = AtomicBool::new(false);
+
+/// Whether a `MemoryKeychain` was installed in this process.
+pub(crate) fn in_memory_keychain_installed() -> bool {
+    IN_MEMORY_KEYCHAIN_INSTALLED.load(Ordering::SeqCst)
+}
+
+/// How a `MemoryKeychain` told to refuse refuses every call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refusal {
+    /// As a locked keychain does: `keyring::Error::NoStorageAccess`.
+    Locked,
+    /// As any other keychain failure: `keyring::Error::PlatformFailure`.
+    Unavailable,
+}
+
+/// The items and the refusal switch every credential of one
+/// `MemoryKeychain` shares.
+#[derive(Default)]
+struct MemoryItems {
+    items: Mutex<HashMap<(String, String), Vec<u8>>>,
+    refuse_as: Mutex<Option<Refusal>>,
+    /// Every read, write and delete asked of an item, refused ones included.
+    calls: AtomicUsize,
+}
+
+impl MemoryItems {
+    fn items(&self) -> MutexGuard<'_, HashMap<(String, String), Vec<u8>>> {
+        self.items.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Count the call, then refuse it as the switch says.
+    fn refusal(&self) -> keyring::Result<()> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let refuse_as = *self.refuse_as.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        match refuse_as {
+            None => Ok(()),
+            Some(Refusal::Locked) => Err(keyring::Error::NoStorageAccess("refused by the test".into())),
+            Some(Refusal::Unavailable) => Err(keyring::Error::PlatformFailure("refused by the test".into())),
+        }
+    }
+}
+
+/// An in-memory credential store for keyring (LLR-36jer8): every credential
+/// it builds is a view onto one shared map, by (service, user), so an item
+/// written through one `keyring::Entry` reads back through another, as in
+/// the OS keychain (keyring's own in-memory store keeps each item in its
+/// entry). Clones share the map and the switch.
+#[derive(Clone, Default)]
+pub struct MemoryKeychain {
+    shared: Arc<MemoryItems>,
+}
+
+impl MemoryKeychain {
+    /// One keychain for the whole test process, for test binaries whose
+    /// tests run in parallel and only need the keychain to hold what the
+    /// handle writes: each test's items are its own Device keys'.
+    pub fn shared() -> &'static MemoryKeychain {
+        static SHARED: std::sync::OnceLock<MemoryKeychain> = std::sync::OnceLock::new();
+        SHARED.get_or_init(MemoryKeychain::default)
+    }
+
+    /// Install this store as keyring's default credential builder, for the
+    /// whole process.
+    pub fn install(&self) {
+        keyring::set_default_credential_builder(Box::new(self.clone()));
+        IN_MEMORY_KEYCHAIN_INSTALLED.store(true, Ordering::SeqCst);
+    }
+
+    /// Refuse every call as `refusal` says, or, with `None`, none.
+    pub fn refuse_as(&self, refusal: Option<Refusal>) {
+        *self.shared.refuse_as.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = refusal;
+    }
+
+    /// Put `bytes` in the item of (`service`, `user`), bypassing keyring: an
+    /// item another program or an older version left.
+    pub fn insert(&self, service: &str, user: &str, bytes: Vec<u8>) {
+        self.shared.items().insert((service.to_string(), user.to_string()), bytes);
+    }
+
+    /// How many item reads, writes and deletes were asked of this keychain,
+    /// refused ones included.
+    pub fn calls(&self) -> usize {
+        self.shared.calls.load(Ordering::SeqCst)
+    }
+
+    /// The (service, user) names of the items held, sorted.
+    pub fn items(&self) -> Vec<(String, String)> {
+        let mut names: Vec<_> = self.shared.items().keys().cloned().collect();
+        names.sort();
+        names
+    }
+}
+
+impl keyring::credential::CredentialBuilderApi for MemoryKeychain {
+    fn build(&self, _target: Option<&str>, service: &str, user: &str) -> keyring::Result<Box<keyring::credential::Credential>> {
+        Ok(Box::new(MemoryCredential {
+            shared: self.shared.clone(),
+            service: service.to_string(),
+            user: user.to_string(),
+        }))
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+impl std::fmt::Debug for MemoryKeychain {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("MemoryKeychain")
+    }
+}
+
+/// One item's view onto a `MemoryKeychain`'s map.
+struct MemoryCredential {
+    shared: Arc<MemoryItems>,
+    service: String,
+    user: String,
+}
+
+impl MemoryCredential {
+    fn name(&self) -> (String, String) {
+        (self.service.clone(), self.user.clone())
+    }
+}
+
+impl keyring::credential::CredentialApi for MemoryCredential {
+    fn set_secret(&self, secret: &[u8]) -> keyring::Result<()> {
+        self.shared.refusal()?;
+        self.shared.items().insert(self.name(), secret.to_vec());
+        Ok(())
+    }
+
+    fn get_secret(&self) -> keyring::Result<Vec<u8>> {
+        self.shared.refusal()?;
+        self.shared.items().get(&self.name()).cloned().ok_or(keyring::Error::NoEntry)
+    }
+
+    fn delete_credential(&self) -> keyring::Result<()> {
+        self.shared.refusal()?;
+        self.shared.items().remove(&self.name()).map(|_| ()).ok_or(keyring::Error::NoEntry)
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+/// The item's name only, never its bytes (keyring logs each credential it
+/// builds with `Debug`).
+impl std::fmt::Debug for MemoryCredential {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "MemoryCredential {{ service: {:?}, user: {:?} }}", self.service, self.user)
     }
 }

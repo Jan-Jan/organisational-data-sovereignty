@@ -2,7 +2,9 @@
 //! not (SDD-swtd3w): the secrets (LLR-sz4xhc), the Organisation public key
 //! (LLR-3jjgtw), and the tag types for the chain account, the Persona
 //! identifier, the epoch and the Sequence number (LLR-s7whrn). Seed to key
-//! pair conversion lives in `keys.rs` (LLR-56hc77).
+//! pair conversion lives in `keys.rs` (LLR-56hc77). The device seed is not
+//! one of these secret types: it exists only as the
+//! move-only `keys::DeviceSecret` (LLR-37k2s3).
 use core::fmt;
 
 use org_members::MemberLeaf;
@@ -48,11 +50,6 @@ secret_type!(
     /// The secret of a Member's X25519 key pair: the secret half of the
     /// Member-as-a-group key (LLR-56hc77).
     MemberSeed
-);
-secret_type!(
-    /// The seed of a device's signing key pair: the secret half of its
-    /// DevicePublicKey and of its iroh identity (LLR-56hc77).
-    DeviceSeed
 );
 secret_type!(
     /// The Organisation's X25519 private key: one per epoch, shared by every

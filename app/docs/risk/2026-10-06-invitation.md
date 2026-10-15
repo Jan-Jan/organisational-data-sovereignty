@@ -57,33 +57,25 @@ recorded as such.
 
 ## Derived requirements assessment
 
-**REQ-prjja8** (produce an Invite with a random invite identifier) and
-**REQ-65xqp8** (refuse a reply naming no outstanding invite identifier): no new
-hazard. The identifier's 32 random bytes make a reply that names one a reply
-to that Invite; refusing the rest keeps an unsolicited reply from reaching an
-admission.
-
-*Amended 2026-10-06 (independent review round 2, finding-1).* The paragraph
-above held only while an identifier was tied to its Organisation, and it was
-not: an identifier was outstanding for every Organisation, and the admit
-panel took the target Organisation from the reply, so a reply echoing one
-Invite's identifier could name any other Organisation this device holds and
-reach an admission there — a person the operator invited to one Organisation
-admitted to another, which the operator neither intended nor reviewed. REQ-65xqp8 now refuses a
-reply unless its identifier is outstanding for the Organisation it names, and
-LLR-gha5f6 admits only to that Organisation, whatever the panel selects; with
-that, the assessment above stands again, and no new hazard is recorded.
-
-**REQ-tcutr6** (produce an Invite reply, and declare the expected first
-admission to org-node): the reply is the disclosure HAZ-qfb95k analyses. The
-declaration realises org-node's control on first admissions; a stale
-declaration only lets a chain-valid admission for that Organisation be read.
+*Moved 2026-10-14 (S4, task T13 of docs/plans/2026-10-06-org-io-transport.md,
+ruling A).* The assessments of the three invitation requirements that stood
+here — producing an Invite with a random identifier, refusing a reply naming
+no identifier outstanding for its Organisation (with its review-round-2
+amendment), and producing a reply that declares the expected admission —
+moved with the requirements to org-io's risk ledger
+(`org-io/docs/risk/`, the transport file of change
+`worktree-org-io-transport`), where they are assessed again against
+org-io's hazards. The reply's disclosure stays this unit's HAZ-qfb95k,
+controlled by RC-wzb48r through REQ-ab2mfz.
 
 **REQ-ab2mfz** realises RC-wzb48r; assessed above.
 
-**REQ-yazum3** (refuse an Invite or reply that does not parse, naming the
-field): no hazard impact; it is the parse-at-the-system-edge rule at this
-unit's new edge, and refusing acts on nothing.
+*Moved 2026-10-13 (S4, task T6 of docs/plans/2026-10-06-org-io-transport.md,
+ruling A).* The assessment of the Blob-parse requirement that stood here (no
+hazard impact: the parse-at-the-system-edge rule, and refusing acts on
+nothing) moved with the requirement to org-node's risk ledger
+(`org-node/docs/risk/2026-10-06-chain-authority.md`). This file's `assesses:`
+line keeps its four other requirements.
 
 *Moved 2026-10-08 (change `worktree-org-io-create`, task T9, ruling A).* The
 assessment of the submission requirement that stood here (submit through
@@ -93,9 +85,10 @@ requirement to org-io's risk ledger
 re-assessed for the signatory key's custody, now org-io's. This file's
 `assesses:` line keeps its five other requirements. The app's residue, the
 decision when to submit and to which Device, is assessed in
-`app/docs/risk/2026-10-08-submission.md`.
+`app/docs/risk/2026-10-08-submission.md`. *(2026-10-14, S4 task T13: three
+of those left with the exchange, above; the line keeps REQ-ab2mfz.)*
 
-assesses: REQ-prjja8, REQ-65xqp8, REQ-tcutr6, REQ-ab2mfz, REQ-yazum3
+assesses: REQ-ab2mfz
 
 ## Derived low-level requirements amended by the design (2026-10-06)
 
@@ -132,10 +125,17 @@ paragraph above describes the code before that change.
 file names the report by description because the app may cite only org-io's
 exported items.
 
-**LLR-ctrfz4** (`admit_member` reads the joiner's peer address from its own
-argument, blank meaning absent): no new hazard. It replaces reading the
-address from a join request; where the admission is sent is still the
-operator's input, and in Networked transport the address is not used.
+**LLR-ctrfz4** (`admit_member` reads the joiner's peer
+address from its own argument, blank meaning absent): no new hazard. It
+replaces reading the address from a join request; where the admission is sent
+is still the operator's input, and in Networked transport the address is not
+used. *(2026-10-13, S4 task T12: the item moved to org-io with the parse, its
+assessment with it, to `org-io/docs/risk/2026-10-06-transport.md`;
+its ID left the `assesses:` line below. org-io now also sends in Loopback
+mode only to an address whose identity is a recipient's Device key.)*
+*(2026-10-15, S4 TEST conformance review finding-4: the item moved back to
+this unit, derived again, with its ID; it is back on the `assesses:` line
+below, and org-io's copy of the assessment is a prose pointer.)*
 
 **LLR-pmus9f** (`import_invite_reply` shows a parsed reply and stores
 nothing, and refuses one naming no outstanding invite): no new hazard. It
@@ -146,14 +146,11 @@ assesses: LLR-ctrfz4, LLR-pmus9f
 
 ## Derived low-level requirement of review round 1 (2026-10-06)
 
-**LLR-rt8gdz** (founding and replying offer only Personas bound to no
-Organisation, and the backend refuses a bound one): no new hazard; it removes
-one. Before it, a Persona bound to one Organisation could found a second or
-reply to an Invite to one, and a first admission or commit could then rebind
-it, so the device's record of which Organisation a Persona belongs to — what
-every later send and verification of that Persona reads — could change
-silently. Refusing before the chain is written and before an expectation is
-declared acts on nothing; what it breaks is joining a second Organisation with
-an existing Persona, for which the user creates another Persona.
-
-assesses: LLR-rt8gdz
+*Moved 2026-10-14 (S4, task T13, ruling A).* The assessment that stood here,
+of the low-level requirement that founding and replying offer only Personas
+bound to no Organisation and that the backend refuses a bound one (no new
+hazard; it removes one), moved with the item to org-io's risk ledger
+(`org-io/docs/risk/`, the transport file of change
+`worktree-org-io-transport`). The webview's offer of only unbound Personas
+stays the app's code; it adds no hazard of its own, since the backend
+refusal holds when the webview is bypassed.

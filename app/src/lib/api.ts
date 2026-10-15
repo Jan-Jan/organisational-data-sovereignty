@@ -153,7 +153,7 @@ export function exportInvite(orgId: string, orgName: string, inviteeName: string
 	return invoke<string>('export_invite', { orgId, orgName, inviteeName });
 }
 
-/** REQ-yazum3: parse an Invite Blob; a field that does not parse is named. */
+/** Parse an Invite Blob (org-node's parse); a field that does not parse is named. */
 export function importInvite(blob: string): Promise<InviteDto> {
 	return invoke<InviteDto>('import_invite', { blob });
 }
@@ -178,9 +178,9 @@ export function admitMember(orgId: string, replyBlob: string, peerAddrBlob: stri
 }
 
 /**
- * Revoke a member by member_id_hex (64 hex chars) and peer_addr_blob (hex-encoded
- * postcard bytes of the revoked member's iroh EndpointAddr, needed for Loopback
- * dialling only).
+ * Revoke a member by member_id_hex (64 hex chars) and peer_addr_blob (the
+ * revoked member's peer address in hex, needed for Loopback dialling only; its
+ * format is org-io's, which parses it).
  *
  * REQ-vgr7s2: `peerAddrBlob` may be the empty string, which means "no address".
  * Networked mode dials by device key and has no address to give, so demanding

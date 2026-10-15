@@ -9,8 +9,8 @@
 use std::path::PathBuf;
 
 /// Which of the two ways this installation reaches other nodes. Mirrors
-/// org-node's `transport::TransportMode` (through org-io), but is this unit's own type because it
-/// is serialised across the IPC boundary and org-node's is not.
+/// org-io's `transport::TransportMode`, but is this unit's own type because it
+/// is serialised across the IPC boundary and org-io's is not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TransportModeName {
@@ -28,9 +28,10 @@ pub struct ChainEndpoint {
 }
 
 /// A startup value that is missing and is not permitted to be defaulted.
+/// No passphrase is among them: org-io opens each store with its keychain
+/// item.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StartupError {
-    MissingPassphrase,
     UnresolvableDataDir,
 }
 
@@ -41,13 +42,6 @@ impl core::fmt::Display for StartupError {
         // supplying variable FIRST — a refusal an operator reads as "set the
         // waiver" is a refusal that recreates the hazard it was added for.
         match self {
-            StartupError::MissingPassphrase => write!(
-                f,
-                "ODS_PASSPHRASE is not set. Set it to the passphrase protecting \
-                 this installation's persona store. To run with the built-in \
-                 development passphrase instead, set ODS_ALLOW_DEV_DEFAULTS=1 — \
-                 do not do this on an installation holding real key material."
-            ),
             StartupError::UnresolvableDataDir => write!(
                 f,
                 "The application data directory could not be resolved and \
@@ -61,29 +55,8 @@ impl core::fmt::Display for StartupError {
     }
 }
 
-/// The built-in passphrase. Public so the test can assert on the exact value
-/// rather than restating the literal, and so a future reader greps one place.
-pub const DEV_PASSPHRASE: &str = "ods-dev-default";
-
 /// The built-in data directory fallback.
 pub const DEV_DATA_DIR: &str = "/tmp/ods-poc";
-
-/// REQ-7g3k9a. `configured` is `ODS_PASSPHRASE`; `allow_dev_defaults` is
-/// whether `ODS_ALLOW_DEV_DEFAULTS` was set.
-pub fn resolve_passphrase(
-    configured: Option<&str>,
-    allow_dev_defaults: bool,
-) -> Result<String, StartupError> {
-    match configured {
-        // An empty ODS_PASSPHRASE is treated as absent, not as an empty
-        // passphrase: a variable set to "" is overwhelmingly a scripting
-        // accident, and honouring it would be the original hazard with an
-        // extra step.
-        Some(p) if !p.is_empty() => Ok(p.to_string()),
-        _ if allow_dev_defaults => Ok(DEV_PASSPHRASE.to_string()),
-        _ => Err(StartupError::MissingPassphrase),
-    }
-}
 
 /// REQ-rxc8sp. `override_dir` is `ODS_DATA_DIR`; `resolved` is what the
 /// platform path resolver returned (`None` on error).

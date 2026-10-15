@@ -19,7 +19,8 @@ use org_node::ids::OrgId;
 use org_node::sequence::SeqGuard;
 use org_node::test_fixtures::{admin_device, admit_member_delta, genesis_trie, org_public_key, Trie};
 use org_node::verify::{check_chain_free, verify_envelope_against_chain, VerifyContext};
-use org_node::{DeviceSeed, Envelope, Epoch, OrgNodeError, SequenceNumber};
+use org_node::{Envelope, Epoch, OrgNodeError, SequenceNumber};
+use org_node::test_fixtures::device_keypair;
 
 fn setup() -> (OrgId, Trie, Envelope, RootHash) {
     let admin = MemberSeed::from([1u8; 32]).x25519_keypair();
@@ -268,7 +269,7 @@ fn rejects_a_delta_whose_base_root_is_not_the_local_root() {
     // (`DuplicateKey`, master `a547ff3`). Neither collides with the fixture
     // seeds [1], [2], [3] or ADMIN_DEVICE_SEED [4].
     let stranger = MemberSeed::from([42u8; 32]).x25519_keypair();
-    let stranger_device = DeviceSeed::from([43u8; 32]).signing_keypair();
+    let stranger_device = device_keypair([43u8; 32]);
     let divergent = genesis_trie(&stranger, &stranger_device);
 
     let chain = chain_at(org, new_root, Epoch::new(2));

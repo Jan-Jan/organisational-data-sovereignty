@@ -285,6 +285,14 @@ remaining sites: `ODS_CONTRACT_H160` (still parsed by the app, now in
 question below. (The `org_secret_hex` site above was removed by the
 key-pair change: `admit_member` takes no Organisation secret.)
 
+*Note 2026-10-14 (change `worktree-org-io-transport`, S4 task T15).* The
+`peer_addr_blob` site left the app: `revoke_member` and `admit_member` hand
+the text to org-io's `parse_peer_addr`, which strips exactly one leading
+`0x` (S4 task T12; org-io `tests/peer_addr.rs`), so a doubled prefix is
+refused there. That site is fixed. The report stays open for
+`ODS_CONTRACT_H160` (`state.rs`'s `chain_settings`, still
+`trim_start_matches("0x")`) and the whitespace question below.
+
 **Widened 2026-09-14: the same two parsers also disagree about whitespace.**
 Found while fixing the second independent review's findings, and measured rather
 than inferred. `validateRevokeInput` (`app/src/lib/revoke.ts`) calls `.trim()`,

@@ -514,13 +514,14 @@ fn a_chain_failure_is_classified_as_a_receiver_error() {
 // verifies: LLR-7bk6qh, LLR-usxk57
 #[test]
 fn a_chain_failure_emits_no_verification_event_for_any_message() {
-    // Abnormal inputs: an empty message, a terminal one the loop's substring
-    // check looks for, and an ordinary transient one. None of them is a verdict,
-    // so none of them may be announced as one — including the terminal case,
-    // where the loop also stops.
+    // Abnormal inputs: an empty message, one the loop's old substring check
+    // stopped on, and an ordinary transient one. None of them is a verdict, so
+    // none of them may be announced as one. *S4, task T16, 2026-10-14:* the
+    // second input no longer names iroh's wording; terminality is org-io's
+    // typed condition now, not this text.
     for msg in [
         "",
-        "iroh recv: iroh accept error: endpoint closed",
+        "accept error: endpoint closed",
         "connection reset by peer",
     ] {
         let outcome = events::classify_receive_error(&OrgNodeError::Chain(msg.to_string()));
@@ -618,45 +619,37 @@ fn the_two_classes_are_actually_distinguished() {
 // `receiver-stopped` event was never emitted, and the guard was never released
 // by task exit: the trigger for REQ-jfxah3 was unreachable.
 //
-// The cases below are the messages the receive path really produces, written
-// exactly as they reach the app — `OrgNodeError::Chain`'s Display prefixes
-// "chain read failed: ", and the transport's own Display prefixes the rest. The
-// expected rendering is spelled out beside each one so that a reworded message
-// upstream fails HERE rather than silently resurrecting the infinite retry.
+// *Rewritten 2026-10-14 (S4, task T16):* the loop now stops on org-io's
+// typed `ReceiveError::Terminal` (LLR-zw6jqy, which supersedes LLR-a9rjtf),
+// so the cases below are org-io's two terminal causes, and the message each
+// carries is whatever org-io renders: nothing is keyed to its text any more.
+// The three tests keep their `verifies:` lines; the text-independence itself
+// is `terminal_is_decided_by_the_error_variant_not_its_text`'s.
+// *Review round 1, 2026-10-14:* the three now also verify LLR-zw6jqy, the
+// typed rule they were rewritten for; LLR-a9rjtf stays beside it as history.
 
 /// Every terminal case: the error as the app receives it, and the message the
 /// operator is shown.
-fn terminal_cases() -> Vec<(OrgNodeError, &'static str)> {
-    vec![
-        // `ensure_endpoint` in org-node/src/service.rs — OrgEndpoint::bind_with_mode failed.
-        (
-            OrgNodeError::Chain(
-                "endpoint bind: iroh bind error: address already in use".to_string(),
-            ),
-            "chain read failed: endpoint bind: iroh bind error: address already in use",
-        ),
-        // `ensure_endpoint` again — the endpoint is still None afterwards.
-        (
-            OrgNodeError::Chain("endpoint bind failed unexpectedly".to_string()),
-            "chain read failed: endpoint bind failed unexpectedly",
-        ),
-        // `recv_one` in org-node/src/transport/endpoint.rs — accept() returned None.
-        (
-            OrgNodeError::Chain("iroh recv: iroh accept error: endpoint closed".to_string()),
-            "chain read failed: iroh recv: iroh accept error: endpoint closed",
-        ),
+fn terminal_cases() -> Vec<(ReceiveError, String)> {
+    [
+        // org-io's `start_receiving`: an endpoint could not be bound.
+        ReceiveError::Terminal(TerminalCause::BindFailed(TransportError::Bind("address already in use".to_string()))),
+        // org-io's `next_received`: every accept task has ended.
+        ReceiveError::Terminal(TerminalCause::EndpointClosed),
     ]
+    .into_iter()
+    .map(|error| {
+        let rendered = error.to_string();
+        (error, rendered)
+    })
+    .collect()
 }
 
-// verifies: LLR-a9rjtf
+// inherited from LLR-a9rjtf (superseded by LLR-zw6jqy), review round 1, 2026-10-14
+// verifies: LLR-zw6jqy, LLR-a9rjtf
 #[test]
 fn every_real_terminal_message_stops_the_loop() {
     for (e, rendered) in terminal_cases() {
-        assert_eq!(
-            e.to_string(),
-            rendered,
-            "the message the operator sees has changed; the match is keyed to it"
-        );
         let outcomes = events::outcomes_for_receive_error(&e);
         assert!(
             outcomes.contains(&ReceiverOutcome::Stopped {
@@ -667,19 +660,22 @@ fn every_real_terminal_message_stops_the_loop() {
     }
 }
 
-// verifies: LLR-a9rjtf
+// inherited from LLR-a9rjtf (superseded by LLR-zw6jqy), review round 1, 2026-10-14
+// verifies: LLR-zw6jqy, LLR-a9rjtf
 #[test]
 fn a_non_terminal_failure_does_not_stop_the_loop() {
     // Abnormal inputs: a transport hiccup, a chain timeout, a local startup
     // condition and an empty message. None of them is terminal — stopping on one
     // would end the receiver for a failure it could have retried past.
+    // *S4, task T16, 2026-10-14:* each arrives as org-io's `ReceiveError`
+    // (a chain read failure); the first no longer names iroh's wording.
     for inner in [
-        "iroh recv: stream error: connection reset by peer",
+        "stream error: connection reset by peer",
         "rpc timeout",
         "no persona found — create one first",
         "",
     ] {
-        let e = OrgNodeError::Chain(inner.to_string());
+        let e = ReceiveError::Chain(OrgNodeError::Chain(inner.to_string()));
         let outcomes = events::outcomes_for_receive_error(&e);
         assert_eq!(
             outcomes,
@@ -693,7 +689,7 @@ fn a_non_terminal_failure_does_not_stop_the_loop() {
     // reject that envelope, not a reason to stop receiving.
     let verdict = OrgNodeError::RootMismatch;
     assert_eq!(
-        events::outcomes_for_receive_error(&verdict),
+        events::outcomes_for_receive_error(&ReceiveError::Refused(OrgNodeError::RootMismatch)),
         vec![ReceiverOutcome::VerifyFailed {
             org_id: None,
             message: verdict.to_string()
@@ -701,7 +697,8 @@ fn a_non_terminal_failure_does_not_stop_the_loop() {
     );
 }
 
-// verifies: LLR-a9rjtf
+// inherited from LLR-a9rjtf (superseded by LLR-zw6jqy), review round 1, 2026-10-14
+// verifies: LLR-zw6jqy, LLR-a9rjtf
 #[test]
 fn the_stop_is_announced_after_the_failure_for_the_same_error() {
     // REQ-jfxah3 says the stop is announced "before that loop exits", and what a
@@ -760,7 +757,9 @@ fn the_commit_workflow_refusals_are_classified_as_receiver_errors() {
         OrgNodeError::AcknowledgementForListedDevice { org_id },
         OrgNodeError::AcknowledgementSignatureInvalid { org_id },
         OrgNodeError::DeviceSecretNotSupplied { org_id },
-        OrgNodeError::NoRevocationForRecipient { org_id },
+        // *2026-10-14 (S4, task T15):* `NoRevocationForRecipient` left
+        // org-node in task T5 (the commit returns every recipient's body),
+        // so the tenth case left this list.
     ] {
         assert_eq!(
             events::classify_receive_error(&e),
@@ -784,6 +783,40 @@ fn the_sender_refusals_are_classified_as_receiver_errors() {
             "{e:?}"
         );
     }
+}
+
+// verifies: LLR-7bk6qh
+#[test]
+fn the_store_and_invitation_refusals_are_classified_as_receiver_errors() {
+    // S4 (task T15): the refusals org-node gained with the sealed per-Persona
+    // store and the invitation bookkeeping concern this node's own store or
+    // its outstanding Invites, never whether an update verified, so each is
+    // a receiver error — `OrganisationHeldByAnotherPersona` (task T6) among
+    // them.
+    let org_id = org_io::node::OrgId::new([1; 20]);
+    for e in [
+        OrgNodeError::DeviceSecretMismatch,
+        OrgNodeError::DuplicatePersonaStore,
+        OrgNodeError::ReplyForAnotherOrganisation,
+        OrgNodeError::InviteNotOutstanding,
+        OrgNodeError::OrganisationHeldByAnotherPersona { org_id },
+    ] {
+        assert_eq!(
+            events::classify_receive_error(&e),
+            ReceiverOutcome::ReceiveError { message: e.to_string() },
+            "{e:?} must be a receiver error"
+        );
+    }
+}
+
+// S4 (task T22): a commit refused because this node's own record moved
+// after the message was checked says nothing about whether the update
+// verified, so it is a receiver error.
+// verifies: LLR-7bk6qh
+#[test]
+fn a_record_moved_since_the_check_is_classified_as_a_receiver_error() {
+    let e = OrgNodeError::RecordMovedSinceCheck { org_id: org_io::node::OrgId::new([1; 20]) };
+    assert_eq!(events::classify_receive_error(&e), ReceiverOutcome::ReceiveError { message: e.to_string() });
 }
 
 // verifies: LLR-7bk6qh
@@ -839,6 +872,16 @@ fn locally_reachable_variants_are_classified_as_receiver_errors() {
     }
 }
 
+// A Wire message over the bound (S4, task T2: the codec's own refusal since
+// it left the transport) is refused before anything is decoded, so it is no
+// verdict on an update.
+// verifies: LLR-7bk6qh
+#[test]
+fn a_wire_message_over_the_bound_is_classified_as_a_receiver_error() {
+    let e = OrgNodeError::MessageTooLarge { length: 1 << 21 };
+    assert_eq!(events::classify_receive_error(&e), ReceiverOutcome::ReceiveError { message: e.to_string() });
+}
+
 // verifies: LLR-7bk6qh
 #[test]
 fn a_refused_key_or_field_is_classified_as_a_receiver_error() {
@@ -871,7 +914,8 @@ fn a_refused_key_or_field_is_classified_as_a_receiver_error() {
 // ---------------------------------------------------------------------------
 
 // Finding-12. REQ-jfxah3's loop stops only when it cannot continue: the
-// transport endpoint is gone (`TERMINAL_ERRORS`). None of these refusals is
+// transport endpoint is gone (org-io's `ReceiveError::Terminal` since S4 task
+// T16; `TERMINAL_ERRORS` before it). None of these refusals is
 // about the endpoint. An Organisation public key on chain that is not a valid
 // X25519 key is refused on every read of that Organisation for as long as the
 // chain holds it, but it concerns that one Organisation: the endpoint still
@@ -882,18 +926,178 @@ fn a_refused_key_or_field_is_classified_as_a_receiver_error() {
 // verifies: REQ-jfxah3, REQ-kn5rtx
 #[test]
 fn a_refusal_this_change_added_does_not_stop_the_loop() {
+    // *S4, task T16, 2026-10-14:* each refusal arrives as org-io's
+    // `ReceiveError::Refused`.
     let receiver_errors = [OrgNodeError::InvalidOrgPublicKey];
     for e in receiver_errors {
+        let (message, shown) = (e.to_string(), format!("{e:?}"));
         assert_eq!(
-            events::outcomes_for_receive_error(&e),
-            vec![ReceiverOutcome::ReceiveError { message: e.to_string() }],
-            "{e:?} is one receiver error and must not stop the loop"
+            events::outcomes_for_receive_error(&ReceiveError::Refused(e)),
+            vec![ReceiverOutcome::ReceiveError { message }],
+            "{shown} is one receiver error and must not stop the loop"
         );
     }
     let verdict = OrgNodeError::SeqNotEpoch { seq: 9, epoch: 3 };
     assert_eq!(
-        events::outcomes_for_receive_error(&verdict),
+        events::outcomes_for_receive_error(&ReceiveError::Refused(OrgNodeError::SeqNotEpoch { seq: 9, epoch: 3 })),
         vec![ReceiverOutcome::VerifyFailed { org_id: None, message: verdict.to_string() }],
         "a Sequence number other than the chain's epoch refuses one update and must not stop the loop"
     );
+}
+
+// ---------------------------------------------------------------------------
+// S4, task T16: org-io's typed receive error and its receive kinds
+// ---------------------------------------------------------------------------
+
+use ods_poc_lib::events::Arrival;
+use org_io::node::ReceiveKind;
+use org_io::transport::TransportError;
+use org_io::{ReceiveError, TerminalCause};
+
+// The loop stops on org-io's `ReceiveError::Terminal`, whatever its text, and
+// on nothing else, whatever its text (REQ-x3c8n2, answered by org-io's
+// REQ-8e57wm). Each case is checked twice: the outcomes, and the emissions in
+// order.
+// LLR-a9rjtf removed 2026-10-14 (review round 1): its substring rule is the
+// opposite of what this test asserts.
+// verifies: LLR-zw6jqy
+#[test]
+fn terminal_is_decided_by_the_error_variant_not_its_text() {
+    for terminal in [
+        ReceiveError::Terminal(TerminalCause::EndpointClosed),
+        ReceiveError::Terminal(TerminalCause::BindFailed(TransportError::Bind("no interface to bind".to_string()))),
+        // Boundary: a terminal cause whose own text is empty.
+        ReceiveError::Terminal(TerminalCause::BindFailed(TransportError::Bind(String::new()))),
+    ] {
+        let message = terminal.to_string();
+        assert_eq!(
+            events::outcomes_for_receive_error(&terminal),
+            vec![
+                ReceiverOutcome::ReceiveError { message: message.clone() },
+                ReceiverOutcome::Stopped { reason: message.clone() },
+            ],
+            "{terminal:?} is terminal: the failure, then the stop, both with its message"
+        );
+        let emitted: Vec<Emission> =
+            events::outcomes_for_receive_error(&terminal).iter().flat_map(events::emissions_for).collect();
+        assert_eq!(names(&emitted), vec!["receiver-error", "receiver-stopped"], "{terminal:?}");
+    }
+
+    // Abnormal input: failures after which the loop goes on, each with the
+    // text the old substring match stopped on.
+    for not_terminal in [
+        ReceiveError::Connection(TransportError::Stream("endpoint closed".to_string())),
+        ReceiveError::Connection(TransportError::Accept("endpoint bind: refused".to_string())),
+        ReceiveError::Chain(OrgNodeError::Chain("endpoint bind failed unexpectedly".to_string())),
+        ReceiveError::Refused(OrgNodeError::Chain("endpoint closed".to_string())),
+        ReceiveError::Connection(TransportError::Stream(String::new())),
+    ] {
+        let outcomes = events::outcomes_for_receive_error(&not_terminal);
+        assert_eq!(
+            outcomes,
+            vec![ReceiverOutcome::ReceiveError { message: not_terminal.to_string() }],
+            "{not_terminal:?} is one receiver error and must not stop the loop, whatever its text"
+        );
+    }
+
+    // A refusal keeps org-node's classification (LLR-7bk6qh) and never stops.
+    let verdict = ReceiveError::Refused(OrgNodeError::RootMismatch);
+    assert_eq!(
+        events::outcomes_for_receive_error(&verdict),
+        vec![ReceiverOutcome::VerifyFailed { org_id: None, message: OrgNodeError::RootMismatch.to_string() }]
+    );
+}
+
+// verifies: LLR-bym4md
+#[test]
+fn the_outcome_kind_comes_from_receive_kind() {
+    let root = "cd".repeat(32);
+    let record = || Some((7, root.clone()));
+    // Removed and Revoked are a self-delete, even when a record still reads.
+    for kind in [ReceiveKind::Removed, ReceiveKind::Revoked] {
+        for read in [record(), None] {
+            assert_eq!(
+                events::outcome_for_arrival(Arrival::Committed(kind), org(), read.clone()),
+                ReceiverOutcome::SelfDeleted { org_id: org() },
+                "{kind:?} with record {read:?}"
+            );
+        }
+    }
+    // Updated and Admitted announce the record read back, or that it could not be.
+    for kind in [ReceiveKind::Updated, ReceiveKind::Admitted] {
+        assert_eq!(
+            events::outcome_for_arrival(Arrival::Committed(kind), org(), record()),
+            ReceiverOutcome::Updated { org_id: org(), epoch: 7, root: root.clone() },
+            "{kind:?}"
+        );
+        assert_eq!(
+            events::outcome_for_arrival(Arrival::Committed(kind), org(), None),
+            ReceiverOutcome::RecordUnreadable { org_id: org() },
+            "{kind:?} with no record"
+        );
+    }
+    // An acknowledgement is announced as received, record or not.
+    for read in [record(), None] {
+        assert_eq!(
+            events::outcome_for_arrival(Arrival::Acknowledged, org(), read),
+            ReceiverOutcome::AcknowledgementReceived { org_id: org() }
+        );
+    }
+}
+
+// verifies: LLR-2vg79y, LLR-bym4md
+#[test]
+fn a_revocation_accepted_by_its_notice_is_announced_as_self_deleted() {
+    // org-io accepted this node's revocation notice (`ReceiveKind::Revoked`):
+    // exactly one `revoked`, naming the Organisation, with no epoch at any
+    // depth, whatever epoch the record read back would have carried.
+    for epoch in [0, 1, u64::MAX] {
+        let outcome =
+            events::outcome_for_arrival(Arrival::Committed(ReceiveKind::Revoked), org(), Some((epoch, "ef".repeat(32))));
+        let emitted = events::emissions_for(&outcome);
+        assert_eq!(names(&emitted), vec!["revoked"], "epoch {epoch}");
+        assert_eq!(emitted[0].payload["org_id"], serde_json::json!(org()));
+        assert!(!has_key_anywhere(&emitted[0].payload, "epoch"), "epoch {epoch}: {}", emitted[0].payload);
+    }
+}
+
+// Abnormal (S4 review round 2, finding-7): a store write that failed after a
+// commit, and a keychain refusal, are each one receiver error and never stop
+// the loop: neither is org-io's `Terminal`. Each keychain cause and both
+// store failures are fed in, with the emissions checked as well.
+// verifies: LLR-zw6jqy
+#[test]
+fn store_and_keychain_failures_are_one_receiver_error_and_do_not_stop_the_loop() {
+    use org_io::node::DevicePublicKey;
+    use org_io::store_file::{StoreFileError, StoreFileStep};
+    use org_io::{KeychainError, OpenError, StoreFailure};
+
+    const BASE_POINT: [u8; 32] = [
+        0x58, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+        0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+    ];
+    let device_key = DevicePublicKey::parse(&BASE_POINT).unwrap();
+    let failed = || StoreFileError { step: StoreFileStep::Write, path: "/data/store".into(), reason: "disk full".into() };
+    let failures = [
+        ReceiveError::Store(StoreFailure::Reloaded { failed: failed() }),
+        ReceiveError::Store(StoreFailure::Dropped {
+            failed: failed(),
+            reload: Box::new(OpenError::ReadStore(failed())),
+        }),
+        ReceiveError::Keychain(Box::new(KeychainError::ItemMissing { device_key })),
+        ReceiveError::Keychain(Box::new(KeychainError::Locked { device_key })),
+        ReceiveError::Keychain(Box::new(KeychainError::Unavailable { device_key, reason: "NoNativeBackend" })),
+        ReceiveError::Keychain(Box::new(KeychainError::KeyMismatch { device_key })),
+        ReceiveError::Keychain(Box::new(KeychainError::Malformed { device_key })),
+    ];
+    for failure in failures {
+        assert_eq!(
+            events::outcomes_for_receive_error(&failure),
+            vec![ReceiverOutcome::ReceiveError { message: failure.to_string() }],
+            "{failure:?} is one receiver error and must not stop the loop"
+        );
+        let emitted: Vec<Emission> =
+            events::outcomes_for_receive_error(&failure).iter().flat_map(events::emissions_for).collect();
+        assert_eq!(names(&emitted), vec!["receiver-error"], "{failure:?}");
+    }
 }

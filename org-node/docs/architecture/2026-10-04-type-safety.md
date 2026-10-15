@@ -94,6 +94,12 @@ removed (LLR-qsjde3); the Organisation private key, which the store keeps and
 the Wire message carries in its place, has the same properties as
 `OrgPrivateKey` (LLR-322xfu).
 
+*Amended 2026-10-08 (S4, task T3 of
+docs/plans/2026-10-06-org-io-transport.md):* `DeviceSeed` is removed: the
+device seed is the move-only `DeviceSecret` (LLR-37k2s3), which is not
+`Clone`, has no `expose_secret` and is never serialised. `MemberSeed` (and
+`OrgPrivateKey`) keep this item's rule.
+
 **LLR-s7whrn**: `ChainAccount` (32 bytes), `PersonaId` (string), `Epoch`
 (`u64`) and `SequenceNumber` (`u64`) are tag types: each is built infallibly by
 `new` and by `From` of the value it wraps, holds exactly that value, and
@@ -160,6 +166,14 @@ it does not load. The new store value was derived from the previous one by
 inserting that byte, not captured from the code; `encoding_golden.rs` records
 the previous value beside it.
 
+*Amended 2026-10-13 (S4, task T6 of docs/plans/2026-10-06-org-io-transport.md;
+format rule, dated comment).* The pinned store plaintext also holds one
+outstanding Invite: it ends with `outstanding_invites` (LLR-95753m as
+amended), here one pair — the count `01`, the Organisation identifier's 20
+bytes and the invite identifier's 32 bytes, with no option tag. The new value
+was derived from the previous one by appending those 53 bytes, not captured
+from the code; `encoding_golden.rs` records the previous value beside it.
+
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 This pinned an Organisation with an Organisation secret and no Organisation
 private key (the byte `00` after the chain account being `org_private_key:
@@ -187,6 +201,13 @@ calldata leaves with the chain write for on-chain-client, which pins it there;
 the store now holds provisional updates and expected admissions instead of
 pending Invites, and the Envelope has no signature field. The golden values
 are re-derived when the change is implemented.)
+
+*Amended 2026-10-08 (S4, task T3 of
+docs/plans/2026-10-06-org-io-transport.md):* the store plaintext pinned is one
+Persona's store: one `persona` (no list) whose record holds its Device public
+key in place of its device seed. `GOLDEN_STORE` is re-pinned by the format
+rule, never captured from the code (the derivation is in
+`encoding_golden.rs`).
 
 **LLR-mmdu38**: `OrgPublicKey::parse(&[u8; 32])` and `TryFrom<[u8; 32]>`
 accept a value exactly when `person::x25519::is_valid_public_key` accepts it,
@@ -271,6 +292,13 @@ branch a member seed is the secret of an X25519 key (LLR-ctzkv7), so neither
 exists. The rule, a secret typed by its role at every step, is unchanged. A
 replacement item that stated this text was withdrawn before merge.
 
+*Amended 2026-10-08 (S4, task T3 of
+docs/plans/2026-10-06-org-io-transport.md):* the device seed is a
+`DeviceSecret`, not a `DeviceSeed`: `DeviceSeed::signing_keypair` and
+`SigningKeypair::device_seed` are removed; a signing key pair is built from a
+`DeviceSecret` inside the crate only, for one signature or one endpoint bind,
+and no public operation returns one from a secret (LLR-37k2s3).
+
 ## SDD-pa6p7w — The chain as a read oracle
 
 `org-node/src/chain_read.rs` (`org_state_from_chain`, `OrgStateCache`): what
@@ -340,6 +368,13 @@ neither stated nor tested.)
 `store.rs`, returned by `derive_key`, with no `Display`, not `Copy`, and a
 `Debug` rendering of `StoreKey([REDACTED])`.
 satisfies: REQ-y7tsft
+
+*Amended 2026-10-08 (S4, task T3 of
+docs/plans/2026-10-06-org-io-transport.md):* `derive_key` derives the
+`StoreKey` by HKDF-SHA-256 from the device secret (LLR-2qqqx6), held as
+`Zeroizing<[u8; 32]>`, wiped on drop; the traits are unchanged: private to
+`store.rs`, no `Display`, not `Copy`, `Debug` rendering
+`StoreKey([REDACTED])`. The test probe takes a `DeviceSecret`.
 
 **LLR-g76zqd**: `PersonaRecord`, `MemberSnapshot` and `Joiner` hold the
 handle, name and surname as `Handle`, `Name` and `Surname`, so a record or a
@@ -425,6 +460,12 @@ are rebuilt (`Trie(DuplicateDevice)`, `Trie(DeviceSlotsFull)`,
 here from SDD-vee2fq, which is named for the Join request and Invite decode,
 along with SDD-rx2yvy for the import operations and SDD-8cpyfa for
 `first_admission_base`.)
+
+*Amended 2026-10-08 (S4, task T3 of
+docs/plans/2026-10-06-org-io-transport.md):* "opening a Persona store" is
+`PersonaStore::unseal` (LLR-bg538c); the Persona record's Device public key is
+parsed too (`persona.device_key`). The Invite and reply parse returns in task
+T6.
 
 ## SDD-vee2fq — Out-of-band exchange blobs
 

@@ -30,15 +30,13 @@
 use ods_poc_lib::commands;
 use ods_poc_lib::policy::{ChainEndpoint, TransportModeName};
 use ods_poc_lib::state::AppState;
-use org_io::node::OrgNodeError;
+use org_io::node::{InviteId, InviteReply, OrgId, OrgNodeError};
+use org_io::test_support::FakeChain;
 
 use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
 use tauri::test::MockRuntime;
 use tauri::webview::InvokeRequest;
 use tauri::WebviewWindow;
-
-mod support;
-use support::reply_keys;
 
 /// A live mock application with a real `AppState` over a fresh store.
 ///
@@ -64,9 +62,22 @@ fn harness_at(
     transport: TransportModeName,
     chain: Option<ChainEndpoint>,
 ) -> Harness {
-    let state = AppState::for_test(data_dir, "ipc-suite-passphrase", chain, transport)
-        .expect("AppState::for_test");
+    let state = AppState::for_test(data_dir, chain, transport).expect("AppState::for_test");
+    harness_of(dir, state)
+}
 
+/// A harness over org-io's substitute chain, in Loopback mode, where
+/// Organisations can be founded (S4, task T15: for the invitation commands,
+/// whose outstanding Invites live in the founding Persona's store).
+fn harness_over_chain() -> Harness {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let state = AppState::for_test_over(dir.path().to_path_buf(), &FakeChain::new(), TransportModeName::Loopback)
+        .expect("AppState::for_test_over");
+    harness_of(dir, state)
+}
+
+/// A live mock application managing `state`, whose store lies in `dir`.
+fn harness_of(dir: tempfile::TempDir, state: AppState) -> Harness {
     // The SAME handler list as lib.rs, spelled out here because the macro needs
     // the paths at compile time. `product_registers_the_same_commands_as_the_harness`
     // fails if the two lists drift apart.
@@ -313,7 +324,10 @@ fn revoke_member_rejects_a_doubled_zero_x_prefix_on_the_member_id() {
 // REQ-vgr7s2 — an empty peer address is not a ground for refusal (HAZ-n97v5g)
 // ---------------------------------------------------------------------------
 
-// verifies: LLR-6pmrma, LLR-ty85xv
+// *2026-10-13 (S4, task T12):* the blank-address item this test also
+// verified moved to org-io with the parse (org-io's `tests/peer_addr.rs`
+// verifies it there); its ID left this line, which keeps the other.
+// verifies: LLR-6pmrma
 #[test]
 fn revoke_member_is_not_refused_for_an_empty_peer_addr() {
     let h = harness_with(TransportModeName::Networked, None);
@@ -498,17 +512,65 @@ fn create_persona_refuses_an_invalid_field_naming_it_and_creates_nothing() {
 // and no other. It cannot observe what the handler passed on.
 // ---------------------------------------------------------------------------
 
-/// A valid iroh `EndpointId`: the compressed Ed25519 base point.
-fn endpoint_id() -> iroh::EndpointId {
-    let mut bytes = [0x66u8; 32];
-    bytes[0] = 0x58;
-    iroh::EndpointId::from_bytes(&bytes).expect("the base point is a valid key")
+// *2026-10-13 (S4, task T12):* the peer-address cases left this file with
+// the parse, for org-io's `tests/peer_addr.rs` (moved with their items under
+// ruling A), and with them the encoded-address helpers they used.
+// *2026-10-15 (S4, TEST review finding-4):* the three peer-address items
+// moved back to this unit, since they state what the commands do with the
+// text; their tests are written again here, at the IPC seam (below).
+
+/// The hexadecimal of a well-formed peer address: a postcard-encoded
+/// endpoint address whose identity is the Ed25519 base point (`58 66…66`,
+/// a valid point) and which lists no transport address (`00`, an empty
+/// set). The app names no iroh type, so the address is spelled as bytes.
+fn encoded_peer_addr() -> String {
+    format!("58{}00", "66".repeat(31))
 }
 
-/// The postcard bytes of an id-only `EndpointAddr`, the form the app decodes.
-fn encoded_endpoint_addr() -> Vec<u8> {
-    let addr: iroh::EndpointAddr = endpoint_id().into();
-    postcard::to_allocvec(&addr).expect("an EndpointAddr encodes")
+// verifies: LLR-ty85xv
+#[test]
+fn revoke_member_treats_a_blank_or_whitespace_only_peer_addr_as_absent() {
+    // Whitespace, which a form field easily carries, is an absent address,
+    // not a malformed one: the call reaches the service and fails there.
+    let h = harness();
+    for blank in ["", "   ", "\n", "\t \r\n"] {
+        let err = invoke_err(&h, "revoke_member", revoke_args(&member_id_64(), blank));
+        assert_eq!(err, refused_for_an_unknown_org(), "{blank:?} is not a ground of refusal");
+    }
+}
+
+// verifies: LLR-n6twt7
+#[test]
+fn revoke_member_does_not_refuse_an_encoded_endpoint_addr() {
+    let h = harness();
+    let addr = encoded_peer_addr();
+    for text in [addr.clone(), format!("0x{addr}")] {
+        let err = invoke_err(&h, "revoke_member", revoke_args(&member_id_64(), &text));
+        assert_eq!(err, refused_for_an_unknown_org(), "a decodable address is accepted: {text:?}");
+    }
+}
+
+// verifies: LLR-n6twt7
+#[test]
+fn revoke_member_refuses_a_peer_addr_that_is_not_hex() {
+    let h = harness();
+    for bad in ["zz", "abc", "not hex at all"] {
+        let err = invoke_err(&h, "revoke_member", revoke_args(&member_id_64(), bad));
+        assert!(err.starts_with("peer_addr_blob hex:"), "{bad:?}: {err}");
+    }
+}
+
+// Abnormal input: well-formed hex whose bytes are not an endpoint address.
+// Dropping the address instead of refusing would revoke over discovery when
+// the operator supplied a dial address.
+// verifies: LLR-n6twt7
+#[test]
+fn revoke_member_refuses_a_peer_addr_that_is_not_an_endpoint_addr() {
+    let h = harness();
+    for bad in ["00", "ff", "deadbeef"] {
+        let err = invoke_err(&h, "revoke_member", revoke_args(&member_id_64(), bad));
+        assert!(err.starts_with("peer_addr decode:"), "{bad:?}: {err}");
+    }
 }
 
 // verifies: LLR-vqkr5t
@@ -523,7 +585,12 @@ fn connection_status_reports_the_directory_the_store_was_opened_in() {
     );
 }
 
-// verifies: LLR-85zque, LLR-vqkr5t
+// *2026-10-14 (S4, task T17):* this test also cited the item that states
+// "create the data directory and open the store in it", which moved to
+// org-io in task T9 (org-io's architecture draft, the store files) and
+// cannot be cited from this unit; the ID was dropped and the test is
+// unchanged. It still verifies the reported directory.
+// verifies: LLR-vqkr5t
 #[test]
 fn connection_status_reports_a_data_dir_it_had_to_create_verbatim() {
     // Abnormal input: a directory that does not exist yet, two levels deep,
@@ -547,49 +614,10 @@ fn revoke_member_accepts_a_zero_x_prefixed_member_id() {
     assert_eq!(err, refused_for_an_unknown_org(), "one `0x` prefix is accepted");
 }
 
-// verifies: LLR-ty85xv
-#[test]
-fn revoke_member_treats_a_whitespace_only_peer_addr_as_absent() {
-    // Abnormal input: whitespace, which a form field easily carries. It is an
-    // absent address, not a malformed one.
-    let h = harness();
-    for blank in ["   ", "\n", "\t \r\n"] {
-        let err = invoke_err(&h, "revoke_member", revoke_args(&member_id_64(), blank));
-        assert_eq!(err, refused_for_an_unknown_org(), "{blank:?}");
-    }
-}
-
-// verifies: LLR-n6twt7
-#[test]
-fn revoke_member_does_not_refuse_an_encoded_endpoint_addr() {
-    let h = harness();
-    let addr = hex::encode(encoded_endpoint_addr());
-    let err = invoke_err(&h, "revoke_member", revoke_args(&member_id_64(), &addr));
-    assert_eq!(err, refused_for_an_unknown_org(), "a decodable address is accepted");
-}
-
-// verifies: LLR-n6twt7
-#[test]
-fn revoke_member_refuses_a_peer_addr_that_is_not_hex() {
-    let h = harness();
-    for bad in ["zz", "abc", "not hex at all"] {
-        let err = invoke_err(&h, "revoke_member", revoke_args(&member_id_64(), bad));
-        assert!(err.starts_with("peer_addr_blob hex:"), "{bad:?}: {err}");
-    }
-}
-
-// verifies: LLR-n6twt7
-#[test]
-fn revoke_member_refuses_a_peer_addr_that_is_not_an_endpoint_addr() {
-    // Abnormal input: well-formed hex whose bytes are not an EndpointAddr.
-    // Dropping the address instead of refusing would revoke over discovery
-    // when the operator supplied a dial address.
-    let h = harness();
-    for bad in ["00", "ff", "deadbeef"] {
-        let err = invoke_err(&h, "revoke_member", revoke_args(&member_id_64(), bad));
-        assert!(err.starts_with("peer_addr decode:"), "{bad:?}: {err}");
-    }
-}
+// *2026-10-13 (S4, task T12):* the revocation's four peer-address cases
+// (blank is absent; an encoded address is accepted; not hex, and not an
+// address, refused) moved to org-io's `tests/peer_addr.rs` with the parse.
+// *2026-10-15 (S4, TEST review finding-4):* written again above, over IPC.
 
 // verifies: LLR-pguhw5
 #[test]
@@ -633,6 +661,9 @@ fn a_persona_in_no_organisation_reports_a_null_org_id() {
 // ---------------------------------------------------------------------------
 // The invitation commands (T15 of docs/plans/2026-10-05-chain-authority.md):
 // the Invite and its reply are the app's, parsed in `crate::invitation`.
+// *2026-10-14 (S4, task T15):* org-io runs the exchange and org-node parses
+// the Blobs (`org_io::node::InviteReply`); the refusals below are taken from
+// org-node's typed errors, annotations unchanged.
 //
 // `admit_member` parses the org id, then the peer address, and only then
 // the reply. Its normal-case tests hand it the reply `"x"`, which is not a
@@ -653,7 +684,7 @@ fn admit_args(org_id: &str, peer_addr_blob: &str) -> serde_json::Value {
 /// The refusal `admit_member` ends in once every argument before the reply
 /// was accepted: the reply parser's own message for `"x"`.
 fn refused_for_the_reply() -> String {
-    ods_poc_lib::invitation::InviteReply::parse("x").expect_err("\"x\" is not a reply")
+    InviteReply::parse("x").expect_err("\"x\" is not a reply").to_string()
 }
 
 // verifies: LLR-vzf8j2
@@ -681,11 +712,13 @@ fn export_invite_rejects_a_non_hex_org_id() {
 #[test]
 fn export_invite_does_not_refuse_a_well_formed_org_id() {
     // The fresh store holds no Persona bound to it, so the call is refused
-    // there, after the parser.
+    // there, after the parser. *2026-10-14 (S4, task T15):* org-node's
+    // `build_invite` refuses it, with its typed error for an Organisation
+    // it holds no record of.
     let h = harness();
     for org_id in [org_id_40(), format!("0x{}", org_id_40())] {
         let err = invoke_err(&h, "export_invite", export_args(&org_id));
-        assert_eq!(err, "no Persona of this device belongs to that Organisation", "{org_id}");
+        assert_eq!(err, refused_for_an_unknown_org(), "{org_id}");
     }
 }
 
@@ -711,8 +744,11 @@ fn admit_member_does_not_refuse_a_well_formed_org_id() {
 
 // LLR-8krgzj as amended: `admit_member` takes no Organisation secret — an
 // `orgSecretHex` a caller still sends is not read, whatever it holds — and a
-// blank peer address is the absent one (LLR-ctrfz4).
-// verifies: LLR-8krgzj, LLR-ctrfz4
+// blank peer address is the absent one (the admission's peer-address item).
+// *2026-10-13 (S4, task T12):* that item moved to org-io with the parse
+// (org-io's `tests/peer_addr.rs` verifies it there); its ID left this line,
+// which keeps the other.
+// verifies: LLR-8krgzj
 #[test]
 fn admit_member_takes_no_organisation_secret() {
     let h = harness();
@@ -724,14 +760,21 @@ fn admit_member_takes_no_organisation_secret() {
     }
 }
 
+// *2026-10-13 (S4, task T12):* the admission's three peer-address cases
+// moved to org-io's `tests/peer_addr.rs` with the parse.
+// *2026-10-15 (S4, TEST review finding-4):* the admission's peer-address
+// item moved back to this unit; its cases are written again here, over IPC.
+// A call whose peer address was accepted ends in the reply parser's refusal
+// of `"x"`.
+
 // verifies: LLR-ctrfz4
 #[test]
 fn admit_member_does_not_refuse_a_blank_or_decodable_peer_addr() {
     let h = harness();
-    let addr = hex::encode(encoded_endpoint_addr());
-    for peer in ["", "   ", "\n", addr.as_str()] {
-        let err = invoke_err(&h, "admit_member", admit_args(&org_id_40(), peer));
-        assert_eq!(err, refused_for_the_reply(), "{peer:?}");
+    let addr = encoded_peer_addr();
+    for peer in [String::new(), "   ".to_string(), "\n".to_string(), addr.clone(), format!("0x{addr}")] {
+        let err = invoke_err(&h, "admit_member", admit_args(&org_id_40(), &peer));
+        assert_eq!(err, refused_for_the_reply(), "{peer:?} is not a ground of refusal");
     }
 }
 
@@ -755,70 +798,127 @@ fn admit_member_refuses_a_peer_addr_that_is_not_an_endpoint_addr() {
     }
 }
 
-/// A harness whose data directory holds `outstanding_invites.json` with the
-/// one invite id `03…03`, issued for the Organisation `01…01`.
-fn harness_with_outstanding_invite() -> Harness {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let data_dir = dir.path().to_path_buf();
-    std::fs::write(
-        data_dir.join("outstanding_invites.json"),
-        serde_json::json!([{ "org_id": hex::encode([1u8; 20]), "invite_id": hex::encode([3u8; 32]) }]).to_string(),
+/// `create_persona` over IPC; the new Persona's id.
+fn create_persona(h: &Harness, handle: &str, name: &str, surname: &str) -> String {
+    let id = invoke(h, "create_persona", serde_json::json!({ "handle": handle, "name": name, "surname": surname }))
+        .expect("create_persona");
+    id.as_str().expect("a Persona id").to_string()
+}
+
+/// A harness over the substitute chain where the Persona `alice` founded an
+/// Organisation and issued one Invite to it, and the reply to that Invite
+/// from the Persona `bob` (Bob Builder) of a second app. Returns the
+/// inviter's harness, the Organisation's id in hex and the reply's Blob.
+///
+/// *2026-10-14 (S4, task T15):* the outstanding pairs live in the founding
+/// Persona's sealed store (org-io's exchange), not in an
+/// `outstanding_invites.json` a test could write, so the Invite is issued
+/// and replied to over IPC. The inviter runs in Loopback mode, so a send
+/// with no peer address is refused at once rather than dialled.
+fn harness_with_outstanding_invite() -> (Harness, String, String) {
+    let h = harness_over_chain();
+    let alice = create_persona(&h, "alice", "Alice", "Smith");
+    let org_id = invoke(&h, "create_organisation", serde_json::json!({ "personaId": alice }))
+        .expect("create_organisation");
+    let org_id = org_id.as_str().expect("an org id").to_string();
+    let invite = invoke(&h, "export_invite", export_args(&org_id)).expect("export_invite");
+    let joiner = harness();
+    let bob = create_persona(&joiner, "bob", "Bob", "Builder");
+    let reply = invoke(
+        &joiner,
+        "produce_invite_reply",
+        serde_json::json!({ "inviteBlob": invite, "personaId": bob, "confirmed": true }),
     )
-    .expect("write outstanding_invites.json");
-    harness_at(dir, data_dir, TransportModeName::Networked, None)
+    .expect("produce_invite_reply");
+    let reply = reply.as_str().expect("a reply Blob").to_string();
+    (h, org_id, reply)
 }
 
 // verifies: LLR-pmus9f
 #[test]
 fn import_invite_reply_reports_the_reply_it_parses() {
-    let h = harness_with_outstanding_invite();
-    let (mk, dk) = reply_keys();
-    let blob = ods_poc_lib::invitation::InviteReply::wire_for_test(&[1; 20], &[3; 32], &mk, &dk, "bob", "Bob", "Builder");
+    let (h, org_id, blob) = harness_with_outstanding_invite();
+    let parsed = InviteReply::parse(&blob).expect("the reply parses");
+    let personas = invoke(&h, "list_personas", serde_json::json!({})).expect("list_personas");
+    let orgs = invoke(&h, "list_orgs", serde_json::json!({})).expect("list_orgs");
     let dto = invoke(&h, "import_invite_reply", serde_json::json!({ "blob": blob })).expect("import_invite_reply");
     assert_eq!(
         dto,
         serde_json::json!({
-            "org_id": hex::encode([1u8; 20]),
+            "org_id": org_id,
             "handle": "bob",
             "name": "Bob",
             "surname": "Builder",
-            "member_key": hex::encode(mk),
-            "device_key": hex::encode(dk),
+            "member_key": hex::encode(parsed.member_key.as_bytes()),
+            "device_key": hex::encode(parsed.device_key.as_bytes()),
         })
     );
-    // It stores nothing: still no Persona, no Organisation, and the same reply
-    // parses again (its invite is still outstanding).
-    assert_eq!(invoke(&h, "list_personas", serde_json::json!({})).expect("list_personas"), serde_json::json!([]));
-    assert_eq!(invoke(&h, "list_orgs", serde_json::json!({})).expect("list_orgs"), serde_json::json!([]));
+    // It stores nothing: the same Personas and Organisations, and the same
+    // reply parses again (its invite is still outstanding).
+    assert_eq!(invoke(&h, "list_personas", serde_json::json!({})).expect("list_personas"), personas);
+    assert_eq!(invoke(&h, "list_orgs", serde_json::json!({})).expect("list_orgs"), orgs);
     invoke(&h, "import_invite_reply", serde_json::json!({ "blob": blob })).expect("still outstanding");
 }
 
 // verifies: LLR-pmus9f
 #[test]
 fn import_invite_reply_refuses_a_malformed_blob_or_an_unknown_invite() {
-    let h = harness_with_outstanding_invite();
-    let (mk, dk) = reply_keys();
-    let malformed = [
-        "not base64 !".to_string(),
-        ods_poc_lib::invitation::InviteReply::wire_for_test(&[1; 20], &[3; 32], &mk, &dk, "Bob", "Bob", "Builder"),
-    ];
+    let (h, _, blob) = harness_with_outstanding_invite();
+    // Not Base64 at all, and a reply cut short.
+    let malformed = ["not base64 !".to_string(), blob[..blob.len() / 2].to_string()];
     for bad in malformed {
         let err = invoke_err(&h, "import_invite_reply", serde_json::json!({ "blob": bad }));
-        let parser = ods_poc_lib::invitation::InviteReply::parse(&bad).expect_err("refused by the parser");
-        assert_eq!(err, parser, "the parse's own message");
-        assert!(err.starts_with("reply"), "names the field: {err}");
+        let parser = InviteReply::parse(&bad).expect_err("refused by the parser");
+        assert!(matches!(parser, OrgNodeError::InvalidField { .. }), "names the field: {parser:?}");
+        assert_eq!(err, parser.to_string(), "the parse's own message");
     }
-    let unknown = ods_poc_lib::invitation::InviteReply::wire_for_test(&[1; 20], &[4; 32], &mk, &dk, "bob", "Bob", "Builder");
+    let unknown = InviteReply { invite_id: InviteId::new([4; 32]), ..InviteReply::parse(&blob).expect("parses") }
+        .encode()
+        .expect("encodes");
     let err = invoke_err(&h, "import_invite_reply", serde_json::json!({ "blob": unknown }));
-    assert_eq!(err, "this reply names no Invite this device has outstanding");
+    assert_eq!(err, OrgNodeError::InviteNotOutstanding.to_string());
     // The outstanding invite id, under an Organisation it was not issued for
     // (review round 2, finding-1).
-    let elsewhere = ods_poc_lib::invitation::InviteReply::wire_for_test(&[2; 20], &[3; 32], &mk, &dk, "bob", "Bob", "Builder");
+    let elsewhere = InviteReply { org_id: OrgId::new([2; 20]), ..InviteReply::parse(&blob).expect("parses") }
+        .encode()
+        .expect("encodes");
     let err = invoke_err(&h, "import_invite_reply", serde_json::json!({ "blob": elsewhere }));
-    assert_eq!(err, "this reply names no Invite this device has outstanding");
+    assert_eq!(err, OrgNodeError::InviteNotOutstanding.to_string());
 }
 
-// verifies: LLR-w4mhd4
+// S4, task T15: the app hands the reply to org-io's exchange and reports
+// what org-io returned. The harness's chain is a substitute and its
+// endpoints are not reachable, so the admission commits and its send fails:
+// the command reports both, and the Member is admitted.
+// verifies: REQ-m8sgjk
+#[test]
+fn admit_member_hands_the_reply_to_org_io_and_reports_a_committed_admission_whose_send_failed() {
+    let (h, org_id, reply) = harness_with_outstanding_invite();
+    let err = invoke_err(
+        &h,
+        "admit_member",
+        serde_json::json!({ "orgId": org_id, "replyBlob": reply, "peerAddrBlob": "" }),
+    );
+    assert!(err.starts_with("the update was committed, but sending it failed: "), "{err}");
+    let orgs = invoke(&h, "list_orgs", serde_json::json!({})).expect("list_orgs");
+    assert_eq!(orgs[0]["member_count"], 2, "the reply's Persona is admitted beside the founder: {orgs}");
+    // The Invite is settled: the same reply names no outstanding Invite now.
+    let again = invoke_err(&h, "import_invite_reply", serde_json::json!({ "blob": reply }));
+    assert_eq!(again, OrgNodeError::InviteNotOutstanding.to_string());
+}
+
+// *2026-10-14 (S4, task T15):* the confirmation item this test verified
+// moved to org-io with the exchange (task T13; org-io's
+// `tests/invitation_exchange.rs` verifies it there), so its only ID left
+// this test, which keeps running over IPC (the T9 precedent).
+// *Pointed at the app's item 2026-10-15 (S4 TEST review round 2, finding-2;
+// the upgraded guardrails rule on moved IDs):* the old item is org-io's now
+// and not exported, so it is not cited here. The app's requirement that
+// states what this checks is REQ-ab2mfz's last clause — the reply is
+// produced only once the user has confirmed — at the app's IPC seam. No app
+// LLR states the IPC refusal (LLR-n2u4uf is the webview's gate), so the REQ
+// is cited directly.
+// verifies: REQ-ab2mfz
 #[test]
 fn produce_invite_reply_refuses_without_confirmation_over_ipc() {
     let h = harness();
@@ -831,29 +931,68 @@ fn produce_invite_reply_refuses_without_confirmation_over_ipc() {
 }
 
 // ---------------------------------------------------------------------------
+// S4, task T15: the app names no iroh type and no Blob format. org-io runs
+// the invitation exchange, the fan-out and the peer-address parse, so the
+// app's manifest lists none of the crates those need.
+// ---------------------------------------------------------------------------
+
+/// The crate names of the `[dependencies]` table of `manifest`.
+fn dependency_names(manifest: &str) -> Vec<String> {
+    let mut names = vec![];
+    let mut in_dependencies = false;
+    for line in manifest.lines().map(str::trim) {
+        if line.starts_with('[') {
+            in_dependencies = line == "[dependencies]";
+            continue;
+        }
+        if !in_dependencies || line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((name, _)) = line.split_once('=') {
+            names.push(name.trim().to_string());
+        }
+    }
+    names
+}
+
+// verifies: LLR-vzf8j2
+#[test]
+fn the_app_manifest_names_no_iroh_base64_or_postcard() {
+    let manifest = std::fs::read_to_string(format!("{}/Cargo.toml", env!("CARGO_MANIFEST_DIR"))).expect("read Cargo.toml");
+    let names = dependency_names(&manifest);
+    assert!(names.iter().any(|name| name == "org-io"), "the [dependencies] table was read: {names:?}");
+    let named: Vec<&String> =
+        names.iter().filter(|name| ["iroh", "base64", "postcard"].contains(&name.as_str())).collect();
+    assert!(named.is_empty(), "the app's [dependencies] name {named:?}; org-io holds the transport and the Blob format");
+}
+
+// ---------------------------------------------------------------------------
 // REQ-363366 — reconcile (S3b-io T15b; the discard removed by T15d)
 // ---------------------------------------------------------------------------
 
 /// Seed the store the harness will open in `data_dir` with an Organisation
 /// founded over a substitute chain; its id as hex. org-io over `FakeChain`
 /// writes it, and is dropped before the harness opens the same file with the
-/// chain not configured.
+/// chain not configured. *Reconciled with S4, 2026-10-14:* the handle is
+/// `OrgIo::open_for_test` over the data directory, writing one sealed store
+/// file per Persona with its secret in the shared in-memory keychain (S4,
+/// tasks T9 and T15), in place of a passphrase store the app no longer
+/// names.
 fn seed_store(data_dir: &std::path::Path) -> String {
-    use org_io::node::service::OrgService;
-    use org_io::node::store::PersonaStore;
     use org_io::node::{Handle, Name, Surname};
-    use org_io::test_support::FakeChain;
+    use org_io::test_support::{FakeChain, MemoryKeychain};
+    use org_io::transport::TransportMode;
     use rand::rngs::OsRng;
 
+    MemoryKeychain::shared().install();
     let runtime = tokio::runtime::Runtime::new().expect("runtime");
     runtime.block_on(async {
         let chain = FakeChain::new();
-        let store = PersonaStore::open(data_dir.join("persona_store.bin"), "ipc-suite-passphrase").expect("store");
-        let mut io = org_io::OrgIo::for_test(OrgService::new(store), &chain);
+        let io = org_io::OrgIo::open_for_test(data_dir, TransportMode::Networked, &chain).expect("open");
         let alice = io
-            .node_mut()
             .create_persona(&mut OsRng, Handle::parse("alice").unwrap(), Name::parse("Test").unwrap(), Surname::parse("User").unwrap())
-            .unwrap();
+            .await
+            .expect("persona");
         let org = io.found_organisation(&mut OsRng, &alice).await.expect("founded");
         hex::encode(org.as_bytes())
     })

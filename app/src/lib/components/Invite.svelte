@@ -2,11 +2,11 @@
 	/**
 	 * Story 2: Invite flow (two sides).
 	 * A (Member):  export_invite (REQ-prjja8) → show/copy the Invite Blob.
-	 * B (Invitee): paste an Invite → import_invite (REQ-yazum3) → choose a
+	 * B (Invitee): paste an Invite → import_invite (parsed by org-node) → choose a
 	 *              Persona → read REPLY_WARNING and confirm (REQ-ab2mfz,
 	 *              RC-wzb48r) → produce_invite_reply (REQ-tcutr6) → copy.
 	 *              Only Personas bound to no Organisation are offered
-	 *              (LLR-rt8gdz).
+	 *              (LLR-pms47e).
 	 */
 	import {
 		listOrgs,
@@ -83,7 +83,7 @@
 
 	async function loadPersonas() {
 		try {
-			// LLR-rt8gdz: a Persona bound to an Organisation is not offered.
+			// LLR-pms47e: a Persona bound to an Organisation is not offered.
 			personas = unboundPersonas(await listPersonas());
 		} catch (e) {
 			replyErr = String(e);

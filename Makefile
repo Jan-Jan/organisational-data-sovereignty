@@ -255,8 +255,25 @@ PERSON_REGIONS := 99
 # acknowledgement on the self-delete path), not its `NeedsChain` read as T12
 # wrote; that read was covered, and its failed-read error path now is.
 # The owner accepts the shortfall or not at merge (verification record).
-ORG_IO_LINES := 70
-ORG_IO_REGIONS := 68
+#
+# Re-measured 2026-10-14 (worktree-org-io-transport, S4 task T18 of
+# docs/plans/2026-10-06-org-io-transport.md), with the floors at 0 and S4's
+# thirteen targets in ORG_IO_COVERAGE_ARGS, same stable toolchain:
+#
+#   measured 2026-10-14        lines     regions
+#   org-io, S4 T18             81.24%     79.94%   (1568 of 1930 lines; 2805 of 3509 regions)
+#
+# Raised to 80 / 78, one point below, rounded down. The shortfall against the
+# class C target is still the chain-facing shell, as above: bin/preflight.rs
+# 0.00% (56 lines), preflight.rs 40.00%, connect.rs 30.00%, chain_read.rs
+# 54.17%, signatory.rs 72.92%. S4 adds two shells of its own, for the owner to
+# accept or not at merge: transport/mod.rs 54.17% (the iroh relay and
+# Networked-mode binding no gated test reaches without a relay) and the
+# platform keychain's error arms (keychain.rs 91.89%, store_file.rs 90.35%: an
+# OS keychain or file system that refuses is not reproducible in a test over
+# the memory keychain and a writable temporary directory).
+ORG_IO_LINES := 80
+ORG_IO_REGIONS := 78
 
 # DECISION coverage, the other half of the class C target, added 2026-10-06
 # (worktree-guardrails-branch-coverage, docs/plans/2026-10-06-branch-coverage.md).
@@ -345,7 +362,16 @@ PERSON_BRANCHES := 99
 # Re-measured after review round 4's fix (2026-10-08, same toolchain): 21 of
 # 32 branches, 65.63% (`BuiltUpdate::names`' six `&&` outcomes left with it;
 # the comparison is org-node's `holds_provisional` now). The floor stays 64.
-ORG_IO_BRANCHES := 64
+# Re-measured 2026-10-14 (worktree-org-io-transport, S4 task T18), floor at 0,
+# with S4's thirteen targets, same toolchain: 115 of 138 branches, 83.33%.
+# Raised to 82, one point below, rounded down. Of the 23 outcomes no test
+# reaches, 11 are the preflight shell's (preflight.rs 3 of 12,
+# bin/preflight.rs 0 of 2) and custody.rs's one is the unreachable `else`
+# above; the other 11 are one or two outcomes each in endpoints.rs (16 of
+# 18), publish.rs (26 of 28), submit.rs (6 of 8), keychain.rs, lib.rs,
+# send.rs, transport/endpoint.rs and transport/frame.rs — the shortfall
+# against the class C target, for the owner to accept or not at merge.
+ORG_IO_BRANCHES := 82
 
 # Per-crate, so a regression in the well-covered crate cannot hide behind the
 # poorly-covered one. Known limit, unfixable today: each floor is still an
@@ -456,12 +482,23 @@ coverage-person:
 # `test-support` targets. The chopsticks-only `preflight` target is excluded, as
 # in verify_commands. 2026-10-13: `publish_path` and `startup_reconcile` added
 # by S3b-io part 1 (docs/plans/2026-10-08-org-io-publish.md), matching the verify
-# line; the floors are unchanged.
+# line; the floors are unchanged. 2026-10-14: S4 (docs/plans/2026-10-06-org-io-transport.md,
+# task T18) adds its thirteen targets — the keychain, the store files, the
+# transport moved in from org-node, the receive step, the fan-out, the peer
+# address and the invitation exchange — again matching the verify line; the
+# floors are re-set above ORG_IO_LINES. 2026-10-14 (task T19): `expectations_met`
+# (the six expectations shown through org-io) added, matching the verify line;
+# the floors are unchanged.
 ORG_IO_COVERAGE_ARGS := -p org-io --features test-support,dev-seed \
 	--lib --test key_custody_config --test fuzz_seed_parse --test signatory_key \
 	--test dev_seed_env --test absences --test chain_read_rule --test receive_order \
 	--test submit_flow --test signatory_rule --test app_boundary --test open \
-	--test publish_path --test startup_reconcile
+	--test publish_path --test startup_reconcile \
+	--test keychain --test store_files --test transport_handshake \
+	--test transport_networked --test endpoints --test preflight_transport \
+	--test receive_step --test acknowledgement_inbound --test send_fanout \
+	--test peer_addr --test fuzz_peer_addr --test invitation_exchange \
+	--test node_stories --test expectations_met
 
 coverage-org-io:
 	cargo llvm-cov $(ORG_IO_COVERAGE_ARGS) \

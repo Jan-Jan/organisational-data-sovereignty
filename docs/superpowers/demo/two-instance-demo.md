@@ -74,7 +74,6 @@ hex, no `0x` needed):
 ```bash
 cd app
 ODS_DATA_DIR=/tmp/ods-A \
-ODS_PASSPHRASE=demo-A \
 ODS_CHAIN_WS=ws://localhost:8000 \
 ODS_CONTRACT_H160=$CONTRACT_H160 \
 ODS_ADMIN_SEED=e5be9a5092b81bca64be81d212e7f2f9eba183bb7a90954f7b76361f6edb5c0a \
@@ -88,7 +87,6 @@ seed; it is unused for B's read-only path):
 ```bash
 cd app
 ODS_DATA_DIR=/tmp/ods-B \
-ODS_PASSPHRASE=demo-B \
 ODS_CHAIN_WS=ws://localhost:8000 \
 ODS_CONTRACT_H160=$CONTRACT_H160 \
 ODS_ADMIN_SEED=3a9d5b35b9fb4979b5ba87a5b89c3b1b6e3c2c5d9e8f0a1b2c3d4e5f60718293 \
@@ -98,6 +96,13 @@ npm run tauri dev
 > `StatusBar` will show the chain endpoint + epoch once connected.)
 
 Each window opens its own ODS PoC dashboard.
+
+> *2026-10-14 (change `worktree-org-io-transport`, task T18):* the
+> `ODS_PASSPHRASE=demo-A` and `ODS_PASSPHRASE=demo-B` lines were removed from
+> both commands. The app reads no passphrase since that change: each
+> Persona's store is sealed under its own OS keychain item, so the variable
+> is ignored. The **S9** shortcut below (a passphrase-encrypted file store)
+> no longer describes the app for the same reason.
 
 ---
 

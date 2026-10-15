@@ -5,7 +5,7 @@ use std::sync::atomic::Ordering;
 
 use on_chain_client::write::multisig::multi_account_id;
 use on_chain_client::write::AccountId;
-use org_io::node::OrgId;
+use org_node::OrgId;
 use org_io::signatory::{admin_status, controller_of, AdminStatus, OwnAdminError, ProxyDefinition, SignatorySetView};
 use org_io::test_support::FakeChain;
 use org_io::OrgIo;

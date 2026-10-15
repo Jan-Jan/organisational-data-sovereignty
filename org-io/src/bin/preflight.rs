@@ -1,18 +1,25 @@
-//! Preflight CLI (moved from org-node 2026-10-07): run the chain health checks
-//! before a real ODS session and exit non-zero if any fail. Reads
-//! configuration from env vars (mirrors the app's ODS_* convention).
+//! Preflight CLI: run the transport and
+//! chain health checks before a real ODS session and exit non-zero if any
+//! fail. Reads configuration from env vars (mirrors the app's ODS_*
+//! convention).
 //!
-//!   ODS_CHAIN_WS      ws(s):// chain RPC URL                 (required)
-//!   ODS_CONTRACT_H160 0x-prefixed 20-byte contract address   (required)
-//!   ODS_ADMIN_H160    0x-prefixed 20-byte admin/org id        (required)
+//!   ODS_DATA_DIR      the node's data directory, as the app's     (required)
+//!   ODS_TRANSPORT     "networked" (default) | "loopback"
+//!   ODS_CHAIN_WS      ws(s):// chain RPC URL                     (required)
+//!   ODS_CONTRACT_H160 0x-prefixed 20-byte contract address       (required)
+//!   ODS_ADMIN_H160    0x-prefixed 20-byte admin/org id            (required)
 //!
-//! The transport check (ODS_DEVICE_SEED, ODS_TRANSPORT) is not here: it needs
-//! a device signing key, which org-io does not hold (LLR-3zdw8v).
+//! The transport check (owner rulings 7 and 12) binds the
+//! endpoint of every Persona whose store file is in the data directory,
+//! each through its own OS keychain item, as the node does. No variable
+//! names or carries a device key or seed: the data directory is a path, not
+//! key material, and it has no default (owner ruling 2026-10-08).
 
 use std::time::Duration;
 
 use org_io::connect::connect;
-use org_io::preflight::{check_chain_live, check_contract, render, CheckResult};
+use org_io::preflight::{check_chain_live, check_contract, check_transport_for_data_dir, render, CheckResult};
+use org_io::transport::TransportMode;
 
 fn h160_from_env(var: &str) -> Result<[u8; 20], String> {
     let text = std::env::var(var).map_err(|_| format!("{var} not set"))?;
@@ -26,6 +33,21 @@ fn h160_from_env(var: &str) -> Result<[u8; 20], String> {
 async fn main() -> std::process::ExitCode {
     let mut results: Vec<CheckResult> = Vec::new();
 
+    let data_dir = match std::env::var("ODS_DATA_DIR") {
+        Ok(value) => std::path::PathBuf::from(value),
+        Err(std::env::VarError::NotPresent) => {
+            eprintln!("ODS_DATA_DIR not set");
+            return std::process::ExitCode::FAILURE;
+        }
+        Err(std::env::VarError::NotUnicode(_)) => {
+            eprintln!("ODS_DATA_DIR is not valid Unicode");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
+    let mode = match std::env::var("ODS_TRANSPORT").as_deref() {
+        Ok("loopback") => TransportMode::Loopback,
+        _ => TransportMode::Networked,
+    };
     let ws = match std::env::var("ODS_CHAIN_WS") {
         Ok(value) => value,
         Err(_) => {
@@ -40,6 +62,9 @@ async fn main() -> std::process::ExitCode {
             return std::process::ExitCode::FAILURE;
         }
     };
+
+    results.extend(check_transport_for_data_dir(&data_dir, mode, Duration::from_secs(15)).await);
+
     match connect(&ws, contract).await {
         Ok((api, registry)) => {
             results.push(check_chain_live(&api, Duration::from_secs(15)).await);

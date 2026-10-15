@@ -134,9 +134,9 @@
 <section class="panel">
 	<h2>Story 5: Revoke Member</h2>
 	<p class="hint">
-		Enter the member ID (64 hex chars). The peer addr blob (hex-encoded postcard EndpointAddr
-		from the join request) is needed only in Loopback transport — in Networked the peer is
-		reached by EndpointId via discovery. After revocation, the revoked peer self-deletes and
+		Enter the member ID (64 hex chars). The peer address (hex, as the member's Device printed
+		it) is needed only in Loopback transport — in Networked the peer is reached by its
+		DevicePublicKey. After revocation, the revoked peer self-deletes and
 		you'll see the "revoked" event below.
 	</p>
 
@@ -175,8 +175,8 @@
 				type="text"
 				bind:value={peerAddrBlob}
 				placeholder={transportMode === 'loopback'
-					? 'hex-encoded postcard EndpointAddr (required)'
-					: 'hex-encoded postcard EndpointAddr (optional in Networked)'}
+					? 'peer address, hex (required)'
+					: 'peer address, hex (optional in Networked)'}
 				disabled={revokeBusy}
 				class="mono"
 			/>

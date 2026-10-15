@@ -180,6 +180,10 @@ form: an `OrgInformation` renders its key as `OrgPrivateKey([REDACTED])`
 itself.
 satisfies: REQ-y7tsft
 
+*Amended 2026-10-08 (S4, task T2 of `docs/plans/2026-10-06-org-io-transport.md`):*
+code path only. `WireMessage` is defined in `org-node/src/wire.rs`, out of
+`transport/`; the rule is unchanged.
+
 ## SDD-swtd3w — Value types and the rejection vocabulary
 
 `org-node/src/error.rs`, `org-node/src/types.rs`.
@@ -282,6 +286,18 @@ never goes to a Device the node's current record does not list: a recipient a
 later commit removed is sent a revocation, and one a later commit admitted is
 sent the current key, which it may hold.
 
+*Amended 2026-10-13 (S4, task T5 of `docs/plans/2026-10-06-org-io-transport.md`):*
+`send_update` is gone; the commit builds, for each recipient, the body this
+rule chose, from the record as committed and with the key the commit stored
+(captured at commit, not read at send time: PR-gnh3j2 resolved), and returns
+them in `CommitOutcome.outgoing` (LLR-gdfqn9, SDD-bm27xt). A Device the
+committed record lists, other than the sending Persona's own, gets
+`WireMessage::OrgInformation` holding the committed Envelope, the record as
+it stood before the commit and that key; a Device the commit removed gets
+`WireMessage::Revocation` holding its notice; any other Device gets no body,
+so `NoRevocationForRecipient` is gone. The paragraph above on a later commit
+no longer applies: a body already returned keeps its commit's key.
+
 ## SDD-8cpyfa — The receive-and-commit path
 
 `org-node/src/service.rs` (`receive_one`, `receive_and_verify`,
@@ -325,6 +341,11 @@ or expectation is consulted and with no `read_state` call, leaving the store
 unchanged and unwritten.
 satisfies: REQ-c29s93
 
+*Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
+The decode is the first step of `check_received(sender, body)`, which takes
+the body undecoded (`decode_message`, `MalformedMessage`), on the one receive
+path; the transport no longer decodes. The rule is unchanged.
+
 *Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
 `receive_one` is now the public `receive_message` (transport only, body
 unchanged), and the refusal reaches org-io's receive sequence before any
@@ -343,6 +364,11 @@ it runs before the own-Persona check (LLR-3f5h7b). A `Revocation` carries no
 key and is not checked.
 satisfies: REQ-bwx7eg
 
+*Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
+The check runs in `commit_checked`, against the state org-io read for the
+checked message, before any commit, removal or write (`OrgKeyMismatch`). The
+rule is unchanged.
+
 *Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
 the check runs in the apply phase (`apply_receive`, `apply_self_delete`)
 against "the state the apply phase is given", which reads for "the chain
@@ -357,6 +383,14 @@ refuse with `RevocationNotHeld { org_id }`, through `revocation::check_notice`
 nothing; an expectation for that Organisation stays in place.
 satisfies: REQ-vxqc5g
 
+*Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
+The refusal is `check_received`'s, raised by `revocation::check_notice` (the
+store chosen by `revocation::notice_store`), with no chain state asked for.
+It now also states what the retired self-delete-path item (S4 T4; see the
+S4 verification record) stated for that path, on the one receive path: Organisation information about an
+Organisation no store holds is a first admission, refused before any chain
+read unless expected (LLR-s8xp7m). The rule is unchanged.
+
 *Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
 the refusal is made by the chain-free phase (`prepare_receive`,
 `prepare_self_delete`); "with no `read_state` call" reads "refused by the
@@ -364,10 +398,11 @@ chain-free phase, which hands org-io no Organisation to read".
 
 *Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3).*
 `receive_and_self_delete_if_revoked` refused such a message with
-`OrgNotOnChain`, as any message about an unheld Organisation (LLR-379hnv). A
-revocation is now decided by `revocation::check_notice` on both paths, so
-both refuse it with `RevocationNotHeld`; LLR-379hnv still governs an
-Organisation-information message about an unheld Organisation.
+`OrgNotOnChain`, as any message about an unheld Organisation (the
+self-delete path's unheld-Organisation item, since retired). A revocation is
+now decided by `revocation::check_notice` on both paths, so both refuse it
+with `RevocationNotHeld`; that item still governed an
+Organisation-information message about an unheld Organisation until S4.
 
 **LLR-pt32fx**: on a `Revocation(notice)`, `receive_and_verify` and
 `receive_and_self_delete_if_revoked` run `revocation::check_notice`
@@ -391,6 +426,14 @@ acknowledgements. A revocation never commits an update into a record the
 node keeps, and an Organisation-information message never reaches
 `revocation::accept`.
 satisfies: REQ-3dsweu, REQ-m2xh8q, REQ-b462sh
+
+*Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
+`receive_and_verify` and `receive_and_self_delete_if_revoked` read as the
+one receive path: the notice is checked in `check_received`
+(`check_notice`, then the sender) with no chain state, and decided in
+`commit_checked` by `revocation::accept` (`ReceiveKind::Revoked`); an
+acknowledgement is decided in `check_received` (`Checked::Acknowledged`).
+The rule is unchanged.
 
 *Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
 the same decisions, split across the two phases. `check_notice`, the sender

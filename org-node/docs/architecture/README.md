@@ -109,8 +109,8 @@ SDD-swtd3w, and LLR-8bum44 from SDD-vee2fq to SDD-af5vnt.)*
 |---|---|---|
 | **Values and custody** | SDD-swtd3w, SDD-sxp8hb | What an identifier is, what a value org-node holds is typed as (secrets, keys, tags), what a refusal is called, and which key plays which role |
 | **The commit rule** | SDD-kk2y3e, SDD-d8ktxa, SDD-na9nc3, SDD-pa6p7w | What a change must prove before it is believed |
-| **Carriage and rest** | SDD-kwncn7, SDD-8uyg4s, SDD-af5vnt, SDD-vee2fq | How bytes reach the node, and where secrets sit when they are not moving |
-| **The five stories** | SDD-ueh4tm, SDD-89es4z, SDD-rx2yvy, SDD-8cpyfa, SDD-72ddm6, SDD-b8tuv3 | How the parts compose into what a Persona does |
+| **Carriage and rest** | SDD-kwncn7, SDD-af5vnt, SDD-vee2fq (the authenticated endpoint moved to org-io 2026-10-13, S4 task T10) | How bytes reach the node, and where secrets sit when they are not moving |
+| **The five stories** | SDD-ueh4tm, SDD-89es4z, SDD-rx2yvy, SDD-8cpyfa, SDD-72ddm6 (the endpoint lifecycle moved to org-io 2026-10-13, S4 task T10) | How the parts compose into what a Persona does |
 | **The supplier edge** | SDD-msb6xh, SDD-rq6nv4, org-io's chain-connection item (moved 2026-10-07) | What is said to the chain |
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
@@ -184,7 +184,8 @@ in the verification record's Gaps:
 
 - `RelayMode::Disabled` on the Loopback arm. A relay home is acquired only
   after `online()`, so an assertion at bind time is vacuous.
-- REQ-2wzfzv's bind failures, which no gated test can produce.
+- The required-IPv4, optional-IPv6 loopback bind failures, which no gated
+  test can produce (that requirement is org-io's since S4 task T10).
 - The Networked arm of `admit_member` and `revoke_member`, and
   `ensure_endpoint`'s use of the transport mode. Both need an injected-relay
   constructor this unit does not have. *(Amended 2026-10-05, owner ruling,
@@ -201,7 +202,8 @@ being observed already green, **with named exceptions**. The dated
 decomposition file lists them, each with its reason:
 
 - four requirements that are compile-enforced, not test-enforced;
-- LLR-6adc99, which no gated test can reach;
+- the IPv4-required loopback item (org-io's since S4 task T10), which no
+  gated test can reach;
 - the first-admission clause of LLR-u6rq4s, where the skip it describes is
   unnecessary rather than unverified;
 - the administrator-key exclusion in LLR-e5c9ud, which sits inside PR-mdv38y's
@@ -211,9 +213,11 @@ decomposition file lists them, each with its reason:
 The last two exceptions go with the behaviour they described: LLR-u6rq4s now
 states that no sender is checked, and LLR-e5c9ud has no administrator-key
 exclusion. The compile-enforced requirements grow: besides the four, the
-requirements that now state an absence — LLR-na7p4w, LLR-g9vmbx, LLR-8qxwst,
-LLR-zj88e6, LLR-qezw3n and those of SDD-msb6xh and SDD-rq6nv4 — are enforced
-by the compiler, since what they forbid does not exist to call.
+requirements that now state an absence — LLR-na7p4w, the no-Invite item
+(retired 2026-10-13, S4 T6), LLR-8qxwst, LLR-zj88e6, LLR-qezw3n and those of
+SDD-msb6xh and SDD-rq6nv4 — are enforced by the compiler, since what they
+forbid does not exist to call. *(2026-10-13, S4 T6: LLR-8qxwst and LLR-zj88e6
+are rewritten as the Invite returns to org-node.)*
 
 The attestations are in the verification record for the change that wrote
 them.
@@ -226,10 +230,12 @@ count each round changes.*
 
 Seven known defects are pinned rather than fixed, each by a test that asserts
 today's behaviour and reddens when it is corrected: PR-vt244s, PR-b9wab3,
-PR-mdv38y, PR-8qsnhx, PR-xwek5e, PR-322qst and PR-u4c2vp, in
+PR-mdv38y, the endpoint-bound-once report, PR-xwek5e, PR-322qst and PR-u4c2vp, in
 `org-node/docs/problems/`. *PR-u4c2vp added 2026-10-05 by review round 8; its
-pin was written in round 7.*
-PR-mdv38y and PR-8qsnhx share one cause: the code assumes one Persona, one
+pin was written in round 7.* *(2026-10-13, S4 task T10: the
+endpoint-bound-once report moved to org-io's problems ledger and is resolved
+there by one endpoint per Persona.)*
+PR-mdv38y and the endpoint-bound-once report share one cause: the code assumes one Persona, one
 Organisation and one endpoint per store, and nothing enforces that. PR-322qst,
 PR-xwek5e and PR-u4c2vp do not. Each reproduces on a store holding one Persona and one
 Organisation, and each has a cause of its own. *Corrected 2026-10-04 by review
@@ -243,16 +249,17 @@ required behaviour on every path (LLR-3q63zv); PR-322qst (an own revocation
 committed as an update) is replaced by deletion on every commit path
 (LLR-b27jr6); and PR-b9wab3 (a Loopback revocation with no address burning an
 epoch) loses its mechanism, because org-node no longer submits to the chain
-(LLR-pw369n). PR-vt244s is narrowed — the sender's record no longer runs ahead
+(the Loopback revocation's refusal without an address, an item org-io's since
+2026-10-13, S4 task T12). PR-vt244s is narrowed — the sender's record no longer runs ahead
 of the chain, and a failed send no longer leaves it an epoch behind — and stays
-open by owner ruling. PR-mdv38y, PR-8qsnhx (its sending side) and PR-xwek5e
+open by owner ruling. PR-mdv38y, the endpoint-bound-once report (its sending side) and PR-xwek5e
 are unchanged. Whether the three are resolved by this change is for its plan.
 
 *Note 2026-10-06 (independent review round 3, finding-1).* That change
 resolved PR-b9wab3, PR-322qst and, by the owner's ruling of one Persona per
 Organisation (REQ-yp75u9), PR-mdv38y; PR-u4c2vp was already resolved on master.
-Of the seven pinned defects named above, PR-vt244s, PR-8qsnhx and PR-xwek5e
-remain open and pinned.
+Of the seven pinned defects named above, PR-vt244s, the endpoint-bound-once
+report and PR-xwek5e remain open and pinned.
 
 `test_paths` reads `verifies:` annotations only from `org-node/tests`, so a
 test in a `#[cfg(test)]` module under `src` cannot carry one. Twenty-two such

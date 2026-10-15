@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Value types and the rejection vocabulary (SDD-swtd3w).
 //!
 //! Relocated from the `#[cfg(test)]` modules in `org-node/src/ids.rs` so the

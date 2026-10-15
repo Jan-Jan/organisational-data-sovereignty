@@ -82,6 +82,11 @@ pub enum OrgNodeError {
     #[error("received wire message is malformed")]
     MalformedMessage,
 
+    /// A Wire message whose encoding is over the bound, refused on encode and,
+    /// before decoding, on decode (LLR-sc6zuh, LLR-8kh3zf).
+    #[error("wire message too large: {length} bytes (max {max})", max = crate::wire::MAX_MESSAGE)]
+    MessageTooLarge { length: usize },
+
     /// An Organisation-information message whose Organisation private key's
     /// public half is not the chain's Organisation public key (LLR-j5vbqj,
     /// LLR-ba2ejp, REQ-bwx7eg).
@@ -143,11 +148,6 @@ pub enum OrgNodeError {
     #[error("device secret for organisation {org_id:?} was not supplied")]
     DeviceSecretNotSupplied { org_id: OrgId },
 
-    /// `send_update` to a Device the record does not list and the outcome
-    /// holds no notice for (LLR-n67aw8, LLR-6ymd6d).
-    #[error("no revocation for organisation {org_id:?} is held for this recipient")]
-    NoRevocationForRecipient { org_id: OrgId },
-
     /// An update for a held Organisation, or a revocation, from a Device the
     /// record does not list (LLR-2r2fha, LLR-kzgjz8).
     #[error("message for organisation {org_id:?} from a device its record does not list")]
@@ -157,6 +157,57 @@ pub enum OrgNodeError {
     /// (LLR-5azhry, LLR-3aysup).
     #[error("acknowledgement for organisation {org_id:?} was not sent by the device it names")]
     AcknowledgementNotFromItsDevice { org_id: OrgId },
+
+    /// Sealed store bytes `PersonaStore::unseal` refuses (LLR-bg538c).
+    #[error("persona store refused: {0}")]
+    StoreRefused(StoreRefusal),
+
+    /// A device secret whose Device public key is not the one named, or a
+    /// store whose Persona names another Device (LLR-bg538c).
+    #[error("Device seed does not match the Persona store's DevicePublicKey")]
+    DeviceSecretMismatch,
+
+    /// Two Persona stores with the same Device public key (LLR-rdda86).
+    #[error("two Persona stores hold the same DevicePublicKey")]
+    DuplicatePersonaStore,
+
+    /// An Invite reply whose Organisation is not the one selected
+    /// (LLR-d55brn).
+    #[error("this reply is for another organisation")]
+    ReplyForAnotherOrganisation,
+
+    /// An Invite reply, or a settle, whose (Organisation, invite identifier)
+    /// pair no store holds as outstanding (LLR-d55brn).
+    #[error("this reply names no invite this node has outstanding")]
+    InviteNotOutstanding,
+
+    /// An expected admission to an Organisation another Persona of this node
+    /// holds or already expects (LLR-yexf5m, REQ-uy7kfq). Names the
+    /// Organisation and no Persona.
+    #[error("organisation {org_id:?} is already held or awaited by another persona of this node")]
+    OrganisationHeldByAnotherPersona { org_id: OrgId },
+
+    /// A checked message whose Organisation record changed between
+    /// `check_received` and `commit_checked`: its epoch, root or sequence
+    /// guard moved, or a record appeared or went (LLR-6qjmhf, PR-erskh4).
+    /// Nothing was committed; check the body again.
+    #[error("the record of organisation {org_id:?} changed after the message was checked")]
+    RecordMovedSinceCheck { org_id: OrgId },
+}
+
+/// Why `PersonaStore::unseal` refused the sealed bytes (LLR-bg538c). No
+/// variant carries a byte of the input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
+pub enum StoreRefusal {
+    /// Fewer bytes than a nonce and an authentication tag.
+    #[error("too short to hold a sealed store")]
+    TooShort,
+    /// The ciphertext does not authenticate under the derived key.
+    #[error("the ciphertext does not authenticate")]
+    NotAuthentic,
+    /// The plaintext does not decode as a store.
+    #[error("the plaintext does not decode")]
+    Undecodable,
 }
 
 impl From<org_members::OrgMembersError> for OrgNodeError {

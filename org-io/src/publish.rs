@@ -5,9 +5,17 @@
 //! once it can no longer execute, and reconciling a held Organisation with
 //! the chain (LLR-k5pzsz, LLR-kp95ty). Every other discard is org-node's own,
 //! with each commit (LLR-fptp57, LLR-36zp69); the app discards nothing. The
-//! state is in memory, in one `OrgIo` field (`PublishState`), so stage S4's
-//! move of the handle behind its own lock is one field. org-io deletes
+//! state is in memory, in one `OrgIo` field (`PublishState`). org-io deletes
 //! nothing here itself: every removal is one of org-node's (LLR-cc59ys).
+//!
+//! org-node saves nothing and sends nothing. Each org-node operation here returns its
+//! store change, which org-io writes through its store files before
+//! reporting (`LocalStore::store`); a write that fails reloads the Persona
+//! from its file, so the operation's change is undone in memory and the
+//! result says so. A late commit is sent as its submission would have sent
+//! it — every body org-node built, to every recipient, at the address the
+//! submission was given (`LocalStore::send_committed`). `PublishState` sits
+//! behind its own lock in `OrgIo`, taken after the node's.
 
 use std::collections::HashMap;
 
@@ -18,7 +26,10 @@ use org_node::{CommitOutcome, DevicePublicKey, Epoch, OrgId, OrgNodeError, OrgSt
 use rand_core::{CryptoRng, RngCore};
 
 use crate::chain_read::StateReader;
+use crate::peer_addr::PeerAddr;
+use crate::send::SendReport;
 use crate::view::BuiltUpdate;
+use crate::{LocalStore, StoreFailure};
 
 /// What settling a chain write whose outcome was unknown found
 /// (LLR-t98pk9). Public data only.
@@ -27,8 +38,9 @@ pub enum Settled {
     /// The Organisation has no write whose outcome is unknown; nothing read.
     NoUnknownWrite,
     /// The write executed: its update is committed at `epoch` and was sent
-    /// to the Device its submission named; `sent` is the send's result,
-    /// whose failure does not unwind the commit.
+    /// as its submission would have sent it; `sent` is the send's result,
+    /// whose failure does not unwind the commit; `Err` names each Device
+    /// whose send failed.
     Committed { org_id: OrgId, epoch: Epoch, sent: Result<(), String> },
     /// The chain moved past the record to another root: the reconcile's
     /// result for that state.
@@ -37,7 +49,7 @@ pub enum Settled {
     /// block: the write can no longer execute, and its update is discarded.
     NotExecuted { org_id: OrgId },
     /// The outcome is still unknown: within the write's window, or the chain
-    /// could not be read.
+    /// could not be read, or the store change of the settle was not written.
     StillUnknown { org_id: OrgId, reason: String },
 }
 
@@ -47,12 +59,15 @@ pub enum Settled {
 pub enum Reconciliation {
     InStep { org_id: OrgId, epoch: Epoch },
     /// A held update was committed at `epoch`; `recipients` are the Devices
-    /// it is for.
+    /// it is for, which a late commit's bodies were sent to — not the
+    /// Devices they reached: a failed send is not reported here.
     Committed { org_id: OrgId, epoch: Epoch, recipients: Vec<DevicePublicKey> },
     Behind { org_id: OrgId, chain_epoch: Epoch },
     /// The committed update removed this node; its acknowledgements are kept
     /// in org-io's memory, never returned.
     Removed { org_id: OrgId },
+    /// org-node refused, or its store change was not written and the
+    /// Persona was reloaded from its file.
     Refused { org_id: OrgId, reason: String },
     /// The chain could not be read, or its state was refused at parse: no
     /// org-node operation ran (LLR-kp95ty).
@@ -70,10 +85,11 @@ pub enum Verification {
 }
 
 /// A chain write that timed out, as its submission named it (LLR-2yjuaj).
+/// A submission names no recipient, so the write keeps the address the
+/// submission was given, the one a Loopback send dials.
 struct UnknownWrite {
     update: BuiltUpdate,
-    recipient: DevicePublicKey,
-    peer_addr: Option<iroh::EndpointAddr>,
+    peer_addr: Option<PeerAddr>,
     last_valid_block: u64,
     /// The epoch the write expected the chain at: the contract executes it
     /// only from that epoch (review round 1, finding-3).
@@ -104,13 +120,11 @@ impl PublishState {
     pub(crate) fn record_unknown(
         &mut self,
         update: BuiltUpdate,
-        recipient: DevicePublicKey,
-        peer_addr: Option<iroh::EndpointAddr>,
+        peer_addr: Option<PeerAddr>,
         last_valid_block: u64,
         expected_epoch: Epoch,
     ) {
-        self.unknown_writes
-            .insert(update.org_id, UnknownWrite { update, recipient, peer_addr, last_valid_block, expected_epoch });
+        self.unknown_writes.insert(update.org_id, UnknownWrite { update, peer_addr, last_valid_block, expected_epoch });
     }
 
     /// Whether `update` is the update of its Organisation's unknown write
@@ -134,12 +148,12 @@ impl Settled {
         match self {
             Settled::Committed { epoch, sent: Ok(()), .. } => format!(
                 "an earlier chain write for this Organisation, whose outcome was unknown, executed: it was committed \
-                 at epoch {} and sent to its own recipient; {not_written}",
+                 at epoch {} and sent to its own recipients; {not_written}",
                 epoch.get()
             ),
             Settled::Committed { epoch, sent: Err(error), .. } => format!(
                 "an earlier chain write for this Organisation, whose outcome was unknown, executed: it was committed \
-                 at epoch {}, but its send to its own recipient failed ({error}); {not_written}",
+                 at epoch {}, but its send to its own recipients failed ({error}); {not_written}",
                 epoch.get()
             ),
             Settled::Reconciled(reconciliation) => format!(
@@ -154,13 +168,67 @@ impl Settled {
     }
 }
 
+/// Why org-io's run of org-node's `reconcile` changed nothing.
+enum ReconcileFailed {
+    /// org-node refused.
+    Node(OrgNodeError),
+    /// org-node's change was not written; the Persona was reloaded from its
+    /// file (or dropped), so the change is undone in memory.
+    Store(StoreFailure),
+}
+
+impl ReconcileFailed {
+    fn reason(&self) -> String {
+        match self {
+            Self::Node(error) => error.to_string(),
+            Self::Store(failure) => format!("nothing committed: {failure}"),
+        }
+    }
+}
+
+/// org-node's `reconcile` against `chain_state`, signing with the
+/// keychain's secrets, and its store change written before the result is
+/// returned (LLR-murjr6).
+fn run_reconcile<R: RngCore + CryptoRng + Send>(
+    service: &mut OrgService,
+    local: &LocalStore,
+    rng: &mut R,
+    org_id: OrgId,
+    chain_state: Option<OrgState>,
+) -> Result<Reconciled, ReconcileFailed> {
+    let (reconciled, change) = service
+        .reconcile(rng, org_id, chain_state, |keys| local.device_secrets_for_signing(keys))
+        .map_err(ReconcileFailed::Node)?;
+    if let Some(change) = change {
+        local.store(service, change).map_err(ReconcileFailed::Store)?;
+    }
+    Ok(reconciled)
+}
+
+/// Send every body a late commit carries, as its submission would have,
+/// and say whether every send succeeded.
+async fn send_late_commit(
+    service: &OrgService,
+    local: &LocalStore,
+    outcome: &CommitOutcome,
+    peer_addr: Option<PeerAddr>,
+) -> Result<(), String> {
+    let sender = service.persona_public_keys(&outcome.sender).map(|(_, device)| device).map_err(|error| error.to_string());
+    let report: SendReport = local.send_committed(sender, outcome, peer_addr).await;
+    match report.failure_summary() {
+        None => Ok(()),
+        Some(failed) => Err(failed),
+    }
+}
+
 /// Settle `org_id`'s unknown write (LLR-t98pk9): read the finalised block,
 /// then the state, once each, and decide; every result but `StillUnknown`
 /// clears the write. A record already past the epoch the write expected
 /// settles it as not executed with no read.
 pub(crate) async fn settle_unknown<R: RngCore + CryptoRng + Send>(
     state: &mut PublishState,
-    svc: &mut OrgService,
+    service: &mut OrgService,
+    local: &LocalStore,
     reader: &dyn StateReader,
     rng: &mut R,
     org_id: OrgId,
@@ -171,14 +239,16 @@ pub(crate) async fn settle_unknown<R: RngCore + CryptoRng + Send>(
         return Settled::NoUnknownWrite;
     };
     let still_unknown = |reason: String| Settled::StillUnknown { org_id, reason };
-    // The record moved past the epoch the write expected: the chain is at
-    // least at the record's epoch, so the contract's epoch check can never
-    // pass the write. Had it executed, the record could have moved past it
-    // only by committing it, and every commit of it org-io drives clears the
-    // unknown write. Settled at once, with no read (review round 1,
-    // finding-3).
-    if held_epoch(svc, org_id).is_some_and(|epoch| epoch > expected_epoch) {
-        return not_executed(state, svc, rng, org_id, update);
+    // The record is at the epoch after the one the write expected, with
+    // another update: that update took the epoch the write would have
+    // produced, so the write did not execute and the contract's epoch check
+    // can never pass it. Settled at once, with no read (review round 1,
+    // finding-3). A record further on, or one holding the write's own update,
+    // says nothing about which update took that epoch: the chain is read
+    // (PR-9q5ems).
+    let next_epoch = Epoch::new(expected_epoch.get().saturating_add(1));
+    if held_state(service, org_id).is_some_and(|record| record.epoch == next_epoch && !holds_update(&record, &update)) {
+        return not_executed(state, service, local, rng, org_id, update);
     }
     let finalised = match reader.finalised_block().await {
         Ok(number) => number,
@@ -189,11 +259,12 @@ pub(crate) async fn settle_unknown<R: RngCore + CryptoRng + Send>(
         Ok(None) => return still_unknown(OrgNodeError::OrgNotOnChain.to_string()),
         Err(error) => return still_unknown(format!("reading the chain failed: {error}")),
     };
-    let record_epoch = held_epoch(svc, org_id);
+    let record_epoch = held_epoch(service, org_id);
     let executed = holds_update(&chain_state, &update);
     if !executed {
         match record_epoch {
-            Some(epoch) if chain_state.epoch == epoch => {
+            // The chain and the record still at the epoch the write expected.
+            Some(epoch) if chain_state.epoch == epoch && epoch == expected_epoch => {
                 if finalised <= last_valid_block {
                     return still_unknown(format!(
                         "the chain is still at epoch {} and the write may yet execute until block {last_valid_block} \
@@ -201,7 +272,7 @@ pub(crate) async fn settle_unknown<R: RngCore + CryptoRng + Send>(
                         epoch.get()
                     ));
                 }
-                return not_executed(state, svc, rng, org_id, update);
+                return not_executed(state, service, local, rng, org_id, update);
             }
             Some(epoch) if chain_state.epoch < epoch => {
                 return still_unknown(format!(
@@ -216,29 +287,46 @@ pub(crate) async fn settle_unknown<R: RngCore + CryptoRng + Send>(
     let Some(unknown) = state.unknown_writes.remove(&org_id) else {
         return Settled::NoUnknownWrite;
     };
-    match svc.reconcile(rng, org_id, Some(chain_state)) {
+    match run_reconcile(service, local, rng, org_id, Some(chain_state)) {
         Ok(Reconciled::Committed { outcome, .. }) if executed => {
-            let sent = svc.send_update(&outcome, unknown.recipient, unknown.peer_addr).await.map_err(|error| error.to_string());
+            let sent = send_late_commit(service, local, &outcome, unknown.peer_addr).await;
             Settled::Committed { org_id, epoch: outcome.epoch, sent }
         }
-        reconciled => Settled::Reconciled(reconciliation(state, svc, org_id, reconciled)),
+        // The executed write's commit was not stored, and the Persona was
+        // reloaded from its file: the write is kept, to be settled again.
+        Err(ReconcileFailed::Store(failure)) if executed => {
+            let reason = format!("the write executed, but committing it was not stored: {failure}");
+            state.unknown_writes.insert(org_id, unknown);
+            still_unknown(reason)
+        }
+        reconciled => Settled::Reconciled(reconciliation(state, service, org_id, reconciled)),
     }
 }
 
 /// The unknown write of `org_id`, for `update`, can no longer execute:
 /// discard its update, with the private key it holds — never before (owner
 /// ruling D3) — and clear the write. An update org-node no longer holds (a
-/// commit dropped it) is already gone. A discard that cannot save the store
-/// keeps the write, to be tried again.
+/// commit dropped it) is already gone. A discard whose store change cannot
+/// be written keeps the write, to be tried again (the Persona is reloaded
+/// from its file, so the update is held again in memory as on disk).
 fn not_executed<R: RngCore + CryptoRng + Send>(
     state: &mut PublishState,
-    svc: &mut OrgService,
+    service: &mut OrgService,
+    local: &LocalStore,
     rng: &mut R,
     org_id: OrgId,
     update: BuiltUpdate,
 ) -> Settled {
-    match svc.discard_provisional(rng, ProvisionalTarget::Org(org_id), update.resulting_root, update.org_pub_key) {
-        Ok(()) | Err(OrgNodeError::NoProvisionalUpdate) => {}
+    match service.discard_provisional(rng, ProvisionalTarget::Org(org_id), update.resulting_root, update.org_pub_key) {
+        Ok(write) => {
+            if let Err(failure) = local.write(service, write) {
+                return Settled::StillUnknown {
+                    org_id,
+                    reason: format!("discarding the update not executed failed: {failure}"),
+                };
+            }
+        }
+        Err(OrgNodeError::NoProvisionalUpdate) => {}
         Err(error) => {
             return Settled::StillUnknown { org_id, reason: format!("discarding the update not executed failed: {error}") }
         }
@@ -252,11 +340,14 @@ fn not_executed<R: RngCore + CryptoRng + Send>(
 /// and runs no org-node operation; any state read records `Verified`
 /// (LLR-kp95ty). Sends nothing, except a write whose outcome was unknown:
 /// when the state read holds that write's update, the write is settled —
-/// cleared, and its update, when this reconcile commits it, sent to the
-/// Device its submission named (review round 1, finding-1).
+/// cleared, and its update, when this reconcile commits it, sent as its
+/// submission would have sent it. When the
+/// commit's store change is not written, the Persona is reloaded from its
+/// file and the write is kept, to be settled again — the send is not lost.
 pub(crate) async fn reconcile<R: RngCore + CryptoRng + Send>(
     state: &mut PublishState,
-    svc: &mut OrgService,
+    service: &mut OrgService,
+    local: &LocalStore,
     reader: &dyn StateReader,
     rng: &mut R,
     org_id: OrgId,
@@ -271,32 +362,45 @@ pub(crate) async fn reconcile<R: RngCore + CryptoRng + Send>(
     };
     state.verifications.insert(org_id, Verification::Verified);
     // The unknown write the state shows executed: its outcome is known, so it
-    // is cleared whatever org-node decides.
+    // is cleared whatever org-node decides — unless the decision's store
+    // change is not written (below).
     let executed_write = match (&chain_state, state.unknown_writes.get(&org_id)) {
         (Some(chain_state), Some(unknown)) if holds_update(chain_state, &unknown.update) => state.unknown_writes.remove(&org_id),
         _ => None,
     };
-    let reconciled = svc.reconcile(rng, org_id, chain_state);
-    if let (Some(unknown), Ok(Reconciled::Committed { outcome, .. })) = (executed_write, &reconciled) {
-        // The send's failure does not unwind the commit; its recipient is
-        // among the result's `recipients`.
-        let _ = svc.send_update(outcome, unknown.recipient, unknown.peer_addr).await;
+    let reconciled = run_reconcile(service, local, rng, org_id, chain_state);
+    match (executed_write, &reconciled) {
+        (Some(unknown), Ok(Reconciled::Committed { outcome, .. })) => {
+            // The send's failure does not unwind the commit; its recipients
+            // are the result's `recipients`. `Reconciliation` has no field for
+            // the per-Device failures yet: they reach the caller with S3b-io
+            // part 2's per-Device `SendReport` (PR-b8kmk2). Until then the
+            // failures are held here and dropped; nothing is retried, and
+            // `settle_unknown` (which has the field) returns them.
+            let _send_failures_until_part_2: Result<(), String> =
+                send_late_commit(service, local, outcome, unknown.peer_addr).await;
+        }
+        (Some(unknown), Err(ReconcileFailed::Store(_))) => {
+            state.unknown_writes.insert(org_id, unknown);
+        }
+        _ => {}
     }
-    reconciliation(state, svc, org_id, reconciled)
+    reconciliation(state, service, org_id, reconciled)
 }
 
 /// `reconcile` for every Organisation the store holds, in store order
 /// (LLR-k5pzsz).
 pub(crate) async fn reconcile_held<R: RngCore + CryptoRng + Send>(
     state: &mut PublishState,
-    svc: &mut OrgService,
+    service: &mut OrgService,
+    local: &LocalStore,
     reader: &dyn StateReader,
     rng: &mut R,
 ) -> Vec<Reconciliation> {
-    let held: Vec<OrgId> = svc.list_orgs().iter().map(|record| record.org_id).collect();
+    let held: Vec<OrgId> = service.list_orgs().iter().map(|record| record.org_id).collect();
     let mut results = Vec::with_capacity(held.len());
     for org_id in held {
-        results.push(reconcile(state, svc, reader, rng, org_id).await);
+        results.push(reconcile(state, service, local, reader, rng, org_id).await);
     }
     results
 }
@@ -305,45 +409,46 @@ pub(crate) async fn reconcile_held<R: RngCore + CryptoRng + Send>(
 /// data only; a removal's acknowledgements stay in `state`.
 fn reconciliation(
     state: &mut PublishState,
-    svc: &OrgService,
+    service: &OrgService,
     org_id: OrgId,
-    reconciled: Result<Reconciled, OrgNodeError>,
+    reconciled: Result<Reconciled, ReconcileFailed>,
 ) -> Reconciliation {
     match reconciled {
-        Ok(Reconciled::InStep) => match held_epoch(svc, org_id) {
+        Ok(Reconciled::InStep) => match held_epoch(service, org_id) {
             Some(epoch) => Reconciliation::InStep { org_id, epoch },
             None => Reconciliation::Refused { org_id, reason: OrgNodeError::OrgNotHeld { org_id }.to_string() },
         },
         Ok(Reconciled::Committed { outcome, .. }) => {
-            Reconciliation::Committed { org_id, epoch: outcome.epoch, recipients: recipients(svc, &outcome) }
+            Reconciliation::Committed { org_id, epoch: outcome.epoch, recipients: recipients(&outcome) }
         }
         Ok(Reconciled::Behind { chain_epoch }) => Reconciliation::Behind { org_id, chain_epoch },
         Ok(Reconciled::Removed { acknowledgements, .. }) => {
             state.acknowledgements.extend(acknowledgements);
             Reconciliation::Removed { org_id }
         }
-        Err(error) => Reconciliation::Refused { org_id, reason: error.to_string() },
+        Err(failed) => Reconciliation::Refused { org_id, reason: failed.reason() },
     }
 }
 
 /// The epoch of `org_id`'s committed record; `None` when it is not held.
-fn held_epoch(svc: &OrgService, org_id: OrgId) -> Option<Epoch> {
-    svc.list_orgs().iter().find(|record| record.org_id == org_id).map(|record| record.epoch)
+fn held_epoch(service: &OrgService, org_id: OrgId) -> Option<Epoch> {
+    held_state(service, org_id).map(|record| record.epoch)
 }
 
-/// The Devices a committed update is for: every Device the committed record
-/// lists other than this node's own, then each Device its notices name.
-fn recipients(svc: &OrgService, outcome: &CommitOutcome) -> Vec<DevicePublicKey> {
-    let own: Vec<DevicePublicKey> = svc
-        .list_personas()
-        .iter()
-        .filter_map(|persona| svc.persona_public_keys(&persona.persona_id).ok().map(|(_, device)| device))
-        .collect();
-    let listed = svc
-        .list_orgs()
-        .iter()
-        .filter(|record| record.org_id == outcome.org_id)
-        .flat_map(|record| record.trie_members.iter().flat_map(|member| member.device_keys.iter().copied()))
-        .filter(|device| !own.contains(device));
-    listed.chain(outcome.revocations.iter().map(|notice| notice.device)).collect()
+/// The root, Organisation public key and epoch of `org_id`'s committed
+/// record; `None` when it is not held.
+fn held_state(service: &OrgService, org_id: OrgId) -> Option<OrgState> {
+    service.list_orgs().iter().find(|record| record.org_id == org_id).map(|record| OrgState {
+        root_hash: record.root_hash,
+        org_pub_key: record.org_pub_key,
+        epoch: record.epoch,
+    })
+}
+
+/// The Devices a committed update is for. org-node builds one body per
+/// recipient inside the commit, so they are the recipients of `outgoing`, in the order it built them:
+/// every Device the committed record lists other than the sender's, then
+/// each Device a revocation notice names.
+fn recipients(outcome: &CommitOutcome) -> Vec<DevicePublicKey> {
+    outcome.outgoing.iter().map(|message| message.recipient).collect()
 }

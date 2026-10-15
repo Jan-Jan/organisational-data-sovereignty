@@ -41,9 +41,7 @@ fn connect_refuses_a_co_signer_equal_to_the_own_account() {
     let dir = std::env::temp_dir().join(format!("org-io-own-co-signer-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let service = org_io::node::service::OrgService::new(
-        org_io::node::store::PersonaStore::open(dir.join("store.bin"), "pw").unwrap(),
-    );
+    let service = org_node::service::OrgService::new(Vec::new()).unwrap();
     let settings = org_io::ChainSettings {
         ws_url: "ws://127.0.0.1:1".into(),
         contract_h160: [0u8; 20],

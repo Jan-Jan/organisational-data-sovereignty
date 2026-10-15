@@ -129,10 +129,30 @@ test_paths:
 # 2026-10-08, T9 of docs/plans/2026-10-06-org-io-create.md (the app depends
 # on org-io alone): submit_flow 5 -> 2 — the five submission tests moved to
 # org-io's own submit_flow with the code (REQ-nfr3n2 is org-io's since then);
-# the two recipient tests (LLR-q225ws) stay. Measured at T9:
+# the two recipient tests (the one-send-per-command item's) stay. Measured at T9:
 #   startup_policy 13 + connection_status 10 + org_id_parsing 14
 #   + receiver_events 35 + receiver_guard 6 + ipc 33 + csp_policy 24
 #   + state_assembly 3 + submit_flow 2 + invitation 17 = 157 tests.
+# 2026-10-13, S4 task T12 of docs/plans/2026-10-06-org-io-transport.md: the
+# submit_flow target leaves (its two recipient tests moved to org-io's
+# submit_flow; their item is retired, superseded by org-io's fan-out), and
+# ipc loses its seven peer-address cases to org-io's peer_addr (the parse
+# moved there). Not re-counted: the app does not compile until S4 task T15.
+# 2026-10-14, S4 task T13 of the same plan: the invitation target leaves (its
+# fourteen exchange tests moved to org-io's invitation_exchange with the
+# exchange; its three Blob-parse tests had left for org-node in T6). Not
+# re-counted, as above.
+# 2026-10-14, S4 task T15 of the same plan: the app compiles against
+# org-io's current API again. state_assembly 3 -> 1 (two tests moved to
+# org-io in T9; the passphrase-refusal test deleted with the behaviour,
+# org-io takes no passphrase), receiver_events 35 -> 37, ipc 28 (the
+# invitation commands' tests rewritten onto org-io's exchange, the manifest
+# scan and the admission's IPC test added). Measured:
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 37 + receiver_guard 6 + ipc 28 + csp_policy 24
+#   + state_assembly 1 = 133 tests; vitest 45.
+# The S3b-io part 1 change (master, merged into S4 2026-10-14) counted on its
+# own branch, before S4's T12-T15:
 # 2026-10-13, T15b of docs/plans/2026-10-08-org-io-publish.md: a new target,
 # reconcile (3: the reconcile command's body over org-io's FakeChain and its
 # IPC shapes); ipc 33 -> 39 (reconcile, list_orgs' verification, the two
@@ -151,6 +171,19 @@ test_paths:
 #   = 164 tests; vitest 50.
 # 2026-10-13, review round 1 fixes (finding-6): vitest 50 -> 51, a test of
 # the Organisation list's reconcile button (tests/reconcile.view.test.ts).
+# 2026-10-14, merge of S3b-io part 1 into S4 (worktree-org-io-transport):
+# the reconcile target joins S4's line; submit_flow and invitation stay gone
+# (S4 tasks T12, T13). Measured after the merge:
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 37 + receiver_guard 6 + ipc 31 + csp_policy 24
+#   + state_assembly 1 + reconcile 3 = 139 tests; vitest 52.
+# 2026-10-15, S4 owner ruling of that day: state_assembly's last test
+# (init_opens_the_store_once_even_when_the_connect_is_refused) deleted, no
+# app item stating it; the target leaves Cargo.toml and the line above. The
+# other counts are as S4's earlier tasks left them. Measured:
+#   startup_policy 9 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 41 + receiver_guard 10 + ipc 38 + csp_policy 24
+#   + reconcile 3 = 149 tests.
 #
 # `npm run check` is `svelte-kit sync && svelte-check`; it type-checks app/src
 # AND app/tests (measured 2026-09-14 — the generated .svelte-kit/tsconfig.json
@@ -166,7 +199,7 @@ test_paths:
 # machine must run `npm --prefix app ci` first. A fresh worktree does not have
 # it.
 verify_commands:
-  - cargo test --manifest-path app/src-tauri/Cargo.toml --features test-support --test startup_policy --test connection_status --test org_id_parsing --test receiver_events --test receiver_guard --test ipc --test csp_policy --test state_assembly --test submit_flow --test invitation --test reconcile
+  - cargo test --manifest-path app/src-tauri/Cargo.toml --features test-support --test startup_policy --test connection_status --test org_id_parsing --test receiver_events --test receiver_guard --test ipc --test csp_policy --test reconcile
   - npm --prefix app run check
   - npm --prefix app run test
 

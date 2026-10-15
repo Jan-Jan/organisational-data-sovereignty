@@ -10,12 +10,16 @@ Same rule as org-members; why: `../docs/adr/2026-10-04-parse-at-the-system-edge.
 
 - **Plain types (`&str`, `String`, `[u8; 32]`) only where data enters the
   system**, parsed there, once. org-node's edges: app/Tauri command inputs,
-  persona-store decoding (`store.rs`), transport frames
-  (`transport/wire.rs`), and the chain state org-io hands in
+  persona-store decoding (`store.rs`), the Wire message body org-io hands in
+  (`wire.rs`; org-node has no transport since S4 task T14, 2026-10-14 — it is
+  sans-IO: no endpoint, no file, no async, no keychain), and the chain state org-io hands in
   (`OrgState::from_chain` in `chain.rs`; org-io reads the chain and calls it,
   org-node reads no chain — ruling B, 2026-10-08, change
-  `worktree-org-io-create`, which deleted `chain_read.rs`). The invitation
-  Blobs are the app's edge (`app/src-tauri/src/invitation.rs`), not org-node's.
+  `worktree-org-io-create`, which deleted `chain_read.rs`), and the
+  invitation Blobs (`Invite::parse`, `InviteReply::parse` in
+  `invitation.rs`; they returned from the app in S4 task T6, 2026-10-13).
+  The edges are, in short: Wire message decode (`wire.rs`), unseal
+  (`store.rs`) and Blob parse (`invitation.rs`).
   Everywhere else -- every signature, struct field and return -- uses the
   newtype.
 - **Reuse org-members' types** (`Handle`, `MemberId`, `RootHash`, and
@@ -51,7 +55,8 @@ buffer:
 `keys.rs` 2 (`X25519Keypair`'s secret and its `public_bytes`),
 `chain.rs` 1 (`OrgState::from_chain`, the chain-read edge),
 `test_fixtures.rs` 2 (fixture device seeds, test support only),
-`bin/preflight.rs` 1 (env parsing). Don't add new ones outside an edge.
+`bin/preflight.rs` 1 (env parsing; the binary left with the transport
+check, S4 task T14, 2026-10-14). Don't add new ones outside an edge.
 
 ```rust
 // Edge: a decoded store record is parsed once, each field named on refusal...

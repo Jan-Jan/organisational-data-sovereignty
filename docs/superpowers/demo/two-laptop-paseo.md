@@ -77,7 +77,6 @@ Expected: every line `PASS` and a zero exit code. Interpreting failures:
 ```bash
 cd app
 ODS_DATA_DIR=~/.ods \
-ODS_PASSPHRASE=<choose-A> \
 ODS_CHAIN_WS=wss://asset-hub-paseo-rpc.dwellir.com \
 ODS_CONTRACT_H160=$CONTRACT \
 ODS_ADMIN_SEED=<A funded account: 64-hex seed> \
@@ -89,7 +88,6 @@ npm run tauri dev
 ```bash
 cd app
 ODS_DATA_DIR=~/.ods \
-ODS_PASSPHRASE=<choose-B> \
 ODS_CHAIN_WS=wss://asset-hub-paseo-rpc.dwellir.com \
 ODS_CONTRACT_H160=$CONTRACT \
 ODS_ADMIN_SEED=<any 64-hex; B never submits> \
@@ -98,6 +96,13 @@ npm run tauri dev
 
 > `StatusBar` should show the chain endpoint + epoch once each app connects.
 > Both apps reach the n0 relay automatically (Networked mode) — no extra config.
+
+> *2026-10-14 (change `worktree-org-io-transport`, task T18):* the
+> `ODS_PASSPHRASE=<choose-A>` and `ODS_PASSPHRASE=<choose-B>` lines were
+> removed from both commands. The app reads no passphrase since that change:
+> each Persona's store is sealed under its own OS keychain item, so the
+> variable is ignored. The **S9** limitation below (a passphrase-encrypted
+> file store) no longer describes the app for the same reason.
 
 ## 3. Walk the five stories
 

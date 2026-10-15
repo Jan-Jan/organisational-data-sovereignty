@@ -5,29 +5,52 @@
 //! snapshot holding a value its type's parse refuses is refused whole, naming
 //! the field (LLR-8bum44). Both requirements sit under SDD-af5vnt. (The Join
 //! request and the Invite left org-node in T7 of the chain-authority change.)
-
-use std::path::PathBuf;
+//!
+//! *Adapted 2026-10-08 (S4, task T3):* a store is one Persona's, sealed under
+//! a key derived from its device secret and handed out as bytes; "a store
+//! file" below is those sealed bytes, opened with `PersonaStore::unseal`.
+//! Annotations unchanged.
 
 use org_members::{Handle, MemberId, Name, RootHash, Surname};
 use org_node::service::first_admission_base;
 use org_node::ids::OrgId;
 use org_node::store::{
-    self, ExpectedAdmission, MemberSnapshot, OrgRecord, PersonaDetails, PersonaRecord, PersonaStatus, PersonaStore,
-    ProvisionalChange, StoreData,
+    ExpectedAdmission, MemberSnapshot, OrgRecord, PersonaDetails, PersonaRecord, PersonaStatus, PersonaStore,
+    ProvisionalChange, SealedStore, StoreData, StoreWrite,
 };
-use org_node::test_fixtures::{device_key, member_key};
+use org_node::test_fixtures::{device_key, device_secret, member_key, seal_plaintext_for_test};
 use org_node::{
-    ChainAccount, DeviceSeed, Epoch, MemberSeed, OrgNodeError, OrgPrivateKey, OrgPublicKey, OrgService,
+    ChainAccount, DeviceSecret, Epoch, MemberSeed, OrgNodeError, OrgPrivateKey, OrgPublicKey, OrgService,
     PersonaId, SequenceNumber,
 };
 use rand::rngs::OsRng;
+use zeroize::Zeroizing;
 
-fn tmp_path(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("ods-persona-records-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join(format!("{name}.bin"));
-    let _ = std::fs::remove_file(&path);
-    path
+/// The device seed byte of the Persona every store in this file holds.
+const DEVICE: u8 = 0x12;
+
+/// `plaintext`, sealed as the store of the Persona whose device seed is
+/// `[DEVICE; 32]`.
+fn seal(plaintext: &[u8]) -> SealedStore {
+    seal_plaintext_for_test(&device_secret([DEVICE; 32]), device_key(DEVICE), plaintext, &mut OsRng)
+}
+
+/// Open `sealed` as that Persona's store.
+fn open(sealed: &SealedStore) -> Result<PersonaStore, OrgNodeError> {
+    PersonaStore::unseal(sealed, device_key(DEVICE), device_secret([DEVICE; 32]))
+}
+
+/// A service with one new Persona, the write that created its store and its
+/// secret's bytes.
+fn reopen(write: &StoreWrite, kept: &DeviceSecret) -> PersonaStore {
+    let mut seed = Zeroizing::new(vec![]);
+    kept.lend_to_keychain(|bytes| {
+        seed.extend_from_slice(bytes);
+        Ok::<(), std::convert::Infallible>(())
+    })
+    .unwrap();
+    let secret = DeviceSecret::from_keychain_bytes(seed).unwrap();
+    PersonaStore::unseal(&write.sealed, write.device_key, secret).unwrap()
 }
 
 /// Adapted at the merge of master `1feb608` into worktree-person-shared-types,
@@ -49,7 +72,7 @@ fn persona(handle: &str) -> PersonaRecord {
         name: Name::parse("Alice").unwrap(),
         surname: Surname::parse("Smith").unwrap(),
         member_seed: MemberSeed::from([0x11; 32]),
-        device_seed: DeviceSeed::from([0x12; 32]),
+        device_key: device_key(DEVICE),
         member_id: None,
         status: PersonaStatus::Proposed,
     })
@@ -85,21 +108,18 @@ fn replace_once(bytes: &mut [u8], from: &[u8], to: &[u8]) {
     bytes[at[0]..at[0] + to.len()].copy_from_slice(to);
 }
 
-/// A store file holding `data` with `from` replaced by `to` in its plaintext.
-fn sealed_store(name: &str, data: &StoreData, from: &[u8], to: &[u8]) -> PathBuf {
-    let path = tmp_path(name);
+/// A sealed store holding `data` with `from` replaced by `to` in its plaintext.
+fn sealed_store(data: &StoreData, from: &[u8], to: &[u8]) -> SealedStore {
     let mut plaintext = postcard::to_allocvec(data).unwrap();
     replace_once(&mut plaintext, from, to);
-    store::seal_for_test(&path, "pw", &plaintext, &mut OsRng).unwrap();
-    path
+    seal(&plaintext)
 }
 
 /// verifies: LLR-g76zqd
 #[test]
 fn create_persona_holds_the_parsed_details_across_a_reopen() {
-    let path = tmp_path("create");
-    let mut svc = OrgService::new(PersonaStore::open(path.clone(), "pw").unwrap());
-    let pid = svc
+    let mut svc = OrgService::new(vec![]).unwrap();
+    let (pid, secret, write) = svc
         .create_persona(
             &mut OsRng,
             Handle::parse("jose\u{0301}").unwrap(),
@@ -107,8 +127,8 @@ fn create_persona_holds_the_parsed_details_across_a_reopen() {
             Surname::parse("Smith").unwrap(),
         )
         .unwrap();
-    let reopened = PersonaStore::open(path, "pw").unwrap();
-    let p = &reopened.data().personas[0];
+    let reopened = reopen(&write, &secret);
+    let p = &reopened.data().persona;
     assert_eq!(p.persona_id, pid);
     assert_eq!(p.handle.as_str(), "jos\u{e9}", "stored in the NFC form Handle::parse produces");
     assert_eq!(p.name.as_str(), "Jos\u{e9}");
@@ -123,7 +143,7 @@ fn create_persona_holds_the_parsed_details_across_a_reopen() {
         svc.persona_public_keys(&pid).unwrap(),
         (
             held.member_seed_for_test().x25519_keypair().member_key().unwrap(),
-            held.device_seed_for_test().signing_keypair().device_key().unwrap()
+            secret.device_key()
         )
     );
 }
@@ -142,14 +162,13 @@ fn a_persona_record_decoded_directly_refuses_an_invalid_handle() {
 /// verifies: LLR-q6n25z
 #[test]
 fn persona_details_parse_into_their_types_and_create_a_persona() {
-    let path = tmp_path("details-create");
-    let mut svc = OrgService::new(PersonaStore::open(path, "pw").unwrap());
+    let mut svc = OrgService::new(vec![]).unwrap();
     let details = PersonaDetails::parse("jose\u{0301}", "Jose\u{0301}", "Smith").unwrap();
     assert_eq!(details.handle.as_str(), "jos\u{e9}");
     assert_eq!(details.name.as_str(), "Jos\u{e9}");
     assert_eq!(details.surname.as_str(), "Smith");
     let PersonaDetails { handle, name, surname } = details;
-    svc.create_persona(&mut OsRng, handle, name, surname).unwrap();
+    let _created = svc.create_persona(&mut OsRng, handle, name, surname).unwrap();
     assert_eq!(svc.list_personas()[0].handle.as_str(), "jos\u{e9}");
 }
 
@@ -174,16 +193,15 @@ fn persona_details_refuse_each_invalid_field_naming_it() {
 /// verifies: LLR-q6n25z
 #[test]
 fn non_nfc_persona_details_are_stored_in_nfc() {
-    let path = tmp_path("details-nfc");
-    let mut svc = OrgService::new(PersonaStore::open(path.clone(), "pw").unwrap());
+    let mut svc = OrgService::new(vec![]).unwrap();
     let PersonaDetails { handle, name, surname } =
         PersonaDetails::parse("jose\u{0301}", "Jose\u{0301}", "Nun\u{0303}ez").unwrap();
-    svc.create_persona(&mut OsRng, handle, name, surname).unwrap();
+    let (_, secret, write) = svc.create_persona(&mut OsRng, handle, name, surname).unwrap();
     let nfc = ("jos\u{e9}", "Jos\u{e9}", "Nu\u{f1}ez");
     let held = &svc.list_personas()[0];
     assert_eq!((held.handle.as_str(), held.name.as_str(), held.surname.as_str()), nfc, "held in NFC");
-    let reopened = PersonaStore::open(path, "pw").unwrap();
-    let p = &reopened.data().personas[0];
+    let reopened = reopen(&write, &secret);
+    let p = &reopened.data().persona;
     assert_eq!((p.handle.as_str(), p.name.as_str(), p.surname.as_str()), nfc, "stored in NFC");
 }
 
@@ -206,14 +224,14 @@ fn persona_details_with_two_invalid_fields_report_the_first() {
 #[test]
 fn a_store_of_valid_records_opens_with_every_field_parsed() {
     let data = StoreData {
-        personas: vec![persona("alice")],
+        persona: persona("alice"),
         orgs: vec![org_with_member()],
         provisional_updates: vec![],
         expected_admissions: vec![],
+        outstanding_invites: vec![],
     };
-    let path = sealed_store("valid", &data, b"alice", b"alice");
-    let opened = PersonaStore::open(path, "pw").unwrap();
-    assert_eq!(opened.data().personas[0].handle.as_str(), "alice");
+    let opened = open(&sealed_store(&data, b"alice", b"alice")).unwrap();
+    assert_eq!(opened.data().persona.handle.as_str(), "alice");
     assert_eq!(opened.data().orgs[0].trie_members[0].member_key, member_key(0x21));
 }
 
@@ -223,10 +241,12 @@ fn a_store_of_valid_records_opens_with_every_field_parsed() {
 /// encoded).
 #[derive(serde::Serialize)]
 struct WireStore {
-    personas: Vec<WirePersona>,
+    persona: WirePersona,
     orgs: Vec<WireOrg>,
     provisional_updates: Vec<WireProvisional>,
     expected_admissions: Vec<[u8; 20]>,
+    // S4, task T6: the store ends with its outstanding Invites.
+    outstanding_invites: Vec<([u8; 20], [u8; 32])>,
 }
 
 #[derive(serde::Serialize)]
@@ -237,7 +257,7 @@ struct WirePersona {
     name: String,
     surname: String,
     member_seed: MemberSeed,
-    device_seed: DeviceSeed,
+    device_key: [u8; 32],
     member_id: Option<MemberId>,
     status: PersonaStatus,
 }
@@ -297,17 +317,17 @@ fn wire_bob() -> WireMember {
 /// A store in which every fallible field is valid and every key distinct.
 fn wire_store() -> WireStore {
     WireStore {
-        personas: vec![WirePersona {
+        persona: WirePersona {
             persona_id: PersonaId::new("p1".to_string()),
             org_id: None,
             handle: "alice".into(),
             name: "Alice".into(),
             surname: "Smith".into(),
             member_seed: MemberSeed::from([0x11; 32]),
-            device_seed: DeviceSeed::from([0x12; 32]),
+            device_key: *device_key(DEVICE).as_bytes(),
             member_id: None,
             status: PersonaStatus::Proposed,
-        }],
+        },
         orgs: vec![WireOrg {
             org_id: OrgId::new([5u8; 20]),
             root_hash: RootHash::new([0x11u8; 32]),
@@ -329,13 +349,12 @@ fn wire_store() -> WireStore {
             change: WireChange::Genesis { members: vec![wire_bob()], org_private_key: [0x88; 32] },
         }],
         expected_admissions: vec![[0x77; 20]],
+        outstanding_invites: vec![],
     }
 }
 
-fn sealed_wire_store(name: &str, store: &WireStore) -> PathBuf {
-    let path = tmp_path(name);
-    store::seal_for_test(&path, "pw", &postcard::to_allocvec(store).unwrap(), &mut OsRng).unwrap();
-    path
+fn sealed_wire_store(store: &WireStore) -> SealedStore {
+    seal(&postcard::to_allocvec(store).unwrap())
 }
 
 fn too_long() -> String {
@@ -347,9 +366,9 @@ fn too_long() -> String {
 /// verifies: LLR-8bum44
 #[test]
 fn a_store_with_every_record_kind_opens_with_every_field_parsed() {
-    let opened = PersonaStore::open(sealed_wire_store("every-kind", &wire_store()), "pw").unwrap();
+    let opened = open(&sealed_wire_store(&wire_store())).unwrap();
     let d = opened.data();
-    assert_eq!((d.personas[0].handle.as_str(), d.personas[0].name.as_str(), d.personas[0].surname.as_str()), ("alice", "Alice", "Smith"));
+    assert_eq!((d.persona.handle.as_str(), d.persona.name.as_str(), d.persona.surname.as_str()), ("alice", "Alice", "Smith"));
     assert_eq!(d.orgs[0].org_pub_key, OrgPublicKey::parse(member_key(0x32).as_bytes()).unwrap());
     let m = &d.orgs[0].trie_members[0];
     assert_eq!((m.handle.as_str(), m.name.as_str(), m.surname.as_str()), ("bob", "Bob", "Jones"));
@@ -372,26 +391,24 @@ fn a_store_with_every_record_kind_opens_with_every_field_parsed() {
 #[test]
 fn a_record_carries_its_organisation_private_key_and_a_store_without_one_is_refused() {
     let data = StoreData {
-        personas: vec![],
+        persona: persona("alice"),
         orgs: vec![org_with_member()],
         provisional_updates: vec![],
         expected_admissions: vec![],
+        outstanding_invites: vec![],
     };
     let plaintext = postcard::to_allocvec(&data).unwrap();
     let key = org_with_member().org_private_key_for_test().clone();
     // The key is the record's 32 bytes before its `kept_change_set: None`
     // (`00`, LLR-d9778a; offsets shifted by one on 2026-10-07, S3 T2) and the
-    // two empty lists.
-    assert_eq!(&plaintext[plaintext.len() - 35..plaintext.len() - 3], key.expose_secret(), "no option tag");
-    let path = tmp_path("with-key");
-    store::seal_for_test(&path, "pw", &plaintext, &mut OsRng).unwrap();
-    assert_eq!(PersonaStore::open(path, "pw").unwrap().data().orgs[0].org_private_key_for_test(), &key);
+    // two empty lists. *2026-10-13 (S4, task T6):* three empty lists — the
+    // store ends with `outstanding_invites` — so every offset shifts by one.
+    assert_eq!(&plaintext[plaintext.len() - 36..plaintext.len() - 4], key.expose_secret(), "no option tag");
+    assert_eq!(open(&seal(&plaintext)).unwrap().data().orgs[0].org_private_key_for_test(), &key);
 
-    let mut legacy = plaintext[..plaintext.len() - 35].to_vec();
-    legacy.extend_from_slice(&[0x00, 0x00, 0x00]); // `org_private_key: None`, then the two empty lists
-    let path = tmp_path("without-key");
-    store::seal_for_test(&path, "pw", &legacy, &mut OsRng).unwrap();
-    assert!(PersonaStore::open(path, "pw").is_err(), "a record without the key is not read");
+    let mut legacy = plaintext[..plaintext.len() - 36].to_vec();
+    legacy.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // `org_private_key: None`, then the three empty lists
+    assert!(open(&seal(&legacy)).is_err(), "a record without the key is not read");
 }
 
 /// Every field the store-open refusal names (design ledger, "Observable
@@ -401,9 +418,9 @@ fn a_record_carries_its_organisation_private_key_and_a_store_without_one_is_refu
 fn a_store_with_any_one_field_invalid_is_refused_naming_exactly_that_field() {
     type Spoil = fn(&mut WireStore);
     let cases: [(&str, Spoil); 9] = [
-        ("persona.handle", |s| s.personas[0].handle = "Alice".into()),
-        ("persona.name", |s| s.personas[0].name = too_long()),
-        ("persona.surname", |s| s.personas[0].surname = too_long()),
+        ("persona.handle", |s| s.persona.handle = "Alice".into()),
+        ("persona.name", |s| s.persona.name = too_long()),
+        ("persona.surname", |s| s.persona.surname = too_long()),
         ("org.org_pub_key", |s| s.orgs[0].org_pub_key = off_curve_key()),
         ("member.handle", |s| s.orgs[0].trie_members[0].handle = "Bob".into()),
         ("member.name", |s| s.orgs[0].trie_members[0].name = too_long()),
@@ -414,12 +431,12 @@ fn a_store_with_any_one_field_invalid_is_refused_naming_exactly_that_field() {
     for (field, spoil) in cases {
         let mut wire = wire_store();
         spoil(&mut wire);
-        let path = sealed_wire_store(field, &wire);
-        let before = std::fs::read(&path).unwrap();
-        let err = PersonaStore::open(path.clone(), "pw").err().unwrap_or_else(|| panic!("{field}: must be refused"));
+        let sealed = sealed_wire_store(&wire);
+        let before = sealed.as_bytes().to_vec();
+        let err = open(&sealed).err().unwrap_or_else(|| panic!("{field}: must be refused"));
         assert!(matches!(&err, OrgNodeError::InvalidField { field: f, .. } if *f == field), "{field}: got {err:?}");
         assert!(err.to_string().contains(field), "the message names the field: {err}");
-        assert_eq!(std::fs::read(&path).unwrap(), before, "{field}: a refused store is left as it was");
+        assert_eq!(sealed.as_bytes(), before, "{field}: a refused store is left as it was");
     }
 }
 
@@ -432,7 +449,7 @@ fn a_store_with_two_invalid_fields_in_one_record_reports_the_first_in_record_ord
     let mut wire = wire_store();
     wire.orgs[0].org_pub_key = off_curve_key();
     wire.orgs[0].trie_members[0].member_key = off_curve_key();
-    let err = PersonaStore::open(sealed_wire_store("two-invalid", &wire), "pw").err().expect("must be refused");
+    let err = open(&sealed_wire_store(&wire)).err().expect("must be refused");
     assert!(matches!(&err, OrgNodeError::InvalidField { field: "org.org_pub_key", .. }), "got {err:?}");
 }
 
@@ -450,8 +467,7 @@ fn a_store_with_an_invalid_provisional_update_is_refused_naming_the_field() {
     ] {
         let mut wire = wire_store();
         corrupt(&mut wire);
-        let path = sealed_wire_store(&format!("bad-provisional-{field}"), &wire);
-        let err = PersonaStore::open(path, "pw").err().unwrap_or_else(|| panic!("{field}: must be refused"));
+        let err = open(&sealed_wire_store(&wire)).err().unwrap_or_else(|| panic!("{field}: must be refused"));
         assert!(matches!(&err, OrgNodeError::InvalidField { field: f, .. } if *f == field), "{field}: {err:?}");
     }
 }

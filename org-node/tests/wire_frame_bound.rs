@@ -1,19 +1,20 @@
-#![cfg(all(feature = "transport", feature = "test-support"))]
+#![cfg(feature = "test-support")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-//! Frame bound on the org-node channel: a `WireMessage` round-trips through
-//! `encode_frame`/`decode_body`, and bodies above `MAX_FRAME` are refused on
-//! both the encode and the decode side. The round trip is the normal case;
-//! the two rejections are the abnormal-input cases. Since S3 T4 also the
-//! three kinds of Wire message and the refusals of a malformed revocation
-//! or acknowledgement.
+//! The Wire message's encoding and bound: a `WireMessage` round-trips through
+//! `encode_message`/`decode_message`, and bodies above `MAX_MESSAGE` are
+//! refused on both the encode and the decode side. The round trip is the
+//! normal case; the two rejections are the abnormal-input cases. Since S3 T4
+//! also the three kinds of Wire message and the refusals of a malformed
+//! revocation or acknowledgement. *Re-pointed 2026-10-08 (S4, task T2):* the
+//! codec left `transport/` for `org_node::wire`, without the length prefix;
+//! the transport's framing test moved to org-io in T10.
 
 use org_members::MemberId;
 use org_node::ids::OrgId;
 use org_node::revocation::{Acknowledgement, RevocationNotice, Signature64};
 use org_node::test_fixtures::{admit_member_delta, bob_absence_notice, device_key};
-use org_node::transport::wire::{decode_body, encode_frame, WireMessage};
-use org_node::transport::{TransportError, MAX_FRAME};
-use org_node::{Envelope, Epoch, MemberSeed, OrgPrivateKey, RootHash, SequenceNumber};
+use org_node::wire::{decode_message, encode_message, WireMessage, MAX_MESSAGE};
+use org_node::{Envelope, Epoch, MemberSeed, OrgNodeError, OrgPrivateKey, RootHash, SequenceNumber};
 
 /// The one Organisation every fixture names.
 fn the_org() -> OrgId {
@@ -70,9 +71,31 @@ fn acknowledgement_with_signature_of(signature_length: usize) -> Vec<u8> {
     body
 }
 
-/// The postcard body of `msg`, without the frame's length prefix.
+/// The postcard body of `msg`: its encoding, which carries no length prefix.
 fn body_of(msg: &WireMessage) -> Vec<u8> {
-    encode_frame(msg).unwrap()[4..].to_vec()
+    encode_message(msg).unwrap()
+}
+
+// verifies: LLR-er2x8n
+#[test]
+fn an_encoded_message_is_its_postcard_body_with_no_length_prefix() {
+    let message = sample_msg();
+    let body = encode_message(&message).unwrap();
+    assert_eq!(body, postcard::to_allocvec(&message).unwrap());
+    assert_eq!(decode_message(&body).unwrap(), message);
+}
+
+// verifies: LLR-8kh3zf
+#[test]
+fn a_body_over_the_bound_is_refused_before_decoding() {
+    let body = vec![0u8; MAX_MESSAGE + 1];
+    assert!(matches!(decode_message(&body), Err(OrgNodeError::MessageTooLarge { length }) if length == MAX_MESSAGE + 1));
+}
+
+// verifies: LLR-pkruy8
+#[test]
+fn a_body_that_is_not_a_wire_message_is_malformed() {
+    assert!(matches!(decode_message(&[0xff, 0xff, 0xff]), Err(OrgNodeError::MalformedMessage)));
 }
 
 // *Replaced 2026-10-07 (change worktree-org-io-commit-workflow, S3 T4).* Was
@@ -90,9 +113,9 @@ fn the_three_kinds_round_trip_with_their_indices() {
         (WireMessage::Acknowledgement(sample_acknowledgement()), 2),
     ];
     for (message, index) in kinds {
-        let frame = encode_frame(&message).unwrap();
-        assert_eq!(frame[4], index);
-        assert_eq!(decode_body(&frame[4..]).unwrap(), message);
+        let body = encode_message(&message).unwrap();
+        assert_eq!(body[0], index);
+        assert_eq!(decode_message(&body).unwrap(), message);
         assert_eq!(message.org_id(), the_org());
     }
 }
@@ -123,7 +146,7 @@ fn malformed_revocations_and_acknowledgements_are_refused() {
         acknowledgement_with_signature_of(63),
     ];
     for body in refused {
-        assert!(matches!(decode_body(&body), Err(TransportError::Malformed)), "{body:02x?}");
+        assert!(matches!(decode_message(&body), Err(OrgNodeError::MalformedMessage)), "{body:02x?}");
     }
 }
 
@@ -135,11 +158,11 @@ fn malformed_revocations_and_acknowledgements_are_refused() {
 #[test]
 fn an_org_information_body_with_trailing_bytes_is_refused() {
     let whole = body_of(&sample_msg());
-    assert_eq!(decode_body(&whole).unwrap(), sample_msg(), "the body without trailing bytes decodes");
+    assert_eq!(decode_message(&whole).unwrap(), sample_msg(), "the body without trailing bytes decodes");
     for trailing in [vec![0u8], vec![0xFF; 7]] {
         let mut body = whole.clone();
         body.extend(trailing);
-        assert!(matches!(decode_body(&body), Err(TransportError::Malformed)), "{body:02x?}");
+        assert!(matches!(decode_message(&body), Err(OrgNodeError::MalformedMessage)), "{body:02x?}");
     }
 }
 
@@ -159,7 +182,7 @@ fn exactly_three_kinds_round_trip_and_an_unknown_kind_or_leftover_bytes_are_refu
     for (message, index) in &kinds {
         let body = body_of(message);
         assert_eq!(body[0], *index);
-        let decoded = decode_body(&body).unwrap();
+        let decoded = decode_message(&body).unwrap();
         let decoded_as_the_same_kind = match (&decoded, message) {
             (
                 WireMessage::OrgInformation { envelope, record_snapshot, org_private_key },
@@ -189,7 +212,7 @@ fn exactly_three_kinds_round_trip_and_an_unknown_kind_or_leftover_bytes_are_refu
         let mut leftover = body.clone();
         leftover.push(0);
         assert!(
-            matches!(decode_body(&leftover), Err(TransportError::Malformed)),
+            matches!(decode_message(&leftover), Err(OrgNodeError::MalformedMessage)),
             "kind {index} with a leftover byte"
         );
 
@@ -197,7 +220,7 @@ fn exactly_three_kinds_round_trip_and_an_unknown_kind_or_leftover_bytes_are_refu
             let mut unknown_kind = body.clone();
             unknown_kind[0] = unknown_index;
             assert!(
-                matches!(decode_body(&unknown_kind), Err(TransportError::Malformed)),
+                matches!(decode_message(&unknown_kind), Err(OrgNodeError::MalformedMessage)),
                 "kind {index}'s payload under index {unknown_index}"
             );
         }
@@ -211,12 +234,12 @@ fn exactly_three_kinds_round_trip_and_an_unknown_kind_or_leftover_bytes_are_refu
 #[test]
 fn an_acknowledgement_signature_decodes_only_at_exactly_64_bytes() {
     assert_eq!(
-        decode_body(&acknowledgement_with_signature_of(64)).unwrap(),
+        decode_message(&acknowledgement_with_signature_of(64)).unwrap(),
         WireMessage::Acknowledgement(sample_acknowledgement())
     );
     for length in [0, 63, 65] {
         assert!(
-            matches!(decode_body(&acknowledgement_with_signature_of(length)), Err(TransportError::Malformed)),
+            matches!(decode_message(&acknowledgement_with_signature_of(length)), Err(OrgNodeError::MalformedMessage)),
             "{length} signature bytes"
         );
     }
@@ -233,28 +256,20 @@ fn an_organisation_information_body_without_its_snapshot_or_key_does_not_decode(
     let mut no_snapshot = vec![0u8];
     no_snapshot.extend(postcard::to_allocvec(&sample_envelope()).unwrap());
     for cut in [no_snapshot, body[..body.len() - 32].to_vec(), body[..body.len() - 1].to_vec()] {
-        assert!(matches!(decode_body(&cut), Err(TransportError::Malformed)), "{} bytes", cut.len());
+        assert!(matches!(decode_message(&cut), Err(OrgNodeError::MalformedMessage)), "{} bytes", cut.len());
     }
 }
 
-// verifies: REQ-eg5j8u, LLR-fa7jt8, LLR-er2x8n
-#[test]
-fn frame_round_trips() {
-    let msg = sample_msg();
-    let framed = encode_frame(&msg).unwrap();
-    // strip the 4-byte length prefix
-    let len = u32::from_le_bytes(framed[0..4].try_into().unwrap()) as usize;
-    assert_eq!(len, framed.len() - 4);
-    let back = decode_body(&framed[4..]).unwrap();
-    assert_eq!(back, msg);
-}
+// *Moved 2026-10-13 (S4, task T10):* the transport's framing test,
+// `frame_round_trips`, moved to org-io (`org-io/tests/transport_handshake.rs`)
+// with the transport.
 
 // verifies: REQ-eg5j8u, LLR-8kh3zf
 #[test]
 fn oversize_body_is_rejected() {
-    // A body claiming > MAX_FRAME must be rejected by decode_body.
-    let big = vec![0u8; MAX_FRAME + 1];
-    assert!(matches!(decode_body(&big), Err(TransportError::FrameTooLarge(_))));
+    // A body claiming > MAX_MESSAGE must be rejected by decode_message.
+    let big = vec![0u8; MAX_MESSAGE + 1];
+    assert!(matches!(decode_message(&big), Err(OrgNodeError::MessageTooLarge { .. })));
 }
 
 // verifies: REQ-eg5j8u, LLR-sc6zuh
@@ -262,10 +277,10 @@ fn oversize_body_is_rejected() {
 fn oversize_message_is_rejected_on_encode() {
     let msg = WireMessage::OrgInformation {
         envelope: sample_envelope(),
-        record_snapshot: vec![0u8; MAX_FRAME + 1],
+        record_snapshot: vec![0u8; MAX_MESSAGE + 1],
         org_private_key: OrgPrivateKey::from([9u8; 32]),
     };
-    assert!(matches!(encode_frame(&msg), Err(TransportError::FrameTooLarge(_))));
+    assert!(matches!(encode_message(&msg), Err(OrgNodeError::MessageTooLarge { .. })));
 }
 
 // ---- added 2026-10-03 by the architecture tooth ----------------------------
@@ -277,19 +292,20 @@ fn oversize_message_is_rejected_on_encode() {
 #[test]
 fn a_body_that_is_not_an_encoded_message_is_refused() {
     assert!(matches!(
-        decode_body(b"not a postcard WireMessage"),
-        Err(TransportError::Malformed)
+        decode_message(b"not a postcard WireMessage"),
+        Err(OrgNodeError::MalformedMessage)
     ));
     // Empty input is the boundary of the same case.
-    assert!(matches!(decode_body(&[]), Err(TransportError::Malformed)));
+    assert!(matches!(decode_message(&[]), Err(OrgNodeError::MalformedMessage)));
     // A truncated prefix of a real body: valid bytes, cut short.
-    let framed = encode_frame(&sample_msg()).unwrap();
-    let truncated = &framed[4..framed.len() - 1];
-    assert!(matches!(decode_body(truncated), Err(TransportError::Malformed)));
+    let body = encode_message(&sample_msg()).unwrap();
+    let truncated = &body[..body.len() - 1];
+    assert!(matches!(decode_message(truncated), Err(OrgNodeError::MalformedMessage)));
 }
 
-// A body of exactly MAX_FRAME is within the bound, so the refusal is `>` and
-// not `>=` — the boundary itself must not be rejected for being the boundary.
+// A body of exactly MAX_MESSAGE is within the bound, so the refusal is `>`
+// and not `>=` — the boundary itself must not be rejected for being the
+// boundary.
 // verifies: REQ-eg5j8u, LLR-8kh3zf
 #[test]
 fn a_body_of_exactly_the_bound_is_not_refused_for_its_size() {
@@ -297,8 +313,8 @@ fn a_body_of_exactly_the_bound_is_not_refused_for_its_size() {
     // information with an empty envelope, an empty snapshot and an all-zero
     // key. A leading run of 0xff bytes is a variant-index varint that
     // overflows, so this body is not.
-    let at_bound = vec![0xffu8; MAX_FRAME];
+    let at_bound = vec![0xffu8; MAX_MESSAGE];
     // It is not a valid message, so it is refused — but as Malformed, which is
-    // the decode verdict, never as FrameTooLarge, which is the size verdict.
-    assert!(matches!(decode_body(&at_bound), Err(TransportError::Malformed)));
+    // the decode verdict, never as MessageTooLarge, which is the size verdict.
+    assert!(matches!(decode_message(&at_bound), Err(OrgNodeError::MalformedMessage)));
 }

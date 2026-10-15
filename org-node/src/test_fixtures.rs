@@ -13,8 +13,10 @@ use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
 use org_members::{DevicePublicKey, Handle, MemberId, MemberLeaf, Name, PersonPublicKey, Surname};
 
-use crate::keys::{SigningKeypair, X25519Keypair};
-use crate::types::{DeviceSeed, MemberSeed, OrgPrivateKey, OrgPublicKey};
+use zeroize::Zeroizing;
+
+use crate::keys::{DeviceSecret, SigningKeypair, X25519Keypair};
+use crate::types::{MemberSeed, OrgPrivateKey, OrgPublicKey};
 
 pub type Trie = OrgTrie<Blake3Hasher>;
 
@@ -57,9 +59,85 @@ pub fn genesis_trie(admin: &X25519Keypair, admin_device: &SigningKeypair) -> Tri
 /// (`OrgMembersError::DuplicateKey`).
 pub const ADMIN_DEVICE_SEED: [u8; 32] = [4u8; 32];
 
+/// The device secret whose seed is `seed`, as org-io's keychain would hand
+/// it back (the one form of a device seed, LLR-37k2s3).
+pub fn device_secret(seed: [u8; 32]) -> DeviceSecret {
+    DeviceSecret::from_keychain_bytes(Zeroizing::new(seed.to_vec())).unwrap()
+}
+
+/// The device signing key pair whose seed is `seed`, for tests that bind an
+/// endpoint or sign as a Device (test builds only; production code builds a
+/// key pair only inside the crate, from a `DeviceSecret`).
+pub fn device_keypair(seed: [u8; 32]) -> SigningKeypair {
+    device_secret(seed).signing_keypair()
+}
+
+/// `plaintext` sealed under the store key `secret` derives for
+/// `device_key`, exactly as a store seals its data, so a test can present
+/// content this software never writes (LLR-8bum44, LLR-bg538c).
+#[cfg(feature = "app")]
+pub fn seal_plaintext_for_test<R: rand_core::RngCore + rand_core::CryptoRng>(
+    secret: &DeviceSecret,
+    device_key: DevicePublicKey,
+    plaintext: &[u8],
+    rng: &mut R,
+) -> crate::store::SealedStore {
+    let key = crate::store::cipher(secret, &device_key).unwrap();
+    crate::store::seal_bytes(&key, plaintext, rng).unwrap()
+}
+
+/// An unbound, proposed Persona record named `persona_id`, whose Member seed
+/// is 32 bytes of `member` and whose Device is that of device seed 32 bytes
+/// of `device`.
+#[cfg(feature = "app")]
+pub fn persona_record(persona_id: &str, member: u8, device: u8) -> crate::store::PersonaRecord {
+    crate::store::PersonaRecord::from(crate::store::PersonaRecordParts {
+        persona_id: crate::types::PersonaId::new(persona_id.to_string()),
+        org_id: None,
+        handle: Handle::parse("alice").unwrap(),
+        name: Name::parse("Alice").unwrap(),
+        surname: Surname::parse("Smith").unwrap(),
+        member_seed: MemberSeed::from([member; 32]),
+        device_key: device_key(device),
+        member_id: None,
+        status: crate::store::PersonaStatus::Proposed,
+    })
+}
+
+/// A store holding `persona` and nothing else.
+#[cfg(feature = "app")]
+pub fn empty_store(persona: crate::store::PersonaRecord) -> crate::store::StoreData {
+    crate::store::StoreData {
+        persona,
+        orgs: Vec::new(),
+        provisional_updates: Vec::new(),
+        expected_admissions: Vec::new(),
+        outstanding_invites: Vec::new(),
+    }
+}
+
+/// An open store over `data`, keyed from `secret`, whose Device must be
+/// `data`'s Persona's: what `PersonaStore::unseal` returns for `data`, built
+/// without sealing it first.
+#[cfg(feature = "app")]
+pub fn store_for_test(secret: &DeviceSecret, data: crate::store::StoreData) -> crate::store::PersonaStore {
+    let mut store = crate::store::PersonaStore::create(secret, data.persona.clone()).unwrap();
+    *store.data_mut() = data;
+    store
+}
+
+/// `store`, sealed as an operation that changed it would seal it.
+#[cfg(feature = "app")]
+pub fn seal_for_test<R: rand_core::RngCore + rand_core::CryptoRng>(
+    store: &crate::store::PersonaStore,
+    rng: &mut R,
+) -> crate::store::StoreWrite {
+    store.seal(rng).unwrap()
+}
+
 /// The admin's device keypair: a key of its own, never the admin's member key.
 pub fn admin_device() -> SigningKeypair {
-    DeviceSeed::from(ADMIN_DEVICE_SEED).signing_keypair()
+    device_keypair(ADMIN_DEVICE_SEED)
 }
 
 /// Seed of bob's device keypair in [`admit_member_delta`].
@@ -67,7 +145,7 @@ pub const BOB_DEVICE_SEED: [u8; 32] = [3u8; 32];
 
 /// Bob's device keypair: the device [`admit_member_delta`] enrols.
 pub fn bob_device() -> SigningKeypair {
-    DeviceSeed::from(BOB_DEVICE_SEED).signing_keypair()
+    device_keypair(BOB_DEVICE_SEED)
 }
 
 /// Build the "admit member B (id=[2u8;32])" delta against a genesis trie
@@ -98,13 +176,12 @@ pub fn member_key(seed: u8) -> PersonPublicKey {
 
 /// The DevicePublicKey of the key pair whose device seed is 32 bytes of `seed`.
 pub fn device_key(seed: u8) -> DevicePublicKey {
-    DeviceSeed::from([seed; 32]).signing_keypair().device_key().unwrap()
+    device_secret([seed; 32]).device_key()
 }
 
 /// A revocation notice for `org_id` naming Member `[2u8;32]` on Bob's
 /// Device, which the genesis trie does not list, with a proof of its absence
 /// from that trie.
-#[cfg(feature = "transport")]
 pub fn bob_absence_notice(org_id: crate::ids::OrgId) -> crate::revocation::RevocationNotice {
     let trie = genesis_trie(&MemberSeed::from([1u8; 32]).x25519_keypair(), &admin_device());
     let member_id = MemberId::new([2u8; 32]);

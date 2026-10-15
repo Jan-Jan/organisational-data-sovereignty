@@ -70,6 +70,9 @@ _Avoid_: group key, p2p key, member key
 The ed25519 public key identifying one of a Member's or a Person's devices.
 Each holds a bounded number of them. One device is meant to hold a different
 DevicePublicKey in each record it appears in, a rule no software enforces yet.
+In code a value of this type is named `device_key` (as in
+`DeviceSecret::device_key()` and `KeychainError`'s fields); those identifiers
+stay, and the _Avoid_ list governs prose and user-facing text (2026-10-15).
 _Avoid_: device key, P2pDeviceKey, device id, endpoint key
 
 **Person**:
@@ -159,3 +162,47 @@ holding the user's signatory key, and (from stage S4) peer communication and
 local storage, while org-node takes values and returns values. (Added
 2026-10-08, change `worktree-org-io-create`;
 `docs/adr/2026-10-06-org-io-unit.md`.)
+
+*The six terms below were added 2026-10-15 (change
+`worktree-org-io-transport`, ARCHITECTURE conformance review finding-4):*
+org-io's stage S4 put them in the public interface between org-node, org-io
+and the app.
+
+**Device seed**:
+The 32-byte secret of one of a Persona's devices, from which its
+DevicePublicKey is derived and with which its transport endpoint proves it
+holds that key. Kept at rest only in the device's keychain item, and never
+handed to the app.
+_Avoid_: Device secret, device private key, endpoint secret
+
+**DeviceSecret**:
+org-node's holder of one Device seed for the duration of one operation:
+moved, never copied, displayed or serialised, and wiped when dropped; its
+DevicePublicKey is derived once, when it is built. The type keeps its name;
+prose says Device seed for the value it holds.
+_Avoid_: using it for the seed itself
+
+**Keychain item**:
+The entry in the operating system's keychain that holds one Persona's Device
+seed, named by that Persona's DevicePublicKey. A failure to read or write one
+is a **KeychainError**, which names the DevicePublicKey and nothing of the
+item's content.
+_Avoid_: keystore, credential, wallet
+
+**SealedStore**:
+A Persona store (org-node's glossary) encrypted for disk: the bytes org-node
+hands org-io to write and takes back to open it. Opened only with the
+Persona's Device seed.
+_Avoid_: encrypted store, store blob
+
+**Store file**:
+The file in the data directory that holds one Persona's SealedStore, named by
+that Persona's DevicePublicKey. One per Persona.
+_Avoid_: database, persona store file, store blob
+
+**Verdict**:
+The one byte a device's receive side writes back after a message: whether the
+message was acted on (accepted) or not (refused). A sender reads a refusal,
+or silence, as its cue to try another address.
+_Avoid_: acknowledgement, ack (an acknowledgement is a signed message about a
+committed update, a different thing)

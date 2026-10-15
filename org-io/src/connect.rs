@@ -54,18 +54,21 @@ impl std::error::Error for ConnectFailure {}
 /// Returned boxed: the service is large.
 pub struct ConnectFailed {
     service: OrgService,
+    /// The handle's data directory, keychain and endpoints, handed back
+    /// with the service.
+    local: crate::LocalStore,
     pub reason: ConnectFailure,
 }
 
 impl ConnectFailed {
-    pub(crate) fn boxed(service: OrgService, reason: ConnectFailure) -> Box<Self> {
-        Box::new(Self { service, reason })
+    pub(crate) fn boxed(service: OrgService, local: crate::LocalStore, reason: ConnectFailure) -> Box<Self> {
+        Box::new(Self { service, local, reason })
     }
 
-    /// The handle with the chain not configured, over the service the
-    /// refused connect was given.
+    /// The handle with the chain not configured, over the service, data
+    /// directory and keychain the refused connect was given.
     pub fn into_not_configured(self) -> crate::OrgIo {
-        crate::OrgIo::not_configured(self.service)
+        crate::OrgIo::unconfigured(self.service, self.local)
     }
 }
 

@@ -6,17 +6,14 @@ Class C. The owner's rulings are in
 
 ## Derived requirements assessment
 
-**REQ-tcutr6** (amended: the app declares to org-node that it expects a first
-admission to an Organisation, without the invite identifier): the invite
-identifier still binds an Invite reply to the Invite the administrator issued
-(REQ-65xqp8, unchanged), which is where the owner's journey uses it. On the
-joiner's side org-node now matches a first admission against the Organisation
-alone; its risk analysis
-(`org-node/docs/risk/2026-10-07-org-key-pair.md`)
-finds the residual of its first-admission control unchanged. The app stops supplying
-an Organisation secret to org-node at all (the admission's key now comes from
-org-node's own record), which removes the path by which a user-typed value
-became the Members' shared secret (`app/docs/risk/2026-10-05-derived.md`, "The
-admission's Organisation secret"). No new hazard.
-
-assesses: REQ-tcutr6
+*Moved 2026-10-14 (S4, task T13 of docs/plans/2026-10-06-org-io-transport.md,
+ruling A).* The assessment that stood here, of the reply requirement as the
+key-pair change amended it (the expectation names the Organisation alone; no
+new hazard), moved with the requirement to org-io's risk ledger
+(`org-io/docs/risk/`, the transport file of change
+`worktree-org-io-transport`). What it also recorded stays true of the app:
+the app supplies no Organisation secret to org-node at all (the admission's
+key comes from org-node's own record), which removed the path by which a
+user-typed value became the Members' shared secret
+(`app/docs/risk/2026-10-05-derived.md`, "The admission's Organisation
+secret").

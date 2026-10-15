@@ -195,38 +195,19 @@ retryable step whose failure is reported without unwinding the commit.
 
 ## Loopback admission delivers to an address the joiner did not prove
 
-**PR-2dmjzj**: in loopback transport mode `admit_member` sends the admission
-Envelope and the Organisation secret to the `EndpointAddr` the caller passes
-from the Join request, without checking that the address's identity is the
-Device key the Join request carries, so an altered Join request hands the
-secret to whoever the altered address names while the record admits the
-joiner's genuine keys.
-affects: RC-b6mydy, LLR-jn5jeh
-opened: 2026-09-09
-status: open
-
-Where: `org-node/src/service.rs`, the transport send in `admit_member`: the
-`TransportMode::Loopback` branch dials `peer_addr` as given, against the
-`TransportMode::Networked` branch, which derives the peer identity
-from `join_request.device_key` and so binds delivery to the key). The Join
-request is an unsigned, unauthenticated blob by design
-(`org-node/src/blobs.rs:12-36`, *re-resolved 2026-10-05 at the merge of master `1feb608` into worktree-person-shared-types; it read `:11-34` on that branch and `:13-34` on master, re-measured there by the org-node type-safety change, review round 7*), travelling out of band by copy and paste, so
-nothing upstream detects the alteration.
-
-Observable symptom: with a Join request carrying B's keys and C's address,
-`admit_member` succeeds, the chain's root admits B, and C's endpoint receives
-the `WireMessage` carrying `org_secret`. Reproduced in this change by reading,
-not by running; the reproducing test is the first step of the fix.
-
-Why it is a hazard: HAZ-ep6uzs in org-node's register, S3/P2 — the
-Organisation secret reaches a device the record does not name. The S3/P1 the
-register carries for this defect belongs to its own prose entry, the admission
-address, which needs the Join request altered in transit; the hazard it
-instantiates is the P2 one.
-
-The fix, in outline (not-minted control 2): refuse a `peer_addr` whose
-`EndpointId` differs from the Join request's Device key, or dial by the key in
-both modes.
+*Moved 2026-10-13 (S4, task T12 of `docs/plans/2026-10-06-org-io-transport.md`,
+ruling A):* the report this section held — in Loopback mode the admission and
+the Organisation's key were sent to the address the caller passed, with no
+check that the address's identity was the joiner's Device key, so an altered
+address handed the key to whoever it named while the record admitted the
+joiner's genuine keys — moved to org-io with the send, to
+`org-io/docs/problems/2026-10-13-loopback-address.md`,
+where it is resolved by sending in Loopback mode only to an address whose
+identity is a recipient's Device key. Its `affects:` line named RC-b6mydy
+and the Loopback dial item (which moved with it). org-node's transitional
+`send_body` still dials the address unchecked; org-io no longer calls it, and
+task T14 deletes it. *(Deleted 2026-10-14, S4 task T14.)* The hazard it
+instantiated, HAZ-ep6uzs, is unchanged in this register (below).
 
 ## The revocation receive path commits from a sender it never checks
 

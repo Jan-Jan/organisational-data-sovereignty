@@ -1,10 +1,13 @@
 #![cfg(all(feature = "app", feature = "test-support"))]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! Integration tests: who delivers a message to a node's ordinary receive
-//! (`prepare_receive` then `apply_receive`, in the sequence org-io runs:
-//! `support::Node::receive_and_verify`) and to the self-delete path, over the service API, with real iroh
-//! endpoints on loopback and a shared `ChainSlots`. Offline — no live chain,
-//! no relay.
+//! Integration tests: who delivers a message to a node's receive
+//! (`check_received` then `commit_checked`, in the sequence org-io runs:
+//! `support::Node::receive_from`), over the service API, each body delivered
+//! by value with its sending Device's key, and a shared `ChainSlots`.
+//! Offline — no live chain, no relay. (*S4 task T4, 2026-10-13:* the
+//! self-delete path folded into the one receive path, and delivery left iroh.
+//! *S4 task T14, 2026-10-14:* the dial tests went to org-io with the
+//! transport; every delivery here is by value.)
 //!
 //! A (the founding node) always produces a chain-valid admission envelope. The
 //! Envelope carries no signature; what varies is *who delivers it* to the
@@ -28,12 +31,12 @@ use org_members::MemberId;
 use org_node::error::OrgNodeError;
 use org_node::ids::OrgId;
 use org_node::keys::SigningKeypair;
-use org_node::service::SelfDeleteOutcome;
+use org_node::service::{ReceiveKind, ReceiveOutcome};
 use org_node::test_fixtures::ChainSlots;
 use org_node::store::{OrgRecord, PersonaRecord, PersonaStatus};
-use org_node::transport::endpoint::OrgEndpoint;
-use org_node::transport::wire::WireMessage;
-use org_node::{DeviceSeed, Epoch, MemberSeed, OrgPrivateKey, OrgPublicKey, PersonaId, RootHash, SequenceNumber};
+use org_node::wire::WireMessage;
+use org_node::test_fixtures::device_keypair;
+use org_node::{Epoch, MemberSeed, OrgPrivateKey, OrgPublicKey, PersonaId, RootHash, SequenceNumber};
 use rand::rngs::OsRng;
 
 // REQ-xa6smf as amended 2026-10-05: a first admission that verifies against
@@ -46,18 +49,17 @@ use rand::rngs::OsRng;
 // information they receive on-chain so the risk here is only a new joiner
 // being DoS'ed which is acceptable". This is that exemption clause.
 // verifies: REQ-xa6smf, LLR-2r2fha, LLR-j83kc8, LLR-9fvb3y
-#[tokio::test(flavor = "multi_thread")]
-async fn a_first_admission_relayed_by_another_device_is_committed() {
-    let mut s = setup("first-rogue").await;
+#[test]
+fn a_first_admission_relayed_by_another_device_is_committed() {
+    let mut s = setup("first-rogue");
 
     // R waits for A's push; A "admits B" but is handed R's address.
-    let (r_addr, r_task) = spawn_recv_one(ROGUE_SEED).await;
+    let (r_addr, r_task) = spawn_recv_one(ROGUE_SEED);
     admit(&mut s.svc_a, &s.chain, s.org_id, &s.joiner_b, r_addr)
-        .await
         .expect("admit_member(B via R) failed");
     assert_eq!(s.chain.get(&s.org_id).unwrap().epoch, Epoch::new(2));
 
-    let (ep_r, sender_seen_by_r, msg) = r_task.await.unwrap();
+    let (ep_r, sender_seen_by_r, msg) = r_task.run();
     assert_eq!(
         sender_seen_by_r,
         device_kp(&s.svc_a, &s.svc_a.list_personas()[0].persona_id).device_key().unwrap(),
@@ -66,13 +68,10 @@ async fn a_first_admission_relayed_by_another_device_is_committed() {
     assert!(matches!(msg, WireMessage::OrgInformation { .. }), "Organisation information");
 
     // R relays the identical message to B.
-    let (b_addr, b_task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
-    tokio::time::timeout(NET, ep_r.send(b_addr, &msg))
-        .await
-        .expect("R relay send timed out")
-        .expect("R relay send failed");
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
+    ep_r.send(b_addr, &msg).expect("R relay send failed");
 
-    let (svc_b, result) = b_task.await.unwrap();
+    let (svc_b, result) = b_task.run();
     let outcome = result.expect("a chain-valid first admission is committed whoever relays it");
     assert_eq!(outcome.org_id, s.org_id);
     assert_eq!(outcome.epoch, Epoch::new(2));
@@ -86,21 +85,20 @@ async fn a_first_admission_relayed_by_another_device_is_committed() {
 // It is also LLR-9f5hmr's normal case (the Sequence number equals the chain's
 // epoch, and the mark becomes that epoch).
 // verifies: REQ-ztdza4, LLR-u6rq4s, LLR-cja9zv, LLR-9f5hmr
-#[tokio::test(flavor = "multi_thread")]
-async fn update_from_the_admin_after_admission_is_committed() {
-    let mut s = admit_b_directly(setup("update-admin").await).await;
+#[test]
+fn update_from_the_admin_after_admission_is_committed() {
+    let mut s = admit_b_directly(setup("update-admin"));
     let seq_at_2 = s.svc_b.list_orgs()[0].last_seq;
 
     let jr_c = joiner_for_c(&mut s.svc_a);
 
     // B waits for the next update; A admits C, pushing the envelope to B.
-    let (b_addr, b_task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
     admit(&mut s.svc_a, &s.chain, s.org_id, &jr_c, b_addr)
-        .await
         .expect("admit_member(C) failed");
     assert_eq!(s.chain.get(&s.org_id).unwrap().epoch, Epoch::new(3), "admitting C must bump to epoch 3");
 
-    let (svc_b, result) = b_task.await.unwrap();
+    let (svc_b, result) = b_task.run();
     let outcome = result.expect("B must accept an update sent by A's own device");
     assert_eq!(outcome.org_id, s.org_id);
     assert_eq!(outcome.epoch, Epoch::new(3), "B must commit epoch 3");
@@ -135,31 +133,27 @@ async fn update_from_the_admin_after_admission_is_committed() {
 // `update_relayed_by_a_non_member_after_admission_is_committed` (REQ-ztdza4
 // and REQ-ag6kqm as amended 2026-10-05: committed whoever relays it).
 // verifies: LLR-2r2fha, LLR-u6rq4s
-#[tokio::test(flavor = "multi_thread")]
-async fn update_relayed_by_a_non_member_after_admission_is_refused() {
-    let mut s = admit_b_directly(setup("update-rogue").await).await;
+#[test]
+fn update_relayed_by_a_non_member_after_admission_is_refused() {
+    let mut s = admit_b_directly(setup("update-rogue"));
     let root_at_2 = s.svc_b.list_orgs()[0].root_hash;
     let record_at_2 = s.svc_b.list_orgs()[0].clone();
 
     let jr_c = joiner_for_c(&mut s.svc_a);
 
     // R captures A's C-admission push.
-    let (r_addr, r_task) = spawn_recv_one(ROGUE_SEED).await;
+    let (r_addr, r_task) = spawn_recv_one(ROGUE_SEED);
     admit(&mut s.svc_a, &s.chain, s.org_id, &jr_c, r_addr)
-        .await
         .expect("admit_member(C via R) failed");
     assert_eq!(s.chain.get(&s.org_id).unwrap().epoch, Epoch::new(3));
-    let (ep_r, _sender, msg) = r_task.await.unwrap();
+    let (ep_r, _sender, msg) = r_task.run();
 
     // R relays it to B.
     let before = store_bytes("update-rogue", "b");
-    let (b_addr, b_task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
-    tokio::time::timeout(NET, ep_r.send(b_addr, &msg))
-        .await
-        .expect("R relay send timed out")
-        .expect("R relay send failed");
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
+    ep_r.send(b_addr, &msg).expect("R relay send failed");
 
-    let (mut svc_b, result) = b_task.await.unwrap();
+    let (mut svc_b, result) = b_task.run();
     assert_eq!(result.map(|_| ()), Err(OrgNodeError::SenderNotListed { org_id: s.org_id }));
     let unchanged = svc_b.list_orgs()[0].clone();
     assert_eq!(
@@ -172,7 +166,6 @@ async fn update_relayed_by_a_non_member_after_admission_is_refused() {
     // The same message from A's own Device is committed.
     let a_seed = device_seed_of(&s.svc_a, &s.pid_a);
     let outcome = deliver_from_to_receive(&mut svc_b, a_seed, msg)
-        .await
         .expect("an update from a listed Device is committed");
     assert_eq!(outcome.epoch, Epoch::new(3));
     assert_eq!(svc_b.list_orgs()[0].epoch, Epoch::new(3));
@@ -195,31 +188,29 @@ async fn update_relayed_by_a_non_member_after_admission_is_refused() {
 // `a_revocation_relayed_by_a_non_member_is_still_acted_on` (REQ-ztdza4 and
 // LLR-3q63zv as amended 2026-10-05: acted on whoever relays it).
 // verifies: LLR-kzgjz8
-#[tokio::test(flavor = "multi_thread")]
-async fn a_revocation_relayed_by_a_non_member_is_refused() {
-    let (s, counting) = setup_counting("revoke-relay").await;
-    let mut s = admit_b_directly(s).await;
+#[test]
+fn a_revocation_relayed_by_a_non_member_is_refused() {
+    let (s, counting) = setup_counting("revoke-relay");
+    let mut s = admit_b_directly(s);
     let b_member_id = s.svc_b.list_personas()[0].member_id.expect("B has a member id");
 
     // R stands between A and B: A revokes B and sends the message to R's
     // address; R captures it and relays it on to B.
-    let (rogue_addr, rogue_task) = spawn_recv_one(ROGUE_SEED).await;
-    revoke(&mut s.svc_a, &s.chain, s.org_id, b_member_id, Some(rogue_addr))
-        .await
-        .expect("revoke_member failed");
+    let (rogue_addr, rogue_task) = spawn_recv_one(ROGUE_SEED);
+    revoke(&mut s.svc_a, &s.chain, s.org_id, b_member_id, rogue_addr).expect("revoke_member failed");
 
-    let (rogue_ep, sender, captured) = rogue_task.await.unwrap();
+    let (rogue_ep, sender, captured) = rogue_task.run();
     assert_eq!(
         sender.as_bytes(),
-        s.svc_a.endpoint().expect("A endpoint").device_key().as_bytes(),
+        device_kp(&s.svc_a, &s.pid_a).device_key().unwrap().as_bytes(),
         "R must have received the revocation from A itself"
     );
     assert!(matches!(captured, WireMessage::Revocation(_)), "B's Device is no longer listed");
 
     let reads_before = counting.reads();
-    let (b_addr, b_task) = spawn_self_delete(s.svc_b, &s.b_device_kp).await;
-    rogue_ep.send(b_addr, &captured).await.expect("rogue relay to B failed");
-    let (mut svc_b, refused) = b_task.await.unwrap();
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
+    rogue_ep.send(b_addr, &captured).expect("rogue relay to B failed");
+    let (mut svc_b, refused) = b_task.run();
     assert_eq!(refused.map(|_| ()), Err(OrgNodeError::SenderNotListed { org_id: s.org_id }));
     assert_eq!(counting.reads(), reads_before, "the refusal reads no chain");
     assert_eq!(svc_b.list_orgs().len(), 1, "B keeps its record");
@@ -227,12 +218,11 @@ async fn a_revocation_relayed_by_a_non_member_is_refused() {
 
     // The same notice from A's own Device.
     let a_seed = device_seed_of(&s.svc_a, &s.pid_a);
-    let outcome = deliver_from_to_self_delete(&mut svc_b, a_seed, captured)
-        .await
+    let outcome = deliver_from_to_receive(&mut svc_b, a_seed, captured)
         .expect("B acts on a chain-valid revocation from a listed Device");
     assert!(
-        matches!(&outcome, SelfDeleteOutcome::SelfDeleted { acknowledgements, .. } if acknowledgements.len() == 1),
-        "expected SelfDeleted with B's acknowledgement, got {outcome:?}"
+        outcome.kind == ReceiveKind::Revoked && outcome.acknowledgements.len() == 1,
+        "expected a revocation accepted with B's acknowledgement, got {outcome:?}"
     );
     assert!(svc_b.list_orgs().is_empty(), "B's record of the org must be gone");
     // S3 T9: the Persona is deleted with its keys (was: marked Revoked).
@@ -243,11 +233,11 @@ async fn a_revocation_relayed_by_a_non_member_is_refused() {
 // Organisation the chain does not know: refused with `OrgNotOnChain` after the
 // chain-free checks (LLR-3wb7th), not with a "no such record" error.
 // verifies: REQ-bvh8v6, LLR-3wb7th
-#[tokio::test(flavor = "multi_thread")]
-async fn a_message_for_an_organisation_absent_from_the_chain_is_refused() {
-    let mut s = setup("absent-org").await;
+#[test]
+fn a_message_for_an_organisation_absent_from_the_chain_is_refused() {
+    let mut s = setup("absent-org");
     s.svc_b.expect_admission(&mut OsRng, OrgId::new([0xeeu8; 20])).unwrap();
-    let (b_addr, b_task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
 
     // A well-formed first admission for an org that was never put on the mock
     // chain, carrying the snapshot its Change set extends.
@@ -262,10 +252,10 @@ async fn a_message_for_an_organisation_absent_from_the_chain_is_refused() {
         org_private_key: OrgPrivateKey::from([0x42u8; 32]),
     };
 
-    let relay = OrgEndpoint::bind(&DeviceSeed::from([0x5bu8; 32]).signing_keypair()).await.unwrap();
-    relay.send(b_addr, &msg).await.expect("send to B failed");
+    let relay = Relay::from_seed([0x5bu8; 32]);
+    relay.send(b_addr, &msg).expect("send to B failed");
 
-    let (svc_b, result) = b_task.await.unwrap();
+    let (svc_b, result) = b_task.run();
     assert_eq!(result.unwrap_err(), OrgNodeError::OrgNotOnChain);
     assert!(svc_b.list_orgs().is_empty(), "nothing may be committed");
 }
@@ -276,9 +266,9 @@ async fn a_message_for_an_organisation_absent_from_the_chain_is_refused() {
 // consumes all left the suite green. Everything asserted here is read back
 // from DISK, so a commit that only ever existed in memory fails it.
 // verifies: REQ-nhe2zu, REQ-txvtm9, LLR-cja9zv, LLR-q8emds
-#[tokio::test(flavor = "multi_thread")]
-async fn a_committed_admission_reaches_the_disk_and_clears_the_expectation() {
-    let s = setup("commit-persisted").await;
+#[test]
+fn a_committed_admission_reaches_the_disk_and_clears_the_expectation() {
+    let s = setup("commit-persisted");
     // Before admission B holds the expectation it declared.
     assert_eq!(
         s.svc_b.list_personas().len(),
@@ -286,7 +276,7 @@ async fn a_committed_admission_reaches_the_disk_and_clears_the_expectation() {
         "B starts with exactly its own persona"
     );
 
-    let s = admit_b_directly(s).await;
+    let s = admit_b_directly(s);
 
     // In memory, B committed epoch 2 with a non-zero sequence mark.
     let in_memory = s.svc_b.list_orgs()[0].clone();
@@ -295,7 +285,7 @@ async fn a_committed_admission_reaches_the_disk_and_clears_the_expectation() {
     assert_eq!(in_memory.last_seq.get(), in_memory.epoch.get(), "the mark is the epoch committed (REQ-txvtm9)");
 
     // On disk, the same record — this is what `self.store.save(rng)?` is for.
-    let reloaded = reopen_store("commit-persisted", "b", "pw_b");
+    let reloaded = reopen_store("commit-persisted", "b");
     let orgs = &reloaded.data().orgs;
     assert_eq!(orgs.len(), 1, "the committed record must have reached the disk");
     assert_eq!(orgs[0].org_id, in_memory.org_id);
@@ -323,16 +313,16 @@ async fn a_committed_admission_reaches_the_disk_and_clears_the_expectation() {
 // by `commit_update`, which the story helper calls; LLR-t4znbk, LLR-rb8r65
 // and LLR-ghja3x are verified in commit_paths.rs.
 // verifies: LLR-cmdrp9, LLR-cja9zv
-#[tokio::test(flavor = "multi_thread")]
-async fn an_admission_reaches_the_administrators_disk() {
-    let s = admit_b_directly(setup("admin-persisted").await).await;
+#[test]
+fn an_admission_reaches_the_administrators_disk() {
+    let s = admit_b_directly(setup("admin-persisted"));
 
     let in_memory = s.svc_a.list_orgs()[0].clone();
     assert_eq!(in_memory.epoch, Epoch::new(2), "A must hold the epoch it committed");
     assert_eq!(in_memory.trie_members.len(), 2, "A + B");
     assert_ne!(in_memory.last_seq, SequenceNumber::new(0), "A must hold the sequence of its update");
 
-    let reloaded = reopen_store("admin-persisted", "a", "pw_a");
+    let reloaded = reopen_store("admin-persisted", "a");
     let orgs = &reloaded.data().orgs;
     assert_eq!(orgs.len(), 1, "A's record must reach the disk");
     assert_eq!(orgs[0].epoch, in_memory.epoch, "A's epoch must be persisted");
@@ -371,21 +361,27 @@ async fn an_admission_reaches_the_administrators_disk() {
 // is disabled and there is no address discovery; iroh has no path to try and
 // refuses immediately. (Dialling a loopback port nothing listens on does NOT
 // work here — QUIC retries it for thirty seconds.)
+// *Rewritten 2026-10-14 (S4, task T14):* org-node has no send left to fail
+// (the transitional `send_body` is deleted; org-io's send, and its failed-send
+// test, are org-io's). What stays org-node's is the commit's half: the body
+// B's Device was to receive is built and never delivered, and the committed
+// record stands.
 // verifies: LLR-t4znbk
-#[tokio::test(flavor = "multi_thread")]
-async fn a_failed_send_leaves_the_committed_record_in_place() {
-    let mut s = setup("admin-send-fails").await;
+#[test]
+fn a_failed_send_leaves_the_committed_record_in_place() {
+    let mut s = setup("admin-send-fails");
     let epoch_before = s.chain.get(&s.org_id).unwrap().epoch;
     let before = s.svc_a.list_orgs()[0].clone();
 
-    let result = admit(&mut s.svc_a, &s.chain, s.org_id, &s.joiner_b, dead_addr([0x6fu8; 32])).await;
-    assert!(result.is_err(), "a send to a peer that is not listening must fail");
+    let (_, outcome) = commit_admission(&mut s.svc_a, &s.chain, s.org_id, &s.joiner_b).unwrap();
+    assert!(body_for(&outcome, s.joiner_b.device_key).is_some(), "B's body is built");
+    drop(outcome); // never delivered
 
     let chain_after = s.chain.get(&s.org_id).unwrap();
     assert_eq!(chain_after.epoch, Epoch::new(epoch_before.get() + 1), "the chain carries the update");
     for (after, place) in [
         (s.svc_a.list_orgs()[0].clone(), "in memory"),
-        (disk_rec_of(&reopen_store("admin-send-fails", "a", "pw_a"), s.org_id), "on disk"),
+        (disk_rec_of(&reopen_store("admin-send-fails", "a"), s.org_id), "on disk"),
     ] {
         assert_eq!(after.epoch, chain_after.epoch, "the record's epoch advanced with the chain ({place})");
         assert_eq!(after.root_hash, chain_after.root_hash, "the record holds the chain's root ({place})");
@@ -398,9 +394,9 @@ async fn a_failed_send_leaves_the_committed_record_in_place() {
 // Normal case of REQ-d9g6nt: the founding admin's id and an admitted
 // member's id are not their keys, and differ from each other.
 // verifies: REQ-d9g6nt, LLR-ag9mgm, LLR-rjg3m2
-#[tokio::test(flavor = "multi_thread")]
-async fn member_ids_are_not_derived_from_keys() {
-    let mut s = setup("ids-not-keys").await;
+#[test]
+fn member_ids_are_not_derived_from_keys() {
+    let mut s = setup("ids-not-keys");
 
     let admin_snap = s.svc_a.list_orgs()[0].trie_members[0].clone();
     assert_eq!(admin_snap.member_key, s.svc_a.persona_public_keys(&s.pid_a).unwrap().0);
@@ -408,11 +404,10 @@ async fn member_ids_are_not_derived_from_keys() {
     assert_ne!(admin_snap.id.as_bytes(), admin_snap.device_keys[0].as_bytes(), "the admin's id is its device key");
 
     // A admits B, delivered to B's own endpoint as in `admit_b_directly`.
-    let (b_addr, b_task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
     let id_b = admit(&mut s.svc_a, &s.chain, s.org_id, &s.joiner_b, b_addr)
-        .await
         .expect("admit_member(B) failed");
-    let (_svc_b, outcome) = b_task.await.unwrap();
+    let (_svc_b, outcome) = b_task.run();
     outcome.expect("B's admission from A must verify");
 
     assert_ne!(id_b.as_bytes(), s.joiner_b.member_key.as_bytes(), "B's id is its member key");
@@ -429,19 +424,18 @@ async fn member_ids_are_not_derived_from_keys() {
 // succeeds (owner ruling: same keys allowed), and each new id differs from
 // every deleted id and from every key. Three rounds.
 // verifies: REQ-d9g6nt, LLR-ag9mgm
-#[tokio::test(flavor = "multi_thread")]
-async fn readmission_with_same_keys_gets_a_fresh_member_id() {
-    let mut s = setup("readmit-same-keys").await;
+#[test]
+fn readmission_with_same_keys_gets_a_fresh_member_id() {
+    let mut s = setup("readmit-same-keys");
     let admin_id = s.svc_a.list_orgs()[0].trie_members[0].id;
 
     let mut ids: Vec<MemberId> = Vec::new();
     for round in 0..3 {
         // Admit the same joiner.
-        let (addr, sink) = spawn_recv_one(rand::random()).await;
+        let (addr, sink) = spawn_recv_one(rand::random());
         let id = admit(&mut s.svc_a, &s.chain, s.org_id, &s.joiner_b, addr)
-            .await
             .unwrap_or_else(|e| panic!("admission round {round} with the same keys failed: {e:?}"));
-        sink.await.unwrap();
+        sink.run();
 
         assert_ne!(id.as_bytes(), s.joiner_b.member_key.as_bytes(), "round {round}: id is B's member key");
         assert_ne!(id.as_bytes(), s.joiner_b.device_key.as_bytes(), "round {round}: id is B's device key");
@@ -458,11 +452,10 @@ async fn readmission_with_same_keys_gets_a_fresh_member_id() {
         ids.push(id);
 
         // Revoke B by MemberId.
-        let (addr, sink) = spawn_recv_one(rand::random()).await;
-        revoke(&mut s.svc_a, &s.chain, s.org_id, id, Some(addr))
-            .await
+        let (addr, sink) = spawn_recv_one(rand::random());
+        revoke(&mut s.svc_a, &s.chain, s.org_id, id, addr)
             .expect("revoke_member(B) failed");
-        sink.await.unwrap();
+        sink.run();
         assert!(
             !s.svc_a.list_orgs()[0].trie_members.iter().any(|m| m.id == id),
             "round {round}: revoked id still in A's record"
@@ -483,11 +476,11 @@ async fn readmission_with_same_keys_gets_a_fresh_member_id() {
 // Envelope, so the relay's message is a notice about the Organisation B
 // expects but holds no record of; the refusal is the same.
 // verifies: REQ-d9g6nt, REQ-vxqc5g, LLR-j6j95z, LLR-38e2kn
-#[tokio::test(flavor = "multi_thread")]
-async fn a_revocation_about_an_organisation_not_held_is_refused_before_the_chain() {
-    let (mut s, counting) = setup_counted("no-snapshot").await;
+#[test]
+fn a_revocation_about_an_organisation_not_held_is_refused_before_the_chain() {
+    let (mut s, counting) = setup_counted("no-snapshot");
     let joiner = s.joiner_b.clone();
-    let genuine = captured_admission(&mut s, &joiner).await;
+    let genuine = captured_admission(&mut s, &joiner);
     let some_member = MemberId::new([0x17; 32]);
     let b_device = s.b_device_kp.device_key().unwrap();
     let relabelled = WireMessage::Revocation(org_node::revocation::RevocationNotice {
@@ -498,9 +491,9 @@ async fn a_revocation_about_an_organisation_not_held_is_refused_before_the_chain
     });
     let on_disk = store_bytes("no-snapshot", "b");
     let reads = counting.reads();
-    let (b_addr, b_task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
-    deliver(b_addr, &relabelled).await;
-    let (svc_b, result) = b_task.await.unwrap();
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
+    deliver(b_addr, &relabelled);
+    let (svc_b, result) = b_task.run();
     assert_eq!(result.unwrap_err(), OrgNodeError::RevocationNotHeld { org_id: s.org_id });
     assert_eq!(counting.reads(), reads, "no chain read");
     assert!(svc_b.list_orgs().is_empty(), "no record");
@@ -508,9 +501,9 @@ async fn a_revocation_about_an_organisation_not_held_is_refused_before_the_chain
     let persona_b = persona_of(&svc_b, &s.pid_b);
     assert_eq!((persona_b.status, persona_b.org_id), (PersonaStatus::Proposed, None));
     assert_eq!(store_bytes("no-snapshot", "b"), on_disk, "nothing written");
-    let (b_addr, b_task) = spawn_receive(svc_b, &s.b_device_kp).await;
-    deliver(b_addr, &genuine).await;
-    let (_svc_b, result) = b_task.await.unwrap();
+    let (b_addr, b_task) = spawn_receive(svc_b);
+    deliver(b_addr, &genuine);
+    let (_svc_b, result) = b_task.run();
     assert_eq!(result.expect("the genuine admission commits").org_id, s.org_id);
 }
 
@@ -531,21 +524,20 @@ async fn a_revocation_about_an_organisation_not_held_is_refused_before_the_chain
 // never had to reach the disk, so a node that restarted recovered
 // the member it had just removed on chain. Since T11 of the chain-authority
 // change the removal reaches the record through `commit_update`; LLR-6dc598,
-// LLR-tax3pm and LLR-pw369n are verified in commit_paths and in
+// LLR-tax3pm and the Loopback-address refusal (org-io's since 2026-10-13,
+// S4 task T12) are verified in commit_paths and in
 // `a_loopback_revocation_without_an_address_burns_no_epoch`.
 // verifies: LLR-qg9utu, LLR-8hdu9x, LLR-6ymd6d
-#[tokio::test(flavor = "multi_thread")]
-async fn a_revocation_reaches_the_administrators_disk() {
-    let mut s = admit_b_directly(setup("revoke-persisted").await).await;
+#[test]
+fn a_revocation_reaches_the_administrators_disk() {
+    let mut s = admit_b_directly(setup("revoke-persisted"));
     let before = s.svc_a.list_orgs()[0].clone();
     assert_eq!(before.trie_members.len(), 2, "A + B before the revocation");
     let b_id = id_by_handle(&before, "bob");
 
-    let (sink_addr, sink) = spawn_recv_one(rand::random()).await;
-    revoke(&mut s.svc_a, &s.chain, s.org_id, b_id, Some(sink_addr))
-        .await
-        .expect("revoke_member failed");
-    let (_sink_ep, _sender, msg) = sink.await.unwrap();
+    let (sink_addr, sink) = spawn_recv_one(rand::random());
+    revoke(&mut s.svc_a, &s.chain, s.org_id, b_id, sink_addr).expect("revoke_member failed");
+    let (_sink_ep, _sender, msg) = sink.run();
 
     // LLR-8hdu9x: the Device the removal removed is sent its notice and
     // nothing else — no Envelope, no snapshot, no key (amended in S3).
@@ -581,7 +573,7 @@ async fn a_revocation_reaches_the_administrators_disk() {
         "the revocation envelope's mark is one past the record's last"
     );
 
-    let reloaded = reopen_store("revoke-persisted", "a", "pw_a");
+    let reloaded = reopen_store("revoke-persisted", "a");
     let orgs = &reloaded.data().orgs;
     assert_eq!(orgs.len(), 1, "A's record must still be on disk");
     assert_eq!(
@@ -617,30 +609,22 @@ async fn a_revocation_reaches_the_administrators_disk() {
 // one that removes this node's own Device is accepted: record deleted,
 // Persona Revoked.
 // verifies: REQ-uxv2x2, LLR-6p4pj2, LLR-pt32fx
-#[tokio::test(flavor = "multi_thread")]
-async fn a_self_delete_reaches_the_revoked_nodes_disk() {
-    let mut s = admit_b_directly(setup("selfdel-persisted").await).await;
+#[test]
+fn a_self_delete_reaches_the_revoked_nodes_disk() {
+    let mut s = admit_b_directly(setup("selfdel-persisted"));
     let b_member_id = s.svc_b.list_personas()[0].member_id.expect("B has a member id");
     assert_eq!(s.svc_b.list_orgs().len(), 1, "B holds the record before the revocation");
 
-    let (b_addr, b_task) = spawn_self_delete(s.svc_b, &s.b_device_kp).await;
-    revoke(&mut s.svc_a, &s.chain, s.org_id, b_member_id, Some(b_addr))
-        .await
-        .expect("revoke_member failed");
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
+    revoke(&mut s.svc_a, &s.chain, s.org_id, b_member_id, b_addr).expect("revoke_member failed");
 
-    let (svc_b, outcome) = b_task.await.unwrap();
-    assert!(
-        matches!(
-            outcome.expect("B must act on its own revocation"),
-            SelfDeleteOutcome::SelfDeleted { .. }
-        ),
-        "B must self-delete"
-    );
+    let (svc_b, outcome) = b_task.run();
+    assert_eq!(outcome.expect("B must act on its own revocation").kind, ReceiveKind::Revoked, "B must self-delete");
     assert!(svc_b.list_orgs().is_empty(), "B's record is gone in memory");
     // S3 T9: the Persona is deleted with its keys (was: marked Revoked).
     assert!(svc_b.list_personas().is_empty(), "B's Persona is gone in memory");
 
-    let reloaded = reopen_store("selfdel-persisted", "b", "pw_b");
+    let reloaded = reopen_store("selfdel-persisted", "b");
     assert!(
         reloaded.data().orgs.is_empty(),
         "the deletion must reach the disk — a restart must not recover the record"
@@ -660,27 +644,25 @@ async fn a_self_delete_reaches_the_revoked_nodes_disk() {
 // `last_seq` before and after. A mark that does not move is a replay window —
 // the same change offered again would pass the replay check.
 // verifies: REQ-uxv2x2, LLR-jsx922, LLR-sxd3tg
-#[tokio::test(flavor = "multi_thread")]
-async fn an_update_that_does_not_revoke_us_reaches_the_disk() {
-    let mut s = admit_b_directly(setup("update-persisted").await).await;
+#[test]
+fn an_update_that_does_not_revoke_us_reaches_the_disk() {
+    let mut s = admit_b_directly(setup("update-persisted"));
     let b_epoch_before = s.svc_b.list_orgs()[0].epoch;
     let b_seq_before = s.svc_b.list_orgs()[0].last_seq;
 
     // A admits C (a third member) and sends the change to B, which is still a
     // member of the trie the change applies to. B must take this through the
-    // self-delete entry point as an ordinary update.
+    // self-delete entry point as an ordinary update. (*S4 T4:* the one
+    // receive path; its `ReceiveKind::Updated`.)
     let jr_c = joiner_for_c(&mut s.svc_a);
-    let (b_addr, b_task) = spawn_self_delete(s.svc_b, &s.b_device_kp).await;
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
     let c_id = admit(&mut s.svc_a, &s.chain, s.org_id, &jr_c, b_addr)
-        .await
         .expect("admit_member(C) failed");
 
-    let (svc_b, outcome) = b_task.await.unwrap();
-    assert!(
-        matches!(
-            outcome.expect("B must commit a change that does not remove it"),
-            SelfDeleteOutcome::UpdatedNotRevoked { .. }
-        ),
+    let (svc_b, outcome) = b_task.run();
+    assert_eq!(
+        outcome.expect("B must commit a change that does not remove it").kind,
+        ReceiveKind::Updated,
         "B must take this as an update, not a self-delete"
     );
     let in_memory = svc_b.list_orgs()[0].clone();
@@ -692,7 +674,7 @@ async fn an_update_that_does_not_revoke_us_reaches_the_disk() {
     );
     assert_eq!(in_memory.trie_members.len(), 3, "A + B + C");
 
-    let reloaded = reopen_store("update-persisted", "b", "pw_b");
+    let reloaded = reopen_store("update-persisted", "b");
     let orgs = &reloaded.data().orgs;
     assert_eq!(orgs.len(), 1, "B's record must still be on disk");
     assert_eq!(orgs[0].epoch, in_memory.epoch, "the advanced epoch must reach the disk");
@@ -727,17 +709,15 @@ async fn an_update_that_does_not_revoke_us_reaches_the_disk() {
 // 1); since T9 of the chain-authority change the mark is 1 at epoch 1
 // (Decision 16), and the Sequence number is 2 either way.
 // verifies: LLR-ghja3x, REQ-txvtm9
-#[tokio::test(flavor = "multi_thread")]
-async fn the_admission_envelope_carries_the_epoch_its_update_produced() {
-    let mut s = setup("envelope-mark").await;
+#[test]
+fn the_admission_envelope_carries_the_epoch_its_update_produced() {
+    let mut s = setup("envelope-mark");
     let before = s.svc_a.list_orgs()[0].clone();
 
     // A "admits B" into a sink, which hands back the message A transmitted.
-    let (sink_addr, sink) = spawn_recv_one(rand::random()).await;
-    admit(&mut s.svc_a, &s.chain, s.org_id, &s.joiner_b, sink_addr)
-        .await
-        .expect("admit_member failed");
-    let (_sink_ep, _sender, msg) = sink.await.unwrap();
+    let (sink_addr, sink) = spawn_recv_one(rand::random());
+    admit(&mut s.svc_a, &s.chain, s.org_id, &s.joiner_b, sink_addr).expect("admit_member failed");
+    let (_sink_ep, _sender, msg) = sink.run();
 
     assert_eq!(
         envelope_of(&msg).parent_seq,
@@ -758,50 +738,9 @@ async fn the_admission_envelope_carries_the_epoch_its_update_produced() {
     assert_eq!(s.svc_a.list_orgs()[0].last_seq, envelope_of(&msg).parent_seq);
 }
 
-// LLR-jn5jeh. Review round 2 found this requirement credited to
-// `delivers_and_verifies_admit_over_iroh` and
-// `delivers_and_verifies_admit_over_relay_by_id`, neither of which calls
-// `admit_member` at all — they build an envelope by hand and send it over a
-// bare endpoint — and the second of which is the by-id case the Loopback
-// clause excludes. This test calls `admit_member` in Loopback mode and
-// observes that the admission reaches the endpoint whose full `EndpointAddr`
-// the call carried. The clause's falsification is the mutation
-// `r2-jn5jeh-loopback-by-id` in the verification record's appendix: replacing
-// the Loopback arm's `ep.send(peer_addr, …)` with a dial by `EndpointId`
-// reddens this test, because in Loopback mode nothing resolves an identity to
-// an address.
-//
-// The obvious second half — dial the SAME identity with its transports
-// stripped and watch it fail — was written, measured and removed. It does not
-// fail: with the listener up, iroh keeps retrying an `EndpointAddr` that
-// carries an identity and no transports, past any timeout a gated test can
-// afford (measured at >30 s, the suite's whole network budget). That is the
-// same property PR-d4nye8's record names on the other side — a dead loopback
-// port does not refuse, it retries — and it is why the negative is carried by
-// a mutation rather than by an assertion here.
-// verifies: LLR-jn5jeh
-#[tokio::test(flavor = "multi_thread")]
-async fn in_loopback_mode_the_joiner_is_dialled_at_the_full_address() {
-    let mut s = setup("loopback-dial").await;
-
-    // A peer whose endpoint is listening, named by the full address it reports.
-    let (full_addr, sink) = spawn_recv_one(ROGUE_SEED).await;
-    let dialled_id = full_addr.id;
-
-    admit(&mut s.svc_a, &s.chain, s.org_id, &s.joiner_b, full_addr)
-        .await
-        .expect("admit_member to the full address failed");
-
-    // It arrived at the endpoint that address named, and it is the admission.
-    let (ep, _sender, msg) = sink.await.unwrap();
-    assert_eq!(
-        ep.inner().id(),
-        dialled_id,
-        "the admission reached an endpoint other than the one the address named"
-    );
-    assert!(matches!(msg, WireMessage::OrgInformation { .. }), "Organisation information, not a revocation");
-    assert_eq!(envelope_of(&msg).org_id, s.org_id);
-}
+// *Deleted 2026-10-14 (S4, task T14):* the Loopback dial test, unannotated
+// since T12, went with org-node's transitional send; org-io's
+// `org-io/tests/send_fanout.rs` tests the Loopback dial.
 
 // The revocation twin of `a_failed_send_leaves_the_committed_record_in_place`.
 // Round 1 found that clause unevidenced on the admission path and closed it
@@ -814,25 +753,26 @@ async fn in_loopback_mode_the_joiner_is_dialled_at_the_full_address() {
 // chain, so a removal the chain carries is committed before the send, and a
 // send that fails afterwards undoes nothing.
 // verifies: LLR-qg9utu, LLR-t4znbk
-#[tokio::test(flavor = "multi_thread")]
-async fn a_failed_revocation_send_leaves_the_committed_removal_in_place() {
-    let mut s = admit_b_directly(setup("revoke-send-fails").await).await;
+#[test]
+fn a_failed_revocation_send_leaves_the_committed_removal_in_place() {
+    let mut s = admit_b_directly(setup("revoke-send-fails"));
     let before = s.svc_a.list_orgs()[0].clone();
     let epoch_before = s.chain.get(&s.org_id).unwrap().epoch;
     let b_id = id_by_handle(&before, "bob");
 
-    // A well-formed identity with no transports: the dial fails at once rather
-    // than waiting on the network, which a loopback port with no listener does
-    // not do (QUIC retries it for thirty seconds).
-    let result = revoke(&mut s.svc_a, &s.chain, s.org_id, b_id, Some(dead_addr([0x7fu8; 32]))).await;
-    assert!(result.is_err(), "a revocation send to a peer that is not listening must fail");
+    // *Rewritten 2026-10-14 (S4, task T14):* org-node has no send left to
+    // fail (the transitional `send_body` is deleted; the send is org-io's).
+    // The revocation B's Device was to receive is built and never delivered.
+    let outcome = commit_removal(&mut s.svc_a, &s.chain, s.org_id, b_id).unwrap();
+    assert!(body_for(&outcome, s.joiner_b.device_key).is_some(), "B's revocation is built");
+    drop(outcome); // never delivered
 
     assert_eq!(s.chain.get(&s.org_id).unwrap().epoch, Epoch::new(epoch_before.get() + 1), "the chain carries the removal");
     let after = s.svc_a.list_orgs()[0].clone();
     assert_eq!(after.epoch, Epoch::new(before.epoch.get() + 1), "A's record follows the chain");
     assert!(!after.trie_members.iter().any(|m| m.id == b_id), "the removal is committed in A's record");
 
-    let reloaded = reopen_store("revoke-send-fails", "a", "pw_a");
+    let reloaded = reopen_store("revoke-send-fails", "a");
     assert!(
         !reloaded.data().orgs[0].trie_members.iter().any(|m| m.id == b_id),
         "and on A's disk"
@@ -845,9 +785,9 @@ async fn a_failed_revocation_send_leaves_the_committed_removal_in_place() {
 // nothing is written. The absence half (no Invite, no Join request, no
 // address) is `org_node_holds_no_invitation_exchange` in tests/absences.rs.
 // verifies: LLR-437fvx, LLR-ctzkv7
-#[tokio::test(flavor = "multi_thread")]
-async fn persona_public_keys_returns_the_personas_two_keys() {
-    let s = setup("persona-keys").await;
+#[test]
+fn persona_public_keys_returns_the_personas_two_keys() {
+    let s = setup("persona-keys");
     let persona_b = persona_of(&s.svc_b, &s.pid_b);
 
     let (member_key, device_key) = s.svc_b.persona_public_keys(&s.pid_b).expect("B's own Persona");
@@ -855,7 +795,7 @@ async fn persona_public_keys_returns_the_personas_two_keys() {
         (member_key, device_key),
         (
             persona_b.member_seed_for_test().x25519_keypair().member_key().unwrap(),
-            persona_b.device_seed_for_test().signing_keypair().device_key().unwrap()
+            device_keypair(s.svc_b.keychain.seed(&persona_b.device_key)).device_key().unwrap()
         ),
         "each key from the Persona's own seed"
     );
@@ -870,9 +810,9 @@ async fn persona_public_keys_returns_the_personas_two_keys() {
 
 // Normal: the Member admitted carries exactly the Joiner's five values.
 // verifies: LLR-kkj64b, REQ-qn2erx
-#[tokio::test(flavor = "multi_thread")]
-async fn an_admitted_member_carries_exactly_the_joiners_values() {
-    let s = admit_b_directly(setup("joiner-values").await).await;
+#[test]
+fn an_admitted_member_carries_exactly_the_joiners_values() {
+    let s = admit_b_directly(setup("joiner-values"));
     let rec = rec_of(&s.svc_a, s.org_id);
     let bob = rec.trie_members.iter().find(|m| m.handle == s.joiner_b.handle).expect("bob");
     assert_eq!(
@@ -886,14 +826,14 @@ async fn an_admitted_member_carries_exactly_the_joiners_values() {
 // org-members' `DuplicateKey` refusal — every key held once, the owner's
 // ruling of 2026-10-04 — which holds whatever the handle.)
 // verifies: LLR-kkj64b
-#[tokio::test(flavor = "multi_thread")]
-async fn a_joiner_with_a_member_key_already_held_is_refused() {
-    let mut s = setup("joiner-dup").await;
+#[test]
+fn a_joiner_with_a_member_key_already_held_is_refused() {
+    let mut s = setup("joiner-dup");
     let (a_member_key, _) = s.svc_a.persona_public_keys(&s.pid_a).unwrap();
     let dup = org_node::Joiner { member_key: a_member_key, ..s.joiner_b.clone() };
     let before = rec_of(&s.svc_a, s.org_id);
-    let (sink_addr, _sink) = spawn_recv_one(rand::random()).await;
-    let err = admit(&mut s.svc_a, &s.chain, s.org_id, &dup, sink_addr).await.unwrap_err();
+    let (sink_addr, _sink) = spawn_recv_one(rand::random());
+    let err = admit(&mut s.svc_a, &s.chain, s.org_id, &dup, sink_addr).unwrap_err();
     assert!(matches!(err, OrgNodeError::Trie(_)), "{err:?}");
     assert_eq!(rec_of(&s.svc_a, s.org_id).trie_members.len(), before.trie_members.len());
 }
@@ -920,18 +860,18 @@ async fn a_joiner_with_a_member_key_already_held_is_refused() {
 // ---------------------------------------------------------------------------
 
 // verifies: LLR-vdyu65, LLR-w3fhhg
-#[tokio::test(flavor = "multi_thread")]
-async fn a_second_organisation_is_admitted_into_without_touching_the_first() {
+#[test]
+fn a_second_organisation_is_admitted_into_without_touching_the_first() {
     let chain = ChainSlots::new();
-    let mut svc_a = Node::new(open_store("two-orgs-admit", "a", "pw_a"), chain.clone());
-    let mut svc_b = Node::new(open_store("two-orgs-admit", "b", "pw_b"), chain.clone());
+    let mut svc_a = Node::new(open_store("two-orgs-admit", "a"), chain.clone());
+    let mut svc_b = Node::new(open_store("two-orgs-admit", "b"), chain.clone());
 
     // TWO personas, so org_2's founder is not the first persona in the
     // store. The first Persona bound to org_2 is the second.
     let pid_1 = svc_a.create_persona(&mut OsRng, h("first"), nm("First"), sn("Admin")).unwrap();
     let pid_2 = svc_a.create_persona(&mut OsRng, h("second"), nm("Second"), sn("Admin")).unwrap();
-    let org_1 = found(&mut svc_a, &chain, &pid_1).await;
-    let org_2 = found(&mut svc_a, &chain, &pid_2).await;
+    let org_1 = found(&mut svc_a, &chain, &pid_1);
+    let org_2 = found(&mut svc_a, &chain, &pid_2);
     assert_ne!(org_1, org_2);
 
     // `commit_genesis` binds each persona to the Organisation it founded,
@@ -946,15 +886,14 @@ async fn a_second_organisation_is_admitted_into_without_touching_the_first() {
         "two personas must give the two Organisations different founding Members"
     );
 
-    // A's endpoint, bound from persona 2's device seed — the founder of the
-    // Organisation being admitted into.
-    let ep_a = OrgEndpoint::bind(&device_kp(&svc_a, &pid_2)).await.unwrap();
-    let mut svc_a = svc_a.with_endpoint(ep_a);
+    // A sends as persona 2's Device — the founder of the Organisation being
+    // admitted into.
+    let a_device = device_kp(&svc_a, &pid_2);
+    let mut svc_a = svc_a.sending_as(&a_device);
 
     // B expects org_2's admission; A admits B as B's joiner.
     let pid_b = svc_b.create_persona(&mut OsRng, h("bob"), nm("Bob"), sn("Builder")).unwrap();
     let jr_b = joiner_of(&svc_b, &pid_b);
-    let b_device_kp = device_kp(&svc_b, &pid_b);
     svc_b.expect_admission(&mut OsRng, org_2).unwrap();
 
     // Building an admission into org_2 keeps it under org_2 alone: org_1's
@@ -978,11 +917,10 @@ async fn a_second_organisation_is_admitted_into_without_touching_the_first() {
 
     // Admit B into org_2. B verifies the envelope against org_2's on-chain
     // state, so an envelope built on org_1's record is refused.
-    let (b_addr, b_task) = spawn_receive(svc_b, &b_device_kp).await;
+    let (b_addr, b_task) = spawn_receive(svc_b);
     let new_member = admit(&mut svc_a, &chain, org_2, &jr_b, b_addr)
-        .await
         .expect("admit_member(org 2) failed");
-    let (svc_b, outcome) = b_task.await.unwrap();
+    let (svc_b, outcome) = b_task.run();
     let outcome = outcome.expect("B must verify an admission into org 2");
     assert_eq!(svc_b.list_orgs()[0].org_id, org_2, "B committed the wrong Organisation");
 
@@ -1016,14 +954,19 @@ async fn a_second_organisation_is_admitted_into_without_touching_the_first() {
 
     // ...and on disk, which is where a lookup that ignored its argument would
     // leave the damage.
-    let reloaded = reopen_store("two-orgs-admit", "a", "pw_a");
+    let reloaded = reopen_store("two-orgs-admit", "a");
     let on_disk = |id: OrgId| disk_rec_of(&reloaded, id);
     assert_eq!(on_disk(org_2).trie_members.len(), 2, "org 2's admission must reach the disk");
     assert_eq!(on_disk(org_1).trie_members.len(), 1, "org 1 must be untouched on disk");
     assert_eq!(on_disk(org_1).epoch, one_before.epoch);
 }
 
-// LLR-pw369n's refusal half and PR-b9wab3's reproduction. In Loopback mode
+// *2026-10-13 (S4, task T12):* the Loopback-address refusal item this test
+// also verified moved to org-io with the send, where its own tests verify it
+// (`org-io/tests/send_fanout.rs`); its ID left this `verifies:` line, which
+// keeps the others. It exercised org-node's transitional send until T14
+// deleted that send (the note in its body).
+// The Loopback-address refusal and PR-b9wab3's reproduction. In Loopback mode
 // there is no discovery to fall back on, so a send offered no peer address is
 // refused with a typed error rather than attempted and lost.
 //
@@ -1034,10 +977,10 @@ async fn a_second_organisation_is_admitted_into_without_touching_the_first() {
 // nothing; the caller's one chain write is followed by `commit_update`, and
 // the address is checked by `send_update`, after a commit the chain already
 // agrees with — so no epoch can be burned.
-// verifies: LLR-pw369n, LLR-6dc598, PR-b9wab3
-#[tokio::test(flavor = "multi_thread")]
-async fn a_loopback_revocation_without_an_address_burns_no_epoch() {
-    let mut s = admit_b_directly(setup("revoke-no-addr").await).await;
+// verifies: LLR-6dc598, PR-b9wab3
+#[test]
+fn a_loopback_revocation_without_an_address_burns_no_epoch() {
+    let mut s = admit_b_directly(setup("revoke-no-addr"));
     let before = s.svc_a.list_orgs()[0].clone();
     let epoch_before = s.chain.get(&s.org_id).unwrap().epoch;
     let b_id = id_by_handle(&before, "bob");
@@ -1051,20 +994,18 @@ async fn a_loopback_revocation_without_an_address_burns_no_epoch() {
 
     // The app's chain write and the commit: each moves by exactly one.
     s.chain.apply_update(s.org_id, update.resulting_root, update.org_pub_key, before.epoch).unwrap();
-    let out = s.svc_a.commit_update(&mut OsRng, s.org_id).await.unwrap();
+    let out = s.svc_a.commit_update(&mut OsRng, s.org_id).unwrap();
     assert_eq!(s.chain.get(&s.org_id).unwrap().epoch, Epoch::new(epoch_before.get() + 1));
     let committed = s.svc_a.list_orgs()[0].clone();
     assert_eq!(committed.epoch, Epoch::new(before.epoch.get() + 1), "A's record follows the chain");
     assert!(!committed.trie_members.iter().any(|m| m.id == b_id), "the removal is committed");
 
-    // The recipient's own identity listens; the send without an address is
-    // refused, nothing reaches it, and nothing else moves.
-    let sink = OrgEndpoint::bind(&s.b_device_kp).await.unwrap();
-    let result = s.svc_a.send_update(&out, s.joiner_b.device_key, None).await;
-    match &result {
-        Err(OrgNodeError::Chain(m)) if m.contains("requires the peer's EndpointAddr") => {}
-        other => panic!("expected a refusal naming the missing address, got {other:?}"),
-    }
+    // *2026-10-14 (S4, task T14):* the send half — the transitional
+    // `send_body` refusing a Loopback send with no address, nothing reaching
+    // the recipient — went with that send; org-io's send refuses so
+    // (`org-io/tests/send_fanout.rs`). The commit built B's body; nothing
+    // else moves.
+    assert!(body_for(&out, s.joiner_b.device_key).is_some(), "B's body is built");
     assert_eq!(
         s.chain.get(&s.org_id).unwrap().epoch,
         Epoch::new(epoch_before.get() + 1),
@@ -1072,10 +1013,6 @@ async fn a_loopback_revocation_without_an_address_burns_no_epoch() {
     );
     let after = s.svc_a.list_orgs()[0].clone();
     assert_eq!((after.epoch, after.root_hash), (committed.epoch, committed.root_hash), "the commit stands");
-    assert!(
-        tokio::time::timeout(std::time::Duration::from_secs(2), sink.recv_one()).await.is_err(),
-        "nothing is sent"
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1115,29 +1052,28 @@ struct TwoOrgReceiver {
     pid_b1: PersonaId,
     pid_b2: PersonaId,
     b1_device_kp: SigningKeypair,
-    b2_device_kp: SigningKeypair,
 }
 
-async fn two_org_receiver(tag: &str) -> TwoOrgReceiver {
+fn two_org_receiver(tag: &str) -> TwoOrgReceiver {
     let chain = ChainSlots::new();
 
     // Two founding nodes, each with its own store and its own Organisation.
-    // They are separate services so that each can hold its own endpoint; what
+    // They are separate services so that each sends from its own Device; what
     // is under test here is the RECEIVER's lookups, not the sender's.
-    let mut svc_a1 = Node::new(open_store(tag, "a1", "pw_a1"), chain.clone());
-    let mut svc_a2 = Node::new(open_store(tag, "a2", "pw_a2"), chain.clone());
+    let mut svc_a1 = Node::new(open_store(tag, "a1"), chain.clone());
+    let mut svc_a2 = Node::new(open_store(tag, "a2"), chain.clone());
     let pid_a1 = svc_a1.create_persona(&mut OsRng, h("admin1"), nm("Admin"), sn("One")).unwrap();
     let pid_a2 = svc_a2.create_persona(&mut OsRng, h("admin2"), nm("Admin"), sn("Two")).unwrap();
-    let org_1 = found(&mut svc_a1, &chain, &pid_a1).await;
-    let org_2 = found(&mut svc_a2, &chain, &pid_a2).await;
+    let org_1 = found(&mut svc_a1, &chain, &pid_a1);
+    let org_2 = found(&mut svc_a2, &chain, &pid_a2);
     assert_ne!(org_1, org_2);
     let a1_dev = device_kp(&svc_a1, &pid_a1);
     let a2_dev = device_kp(&svc_a2, &pid_a2);
-    let mut svc_a1 = svc_a1.with_endpoint(OrgEndpoint::bind(&a1_dev).await.unwrap());
-    let mut svc_a2 = svc_a2.with_endpoint(OrgEndpoint::bind(&a2_dev).await.unwrap());
+    let mut svc_a1 = svc_a1.sending_as(&a1_dev);
+    let mut svc_a2 = svc_a2.sending_as(&a2_dev);
 
     // B: two Personas, one per Organisation.
-    let mut svc_b = Node::new(open_store(tag, "b", "pw_b"), chain.clone());
+    let mut svc_b = Node::new(open_store(tag, "b"), chain.clone());
     let pid_b1 = svc_b.create_persona(&mut OsRng, h("bob-one"), nm("Bob"), sn("One")).unwrap();
     let pid_b2 = svc_b.create_persona(&mut OsRng, h("bob-two"), nm("Bob"), sn("Two")).unwrap();
 
@@ -1145,30 +1081,28 @@ async fn two_org_receiver(tag: &str) -> TwoOrgReceiver {
     // that takes "whichever expectation comes first" rather than the one for
     // this Organisation gets the admission that follows wrong.
     let b1_device_kp = device_kp(&svc_b, &pid_b1);
-    let b2_device_kp = device_kp(&svc_b, &pid_b2);
-    svc_b.expect_admission(&mut OsRng, org_2).unwrap();
-    svc_b.expect_admission(&mut OsRng, org_1).unwrap();
+    // *Adapted 2026-10-08 (S4, task T3):* an expectation is the replying
+    // Persona's, kept in its own store (LLR-rdda86), so each is declared for
+    // the Persona it admits; org 2's is still declared first.
+    svc_b.expect_admission_for(&mut OsRng, &pid_b2, org_2).unwrap();
+    svc_b.expect_admission_for(&mut OsRng, &pid_b1, org_1).unwrap();
     assert_eq!(svc_b.expected_admissions().len(), 2, "two expectations, one each");
-    assert_eq!(svc_b.expected_admissions()[0].org_id, org_2);
+    assert!(svc_b.expected_admissions().iter().any(|expected| expected.org_id == org_2));
 
     // First admission into org 1, with org 2's expectation sitting ahead of it.
     let jr_b1 = joiner_of(&svc_b, &pid_b1);
-    let (addr, task) = spawn_receive(svc_b, &b1_device_kp).await;
-    admit(&mut svc_a1, &chain, org_1, &jr_b1, addr)
-        .await
-        .expect("admit b1 failed");
-    let (svc_b, outcome) = task.await.unwrap();
+    let (addr, task) = spawn_receive(svc_b);
+    admit(&mut svc_a1, &chain, org_1, &jr_b1, addr).expect("admit b1 failed");
+    let (svc_b, outcome) = task.run();
     outcome.expect("B must accept its first admission to org 1");
     assert_eq!(svc_b.expected_admissions().len(), 1, "org 1's expectation and only that one is cleared");
     assert_eq!(svc_b.expected_admissions()[0].org_id, org_2, "org 2's expectation survives");
 
     // First admission into org 2.
     let jr_b2 = joiner_of(&svc_b, &pid_b2);
-    let (addr, task) = spawn_receive(svc_b, &b2_device_kp).await;
-    admit(&mut svc_a2, &chain, org_2, &jr_b2, addr)
-        .await
-        .expect("admit b2 failed");
-    let (svc_b, outcome) = task.await.unwrap();
+    let (addr, task) = spawn_receive(svc_b);
+    admit(&mut svc_a2, &chain, org_2, &jr_b2, addr).expect("admit b2 failed");
+    let (svc_b, outcome) = task.run();
     outcome.expect("B must accept its first admission to org 2");
     assert_eq!(svc_b.list_orgs().len(), 2, "B now holds two Organisations");
     assert!(svc_b.expected_admissions().is_empty(), "both expectations are cleared");
@@ -1183,7 +1117,6 @@ async fn two_org_receiver(tag: &str) -> TwoOrgReceiver {
         pid_b1,
         pid_b2,
         b1_device_kp,
-        b2_device_kp,
     }
 }
 
@@ -1193,9 +1126,9 @@ async fn two_org_receiver(tag: &str) -> TwoOrgReceiver {
 // the author's trace check after review round 7 found both falsified only by
 // this test, which did not name them.
 // verifies: LLR-cja9zv, LLR-q8emds, LLR-y2v8v2, LLR-9zfnmb, LLR-e5c9ud
-#[tokio::test(flavor = "multi_thread")]
-async fn a_receiver_holding_two_organisations_commits_into_the_one_the_change_names() {
-    let mut s = two_org_receiver("two-org-recv").await;
+#[test]
+fn a_receiver_holding_two_organisations_commits_into_the_one_the_change_names() {
+    let mut s = two_org_receiver("two-org-recv");
     let one_before = rec_of(&s.svc_b, s.org_1);
     let two_before = rec_of(&s.svc_b, s.org_2);
     assert_ne!(one_before.org_private_key_for_test().clone(), two_before.org_private_key_for_test().clone(), "two Organisations, two keys");
@@ -1203,11 +1136,9 @@ async fn a_receiver_holding_two_organisations_commits_into_the_one_the_change_na
     // A2 admits C into org 2, and B receives it.
     let pid_c = s.svc_a2.create_persona(&mut OsRng, h("carol"), nm("Carol"), sn("Coder")).unwrap();
     let jr_c = joiner_of(&s.svc_a2, &pid_c);
-    let (addr, task) = spawn_receive(s.svc_b, &s.b2_device_kp).await;
-    let c_id = admit(&mut s.svc_a2, &s.chain, s.org_2, &jr_c, addr)
-        .await
-        .expect("admit C failed");
-    let (svc_b, outcome) = task.await.unwrap();
+    let (addr, task) = spawn_receive(s.svc_b);
+    let c_id = admit(&mut s.svc_a2, &s.chain, s.org_2, &jr_c, addr).expect("admit C failed");
+    let (svc_b, outcome) = task.run();
     let outcome = outcome.expect("B must commit an update for an Organisation it holds");
     assert_eq!(outcome.org_id, s.org_2, "the outcome must name org 2");
 
@@ -1244,7 +1175,7 @@ async fn a_receiver_holding_two_organisations_commits_into_the_one_the_change_na
     assert_eq!(persona_of(&svc_b, &s.pid_b2).org_id, Some(s.org_2));
 
     // ...and all of it on disk.
-    let reloaded = reopen_store("two-org-recv", "b", "pw_b");
+    let reloaded = reopen_store("two-org-recv", "b");
     let on_disk = |id: OrgId| disk_rec_of(&reloaded, id);
     assert_eq!(on_disk(s.org_2).epoch, two_after.epoch, "org 2's update must reach the disk");
     assert_eq!(on_disk(s.org_1).epoch, one_before.epoch, "org 1 must be untouched on disk");
@@ -1262,25 +1193,18 @@ async fn a_receiver_holding_two_organisations_commits_into_the_one_the_change_na
 // record rather than the one being revoked from — as green, along with four
 // other lookups on this path.
 // verifies: REQ-uxv2x2, LLR-6p4pj2, LLR-jwhzh3
-#[tokio::test(flavor = "multi_thread")]
-async fn a_self_delete_removes_only_the_organisation_the_revocation_came_from() {
-    let mut s = two_org_receiver("two-org-selfdel").await;
+#[test]
+fn a_self_delete_removes_only_the_organisation_the_revocation_came_from() {
+    let mut s = two_org_receiver("two-org-selfdel");
     let one_before = rec_of(&s.svc_b, s.org_1);
     let b2_member_id = persona_of(&s.svc_b, &s.pid_b2).member_id.expect("b2 has a member id in org 2");
 
-    let (addr, task) = spawn_self_delete(s.svc_b, &s.b2_device_kp).await;
-    revoke(&mut s.svc_a2, &s.chain, s.org_2, b2_member_id, Some(addr))
-        .await
-        .expect("revoke b2 failed");
+    let (addr, task) = spawn_receive(s.svc_b);
+    revoke(&mut s.svc_a2, &s.chain, s.org_2, b2_member_id, addr).expect("revoke b2 failed");
 
-    let (svc_b, outcome) = task.await.unwrap();
-    assert!(
-        matches!(
-            outcome.expect("B must act on its own revocation from org 2"),
-            SelfDeleteOutcome::SelfDeleted { org_id, .. } if org_id == s.org_2
-        ),
-        "B must self-delete from org 2 and say so"
-    );
+    let (svc_b, outcome) = task.run();
+    let outcome = outcome.expect("B must act on its own revocation from org 2");
+    assert_eq!((outcome.org_id, outcome.kind), (s.org_2, ReceiveKind::Revoked), "B must self-delete from org 2 and say so");
 
     // org 2 is gone; **org 1 is not**.
     assert_eq!(svc_b.list_orgs().len(), 1, "exactly one Organisation must remain");
@@ -1298,7 +1222,7 @@ async fn a_self_delete_removes_only_the_organisation_the_revocation_came_from() 
         "b1 is in another Organisation and must not be deleted by org 2's removal"
     );
 
-    let reloaded = reopen_store("two-org-selfdel", "b", "pw_b");
+    let reloaded = reopen_store("two-org-selfdel", "b");
     assert_eq!(reloaded.data().personas.len(), 1, "only b1 may remain on disk");
     assert_eq!(reloaded.data().personas[0].persona_id, s.pid_b1);
     assert_eq!(reloaded.data().orgs.len(), 1, "only org 1 may remain on disk");
@@ -1319,27 +1243,20 @@ async fn a_self_delete_removes_only_the_organisation_the_revocation_came_from() 
 // an Organisation it was just removed from: any Member who can admit could
 // pin another in place by enrolling a key that member uses elsewhere.
 // verifies: LLR-jsx922, LLR-6p4pj2, LLR-jwhzh3
-#[tokio::test(flavor = "multi_thread")]
-async fn membership_of_one_organisation_is_judged_by_that_organisations_personas_alone() {
-    let mut s = two_org_receiver("two-org-mine").await;
+#[test]
+fn membership_of_one_organisation_is_judged_by_that_organisations_personas_alone() {
+    let mut s = two_org_receiver("two-org-mine");
     let one_before = rec_of(&s.svc_b, s.org_1);
     let two_before = rec_of(&s.svc_b, s.org_2);
 
     // Half 1 — an ordinary update arriving on the self-delete path. org 2's
     // founder admits b1's device key into org 2.
     let jr_b1 = joiner_of(&s.svc_b, &s.pid_b1);
-    let (addr, task) = spawn_self_delete(s.svc_b, &s.b2_device_kp).await;
-    admit(&mut s.svc_a2, &s.chain, s.org_2, &jr_b1, addr)
-        .await
-        .expect("admit b1 into org 2 failed");
-    let (svc_b, outcome) = task.await.unwrap();
-    assert!(
-        matches!(
-            outcome.expect("B must commit an update it is still a member after"),
-            SelfDeleteOutcome::UpdatedNotRevoked { org_id } if org_id == s.org_2
-        ),
-        "B is still in org 2 and must say so, naming org 2"
-    );
+    let (addr, task) = spawn_receive(s.svc_b);
+    admit(&mut s.svc_a2, &s.chain, s.org_2, &jr_b1, addr).expect("admit b1 into org 2 failed");
+    let (svc_b, outcome) = task.run();
+    let outcome = outcome.expect("B must commit an update it is still a member after");
+    assert_eq!((outcome.org_id, outcome.kind), (s.org_2, ReceiveKind::Updated), "B is still in org 2 and must say so, naming org 2");
     let b1_device = s.b1_device_kp.device_key().unwrap();
     let two_mid = rec_of(&svc_b, s.org_2);
     assert!(two_mid.epoch > two_before.epoch, "org 2's record must take the update");
@@ -1360,16 +1277,13 @@ async fn membership_of_one_organisation_is_judged_by_that_organisations_personas
     // Half 2 — org 2 revokes b2. b1's device is still in org 2's trie, but b1
     // is org 1's Persona; B's membership of org 2 was b2, and b2 is gone.
     let b2_member_id = persona_of(&svc_b, &s.pid_b2).member_id.expect("b2 has a member id in org 2");
-    let (addr, task) = spawn_self_delete(svc_b, &s.b2_device_kp).await;
-    revoke(&mut s.svc_a2, &s.chain, s.org_2, b2_member_id, Some(addr))
-        .await
-        .expect("revoke b2 failed");
-    let (svc_b, outcome) = task.await.unwrap();
-    assert!(
-        matches!(
-            outcome.expect("B must act on its own revocation from org 2"),
-            SelfDeleteOutcome::SelfDeleted { org_id, .. } if org_id == s.org_2
-        ),
+    let (addr, task) = spawn_receive(svc_b);
+    revoke(&mut s.svc_a2, &s.chain, s.org_2, b2_member_id, addr).expect("revoke b2 failed");
+    let (svc_b, outcome) = task.run();
+    let outcome = outcome.expect("B must act on its own revocation from org 2");
+    assert_eq!(
+        (outcome.org_id, outcome.kind),
+        (s.org_2, ReceiveKind::Revoked),
         "b2 was B's membership of org 2; another Organisation's Persona must not keep B in it"
     );
     assert_eq!(svc_b.list_orgs().len(), 1, "only org 1 may remain");
@@ -1391,37 +1305,34 @@ async fn membership_of_one_organisation_is_judged_by_that_organisations_personas
 // member-sender rule's "listed before, absent after" normal case: C is
 // listed in B's record when it relays, so the update passes the check.
 // verifies: REQ-ztdza4, LLR-u6rq4s, LLR-2r2fha
-#[tokio::test(flavor = "multi_thread")]
-async fn a_removal_relayed_by_the_member_it_removes_is_committed() {
-    let mut s = admit_b_directly(setup("relay-by-removed").await).await;
+#[test]
+fn a_removal_relayed_by_the_member_it_removes_is_committed() {
+    let mut s = admit_b_directly(setup("relay-by-removed"));
 
     // C: a persona on A's device whose seed the test holds. The admission is
     // pushed to B, so B's record holds C.
     let pid_c = s.svc_a.create_persona(&mut OsRng, h("carol"), nm("Carol"), sn("Coder")).unwrap();
-    let c_seed = *persona_of(&s.svc_a, &pid_c).device_seed_for_test().expose_secret();
+    let c_seed = device_seed_of(&s.svc_a, &pid_c);
     let jr_c = joiner_of(&s.svc_a, &pid_c);
-    let (b_addr, b_task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
-    let c_id = admit(&mut s.svc_a, &s.chain, s.org_id, &jr_c, b_addr)
-        .await
-        .expect("admit C failed");
-    let (svc_b, out) = b_task.await.unwrap();
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
+    let c_id = admit(&mut s.svc_a, &s.chain, s.org_id, &jr_c, b_addr).expect("admit C failed");
+    let (svc_b, out) = b_task.run();
     out.expect("B commits C's admission");
     assert!(svc_b.list_orgs()[0].trie_members.iter().any(|m| m.id == c_id));
     let before = svc_b.list_orgs()[0].clone();
 
     // A revokes C and pushes the change, addressed to B's Device, to C's own
     // endpoint.
-    let (c_addr, c_task) = spawn_recv_one(c_seed).await;
+    let (c_addr, c_task) = spawn_recv_one(c_seed);
     revoke_and_tell(&mut s.svc_a, &s.chain, s.org_id, c_id, s.b_device_kp.device_key().unwrap(), c_addr)
-        .await
         .expect("revoke C failed");
-    let (c_ep, _sender, msg) = c_task.await.unwrap();
+    let (c_ep, _sender, msg) = c_task.run();
     assert!(matches!(msg, WireMessage::OrgInformation { .. }), "B's Device is listed");
 
     // C relays its own removal to B, on B's ordinary receive path.
-    let (b_addr, b_task) = spawn_receive(svc_b, &s.b_device_kp).await;
-    c_ep.send(b_addr, &msg).await.expect("relay to B");
-    let (svc_b, result) = b_task.await.unwrap();
+    let (b_addr, b_task) = spawn_receive(svc_b);
+    c_ep.send(b_addr, &msg).expect("relay to B");
+    let (svc_b, result) = b_task.run();
     let committed = result.expect("a chain-valid removal is committed whoever relays it");
     assert!(committed.epoch > before.epoch);
     let after = svc_b.list_orgs()[0].clone();
@@ -1444,9 +1355,9 @@ async fn a_removal_relayed_by_the_member_it_removes_is_committed() {
 // the chain's root, which still lists B, refuses (`RevocationProofRefused`,
 // LLR-tx8ruv, LLR-jsx922 as amended).
 // verifies: LLR-pt32fx, LLR-jsx922, LLR-u6rq4s, REQ-3dsweu, LLR-8hdu9x, LLR-4kh9w9, LLR-kzgjz8
-#[tokio::test(flavor = "multi_thread")]
-async fn a_revocation_that_leaves_this_device_listed_is_refused_on_both_paths() {
-    let mut s = admit_b_directly(setup("relabelled").await).await;
+#[test]
+fn a_revocation_that_leaves_this_device_listed_is_refused_on_both_paths() {
+    let mut s = admit_b_directly(setup("relabelled"));
     let dora = org_node::Joiner {
         handle: h("dora"),
         name: nm("Dora"),
@@ -1455,7 +1366,7 @@ async fn a_revocation_that_leaves_this_device_listed_is_refused_on_both_paths() 
         device_key: org_node::test_fixtures::device_key(0x72),
     };
     s.svc_b.admit_member(&mut OsRng, s.org_id, &dora).expect("B keeps a provisional update");
-    let genuine = captured_admission_of_c(&mut s).await;
+    let genuine = captured_admission_of_c(&mut s);
     let before = rec_of(&s.svc_b, s.org_id);
     let a_member = before.trie_members.iter().find(|m| m.handle.as_str() == "admin").expect("A in B's record").clone();
     let a_device = a_member.device_keys[0];
@@ -1487,20 +1398,17 @@ async fn a_revocation_that_leaves_this_device_listed_is_refused_on_both_paths() 
 
     let mut svc_b = s.svc_b;
     for (relabelled, sender_seed, expected) in refusals {
-        let (addr, task) = spawn_receive(svc_b, &s.b_device_kp).await;
-        deliver_from(sender_seed, addr, &relabelled).await;
-        let (back, result) = task.await.unwrap();
+        let (addr, task) = spawn_receive(svc_b);
+        deliver_from(sender_seed, addr, &relabelled);
+        let (back, result) = task.run();
         let refused = |result: &Result<_, OrgNodeError>| match result {
             Err(OrgNodeError::RevocationNotForThisDevice { org_id }) if *org_id == s.org_id => "RevocationNotForThisDevice",
             Err(OrgNodeError::RevocationProofRefused { org_id, .. }) if *org_id == s.org_id => "RevocationProofRefused",
             Err(OrgNodeError::SenderNotListed { org_id }) if *org_id == s.org_id => "SenderNotListed",
             _ => "something else",
         };
-        assert_eq!(refused(&result.map(|_| ())), expected, "receive_and_verify");
-        let (addr, task) = spawn_self_delete(back, &s.b_device_kp).await;
-        deliver_from(sender_seed, addr, &relabelled).await;
-        let (back, result) = task.await.unwrap();
-        assert_eq!(refused(&result.map(|_| ())), expected, "receive_and_self_delete_if_revoked");
+        // *S4 T4:* one receive path; this ran on both.
+        assert_eq!(refused(&result.map(|_| ())), expected, "the receive path");
         svc_b = back;
     }
 
@@ -1514,9 +1422,9 @@ async fn a_revocation_that_leaves_this_device_listed_is_refused_on_both_paths() 
     assert_eq!(binding(&persona_of(&svc_b, &s.pid_b)), b_binding, "the Persona as it was");
     assert_eq!(store_bytes("relabelled", "b"), on_disk, "nothing written");
 
-    let (addr, task) = spawn_receive(svc_b, &s.b_device_kp).await;
-    deliver_from(a_seed, addr, &genuine).await;
-    let (svc_b, result) = task.await.unwrap();
+    let (addr, task) = spawn_receive(svc_b);
+    deliver_from(a_seed, addr, &genuine);
+    let (svc_b, result) = task.run();
     assert_eq!(result.expect("the genuine message commits").epoch, Epoch::new(3));
     assert_eq!(rec_of(&svc_b, s.org_id).trie_members.len(), 3, "A + B + C");
 }
@@ -1531,9 +1439,9 @@ async fn a_revocation_that_leaves_this_device_listed_is_refused_on_both_paths() 
 // `a_first_admission_records_the_chains_key_the_secret_and_the_member`, after
 // the Organisation secret this change removes.
 // verifies: LLR-ckk5nz, LLR-e5c9ud, LLR-rys5nx, LLR-3fwykc, LLR-ba2ejp
-#[tokio::test(flavor = "multi_thread")]
-async fn a_first_admission_records_the_chains_key_the_private_key_and_the_member() {
-    let s = admit_b_directly(setup("first-admission-fields").await).await;
+#[test]
+fn a_first_admission_records_the_chains_key_the_private_key_and_the_member() {
+    let s = admit_b_directly(setup("first-admission-fields"));
     let published = s.chain.get(&s.org_id).unwrap().org_pub_key;
     let held_by_a = rec_of(&s.svc_a, s.org_id).org_private_key_for_test().clone();
     let rec = s.svc_b.list_orgs()[0].clone();
@@ -1552,7 +1460,7 @@ async fn a_first_admission_records_the_chains_key_the_private_key_and_the_member
     assert_eq!(persona.status, PersonaStatus::Active);
     assert_eq!(persona.org_id, Some(s.org_id));
 
-    let reloaded = reopen_store("first-admission-fields", "b", "pw_b");
+    let reloaded = reopen_store("first-admission-fields", "b");
     assert_eq!(reloaded.data().orgs[0].org_pub_key, published);
     assert_eq!(reloaded.data().orgs[0].org_private_key_for_test().clone(), held_by_a);
 }
@@ -1565,19 +1473,19 @@ async fn a_first_admission_records_the_chains_key_the_private_key_and_the_member
 // receiver stores it (REQ-ju6vn2). A removes C and tells B, still a Member.
 // Red before the change (B's record held no key), green after.
 // verifies: LLR-ckk5nz, REQ-szq3ud, REQ-ju6vn2, PR-xwek5e
-#[tokio::test(flavor = "multi_thread")]
-async fn pr_xwek5e_another_members_removal_leaves_the_receiver_holding_the_organisations_key() {
-    let mut s = admit_b_directly(setup("pr-xwek5e").await).await;
+#[test]
+fn pr_xwek5e_another_members_removal_leaves_the_receiver_holding_the_organisations_key() {
+    let mut s = admit_b_directly(setup("pr-xwek5e"));
     let jr_c = joiner_for_c(&mut s.svc_a);
-    let (b_addr, b_task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
-    let c_id = admit(&mut s.svc_a, &s.chain, s.org_id, &jr_c, b_addr).await.unwrap();
-    let (svc_b, out) = b_task.await.unwrap();
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
+    let c_id = admit(&mut s.svc_a, &s.chain, s.org_id, &jr_c, b_addr).unwrap();
+    let (svc_b, out) = b_task.run();
     out.unwrap();
 
     let b_device = s.b_device_kp.device_key().unwrap();
-    let (b_addr, b_task) = spawn_receive(svc_b, &s.b_device_kp).await;
-    revoke_and_tell(&mut s.svc_a, &s.chain, s.org_id, c_id, b_device, b_addr).await.unwrap();
-    let (svc_b, out) = b_task.await.unwrap();
+    let (b_addr, b_task) = spawn_receive(svc_b);
+    revoke_and_tell(&mut s.svc_a, &s.chain, s.org_id, c_id, b_device, b_addr).unwrap();
+    let (svc_b, out) = b_task.run();
     out.expect("B commits C's removal");
     let held = rec_of(&svc_b, s.org_id).org_private_key_for_test().clone();
     assert_eq!(held, rec_of(&s.svc_a, s.org_id).org_private_key_for_test().clone(), "PR-xwek5e: B holds the key A's record holds");
@@ -1586,7 +1494,7 @@ async fn pr_xwek5e_another_members_removal_leaves_the_receiver_holding_the_organ
         s.chain.get(&s.org_id).unwrap().org_pub_key,
         "the private half of the chain's key"
     );
-    let reloaded = reopen_store("pr-xwek5e", "b", "pw_b");
+    let reloaded = reopen_store("pr-xwek5e", "b");
     assert_eq!(reloaded.data().orgs[0].org_private_key_for_test().clone(), held, "and on disk");
 }
 
@@ -1596,9 +1504,9 @@ async fn pr_xwek5e_another_members_removal_leaves_the_receiver_holding_the_organ
 // (REQ-szq3ud), and the admitted node stores it (REQ-ju6vn2). Red before the
 // change (B's record held none), green after.
 // verifies: LLR-3fwykc, REQ-szq3ud, REQ-ju6vn2, PR-szkat6
-#[tokio::test(flavor = "multi_thread")]
-async fn pr_szkat6_an_admitted_member_holds_the_organisation_private_key() {
-    let s = admit_b_directly(setup("pr-szkat6").await).await;
+#[test]
+fn pr_szkat6_an_admitted_member_holds_the_organisation_private_key() {
+    let s = admit_b_directly(setup("pr-szkat6"));
     let held = rec_of(&s.svc_b, s.org_id).org_private_key_for_test().clone();
     assert_eq!(held, rec_of(&s.svc_a, s.org_id).org_private_key_for_test().clone(), "the key the creating node holds");
     assert_eq!(held.x25519_keypair().org_public_key().unwrap(), s.chain.get(&s.org_id).unwrap().org_pub_key);
@@ -1613,16 +1521,16 @@ async fn pr_szkat6_an_admitted_member_holds_the_organisation_private_key() {
 // the removal is another, and C's admission brings yet another. Red before
 // (the key never changed), green after.
 // verifies: LLR-e2b7gv, LLR-6s785x, REQ-stx9v3, REQ-jy6ybw, PR-g9u3xq
-#[tokio::test(flavor = "multi_thread")]
-async fn pr_g9u3xq_a_removed_device_holds_no_key_used_after_its_removal() {
-    let mut s = admit_b_directly(setup("pr-g9u3xq").await).await;
+#[test]
+fn pr_g9u3xq_a_removed_device_holds_no_key_used_after_its_removal() {
+    let mut s = admit_b_directly(setup("pr-g9u3xq"));
     let b_key = rec_of(&s.svc_b, s.org_id).org_private_key_for_test().clone();
     let b_id = s.svc_b.list_personas()[0].member_id.expect("B has a member id");
-    let (b_addr, b_task) = spawn_self_delete(s.svc_b, &s.b_device_kp).await;
-    revoke(&mut s.svc_a, &s.chain, s.org_id, b_id, Some(b_addr)).await.unwrap();
-    let (svc_b, outcome) = b_task.await.unwrap();
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
+    revoke(&mut s.svc_a, &s.chain, s.org_id, b_id, b_addr).unwrap();
+    let (svc_b, outcome) = b_task.run();
     s.svc_b = svc_b;
-    assert!(matches!(outcome.unwrap(), SelfDeleteOutcome::SelfDeleted { .. }));
+    assert_eq!(outcome.unwrap().kind, ReceiveKind::Revoked);
     assert!(s.svc_b.list_orgs().is_empty(), "B holds no record, so no key");
     let after_removal = s.chain.get(&s.org_id).unwrap().org_pub_key;
     assert_ne!(b_key.x25519_keypair().org_public_key().unwrap(), after_removal, "the removal published a fresh key");
@@ -1631,7 +1539,7 @@ async fn pr_g9u3xq_a_removed_device_holds_no_key_used_after_its_removal() {
         after_removal,
         "A took it"
     );
-    let next = captured_admission_of_c(&mut s).await;
+    let next = captured_admission_of_c(&mut s);
     let WireMessage::OrgInformation { org_private_key, .. } = &next else { panic!("Organisation information") };
     assert_ne!(org_private_key, &b_key);
     let now = s.chain.get(&s.org_id).unwrap().org_pub_key;
@@ -1648,24 +1556,24 @@ async fn pr_g9u3xq_a_removed_device_holds_no_key_used_after_its_removal() {
 // nothing written — and then commits the genuine message. Red before (B
 // committed the substituted key), green after.
 // verifies: LLR-ba2ejp, LLR-mbjfq8, REQ-bwx7eg, PR-ve9zw8
-#[tokio::test(flavor = "multi_thread")]
-async fn pr_ve9zw8_a_first_admission_carrying_a_substituted_key_is_refused() {
-    let mut s = setup("pr-ve9zw8-first").await;
+#[test]
+fn pr_ve9zw8_a_first_admission_carrying_a_substituted_key_is_refused() {
+    let mut s = setup("pr-ve9zw8-first");
     let joiner = s.joiner_b.clone();
-    let genuine = captured_admission(&mut s, &joiner).await;
+    let genuine = captured_admission(&mut s, &joiner);
     let substituted = with_key(&genuine, OrgPrivateKey::from([0x42u8; 32]));
     let on_disk = store_bytes("pr-ve9zw8-first", "b");
-    let (addr, task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
-    deliver(addr, &substituted).await;
-    let (svc_b, result) = task.await.unwrap();
+    let (addr, task) = spawn_receive(s.svc_b);
+    deliver(addr, &substituted);
+    let (svc_b, result) = task.run();
     assert_eq!(result.unwrap_err(), OrgNodeError::OrgKeyMismatch { org_id: s.org_id });
     assert!(svc_b.list_orgs().is_empty(), "no record");
     assert_eq!(svc_b.expected_admissions().len(), 1, "the expectation is kept");
     assert_eq!(persona_of(&svc_b, &s.pid_b).status, PersonaStatus::Proposed, "the Persona untouched");
     assert_eq!(store_bytes("pr-ve9zw8-first", "b"), on_disk, "nothing written");
-    let (addr, task) = spawn_receive(svc_b, &s.b_device_kp).await;
-    deliver(addr, &genuine).await;
-    let (svc_b, result) = task.await.unwrap();
+    let (addr, task) = spawn_receive(svc_b);
+    deliver(addr, &genuine);
+    let (svc_b, result) = task.run();
     result.expect("the genuine admission commits");
     assert_eq!(
         rec_of(&svc_b, s.org_id).org_private_key_for_test().x25519_keypair().org_public_key().unwrap(),
@@ -1682,25 +1590,25 @@ async fn pr_ve9zw8_a_first_admission_carrying_a_substituted_key_is_refused() {
 // (LLR-2r2fha); the substituted key from a relay B's record does not list is
 // refused first, with `SenderNotListed`.
 // verifies: LLR-ba2ejp, LLR-37cj3n, REQ-bwx7eg, RC-9cefcn, PR-ve9zw8, LLR-3fwykc, LLR-2r2fha
-#[tokio::test(flavor = "multi_thread")]
-async fn pr_ve9zw8_an_update_carrying_a_substituted_key_is_refused_on_both_paths() {
-    let mut s = admit_b_directly(setup("pr-ve9zw8-held").await).await;
+#[test]
+fn pr_ve9zw8_an_update_carrying_a_substituted_key_is_refused_on_both_paths() {
+    let mut s = admit_b_directly(setup("pr-ve9zw8-held"));
     let a_seed = device_seed_of(&s.svc_a, &s.pid_a);
-    let genuine = captured_admission_of_c(&mut s).await;
+    let genuine = captured_admission_of_c(&mut s);
     let substituted = with_key(&genuine, OrgPrivateKey::from([0x42u8; 32]));
     let held = rec_of(&s.svc_b, s.org_id);
     let on_disk = store_bytes("pr-ve9zw8-held", "b");
-    let (addr, task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
-    deliver(addr, &substituted).await;
-    let (svc_b, result) = task.await.unwrap();
+    let (addr, task) = spawn_receive(s.svc_b);
+    deliver(addr, &substituted);
+    let (svc_b, result) = task.run();
     assert_eq!(result.unwrap_err(), OrgNodeError::SenderNotListed { org_id: s.org_id });
-    let (addr, task) = spawn_receive(svc_b, &s.b_device_kp).await;
-    deliver_from(a_seed, addr, &substituted).await;
-    let (svc_b, result) = task.await.unwrap();
+    let (addr, task) = spawn_receive(svc_b);
+    deliver_from(a_seed, addr, &substituted);
+    let (svc_b, result) = task.run();
     assert_eq!(result.unwrap_err(), OrgNodeError::OrgKeyMismatch { org_id: s.org_id });
-    let (addr, task) = spawn_self_delete(svc_b, &s.b_device_kp).await;
-    deliver_from(a_seed, addr, &substituted).await;
-    let (svc_b, result) = task.await.unwrap();
+    let (addr, task) = spawn_receive(svc_b);
+    deliver_from(a_seed, addr, &substituted);
+    let (svc_b, result) = task.run();
     assert_eq!(result.unwrap_err(), OrgNodeError::OrgKeyMismatch { org_id: s.org_id });
     let after = rec_of(&svc_b, s.org_id);
     assert_eq!(
@@ -1709,10 +1617,10 @@ async fn pr_ve9zw8_an_update_carrying_a_substituted_key_is_refused_on_both_paths
     );
     assert_eq!(after.org_private_key_for_test().clone(), held.org_private_key_for_test().clone());
     assert_eq!(store_bytes("pr-ve9zw8-held", "b"), on_disk, "nothing written");
-    let (addr, task) = spawn_self_delete(svc_b, &s.b_device_kp).await;
-    deliver_from(a_seed, addr, &genuine).await;
-    let (_svc_b, result) = task.await.unwrap();
-    assert!(matches!(result, Ok(SelfDeleteOutcome::UpdatedNotRevoked { .. })), "{result:?}");
+    let (addr, task) = spawn_receive(svc_b);
+    deliver_from(a_seed, addr, &genuine);
+    let (_svc_b, result) = task.run();
+    assert!(matches!(result, Ok(ReceiveOutcome { kind: ReceiveKind::Updated, .. })), "{result:?}");
 }
 
 // LLR-ckk5nz, LLR-4kh9w9: a committed Organisation-information update gives
@@ -1721,15 +1629,15 @@ async fn pr_ve9zw8_an_update_carrying_a_substituted_key_is_refused_on_both_paths
 // and the same pair A's record holds.
 // It is also LLR-xn5pwc's normal case: a well-formed message decodes and commits.
 // verifies: LLR-ckk5nz, LLR-4kh9w9, REQ-ju6vn2, LLR-xn5pwc
-#[tokio::test(flavor = "multi_thread")]
-async fn a_committed_update_gives_the_record_the_new_key_pair_on_both_paths() {
-    let mut s = admit_b_directly(setup("new-pair").await).await;
+#[test]
+fn a_committed_update_gives_the_record_the_new_key_pair_on_both_paths() {
+    let mut s = admit_b_directly(setup("new-pair"));
     // B's record, in memory and on disk, holds the chain's key and A's pair.
     let (chain, org_id) = (s.chain.clone(), s.org_id);
     let check = |svc_a: &Node, svc_b: &Node, path: &str| {
         for (rec, place) in [
             (rec_of(svc_b, org_id), path),
-            (disk_rec_of(&reopen_store("new-pair", "b", "pw_b"), org_id), "on disk"),
+            (disk_rec_of(&reopen_store("new-pair", "b"), org_id), "on disk"),
         ] {
             assert_eq!(rec.org_pub_key, chain.get(&org_id).unwrap().org_pub_key, "{place}");
             assert_eq!(rec.org_private_key_for_test().clone(), rec_of(svc_a, org_id).org_private_key_for_test().clone(), "{place}");
@@ -1737,18 +1645,18 @@ async fn a_committed_update_gives_the_record_the_new_key_pair_on_both_paths() {
         }
     };
     let jr_c = joiner_for_c(&mut s.svc_a);
-    let (addr, task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
-    admit(&mut s.svc_a, &s.chain, s.org_id, &jr_c, addr).await.unwrap();
-    let (svc_b, result) = task.await.unwrap();
+    let (addr, task) = spawn_receive(s.svc_b);
+    admit(&mut s.svc_a, &s.chain, s.org_id, &jr_c, addr).unwrap();
+    let (svc_b, result) = task.run();
     result.unwrap();
     check(&s.svc_a, &svc_b, "after receive_and_verify");
 
     let pid_d = s.svc_a.create_persona(&mut OsRng, h("dave"), nm("Dave"), sn("Diver")).unwrap();
     let jr_d = joiner_of(&s.svc_a, &pid_d);
-    let (addr, task) = spawn_self_delete(svc_b, &s.b_device_kp).await;
-    admit(&mut s.svc_a, &s.chain, s.org_id, &jr_d, addr).await.unwrap();
-    let (svc_b, result) = task.await.unwrap();
-    assert!(matches!(result, Ok(SelfDeleteOutcome::UpdatedNotRevoked { .. })), "{result:?}");
+    let (addr, task) = spawn_receive(svc_b);
+    admit(&mut s.svc_a, &s.chain, s.org_id, &jr_d, addr).unwrap();
+    let (svc_b, result) = task.run();
+    assert!(matches!(result, Ok(ReceiveOutcome { kind: ReceiveKind::Updated, .. })), "{result:?}");
     check(&s.svc_a, &svc_b, "after the self-delete path");
 }
 
@@ -1764,52 +1672,36 @@ async fn a_committed_update_gives_the_record_the_new_key_pair_on_both_paths() {
 // bound to org 1 with its member id, org 1's update is committed, and org 2
 // revoking b2 removes B from org 2 although b1's device is still in its trie.
 // verifies: LLR-eyc4ud, REQ-yp75u9, PR-mdv38y
-#[tokio::test(flavor = "multi_thread")]
-async fn pr_mdv38y_an_update_enrolling_another_organisations_persona_does_not_rebind_it() {
-    let mut s = two_org_receiver("pr-mdv38y").await;
+#[test]
+fn pr_mdv38y_an_update_enrolling_another_organisations_persona_does_not_rebind_it() {
+    let mut s = two_org_receiver("pr-mdv38y");
     let b1_before = binding(&persona_of(&s.svc_b, &s.pid_b1));
     assert_eq!(b1_before.0, Some(s.org_1));
 
     // Org 2 enrols b1's device; B receives it on receive_and_verify.
     let jr_b1 = joiner_of(&s.svc_b, &s.pid_b1);
-    let (addr, task) = spawn_receive(s.svc_b, &s.b2_device_kp).await;
-    admit(&mut s.svc_a2, &s.chain, s.org_2, &jr_b1, addr)
-        .await
-        .unwrap();
-    let (svc_b, outcome) = task.await.unwrap();
+    let (addr, task) = spawn_receive(s.svc_b);
+    admit(&mut s.svc_a2, &s.chain, s.org_2, &jr_b1, addr).unwrap();
+    let (svc_b, outcome) = task.run();
     assert_eq!(outcome.unwrap().org_id, s.org_2);
     assert_eq!(binding(&persona_of(&svc_b, &s.pid_b1)), b1_before, "org 1's Persona is not rebound");
 
     // An ordinary org 1 update: B is still in org 1's trie, and keeps org 1.
     let pid_c = s.svc_a1.create_persona(&mut OsRng, h("carol"), nm("Carol"), sn("Coder")).unwrap();
     let jr_c = joiner_of(&s.svc_a1, &pid_c);
-    let (addr, task) = spawn_self_delete(svc_b, &s.b1_device_kp).await;
-    admit(&mut s.svc_a1, &s.chain, s.org_1, &jr_c, addr)
-        .await
-        .unwrap();
-    let (svc_b, outcome) = task.await.unwrap();
-    assert!(
-        matches!(
-            outcome.unwrap(),
-            SelfDeleteOutcome::UpdatedNotRevoked { org_id } if org_id == s.org_1
-        ),
-        "B, still in org 1, commits org 1's update"
-    );
+    let (addr, task) = spawn_receive(svc_b);
+    admit(&mut s.svc_a1, &s.chain, s.org_1, &jr_c, addr).unwrap();
+    let (svc_b, outcome) = task.run();
+    let outcome = outcome.unwrap();
+    assert_eq!((outcome.org_id, outcome.kind), (s.org_1, ReceiveKind::Updated), "B, still in org 1, commits org 1's update");
 
     // Org 2 revokes b2, B's own membership: B leaves org 2.
     let b2_member_id = persona_of(&svc_b, &s.pid_b2).member_id.unwrap();
-    let (addr, task) = spawn_self_delete(svc_b, &s.b2_device_kp).await;
-    revoke(&mut s.svc_a2, &s.chain, s.org_2, b2_member_id, Some(addr))
-        .await
-        .unwrap();
-    let (svc_b, outcome) = task.await.unwrap();
-    assert!(
-        matches!(
-            outcome.unwrap(),
-            SelfDeleteOutcome::SelfDeleted { org_id, .. } if org_id == s.org_2
-        ),
-        "B, removed from org 2, deletes it"
-    );
+    let (addr, task) = spawn_receive(svc_b);
+    revoke(&mut s.svc_a2, &s.chain, s.org_2, b2_member_id, addr).unwrap();
+    let (svc_b, outcome) = task.run();
+    let outcome = outcome.unwrap();
+    assert_eq!((outcome.org_id, outcome.kind), (s.org_2, ReceiveKind::Revoked), "B, removed from org 2, deletes it");
     assert!(svc_b.list_orgs().iter().all(|o| o.org_id != s.org_2));
     assert!(svc_b.list_orgs().iter().any(|o| o.org_id == s.org_1), "and keeps org 1");
 }
@@ -1821,21 +1713,20 @@ async fn pr_mdv38y_an_update_enrolling_another_organisations_persona_does_not_re
 // was the one bound to org 2, and b1's org 1 binding was lost. Now b2, the
 // unbound one, is bound.
 // verifies: LLR-eyc4ud, REQ-yp75u9
-#[tokio::test(flavor = "multi_thread")]
-async fn a_first_admission_binds_the_unbound_persona_not_one_bound_elsewhere() {
-    let mut s = admit_b_directly(setup("bind-unbound").await).await;
-    let (mut a2, org_2) = second_founder(&s.chain, "bind-unbound").await;
+#[test]
+fn a_first_admission_binds_the_unbound_persona_not_one_bound_elsewhere() {
+    let mut s = admit_b_directly(setup("bind-unbound"));
+    let (mut a2, org_2) = second_founder(&s.chain, "bind-unbound");
     let b1_before = binding(&persona_of(&s.svc_b, &s.pid_b));
     let pid_b2 = s.svc_b.create_persona(&mut OsRng, h("bob-two"), nm("Bob"), sn("Two")).unwrap();
-    let b2_dev = device_kp(&s.svc_b, &pid_b2);
     s.svc_b.expect_admission(&mut OsRng, org_2).unwrap();
 
-    let (sink, _lost) = spawn_recv_one(rand::random()).await;
-    admit(&mut a2, &s.chain, org_2, &s.joiner_b, sink).await.unwrap();
+    let (sink, _lost) = spawn_recv_one(rand::random());
+    admit(&mut a2, &s.chain, org_2, &s.joiner_b, sink).unwrap();
     let jr_b2 = joiner_of(&s.svc_b, &pid_b2);
-    let (addr, task) = spawn_receive(s.svc_b, &b2_dev).await;
-    let b2_id = admit(&mut a2, &s.chain, org_2, &jr_b2, addr).await.unwrap();
-    let (svc_b, outcome) = task.await.unwrap();
+    let (addr, task) = spawn_receive(s.svc_b);
+    let b2_id = admit(&mut a2, &s.chain, org_2, &jr_b2, addr).unwrap();
+    let (svc_b, outcome) = task.run();
     assert_eq!(outcome.expect("b2's first admission commits").org_id, org_2);
 
     assert_eq!(binding(&persona_of(&svc_b, &s.pid_b)), b1_before, "b1 keeps its org 1 binding");
@@ -1850,18 +1741,18 @@ async fn a_first_admission_binds_the_unbound_persona_not_one_bound_elsewhere() {
 // not its own (LLR-3f5h7b): no record, the expectation kept, the Persona as
 // it was, nothing written; and org 1 stays B's.
 // verifies: LLR-eyc4ud, LLR-3f5h7b, REQ-yp75u9, PR-mdv38y
-#[tokio::test(flavor = "multi_thread")]
-async fn a_first_admission_listing_only_a_persona_bound_elsewhere_is_refused() {
-    let mut s = admit_b_directly(setup("bound-elsewhere").await).await;
-    let (mut a2, org_2) = second_founder(&s.chain, "bound-elsewhere").await;
+#[test]
+fn a_first_admission_listing_only_a_persona_bound_elsewhere_is_refused() {
+    let mut s = admit_b_directly(setup("bound-elsewhere"));
+    let (mut a2, org_2) = second_founder(&s.chain, "bound-elsewhere");
     prepare_to_join(&mut s.svc_b, org_2);
     let b_before = binding(&persona_of(&s.svc_b, &s.pid_b));
     let expectations = s.svc_b.expected_admissions().to_vec();
     let before = store_bytes("bound-elsewhere", "b");
 
-    let (addr, task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
-    admit(&mut a2, &s.chain, org_2, &s.joiner_b, addr).await.unwrap();
-    let (svc_b, outcome) = task.await.unwrap();
+    let (addr, task) = spawn_receive(s.svc_b);
+    admit(&mut a2, &s.chain, org_2, &s.joiner_b, addr).unwrap();
+    let (svc_b, outcome) = task.run();
     assert_eq!(outcome.unwrap_err(), OrgNodeError::AdmissionNotOurs { org_id: org_2 });
     assert!(svc_b.list_orgs().iter().all(|o| o.org_id != org_2), "no org 2 record");
     assert_eq!(svc_b.expected_admissions(), expectations.as_slice(), "the expectation is kept");
@@ -1870,23 +1761,21 @@ async fn a_first_admission_listing_only_a_persona_bound_elsewhere_is_refused() {
 
     // Org 1 is still B's: its next update is committed as an update.
     let jr_c = joiner_for_c(&mut s.svc_a);
-    let (addr, task) = spawn_self_delete(svc_b, &s.b_device_kp).await;
-    admit(&mut s.svc_a, &s.chain, s.org_id, &jr_c, addr).await.unwrap();
-    let (_svc_b, outcome) = task.await.unwrap();
-    assert!(matches!(
-        outcome.unwrap(),
-        SelfDeleteOutcome::UpdatedNotRevoked { org_id } if org_id == s.org_id
-    ));
+    let (addr, task) = spawn_receive(svc_b);
+    admit(&mut s.svc_a, &s.chain, s.org_id, &jr_c, addr).unwrap();
+    let (_svc_b, outcome) = task.run();
+    let outcome = outcome.unwrap();
+    assert_eq!((outcome.org_id, outcome.kind), (s.org_id, ReceiveKind::Updated));
 }
 
-/// A second founding node on `chain`, its endpoint bound, and its
-/// Organisation.
-async fn second_founder(chain: &ChainSlots, tag: &str) -> (Node, OrgId) {
-    let mut a2 = Node::new(open_store(tag, "a2", "pw_a2"), chain.clone());
+/// A second founding node on `chain`, sending from its founder's Device, and
+/// its Organisation.
+fn second_founder(chain: &ChainSlots, tag: &str) -> (Node, OrgId) {
+    let mut a2 = Node::new(open_store(tag, "a2"), chain.clone());
     let pid = a2.create_persona(&mut OsRng, h("admin2"), nm("Admin"), sn("Two")).unwrap();
-    let org_2 = found(&mut a2, chain, &pid).await;
+    let org_2 = found(&mut a2, chain, &pid);
     let dev = device_kp(&a2, &pid);
-    (a2.with_endpoint(OrgEndpoint::bind(&dev).await.unwrap()), org_2)
+    (a2.sending_as(&dev), org_2)
 }
 
 /// A Persona's binding: its Organisation, member id and status.
@@ -1894,65 +1783,10 @@ fn binding(p: &PersonaRecord) -> (Option<OrgId>, Option<MemberId>, PersonaStatus
     (p.org_id, p.member_id, p.status)
 }
 
-// PR-8qsnhx — PINS A DEFECT. `ensure_endpoint` binds once per service, so a
-// device administering two Organisations through two Personas sends the
-// second Organisation's admissions under the FIRST Persona's device key. Found
-// by review round 5; `a_second_organisation_is_admitted_into_without_touching_the_first`
-// hides it by injecting the second Persona's endpoint by hand. No endpoint is
-// injected here. Correcting the defect reddens the assertion marked below.
-// *Amended 2026-10-05 (switch trim).* The joiner refused that push while its
-// receive path checked the sender against the Invite; nothing about the
-// sender is checked since the owner's ruling, so the joiner now commits it.
-// What stays pinned is the key the push goes out under, captured by a relay.
-#[tokio::test(flavor = "multi_thread")]
-async fn pr_8qsnhx_a_second_organisations_admission_goes_out_under_the_first_personas_key() {
-    let chain = ChainSlots::new();
-    let mut svc_a = Node::new(open_store("pr-8qsnhx", "a", "pw_a"), chain.clone());
-    let pid_1 = svc_a.create_persona(&mut OsRng, h("first"), nm("First"), sn("Admin")).unwrap();
-    let pid_2 = svc_a.create_persona(&mut OsRng, h("second"), nm("Second"), sn("Admin")).unwrap();
-    let org_1 = found(&mut svc_a, &chain, &pid_1).await;
-    let org_2 = found(&mut svc_a, &chain, &pid_2).await;
-
-    let mut svc_b1 = Node::new(open_store("pr-8qsnhx", "b1", "pw_b1"), chain.clone());
-    let mut svc_b2 = Node::new(open_store("pr-8qsnhx", "b2", "pw_b2"), chain.clone());
-    let pid_b1 = svc_b1.create_persona(&mut OsRng, h("bob"), nm("Bob"), sn("One")).unwrap();
-    let pid_b2 = svc_b2.create_persona(&mut OsRng, h("bea"), nm("Bea"), sn("Two")).unwrap();
-    prepare_to_join(&mut svc_b1, org_1);
-    prepare_to_join(&mut svc_b2, org_2);
-    let jr_b1 = joiner_of(&svc_b1, &pid_b1);
-    let jr_b2 = joiner_of(&svc_b2, &pid_b2);
-    let b1_dev = device_kp(&svc_b1, &pid_b1);
-    let b2_dev = device_kp(&svc_b2, &pid_b2);
-
-    // The first Organisation's admission binds A's endpoint from Persona 1.
-    let (addr, task) = spawn_receive(svc_b1, &b1_dev).await;
-    admit(&mut svc_a, &chain, org_1, &jr_b1, addr)
-        .await
-        .unwrap();
-    let (_svc_b1, out1) = task.await.unwrap();
-    out1.expect("the first Organisation's admission is accepted");
-
-    // The second goes out under Persona 1's device key: a relay R captures it.
-    let epoch_before = chain.get(&org_2).unwrap().epoch;
-    let (r_addr, r_task) = spawn_recv_one(rand::random()).await;
-    admit(&mut svc_a, &chain, org_2, &jr_b2, r_addr)
-        .await
-        .expect("PR-8qsnhx: A reports success");
-    let (r_ep, sender, msg) = r_task.await.unwrap();
-    assert_eq!(
-        sender,
-        device_kp(&svc_a, &pid_1).device_key().unwrap(),
-        "PR-8qsnhx: the second Organisation's admission goes out under Persona 1's device key"
-    );
-    assert_eq!(chain.get(&org_2).unwrap().epoch, Epoch::new(epoch_before.get() + 1), "the chain moved");
-
-    // The joiner checks nothing about the sender, so it commits the admission.
-    let (addr, task) = spawn_receive(svc_b2, &b2_dev).await;
-    r_ep.send(addr, &msg).await.expect("relay to the joiner");
-    let (svc_b2, out2) = task.await.unwrap();
-    assert_eq!(out2.expect("a chain-valid first admission is committed whoever delivers it").org_id, org_2);
-    assert_eq!(svc_b2.list_orgs().len(), 1, "the joiner holds the record");
-}
+// *Deleted 2026-10-14 (S4, task T14):* the endpoint-bound-once pin
+// (unannotated; it pinned org-node's transitional send) went with that
+// send. The report is resolved in org-io, by one endpoint per Persona, with
+// the pin inverted there (`org-io/tests/endpoints.rs`).
 
 // ---------------------------------------------------------------------------
 // Review round 6. Three more pins, of the class round 5 named: state one path
@@ -1966,9 +1800,9 @@ async fn pr_8qsnhx_a_second_organisations_admission_goes_out_under_the_first_per
 // deleted (S3 T9; was: Revoked) — in memory and on disk. Before the fix B
 // committed the removal as an ordinary update at epoch 3 and stayed Active.
 // verifies: REQ-uxv2x2, LLR-b27jr6, LLR-pt32fx, PR-322qst
-#[tokio::test(flavor = "multi_thread")]
-async fn an_own_revocation_on_the_ordinary_path_deletes_the_record() {
-    let mut s = admit_b_directly(setup("pr-322qst").await).await;
+#[test]
+fn an_own_revocation_on_the_ordinary_path_deletes_the_record() {
+    let mut s = admit_b_directly(setup("pr-322qst"));
     let b_member_id = s.svc_b.list_personas()[0].member_id.expect("B has a member id");
     let carol = org_node::Joiner {
         handle: h("carol"),
@@ -1979,11 +1813,9 @@ async fn an_own_revocation_on_the_ordinary_path_deletes_the_record() {
     };
     s.svc_b.admit_member(&mut OsRng, s.org_id, &carol).expect("B keeps a provisional update");
     assert_eq!(s.svc_b.provisional_updates(s.org_id).len(), 1);
-    let (b_addr, b_task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
-    revoke(&mut s.svc_a, &s.chain, s.org_id, b_member_id, Some(b_addr))
-        .await
-        .unwrap();
-    let (svc_b, result) = b_task.await.unwrap();
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
+    revoke(&mut s.svc_a, &s.chain, s.org_id, b_member_id, b_addr).unwrap();
+    let (svc_b, result) = b_task.run();
     // S3 T9: B's Device receives its notice; the ordinary path accepts it,
     // returns B's acknowledgement and deletes the Persona (was: Revoked).
     let outcome = result.expect("PR-322qst: the removal verifies");
@@ -1992,7 +1824,7 @@ async fn an_own_revocation_on_the_ordinary_path_deletes_the_record() {
     assert!(svc_b.list_orgs().iter().all(|o| o.org_id != s.org_id), "PR-322qst: B forgets the record");
     assert!(svc_b.list_personas().iter().all(|p| p.persona_id != s.pid_b), "PR-322qst: and its Persona");
     assert!(svc_b.provisional_updates(s.org_id).is_empty(), "and its provisional updates");
-    let reloaded = reopen_store("pr-322qst", "b", "pw_b");
+    let reloaded = reopen_store("pr-322qst", "b");
     assert!(reloaded.data().orgs.iter().all(|o| o.org_id != s.org_id), "PR-322qst: on disk too");
     assert!(reloaded.data().provisional_updates.iter().all(|u| u.org_id != Some(s.org_id)));
     assert!(reloaded.data().personas.iter().all(|p| p.persona_id != s.pid_b), "the Persona is gone on disk");
@@ -2010,9 +1842,9 @@ async fn an_own_revocation_on_the_ordinary_path_deletes_the_record() {
 // with the Persona named, nothing is kept or written, and the next ordinary
 // org 1 update is committed as an update.
 // verifies: LLR-6z5xya, REQ-yp75u9, PR-mdv38y
-#[tokio::test(flavor = "multi_thread")]
-async fn pr_mdv38y_a_member_persona_cannot_found_another_organisation() {
-    let mut s = admit_b_directly(setup("pr-mdv38y-found").await).await;
+#[test]
+fn pr_mdv38y_a_member_persona_cannot_found_another_organisation() {
+    let mut s = admit_b_directly(setup("pr-mdv38y-found"));
     let b_before = binding(&persona_of(&s.svc_b, &s.pid_b));
     assert_eq!(b_before.0, Some(s.org_id));
     assert!(b_before.1.is_some(), "B holds its org 1 member id");
@@ -2025,18 +1857,11 @@ async fn pr_mdv38y_a_member_persona_cannot_found_another_organisation() {
     assert_eq!(store_bytes("pr-mdv38y-found", "b"), before, "nothing written");
 
     let jr_c = joiner_for_c(&mut s.svc_a);
-    let (b_addr, b_task) = spawn_self_delete(s.svc_b, &s.b_device_kp).await;
-    admit(&mut s.svc_a, &s.chain, s.org_id, &jr_c, b_addr)
-        .await
-        .unwrap();
-    let (svc_b, outcome) = b_task.await.unwrap();
-    assert!(
-        matches!(
-            outcome.unwrap(),
-            SelfDeleteOutcome::UpdatedNotRevoked { org_id } if org_id == s.org_id
-        ),
-        "B, still in org 1, commits org 1's update"
-    );
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
+    admit(&mut s.svc_a, &s.chain, s.org_id, &jr_c, b_addr).unwrap();
+    let (svc_b, outcome) = b_task.run();
+    let outcome = outcome.unwrap();
+    assert_eq!((outcome.org_id, outcome.kind), (s.org_id, ReceiveKind::Updated), "B, still in org 1, commits org 1's update");
     assert!(svc_b.list_orgs().iter().any(|o| o.org_id == s.org_id), "B keeps org 1");
 }
 
@@ -2053,34 +1878,32 @@ async fn pr_mdv38y_a_member_persona_cannot_found_another_organisation() {
 // `pr_u4c2vp_an_update_relayed_by_a_non_member_is_committed_on_the_self_delete_path`
 // (owner ruling 2026-10-05: nothing about the sender is checked).
 // verifies: LLR-2r2fha, LLR-3q63zv, PR-u4c2vp
-#[tokio::test(flavor = "multi_thread")]
-async fn pr_u4c2vp_an_update_relayed_by_a_non_member_is_refused_on_the_self_delete_path() {
-    let (s, counting) = setup_counting("pr-u4c2vp").await;
-    let mut s = admit_b_directly(s).await;
+#[test]
+fn pr_u4c2vp_an_update_relayed_by_a_non_member_is_refused_on_the_self_delete_path() {
+    let (s, counting) = setup_counting("pr-u4c2vp");
+    let mut s = admit_b_directly(s);
     let epoch_before = s.svc_b.list_orgs()[0].epoch;
 
     // A admits C, but the push goes to R.
     let jr_c = joiner_for_c(&mut s.svc_a);
-    let (r_addr, r_task) = spawn_recv_one(ROGUE_SEED).await;
-    admit(&mut s.svc_a, &s.chain, s.org_id, &jr_c, r_addr)
-        .await
-        .unwrap();
-    let (r_ep, _sender, msg) = r_task.await.unwrap();
+    let (r_addr, r_task) = spawn_recv_one(ROGUE_SEED);
+    admit(&mut s.svc_a, &s.chain, s.org_id, &jr_c, r_addr).unwrap();
+    let (r_ep, _sender, msg) = r_task.run();
 
     // R relays it to B's self-delete path.
     let reads_before = counting.reads();
-    let (b_addr, b_task) = spawn_self_delete(s.svc_b, &s.b_device_kp).await;
-    r_ep.send(b_addr, &msg).await.expect("relay to B");
-    let (mut svc_b, outcome) = b_task.await.unwrap();
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
+    r_ep.send(b_addr, &msg).expect("relay to B");
+    let (mut svc_b, outcome) = b_task.run();
     assert_eq!(outcome.map(|_| ()), Err(OrgNodeError::SenderNotListed { org_id: s.org_id }));
     assert_eq!(svc_b.list_orgs()[0].epoch, epoch_before, "B's record did not move");
     assert_eq!(counting.reads(), reads_before, "the refusal reads no chain");
 
     // The same message from A's own Device.
     let a_seed = device_seed_of(&s.svc_a, &s.pid_a);
-    let outcome = deliver_from_to_self_delete(&mut svc_b, a_seed, msg).await;
+    let outcome = deliver_from_to_receive(&mut svc_b, a_seed, msg);
     assert!(
-        matches!(outcome, Ok(SelfDeleteOutcome::UpdatedNotRevoked { .. })),
+        matches!(outcome, Ok(ReceiveOutcome { kind: ReceiveKind::Updated, .. })),
         "committed as an ordinary update from a listed Device, got {outcome:?}"
     );
     assert!(svc_b.list_orgs()[0].epoch > epoch_before, "and B's record moved");
@@ -2092,17 +1915,16 @@ async fn pr_u4c2vp_an_update_relayed_by_a_non_member_is_refused_on_the_self_dele
 // expectation. Renamed 2026-10-06 (T6) from
 // `a_first_admission_with_no_imported_invite_rests_on_the_chain_alone`.
 // verifies: REQ-xa6smf, REQ-8amu2a, LLR-mbjfq8
-#[tokio::test(flavor = "multi_thread")]
-async fn a_first_admission_to_an_expected_organisation_rests_on_the_chain_alone() {
-    let mut s = setup_with("no-invite-chain-alone", false).await;
+#[test]
+fn a_first_admission_to_an_expected_organisation_rests_on_the_chain_alone() {
+    let mut s = setup_with("no-invite-chain-alone", false);
     s.svc_b.expect_admission(&mut OsRng, s.org_id).unwrap();
 
-    let (b_addr, b_task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
     admit(&mut s.svc_a, &s.chain, s.org_id, &s.joiner_b, b_addr)
-        .await
         .expect("admit_member(B) failed");
 
-    let (svc_b, outcome) = b_task.await.unwrap();
+    let (svc_b, outcome) = b_task.run();
     assert_eq!(outcome.expect("committed with no Invite").org_id, s.org_id);
     assert_eq!(svc_b.list_orgs().len(), 1);
     assert_eq!(persona_of(&svc_b, &s.pid_b).status, PersonaStatus::Active);
@@ -2116,17 +1938,16 @@ async fn a_first_admission_to_an_expected_organisation_rests_on_the_chain_alone(
 // *Renamed 2026-10-06 (T8).* Was
 // `a_first_admission_records_the_chains_key_as_admin_member_key`.
 // verifies: LLR-xq9nrq, LLR-rys5nx
-#[tokio::test(flavor = "multi_thread")]
-async fn a_first_admission_records_the_chains_organisation_public_key() {
-    let mut s = setup_with("no-invite-admin-key", false).await;
+#[test]
+fn a_first_admission_records_the_chains_organisation_public_key() {
+    let mut s = setup_with("no-invite-admin-key", false);
     s.svc_b.expect_admission(&mut OsRng, s.org_id).unwrap();
 
-    let (b_addr, b_task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
     admit(&mut s.svc_a, &s.chain, s.org_id, &s.joiner_b, b_addr)
-        .await
         .expect("admit_member(B) failed");
 
-    let (svc_b, outcome) = b_task.await.unwrap();
+    let (svc_b, outcome) = b_task.run();
     outcome.expect("committed with no Invite");
     let published = s.chain.get(&s.org_id).unwrap().org_pub_key;
     let rec = rec_of(&svc_b, s.org_id);
@@ -2134,37 +1955,14 @@ async fn a_first_admission_records_the_chains_organisation_public_key() {
     assert_eq!(rec.org_private_key_for_test().clone(), rec_of(&s.svc_a, s.org_id).org_private_key_for_test().clone(), "and the key A's record holds");
 }
 
-// The self-delete path refuses a change about an Organisation it holds no
-// record of, with `OrgNotOnChain`, and writes nothing. That is the mechanism
-// behind Gap 20 (the app receives only on this path, so a joiner's first
-// admission cannot complete there). The error's name is wrong — the chain
-// does hold the Organisation — and that is recorded for the fix change, not
-// endorsed. Stated by no requirement until review round 7.
-// verifies: LLR-379hnv
-#[tokio::test(flavor = "multi_thread")]
-async fn the_self_delete_path_refuses_an_organisation_it_holds_no_record_of() {
-    let mut s = setup("selfdel-no-record").await;
-    let (addr, task) = spawn_self_delete(s.svc_b, &s.b_device_kp).await;
-    admit(&mut s.svc_a, &s.chain, s.org_id, &s.joiner_b, addr)
-        .await
-        .unwrap();
-    let (svc_b, outcome) = task.await.unwrap();
-    assert_eq!(outcome.unwrap_err(), OrgNodeError::OrgNotOnChain);
-    assert!(svc_b.list_orgs().is_empty(), "nothing is written");
-    assert_eq!(svc_b.expected_admissions().len(), 1, "the expectation is not cleared");
-    // Nor is any Persona touched. Added 2026-10-05 by review round 8: marking
-    // every Persona Revoked on this refusal was green.
-    let persona_b = persona_of(&svc_b, &s.pid_b);
-    assert_eq!(persona_b.status, PersonaStatus::Proposed, "B's Persona is untouched");
-    assert_eq!(persona_b.org_id, None);
-    assert_eq!(persona_b.member_id, None);
-    let reloaded = reopen_store("selfdel-no-record", "b", "pw_b");
-    assert!(reloaded.data().orgs.is_empty());
-    assert!(
-        reloaded.data().personas.iter().all(|p| p.status == PersonaStatus::Proposed),
-        "and nothing about a Persona reaches the disk"
-    );
-}
+// *Deleted 2026-10-13 (S4 task T4):*
+// `the_self_delete_path_refuses_an_organisation_it_holds_no_record_of`
+// verified the retired self-delete-path item alone (S4 T4; see the S4
+// verification record): the self-delete path's `OrgNotOnChain` for an
+// unheld Organisation (the mechanism behind Gap 20). With one receive path
+// that message is a first admission, committed when expected
+// (`a_first_admission_to_an_expected_organisation_rests_on_the_chain_alone`)
+// and refused with `AdmissionNotExpected` otherwise.
 
 // ---------------------------------------------------------------------------
 // Review round 8. Two behaviours no test could falsify.
@@ -2180,22 +1978,20 @@ async fn the_self_delete_path_refuses_an_organisation_it_holds_no_record_of() {
 // is still fresh to a first admission, so the Change set bytes are spoiled
 // instead and verification refuses them at the decode.
 // verifies: LLR-q8emds
-#[tokio::test(flavor = "multi_thread")]
-async fn a_first_admission_that_fails_verification_leaves_the_expectation() {
-    let mut s = setup("invite-kept").await;
-    let (r_addr, r_task) = spawn_recv_one(ROGUE_SEED).await;
-    admit(&mut s.svc_a, &s.chain, s.org_id, &s.joiner_b, r_addr)
-        .await
-        .unwrap();
-    let (_r_ep, _sender, genuine) = r_task.await.unwrap();
+#[test]
+fn a_first_admission_that_fails_verification_leaves_the_expectation() {
+    let mut s = setup("invite-kept");
+    let (r_addr, r_task) = spawn_recv_one(ROGUE_SEED);
+    admit(&mut s.svc_a, &s.chain, s.org_id, &s.joiner_b, r_addr).unwrap();
+    let (_r_ep, _sender, genuine) = r_task.run();
     let msg = with_envelope(&genuine, org_node::Envelope { delta_bytes: vec![0xffu8; 16], ..envelope_of(&genuine).clone() });
 
     let pid_a = s.svc_a.list_personas()[0].persona_id.clone();
-    let a_again = OrgEndpoint::bind(&device_kp(&s.svc_a, &pid_a)).await.unwrap();
-    let (b_addr, b_task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
-    tokio::time::timeout(NET, a_again.send(b_addr, &msg)).await.unwrap().unwrap();
+    let a_again = Relay::new(&device_kp(&s.svc_a, &pid_a));
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
+    a_again.send(b_addr, &msg).unwrap();
 
-    let (svc_b, result) = b_task.await.unwrap();
+    let (svc_b, result) = b_task.run();
     assert_eq!(
         result.unwrap_err(),
         OrgNodeError::MalformedDelta,
@@ -2210,31 +2006,31 @@ async fn a_first_admission_that_fails_verification_leaves_the_expectation() {
 // write) unchanged by admissions and revocations; org-node passes it to no
 // chain operation, since its chain seam only reads.
 // verifies: LLR-dzte8x, LLR-3v5nu9, LLR-drgdy8
-#[tokio::test(flavor = "multi_thread")]
-async fn the_proxy_account_from_genesis_is_kept_and_handed_back() {
+#[test]
+fn the_proxy_account_from_genesis_is_kept_and_handed_back() {
     let chain = ChainSlots::new();
-    let mut svc_a = Node::new(open_store("proxy", "a", "pw_a"), chain.clone());
+    let mut svc_a = Node::new(open_store("proxy", "a"), chain.clone());
     let pid_a = svc_a.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
     let update = svc_a.create_organisation(&mut OsRng, &pid_a).unwrap();
     let org_id = chain.apply_genesis(update.resulting_root, update.org_pub_key);
-    svc_a.commit_genesis(&mut OsRng, &pid_a, org_id, test_proxy()).await.unwrap();
+    svc_a.commit_genesis(&mut OsRng, &pid_a, org_id, test_proxy()).unwrap();
     assert_eq!(svc_a.list_orgs()[0].proxy_account, Some(test_proxy()), "LLR-dzte8x: kept in the record");
     assert_eq!(svc_a.proxy_account(org_id).unwrap(), Some(test_proxy()));
     assert_eq!(
-        reopen_store("proxy", "a", "pw_a").data().orgs[0].proxy_account,
+        reopen_store("proxy", "a").data().orgs[0].proxy_account,
         Some(test_proxy()),
         "LLR-dzte8x: and on disk"
     );
 
     let jr = joiner_for_c(&mut svc_a);
-    let (sink_addr, sink) = spawn_recv_one(rand::random()).await;
-    admit(&mut svc_a, &chain, org_id, &jr, sink_addr).await.unwrap();
-    let _ = sink.await.unwrap();
+    let (sink_addr, sink) = spawn_recv_one(rand::random());
+    admit(&mut svc_a, &chain, org_id, &jr, sink_addr).unwrap();
+    let _ = sink.run();
 
-    let c_id = id_by_handle(&svc_a.list_orgs()[0], "carol");
-    let (sink_addr, sink) = spawn_recv_one(rand::random()).await;
-    revoke(&mut svc_a, &chain, org_id, c_id, Some(sink_addr)).await.unwrap();
-    let _ = sink.await.unwrap();
+    let c_id = id_by_handle(svc_a.list_orgs()[0], "carol");
+    let (sink_addr, sink) = spawn_recv_one(rand::random());
+    revoke(&mut svc_a, &chain, org_id, c_id, sink_addr).unwrap();
+    let _ = sink.run();
     assert_eq!(svc_a.proxy_account(org_id).unwrap(), Some(test_proxy()), "LLR-drgdy8: handed back unchanged");
 }
 
@@ -2269,18 +2065,18 @@ fn trie_of(rec: &OrgRecord) -> org_node::test_fixtures::Trie {
 // is refused, the record and the mark stay where they were, and the genuine
 // Envelope still commits with the mark at the chain's epoch.
 // verifies: REQ-txvtm9, REQ-mr5abb, LLR-9f5hmr
-#[tokio::test(flavor = "multi_thread")]
-async fn a_sequence_number_beyond_the_chain_epoch_cannot_jam_the_receive_path() {
-    let mut s = admit_b_directly(setup("jam-receive").await).await;
+#[test]
+fn a_sequence_number_beyond_the_chain_epoch_cannot_jam_the_receive_path() {
+    let mut s = admit_b_directly(setup("jam-receive"));
     let before = rec_of(&s.svc_b, s.org_id);
     // A admits C into a sink: the chain is at epoch 3, B's record still at 2.
-    let genuine = captured_admission_of_c(&mut s).await;
+    let genuine = captured_admission_of_c(&mut s);
     assert_eq!(s.chain.get(&s.org_id).unwrap().epoch, Epoch::new(3));
     let jam = with_envelope(&genuine, org_node::Envelope { parent_seq: SequenceNumber::new(u64::MAX), ..envelope_of(&genuine).clone() });
 
-    let (b_addr, b_task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
-    s.svc_a.endpoint().expect("A endpoint").send(b_addr, &jam).await.expect("send jam");
-    let (svc_b, result) = b_task.await.unwrap();
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
+    Relay::new(&device_kp(&s.svc_a, &s.pid_a)).send(b_addr, &jam).expect("send jam");
+    let (svc_b, result) = b_task.run();
     assert_eq!(
         result.unwrap_err(),
         OrgNodeError::SeqNotEpoch { seq: u64::MAX, epoch: 3 },
@@ -2291,9 +2087,9 @@ async fn a_sequence_number_beyond_the_chain_epoch_cannot_jam_the_receive_path() 
     assert_eq!(after.epoch, Epoch::new(2));
     assert_eq!(after.root_hash, before.root_hash);
 
-    let (b_addr, b_task) = spawn_receive(svc_b, &s.b_device_kp).await;
-    s.svc_a.endpoint().unwrap().send(b_addr, &genuine).await.expect("send genuine");
-    let (svc_b, result) = b_task.await.unwrap();
+    let (b_addr, b_task) = spawn_receive(svc_b);
+    Relay::new(&device_kp(&s.svc_a, &s.pid_a)).send(b_addr, &genuine).expect("send genuine");
+    let (svc_b, result) = b_task.run();
     assert_eq!(result.expect("the genuine Envelope still commits").epoch, Epoch::new(3));
     assert_eq!(rec_of(&svc_b, s.org_id).last_seq, SequenceNumber::new(3), "the mark is the chain's epoch");
 }
@@ -2301,28 +2097,28 @@ async fn a_sequence_number_beyond_the_chain_epoch_cannot_jam_the_receive_path() 
 // The same jam on the receive path that acts on the node's own removal, on
 // its update branch: the Change set (C's admission) leaves B in the record.
 // verifies: REQ-txvtm9, REQ-mr5abb, LLR-9f5hmr
-#[tokio::test(flavor = "multi_thread")]
-async fn a_sequence_number_beyond_the_chain_epoch_cannot_jam_the_self_delete_path() {
-    let mut s = admit_b_directly(setup("jam-self-delete").await).await;
+#[test]
+fn a_sequence_number_beyond_the_chain_epoch_cannot_jam_the_self_delete_path() {
+    let mut s = admit_b_directly(setup("jam-self-delete"));
     let before = rec_of(&s.svc_b, s.org_id);
     // A admits C into a sink: the chain is at epoch 3, B's record still at 2.
-    let genuine = captured_admission_of_c(&mut s).await;
+    let genuine = captured_admission_of_c(&mut s);
     assert_eq!(s.chain.get(&s.org_id).unwrap().epoch, Epoch::new(3));
     let jam = with_envelope(&genuine, org_node::Envelope { parent_seq: SequenceNumber::new(u64::MAX), ..envelope_of(&genuine).clone() });
 
-    let (b_addr, b_task) = spawn_self_delete(s.svc_b, &s.b_device_kp).await;
-    s.svc_a.endpoint().expect("A endpoint").send(b_addr, &jam).await.expect("send jam");
-    let (svc_b, result) = b_task.await.unwrap();
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
+    Relay::new(&device_kp(&s.svc_a, &s.pid_a)).send(b_addr, &jam).expect("send jam");
+    let (svc_b, result) = b_task.run();
     assert_eq!(result.unwrap_err(), OrgNodeError::SeqNotEpoch { seq: u64::MAX, epoch: 3 });
     let after = rec_of(&svc_b, s.org_id);
     assert_eq!(after.last_seq, before.last_seq, "the mark must not move");
     assert_eq!(after.epoch, Epoch::new(2));
     assert_eq!(after.root_hash, before.root_hash);
 
-    let (b_addr, b_task) = spawn_self_delete(svc_b, &s.b_device_kp).await;
-    s.svc_a.endpoint().unwrap().send(b_addr, &genuine).await.expect("send genuine");
-    let (svc_b, result) = b_task.await.unwrap();
-    assert!(matches!(result, Ok(SelfDeleteOutcome::UpdatedNotRevoked { .. })), "got {result:?}");
+    let (b_addr, b_task) = spawn_receive(svc_b);
+    Relay::new(&device_kp(&s.svc_a, &s.pid_a)).send(b_addr, &genuine).expect("send genuine");
+    let (svc_b, result) = b_task.run();
+    assert!(matches!(result, Ok(ReceiveOutcome { kind: ReceiveKind::Updated, .. })), "got {result:?}");
     let after = rec_of(&svc_b, s.org_id);
     assert_eq!((after.epoch, after.last_seq), (Epoch::new(3), SequenceNumber::new(3)), "committed at the chain's epoch");
 }
@@ -2337,23 +2133,23 @@ async fn a_sequence_number_beyond_the_chain_epoch_cannot_jam_the_self_delete_pat
 // `a_malformed_change_set_from_a_device_outside_the_record_is_refused_as_malformed`
 // (REQ-ag6kqm as amended: nothing about the sender is checked).
 // verifies: LLR-2r2fha, LLR-mcdh85, LLR-9sknpa
-#[tokio::test(flavor = "multi_thread")]
-async fn a_malformed_change_set_from_a_device_outside_the_record_is_refused_before_it_is_decoded() {
-    let (s, counting) = setup_counting("known-org-pre-decode").await;
-    let s = admit_b_directly(s).await;
+#[test]
+fn a_malformed_change_set_from_a_device_outside_the_record_is_refused_before_it_is_decoded() {
+    let (s, counting) = setup_counting("known-org-pre-decode");
+    let s = admit_b_directly(s);
     let before = rec_of(&s.svc_b, s.org_id);
     let envelope = org_node::Envelope { org_id: s.org_id, parent_seq: SequenceNumber::new(3), delta_bytes: vec![0xff; 16] };
     let msg = carrying(envelope);
     let reads_before = counting.reads();
 
-    let (b_addr, b_task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
-    let rogue = OrgEndpoint::bind(&DeviceSeed::from(ROGUE_SEED).signing_keypair()).await.unwrap();
-    rogue.send(b_addr, &msg).await.expect("rogue send");
-    let (mut svc_b, result) = b_task.await.unwrap();
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
+    let rogue = Relay::from_seed(ROGUE_SEED);
+    rogue.send(b_addr, &msg).expect("rogue send");
+    let (mut svc_b, result) = b_task.run();
     assert_eq!(result.unwrap_err(), OrgNodeError::SenderNotListed { org_id: s.org_id });
 
     let a_seed = device_seed_of(&s.svc_a, &s.pid_a);
-    let from_a = deliver_from_to_receive(&mut svc_b, a_seed, msg).await;
+    let from_a = deliver_from_to_receive(&mut svc_b, a_seed, msg);
     assert_eq!(from_a.unwrap_err(), OrgNodeError::MalformedDelta);
 
     assert_eq!(counting.reads(), reads_before, "neither refusal reads the chain");
@@ -2371,10 +2167,10 @@ async fn a_malformed_change_set_from_a_device_outside_the_record_is_refused_befo
 // `the_administrators_own_persona_is_never_the_one_a_receive_marks`, which
 // pinned that exclusion.
 // verifies: LLR-e5c9ud
-#[tokio::test(flavor = "multi_thread")]
-async fn the_persona_marked_active_is_the_first_whose_device_is_in_the_record() {
-    let mut s = admit_b_directly(setup("admin-excluded").await).await;
-    let _ = captured_admission_of_c(&mut s).await;
+#[test]
+fn the_persona_marked_active_is_the_first_whose_device_is_in_the_record() {
+    let mut s = admit_b_directly(setup("admin-excluded"));
+    let _ = captured_admission_of_c(&mut s);
     assert_eq!(s.chain.get(&s.org_id).unwrap().epoch, Epoch::new(3));
     let rec_a = rec_of(&s.svc_a, s.org_id);
     let c_id = id_by_handle(&rec_a, "carol");
@@ -2389,7 +2185,7 @@ async fn the_persona_marked_active_is_the_first_whose_device_is_in_the_record() 
         MemberSeed::from([0xd1u8; 32]).x25519_keypair().member_key().unwrap(),
         org_members::Name::parse("Dave").unwrap(),
         org_members::Surname::parse("Diver").unwrap(),
-        vec![DeviceSeed::from([0xd2u8; 32]).signing_keypair().device_key().unwrap()],
+        vec![device_keypair([0xd2u8; 32]).device_key().unwrap()],
     )
     .unwrap();
     let (new_trie, delta) = trie_of(&rec_a).add_member(dave).unwrap().recalculate().unwrap();
@@ -2406,11 +2202,10 @@ async fn the_persona_marked_active_is_the_first_whose_device_is_in_the_record() 
         org_private_key: rec_a.org_private_key_for_test().clone(),
     };
 
-    let a_device_kp = device_kp(&s.svc_a, &admin_pid);
-    let (a_addr, a_task) = spawn_receive(s.svc_a, &a_device_kp).await;
-    let from_b = OrgEndpoint::bind(&s.b_device_kp).await.unwrap();
-    from_b.send(a_addr, &msg).await.expect("send from B");
-    let (svc_a, result) = a_task.await.unwrap();
+    let (a_addr, a_task) = spawn_receive(s.svc_a);
+    let from_b = Relay::new(&s.b_device_kp);
+    from_b.send(a_addr, &msg).expect("send from B");
+    let (svc_a, result) = a_task.run();
     assert_eq!(result.expect("A commits D's admission").epoch, epoch);
 
     // By handle: a committed record lists its members in trie order, not in
@@ -2436,16 +2231,14 @@ async fn the_persona_marked_active_is_the_first_whose_device_is_in_the_record() 
 // Envelope's Sequence number still equals the chain's epoch and the root is
 // the check that refuses it.
 // verifies: REQ-xa6smf, LLR-mbjfq8
-#[tokio::test(flavor = "multi_thread")]
-async fn a_first_admission_that_misses_the_chain_root_commits_nothing() {
-    let mut s = setup_with("no-invite-root-miss", false).await;
+#[test]
+fn a_first_admission_that_misses_the_chain_root_commits_nothing() {
+    let mut s = setup_with("no-invite-root-miss", false);
     s.svc_b.expect_admission(&mut OsRng, s.org_id).unwrap();
 
-    let (r_addr, r_task) = spawn_recv_one(ROGUE_SEED).await;
-    admit(&mut s.svc_a, &s.chain, s.org_id, &s.joiner_b, r_addr)
-        .await
-        .unwrap();
-    let (_r_ep, _sender, msg) = r_task.await.unwrap();
+    let (r_addr, r_task) = spawn_recv_one(ROGUE_SEED);
+    admit(&mut s.svc_a, &s.chain, s.org_id, &s.joiner_b, r_addr).unwrap();
+    let (_r_ep, _sender, msg) = r_task.run();
 
     let on_chain = s.chain.get(&s.org_id).unwrap();
     s.chain.set(
@@ -2457,11 +2250,11 @@ async fn a_first_admission_that_misses_the_chain_root_commits_nothing() {
         },
     );
 
-    let relay = OrgEndpoint::bind(&DeviceSeed::from(ROGUE_SEED).signing_keypair()).await.unwrap();
-    let (b_addr, b_task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
-    tokio::time::timeout(NET, relay.send(b_addr, &msg)).await.unwrap().unwrap();
+    let relay = Relay::from_seed(ROGUE_SEED);
+    let (b_addr, b_task) = spawn_receive(s.svc_b);
+    relay.send(b_addr, &msg).unwrap();
 
-    let (svc_b, result) = b_task.await.unwrap();
+    let (svc_b, result) = b_task.run();
     assert_eq!(result.unwrap_err(), OrgNodeError::RootMismatch);
     assert!(svc_b.list_orgs().is_empty(), "no record is committed");
     assert_eq!(svc_b.expected_admissions().len(), 1, "a refusal keeps the expectation");
@@ -2469,7 +2262,7 @@ async fn a_first_admission_that_misses_the_chain_root_commits_nothing() {
     assert_eq!(persona_b.status, PersonaStatus::Proposed, "B's Persona is untouched");
     assert_eq!(persona_b.org_id, None);
     assert_eq!(persona_b.member_id, None);
-    let reloaded = reopen_store("no-invite-root-miss", "b", "pw_b");
+    let reloaded = reopen_store("no-invite-root-miss", "b");
     assert!(reloaded.data().orgs.is_empty(), "nothing reaches the disk");
     assert!(
         reloaded.data().personas.iter().all(|p| p.status == PersonaStatus::Proposed
@@ -2485,21 +2278,21 @@ async fn a_first_admission_that_misses_the_chain_root_commits_nothing() {
 // not one from the message (LLR-xq9nrq). Since the receipt check (LLR-ba2ejp)
 // the message must carry that key's private half: here B's member seed.
 // verifies: LLR-e5c9ud, LLR-xq9nrq, LLR-ba2ejp
-#[tokio::test(flavor = "multi_thread")]
-async fn a_persona_whose_member_key_the_chain_publishes_is_still_bound() {
-    let mut s = setup("published-key").await;
+#[test]
+fn a_persona_whose_member_key_the_chain_publishes_is_still_bound() {
+    let mut s = setup("published-key");
     let joiner = s.joiner_b.clone();
-    let (sink_addr, sink) = spawn_recv_one(rand::random()).await;
-    admit(&mut s.svc_a, &s.chain, s.org_id, &joiner, sink_addr).await.unwrap();
-    let msg = sink.await.unwrap().2;
+    let (sink_addr, sink) = spawn_recv_one(rand::random());
+    admit(&mut s.svc_a, &s.chain, s.org_id, &joiner, sink_addr).unwrap();
+    let msg = sink.run().2;
     let state = s.chain.get(&s.org_id).unwrap();
     let published = OrgPublicKey::parse(joiner.member_key.as_bytes()).unwrap();
     s.chain.set(s.org_id, org_node::chain::OrgState { org_pub_key: published, ..state });
     let b_seed = *persona_of(&s.svc_b, &s.pid_b).member_seed_for_test().expose_secret();
     let msg = with_key(&msg, OrgPrivateKey::from(b_seed));
-    let (addr, task) = spawn_receive(s.svc_b, &s.b_device_kp).await;
-    deliver(addr, &msg).await;
-    let (svc_b, result) = task.await.unwrap();
+    let (addr, task) = spawn_receive(s.svc_b);
+    deliver(addr, &msg);
+    let (svc_b, result) = task.run();
     result.unwrap();
     let p = persona_of(&svc_b, &s.pid_b);
     assert_eq!((p.status, p.org_id), (PersonaStatus::Active, Some(s.org_id)));

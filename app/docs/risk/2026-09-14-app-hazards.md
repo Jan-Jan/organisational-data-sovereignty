@@ -311,6 +311,11 @@ not have to infer which is which:
    not remedied by further extraction: what is unreached here is the
    `tokio::spawn` itself, not a decision that could be lifted out of it. It is
    part of why HAZ-cfp4jb's residual probability stays at P2.
+
+   *Note 2026-10-14 (S4, tasks T19 and T20):* the receiver loop is now run
+   by tests: `receiver_guard.rs` runs the real loop over a bound Loopback
+   endpoint, closes it, sees the guard released, and starts the loop again
+   (LLR-yrb6th). HAZ-cfp4jb's residual probability is lowered to P1 (§4.6).
 9. **That the connection status is not re-read from the process environment**
    — REQ-bvx4nh's second clause, and the half of RC-a7fenm that removes the
    contradiction described at HAZ-ny7yvt. It is true **by construction rather
@@ -422,6 +427,10 @@ have ended and has not.
 with in the connection status handed to the frontend, so that a decision
 depending on the transport mode can be made from the reported mode rather than
 guessed. mitigates: HAZ-n97v5g
+
+*Checked 2026-10-14 (S4, task T15); text unchanged:* the running service's
+transport is org-io's since S4; the app hands it the mode it reports
+(REQ-645jq9's note).
 
 **RC-jrkn7w**: Derive the revoke form's peer-address precondition from the
 reported transport mode, requiring an address only in Loopback, and validate
@@ -563,6 +572,15 @@ Two further consequences, both recorded rather than smoothed:
   *locatable* needs the provider to say which organisation failed, and that is
   added to REQ-x3c8n2's scope below.
 
+*Note 2026-10-14 (change `worktree-org-io-transport`, review round 1,
+finding 3):* REQ-x3c8n2 is met on its terminal-versus-transient half only
+(S4, task T16). The half this residual depends on, which Organisation a
+failed verification belongs to, is not: org-io's receive error names no
+Organisation for a refusal, and the failure event is still built with
+`org_id: None`. It is now its own expectation on org-io, REQ-q89tjr
+(deadline 2026-12-13). The estimate above stands at S3 / P2, and the
+"unlocatable" half stays unreduced, until REQ-q89tjr is met.
+
 ### 4.3 Placeholder values are emitted as measured ones
 
 **HAZ-5ha5vv**: Hard-coded sentinel values emitted through the channel reserved
@@ -698,6 +716,44 @@ the original state, and nothing in this unit can prevent that. The refusal
 message naming the passphrase variable *first* is the mitigation for that, and
 it is why REQ-bmk2z2 exists as a requirement rather than as a nicety.
 
+*Amended 2026-10-14 (S4, task T17 of
+`docs/plans/2026-10-06-org-io-transport.md`; owner ruling of 2026-10-06,
+plan §13: passphrase sealing retired, the app stops asking for a
+passphrase, IDs kept).* The passphrase, and with it the published
+development constant, is gone: org-io seals each Persona's store under a
+key derived from that Persona's device secret, which only the OS keychain
+holds (org-io's risk draft: the keychain-keyed store with no fallback,
+whose residual the owner accepted on 2026-10-06). RC-xt4qr3 now reads: *refuse to start when the OS keychain
+refuses the item of a Persona whose store is opened, naming the store and
+the condition, and never fall back to another key source; a startup value
+that may be waived (now only the data directory) is refused naming the
+variable that supplies it before the one that waives it.* Realised by
+REQ-7g3k9a (as amended the same day) and REQ-bmk2z2 (narrowed to the data
+directory). HAZ-8ghmhn's hazardous situation, key material under a constant
+in the published source, no longer arises from this unit: no code path
+seals a store under a passphrase, and the refusal keeps a locked or missing
+keychain from being answered by a substitute key. Its "after" estimate in
+§7 is left as recorded; re-estimating it is for the change's risk pass
+(plan task T18, beside HAZ-cfp4jb and HAZ-ny7yvt). Not-minted control 2 in
+§8 (prompt for a passphrase at first run) is moot. No new hazard: a
+keychain refusal at startup is a denial of the safety action of the same
+kind this section already assesses for the passphrase refusal, and it is
+announced with its cause.
+
+*Re-estimated 2026-10-14 (S4, task T18, analyze-risks): the estimate
+stands at S3 / P1, still unacceptable.* Severity is unchanged: the harm, an
+attacker holding a Persona's keys, is the same whatever key source
+protects the store. Probability cannot fall: P1 (improbable) is already the
+lowest rating on this project's scale. What changed is the reason for P1.
+Before S4, P1 rested on a deployment not setting the opt-in. Now no setting
+of this unit can put key material under a constant again, because no code
+path seals with a passphrase and the keychain refusal has no fallback. The
+remaining path to a readable store is the OS keychain item itself. That
+belongs to org-io's keychain-keyed store hazard (named in prose: org-io is
+not this unit's dependency for risk items), whose residual the owner
+accepted on 2026-10-06. §7's row is unchanged. Acceptability is unchanged
+too: S3 is unacceptable at every probability in this matrix.
+
 ### 4.5 Startup degrades silently, and the status display reports a startup fact in the present tense
 
 **HAZ-ny7yvt**: Startup fallbacks that relocate key material and disable chain
@@ -771,6 +827,18 @@ fallback and the display's internal contradiction, and they leave the largest
 contributor — a stale liveness verdict — standing, because it cannot be fixed
 from inside this unit. Recording a reduction here would be recording a
 reduction that was not measured and did not occur.
+
+*Re-estimated 2026-10-14 (S4, task T18, analyze-risks): the estimate
+stands at S3 / P2, still unacceptable.* REQ-x3c8n2 is met (S4, task T16),
+but only on its receive-path face: org-io's receive step now reports a
+terminal failure by its type. That face is HAZ-cfp4jb's, not this hazard's.
+This hazard's largest contributor, the chain verdict decided once at
+startup, is the expectation's other face. PR-eecx3y records it, and it is
+still open: nothing in org-io or the app re-checks the chain connection
+after startup. The data-directory contributor is as RC-djzms3 left it
+(`ODS_DATA_DIR`, else the platform's directory, else a refusal unless
+development defaults are enabled; the store files under it are org-io's
+since S4). §7's row is unchanged.
 
 ### 4.6 A dead receiver is indistinguishable from a live one, and cannot be restarted
 
@@ -865,6 +933,38 @@ tests; the fourth pins variant classification under REQ-kn5rtx and never touches
 the markers — a distinction gate round 9 drew and this sentence had blurred.) It is no sounder for
 being true: a substring match against a provider's formatted text is the defect,
 not the fix, and REQ-x3c8n2 is unchanged.
+
+*Note 2026-10-14 (change `worktree-org-io-transport`, S4 task T19; the
+owner's ruling 2 of that day: lower this hazard to S3/P1 only after a test
+runs the real receive loop, closes the endpoint, and shows the loop stops,
+announces the stop once, releases the guard, and starts again).* Detection is
+no longer by text: since T16 the loop stops on org-io's typed terminal
+condition (REQ-x3c8n2 met, LLR-zw6jqy), which removes the third defect above.
+T19's test then ran the real loop over a bound Loopback endpoint and closed
+the endpoint (LLR-yrb6th). Three of the four steps hold: the loop stops,
+announces `receiver-stopped` once naming "endpoint closed", and releases the
+guard (`a_closed_endpoint_stops_the_loop_announces_it_once_and_releases_the_guard`).
+The fourth does not: `start_receiver` claims the guard and spawns a loop, but
+that loop stops at once with a second `receiver-stopped`, because org-io keeps
+the closed endpoint and never binds it again (org-io's problem report of
+2026-10-14 on the closed endpoint;
+`after_a_stop_start_receiver_starts_a_loop_that_runs`, ignored, fails). The
+state is visible but still absorbing for the life of the process. **The
+estimate stands at S3/P2**, and §7's row is unchanged. It is re-estimated
+once org-io's fix lands and the ignored test passes.
+
+*Note 2026-10-14 (change `worktree-org-io-transport`, S4 task T20; the
+owner's ruling 2 of that day, its condition now met).* org-io no longer
+keeps a closed endpoint: the next `start_receiving` binds it again from the
+keychain item and starts a new accept task (org-io's problem report on the
+closed endpoint, resolved by that task). The fourth step now holds:
+`after_a_stop_start_receiver_starts_a_loop_that_runs` runs un-ignored and
+passes, so after the stop `start_receiver` starts a loop that holds the
+guard and announces no stop. With the three steps T19 showed, the state is
+visible and no longer absorbing, and detection is by type, not text. **The
+estimate is lowered to S3/P1.** Acceptability is unchanged: S3 is
+unacceptable at every probability under this project's matrix. §7's row
+reads S3/P1.
 
 ---
 
@@ -1048,7 +1148,7 @@ remedy.
 | HAZ-5ha5vv — placeholder values emitted as measured ones | S3 / P2 | S3 / P1 | **No** |
 | HAZ-8ghmhn — key material under a published passphrase | S3 / P3 | S3 / P1 | **No** |
 | HAZ-ny7yvt — silent startup degradation, stale status verdict | S3 / P2 | S3 / P2 | **No** |
-| HAZ-cfp4jb — dead receiver unobservable and irreversible | S3 / P2 | S3 / P2 | **No** |
+| HAZ-cfp4jb — dead receiver unobservable and irreversible | S3 / P2 | S3 / P1 | **No** |
 
 **Overall residual risk for the `app` unit: UNACCEPTABLE.**
 
@@ -1067,6 +1167,10 @@ HAZ-cfp4jb — and both for the same reason: their largest remaining contributor
 is state held by `org-node` and not reachable from here. Those two are what
 REQ-x3c8n2 is for, and its deadline of 2026-12-13 is the date by which that
 half has to move.
+
+*Note 2026-10-14 (S4, task T20):* HAZ-cfp4jb now improves, to S3/P1 (§4.6's
+note of that day): REQ-x3c8n2 is met through org-io, and a restart after the
+stop is shown to work. HAZ-ny7yvt's estimate is unchanged.
 
 **What this change did accomplish, stated separately from the verdict**, since
 an UNACCEPTABLE conclusion can otherwise read as though nothing improved:
@@ -1217,4 +1321,28 @@ HAZ-ny7yvt's unreduced probabilities depend, and §4.6 and §4.5 say so. If it
 goes unmet past 2026-12-13, neither residual improves and both stay exactly
 where this register leaves them.
 
+*Note 2026-10-14 (S4, task T16):* the expectation is met by org-io's
+exported REQ-8e57wm, and the receiver loop now stops on org-io's typed
+terminal condition alone (LLR-zw6jqy). Whether HAZ-cfp4jb's and HAZ-ny7yvt's
+probabilities are now re-estimated is a risk-analysis decision this task does
+not take; the estimates in §4.6 and §4.5 stand until it is made.
+
+*Note 2026-10-14 (S4, task T20):* the decision was made for HAZ-cfp4jb under
+the owner's ruling 2 of that day: S3/P1 (§4.6). HAZ-ny7yvt's stands.
+
+*Note 2026-10-14 (review round 1, finding 3):* the T16 note covers
+REQ-x3c8n2's terminal half only. Its other half, the Organisation of a
+failed verification, is now REQ-q89tjr, assessed next.
+
 assesses: REQ-x3c8n2
+
+**REQ-q89tjr** (added 2026-10-14, review round 1, finding 3), the
+expectation on org-io that a failed verification names its Organisation,
+introduces no hazard in this unit, for the same reason REQ-x3c8n2 does not:
+it changes no behaviour here, it records a need. Its hazard relevance is
+the reverse: it is the item on which HAZ-9fmhm4's "failures are
+unlocatable" half depends (§4.2, the dated note in its residual). If it goes
+unmet past 2026-12-13, that half stays unreduced and HAZ-9fmhm4's residual
+stays where §4.2 and §7 leave it.
+
+assesses: REQ-q89tjr

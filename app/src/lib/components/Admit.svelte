@@ -7,8 +7,8 @@
 	 * to the chain, then committed and sent). The org preselected from the
 	 * reply is a convenience only: the backend admits to the Organisation the
 	 * outstanding Invite was issued for and refuses any other selection
-	 * (LLR-gha5f6). A chain-write failure or timeout is shown as the backend
-	 * phrased it.
+	 * (org-io's admission of a reply). A chain-write
+	 * failure or timeout is shown as the backend phrased it.
 	 */
 	import {
 		listOrgs,

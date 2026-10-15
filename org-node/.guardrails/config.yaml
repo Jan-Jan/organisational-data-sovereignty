@@ -243,9 +243,39 @@ test_paths:
 # target, fuzz_wire_decode (LLR-js9dsu), fuzzes `decode_body` of the
 # two-kind Wire message. Change worktree-org-node-org-key-pair adds no other
 # target; per-target counts at the final run: see the verification record.
+# 2026-10-08, S4 task T3 of docs/plans/2026-10-06-org-io-transport.md: the
+# sealed per-Persona store; `sealed_store` (SDD-asxwp8) and a fifth bolero
+# target, `fuzz_unseal` (LLR-bg538c). `transport_handshake` needs
+# `test-support` since `DeviceSeed` went (its key pairs come from
+# `test_fixtures::device_keypair`); the line already enables it.
+# 2026-10-13, S4 task T5: `outgoing_bodies` (SDD-bm27xt, LLR-gdfqn9), the
+# bodies the commit returns. Measured (agent sandbox,
+# CARGO_HOME=/tmp/cargo_home_fuzz) on the line below: 355 passed, 0 failed,
+# five bolero targets clean.
+# 2026-10-13, S4 task T6: `invitation` (SDD-xshv5b: the Invite, the reply and
+# their bookkeeping) and a sixth bolero target, `fuzz_invitation_parse`
+# (LLR-b7wgpf). Measured (agent sandbox, CARGO_HOME=/tmp/cargo_home_fuzz) on
+# the line below: 371 passed, 0 failed, six bolero targets clean.
+# 2026-10-13, S4 task T10: `transport_handshake` and `transport_networked`
+# left the line, moved to org-io with the transport.
+# 2026-10-14, S4 task T14: org-node is sans-IO. The `transport` feature, the
+# `preflight` binary and its test target are deleted (the transport check is
+# org-io's), so the exclusion above no longer applies; `wire_frame_bound`
+# needs `test-support` only, and every test is synchronous (no tokio). The
+# line is unchanged. Measured (agent sandbox, CARGO_HOME=/tmp/cargo_home_fuzz)
+# on the line below: 360 passed, 0 failed, six bolero targets clean (361
+# less the three tests deleted with the transitional send, plus the two
+# absences `org_node_is_sans_io` and `org_node_holds_no_dialling_address`).
+# 2026-10-14, S4 task T18: the all-targets clippy line joins, last. Its
+# pre-existing hits (T1 report; T5's four in `outgoing_bodies`) are fixed:
+# the two test files missing `clippy::panic` or the whole test-file allow gain
+# it, the `Clone` probes lose an ignored `?Sized`, and the probes' constant
+# assertions carry a targeted, reasoned allow.
+# 2026-10-14, S4 task T22: `stale_check` joins (a check whose record moved
+# before its commit, PR-erskh4).
 verify_commands:
   # 2026-10-07: three targets added by S3 (docs/plans/2026-10-06-org-io-commit-workflow.md).
-  - cargo test -p org-node --features app,test-support --lib --test service_stories --test transport_handshake --test transport_networked --test fuzz_envelope_decode --test fuzz_verify_against_chain --test fuzz_first_admission_base --test fuzz_wire_decode --test verify_against_chain --test wire_frame_bound --test store_at_rest --test admission_sender --test value_types --test key_custody --test envelope_binding --test service_lifecycle --test encoding_golden --test node_value_types --test persona_records --test secret_redaction --test organisation_key --test receive_chain_reads --test expected_admission --test absences --test provisional_store --test commit_paths --test revocation --test reconcile --test commit_workflow_errors
+  - cargo test -p org-node --features app,test-support --lib --test service_stories --test fuzz_envelope_decode --test fuzz_verify_against_chain --test fuzz_first_admission_base --test fuzz_wire_decode --test verify_against_chain --test wire_frame_bound --test store_at_rest --test admission_sender --test value_types --test key_custody --test envelope_binding --test service_lifecycle --test encoding_golden --test node_value_types --test persona_records --test secret_redaction --test organisation_key --test receive_chain_reads --test expected_admission --test absences --test provisional_store --test commit_paths --test revocation --test reconcile --test commit_workflow_errors --test sealed_store --test fuzz_unseal --test receive_path --test outgoing_bodies --test invitation --test fuzz_invitation_parse --test stale_check
   - quint --version
   - quint typecheck org-node/quint/protocol.qnt
   - quint typecheck org-node/quint/ods_instances.qnt
@@ -254,9 +284,11 @@ verify_commands:
   - quint run org-node/quint/protocol.qnt --invariant=revokedExcludedFromOrgSecret --max-steps=16 --max-samples=5000
   - quint run org-node/quint/protocol.qnt --invariant=tauWindow --max-steps=16 --max-samples=5000
   - quint run org-node/quint/protocol.qnt --invariant=convergence --max-steps=16 --max-samples=5000
+  - cargo clippy -p org-node --all-targets --features app,test-support -- -D warnings
 
 # Raised from 30 to 45 on 2026-10-05 by owner ruling, during the chain-authority
-# change: PR-vt244s, PR-2dmjzj, PR-u4c2vp and PR-w88sr9 reach 30 days around
+# change: PR-vt244s, the unchecked-Loopback-address report (org-io's since
+# 2026-10-13, S4 task T12), PR-u4c2vp and PR-w88sr9 reach 30 days around
 # 2026-10-09 while the four-change chain-authority sequence that reworks their
 # code is under way.
 # Raised from 45 to 60 on 2026-10-08 by owner ruling (decision D1 of

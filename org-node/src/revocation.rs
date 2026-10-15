@@ -12,7 +12,7 @@ use crate::chain::OrgState;
 use crate::store::{OrgRecord, PersonaRecord, StoreData};
 use crate::types::Epoch;
 #[cfg(feature = "app")]
-use crate::types::DeviceSeed;
+use crate::keys::DeviceSecret;
 #[cfg(feature = "app")]
 use crate::verify::Trie;
 #[cfg(feature = "app")]
@@ -101,11 +101,26 @@ pub fn notices_for(
 }
 
 /// A notice `accept` took: the store without the Organisation and the
-/// acknowledgements signed before it was forgotten (LLR-r8qhky).
+/// acknowledgements signed before it was forgotten (LLR-r8qhky). The store
+/// is `forget_organisation`'s result, `None` when the store's
+/// one Persona went with the Organisation (the caller then removes the
+/// store, `StoreChange::Forgotten`).
 #[cfg(feature = "app")]
 pub struct Accepted {
-    pub store: StoreData,
+    pub store: Option<StoreData>,
     pub acknowledgements: Vec<Acknowledgement>,
+}
+
+/// The Device keys of the Personas of `store` bound to `org_id`: what a
+/// signing path asks its caller's `device_secrets` closure for (LLR-uw7nmv,
+/// LLR-hby4jr).
+#[cfg(feature = "app")]
+pub(crate) fn bound_devices(store: &StoreData, org_id: OrgId) -> Vec<DevicePublicKey> {
+    if store.persona.org_id == Some(org_id) {
+        vec![store.persona.device_key]
+    } else {
+        Vec::new()
+    }
 }
 
 /// The Persona a notice is for, decided with no Organisation state: the
@@ -117,31 +132,51 @@ pub fn check_notice<'a>(store: &'a StoreData, notice: &RevocationNotice) -> Resu
     if !store.orgs.iter().any(|record| record.org_id == org_id) {
         return Err(OrgNodeError::RevocationNotHeld { org_id });
     }
-    store
-        .personas
-        .iter()
-        .find(|persona| {
-            persona.org_id == Some(org_id)
-                && persona.member_id == Some(notice.member_id)
-                && persona_device(persona) == Some(notice.device)
-        })
-        .ok_or(OrgNodeError::RevocationNotForThisDevice { org_id })
+    let persona = &store.persona;
+    if persona.org_id == Some(org_id) && persona.member_id == Some(notice.member_id) && persona.device_key == notice.device
+    {
+        Ok(persona)
+    } else {
+        Err(OrgNodeError::RevocationNotForThisDevice { org_id })
+    }
+}
+
+/// The index, among `stores`, of the store whose Persona a notice is for:
+/// the first that `check_notice` accepts; else the last
+/// `RevocationNotForThisDevice` refusal, or `RevocationNotHeld` when no
+/// store holds the Organisation. LLR-r7zm39, LLR-38e2kn. It is here, not in
+/// the service, so that the unheld refusal is raised in this file only
+/// (PR-q8r32t).
+#[cfg(feature = "app")]
+pub(crate) fn notice_store<'a>(
+    stores: impl Iterator<Item = &'a StoreData>,
+    notice: &RevocationNotice,
+) -> Result<usize, OrgNodeError> {
+    let mut refusal = OrgNodeError::RevocationNotHeld { org_id: notice.org_id };
+    for (index, store) in stores.enumerate() {
+        match check_notice(store, notice) {
+            Ok(_) => return Ok(index),
+            Err(error @ OrgNodeError::RevocationNotForThisDevice { .. }) => refusal = error,
+            Err(_) => {}
+        }
+    }
+    Err(refusal)
 }
 
 /// Decides a notice against the Organisation state the caller read: the
 /// state must exist, be no older than the record, hold the record's root
 /// when at the record's epoch, and the notice's proof
-/// must show the Device absent under its root. On success the seed source
-/// is called, the acknowledgements are signed, then the Organisation is
-/// forgotten; on any refusal the error alone is returned and the seed
-/// source is never called. LLR-tx8ruv, LLR-r8qhky,
-/// LLR-uw7nmv.
+/// must show the Device absent under its root. On success the secret source
+/// is called, with the Device keys of the bound Personas, the
+/// acknowledgements are signed, then the Organisation is forgotten; on any
+/// refusal the error alone is returned and the secret source is never
+/// called. LLR-tx8ruv, LLR-r8qhky, LLR-uw7nmv.
 #[cfg(feature = "app")]
 pub fn accept(
     store: &StoreData,
     notice: &RevocationNotice,
     chain: Option<OrgState>,
-    device_seeds: impl FnOnce() -> Vec<DeviceSeed>,
+    device_secrets: impl FnOnce(&[DevicePublicKey]) -> Vec<DeviceSecret>,
 ) -> Result<Accepted, OrgNodeError> {
     check_notice(store, notice)?;
     let org_id = notice.org_id;
@@ -163,46 +198,47 @@ pub fn accept(
         .proof
         .verify::<Blake3Hasher>(&chain.root_hash, &notice.member_id, &notice.device)
         .map_err(|cause| OrgNodeError::RevocationProofRefused { org_id, cause })?;
-    // Every refusal check has passed: only now are the device seeds read.
-    let acknowledgements = sign_acknowledgements(store, org_id, &chain, device_seeds())?;
+    // Every refusal check has passed: only now are the device secrets read.
+    let acknowledgements = sign_acknowledgements(store, org_id, &chain, device_secrets(&bound_devices(store, org_id)))?;
     Ok(Accepted { store: store.forget_organisation(org_id), acknowledgements })
 }
 
 /// One acknowledgement per Persona bound to `org_id`, in store order (every
 /// binding — `commit_genesis` and a first admission — sets the MemberId with
 /// the Organisation, so the `member_id` filter below skips no bound Persona;
-/// PR-eqs4fs), naming `verified`'s epoch and root and signed with the seed
-/// in `device_seeds` whose public key is that Persona's Device. Refuses
-/// with `DeviceSecretNotSupplied` when such a Persona has no seed there.
-/// The seeds are moved in and dropped on return. LLR-hby4jr.
+/// PR-eqs4fs), naming `verified`'s epoch and root and signed with the
+/// secret in `device_secrets` whose Device key is that Persona's. Refuses
+/// with `DeviceSecretNotSupplied` when such a Persona has no secret there.
+/// The secrets are moved in and dropped, zeroised, on return. LLR-hby4jr.
+/// A store holds one Persona, so at most one acknowledgement.
 #[cfg(feature = "app")]
 pub fn sign_acknowledgements(
     store: &StoreData,
     org_id: OrgId,
     verified: &OrgState,
-    device_seeds: Vec<DeviceSeed>,
+    device_secrets: Vec<DeviceSecret>,
 ) -> Result<Vec<Acknowledgement>, OrgNodeError> {
-    let mut acknowledgements = Vec::new();
-    for persona in store.personas.iter().filter(|persona| persona.org_id == Some(org_id)) {
-        let Some(member_id) = persona.member_id else { continue };
-        let device = persona_device(persona).ok_or(OrgNodeError::DeviceSecretNotSupplied { org_id })?;
-        let keypair = device_seeds
-            .iter()
-            .map(DeviceSeed::signing_keypair)
-            .find(|keypair| keypair.device_key().ok() == Some(device))
-            .ok_or(OrgNodeError::DeviceSecretNotSupplied { org_id })?;
-        let mut acknowledgement = Acknowledgement {
-            org_id,
-            member_id,
-            device,
-            epoch: verified.epoch,
-            root: verified.root_hash,
-            signature: Signature64([0; 64]),
-        };
-        acknowledgement.signature = Signature64(keypair.sign(&acknowledgement.signed_bytes()).to_bytes());
-        acknowledgements.push(acknowledgement);
+    let persona = &store.persona;
+    if persona.org_id != Some(org_id) {
+        return Ok(Vec::new());
     }
-    Ok(acknowledgements)
+    let Some(member_id) = persona.member_id else { return Ok(Vec::new()) };
+    let device = persona.device_key;
+    let keypair = device_secrets
+        .iter()
+        .find(|secret| secret.device_key() == device)
+        .map(DeviceSecret::signing_keypair)
+        .ok_or(OrgNodeError::DeviceSecretNotSupplied { org_id })?;
+    let mut acknowledgement = Acknowledgement {
+        org_id,
+        member_id,
+        device,
+        epoch: verified.epoch,
+        root: verified.root_hash,
+        signature: Signature64([0; 64]),
+    };
+    acknowledgement.signature = Signature64(keypair.sign(&acknowledgement.signed_bytes()).to_bytes());
+    Ok(vec![acknowledgement])
 }
 
 /// An acknowledgement `check_acknowledgement` accepted. Only that function
@@ -252,12 +288,4 @@ pub fn check_acknowledgement(
         .verify_strict(&ack.signed_bytes(), &signature)
         .map_err(|_| OrgNodeError::AcknowledgementSignatureInvalid { org_id })?;
     Ok(VerifiedAcknowledgement(ack))
-}
-
-/// A Persona's DevicePublicKey. Today derived from its stored device seed;
-/// stage S4 replaces this body with the stored public key. The one place a
-/// Persona's Device is derived, for the receive and commit paths too.
-#[cfg(feature = "app")]
-pub(crate) fn persona_device(persona: &PersonaRecord) -> Option<DevicePublicKey> {
-    persona.device_seed.signing_keypair().device_key().ok()
 }

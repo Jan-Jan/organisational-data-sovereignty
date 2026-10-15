@@ -161,6 +161,31 @@ supplies no state, and with no state org-node deletes and commits nothing:
 the device keeps its last verified record, which org-io reports to the app as
 unverified (owner ruling of 2026-10-06 on the plan's decision 5).
 
+*Assessed 2026-10-13 (S4, task T9 of docs/plans/2026-10-06-org-io-transport.md;
+owner ruling of that day, option A): `OrgService::restore_store` and
+`OrgService::drop_store` against this control.* org-io writes each store
+change to the Persona's store file. When that write fails, it puts the
+Persona back as the file holds it (`restore_store`). When it cannot do even
+that, or when the keychain refuses a new Persona's secret, it takes the
+Persona's store out of the in-memory service (`drop_store`). Neither is a
+trigger this control has to refuse:
+- Neither is reachable from a received message, a chain state or any peer
+  input. Each runs only after a local IO failure in org-io: a refused
+  keychain write for a new Persona, which holds no Organisation data and has
+  no file, or a failed reload after a failed store write.
+- Neither deletes anything on disk. The store file and the keychain item
+  stay, and the Persona returns on the next `OrgIo::open`.
+- `restore_store` adds or replaces one store with the sealed copy on disk;
+  it removes no store.
+So the data the device holds, the sealed stores on disk (REQ-em28bq's
+clarification of 2026-10-13), is deleted only as before. The exempt removal
+places are named in the superseding item LLR-jd82t6, and the `absences`
+scan pins them. What it breaks: after a failed reload, the Persona is
+missing from the running node until the next open. That is the conservative
+direction, since a store that cannot be reread is not acted on. No new
+hazard, and no change to HAZ-p6xkuz's ratings or to this control's
+effectiveness.
+
 What it breaks: a device whose record is ahead of the chain endpoint it reads
 cannot act on a genuine revocation until the endpoint catches up; it keeps
 its data meanwhile. That is the direction the owner's ruling prefers (delete

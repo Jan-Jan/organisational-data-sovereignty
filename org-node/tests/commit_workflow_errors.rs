@@ -20,7 +20,8 @@ fn all_new(org_id: OrgId) -> Vec<OrgNodeError> {
         OrgNodeError::AcknowledgementForListedDevice { org_id },
         OrgNodeError::AcknowledgementSignatureInvalid { org_id },
         OrgNodeError::DeviceSecretNotSupplied { org_id },
-        OrgNodeError::NoRevocationForRecipient { org_id },
+        // *Amended 2026-10-13 (S4, task T5):* `NoRevocationForRecipient` went
+        // with `send_update`; the commit builds every recipient's body.
     ]
 }
 

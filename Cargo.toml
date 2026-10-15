@@ -25,3 +25,9 @@ rust-version = "1.85"
 unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
+
+# An ignored `StoreWrite` or `StoreChange` (both `#[must_use]`) is a store
+# change org-io never wrote: a compile error in every crate inheriting these
+# lints (S4, task T3 of docs/plans/2026-10-06-org-io-transport.md).
+[workspace.lints.rust]
+unused_must_use = "deny"

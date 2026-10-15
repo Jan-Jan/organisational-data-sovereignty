@@ -131,7 +131,9 @@ Three hazards are the shape of a **defect** rather than a missing control:
 behaviour the code has that is wrong on an ordinary failure — the publish path
 writing the chain before the local record (**PR-vt244s**), loopback admission
 delivering the organisation secret to an address unbound to the joiner's
-Device key (**PR-2dmjzj**), and the revocation receive path committing a
+Device key (**the unchecked-Loopback-address report**; *moved to org-io with
+the send and resolved there, 2026-10-13, S4 task T12, where it is named by
+its ID; this register names it in prose since*), and the revocation receive path committing a
 record from a sender it never checked (**PR-u4c2vp**). All three are filed as
 problem reports in this unit's ledger
 (`org-node/docs/problems/2026-09-09-org-node-problems.md`)
@@ -352,6 +354,12 @@ Severity is the worst credible harm of the unavailability pathway, as argued
 in "Method". P2: the input is attacker-chosen and the surface is a decoder
 reachable by anything that can open a QUIC connection to the node.
 
+*Amended 2026-10-08 (S4, task T2 of `docs/plans/2026-10-06-org-io-transport.md`):* the decoder (`decode_message`, out of
+`transport/`) is reached through org-io's bounded stream read first, once
+the transport moves to org-io; until then through org-node's transport. The
+surface is the same decoder, reachable by the same peers, so the
+probability argument is unchanged.
+
 **RC-e2uvje**: every rejected envelope and Change set yields a typed error,
 and no sequence of envelope bytes, however malformed, causes a panic in
 decoding or in verification against the chain. mitigates: HAZ-5f9jcm
@@ -359,6 +367,11 @@ decoding or in verification against the chain. mitigates: HAZ-5f9jcm
 **RC-gfn6kr**: a wire frame whose body exceeds 1 MiB is rejected with a typed
 error before any of its bytes are decoded, on send as on receive. mitigates:
 HAZ-5f9jcm
+
+*Amended 2026-10-08 (S4, task T2 of `docs/plans/2026-10-06-org-io-transport.md`), a clarification:* "wire frame" reads "Wire
+message body" (`OrgNodeError::MessageTooLarge` from `encode_message` and
+`decode_message`); the bound on the stream a peer sends is org-io's
+(its stream requirement, in `org-io/docs/requirements/`).
 
 The structural support for RC-e2uvje is worded the same as org-members' and
 carries less weight, so all of it is stated here. The crate denies `unwrap`,
@@ -568,7 +581,7 @@ That second outcome is the reason RC-b6mydy's second clause is scoped to the
 Receive operation that admits or updates rather than to every Wire message,
 and it is now filed as **PR-u4c2vp**.
 
-Third — and this is the defect filed as PR-2dmjzj — in loopback transport
+Third — and this is the defect filed as the unchecked-Loopback-address report — in loopback transport
 mode `admit_member` sends the envelope and the organisation secret to the
 address the join request carried, without binding that address to the
 joiner's Device key (the `TransportMode::Loopback` arm of the send in
@@ -694,6 +707,14 @@ Organisation's secret. Severity: S3. Probability: P2.
 P2: loss or theft of a laptop is an ordinary event, and the file sits in the
 application's data directory with default permissions.
 
+*Amended 2026-10-08 (S4, task T3 of
+docs/plans/2026-10-06-org-io-transport.md):* the store no longer holds every
+secret in one file: one sealed store per Persona, holding its Member seed, its
+Organisation's record and private key, and no device seed, which the OS
+keychain holds (tasks T8–T9). A reader of one store file without that
+Persona's keychain item reads ciphertext only; the passphrase and fixed-salt
+pathways are gone (RC-jjsz97's note).
+
 **RC-jjsz97**: the persona store is written only as ciphertext under a key
 derived from a passphrase, so that the file opened without the passphrase
 yields an error and not data, and no member seed, device seed or
@@ -750,6 +771,20 @@ takes the seed from the OS keychain rather than the store; **S4 is the stage
 that closes this limitation**. Until it merges, the residual above stands
 widened by these copies. This interim exposure has not been put to the
 owner and is not owner-accepted.
+
+*Amended 2026-10-08 (S4, task T3 of
+docs/plans/2026-10-06-org-io-transport.md):* re-assessed with HAZ-45ucqx. The
+store is one sealed store per Persona, XChaCha20-Poly1305 under a key derived
+by HKDF-SHA-256 from that Persona's device secret (LLR-2qqqx6), with a fresh
+nonce per seal; no device seed is in it (LLR-bvt5up). The passphrase and the
+fixed-salt residuals are gone: there is no passphrase, and the key differs per
+Persona and installation. No file-permission control replaces them (owner
+ruling 2026-10-07): the file's confidentiality rests on the keychain-held
+device secret (org-io's keychain controls, tasks T8–T9). The derived key is
+zeroised on drop; the decrypted store data still is not. The interim
+limitation of 2026-10-07 is closed: the signing paths take `DeviceSecret`s,
+moved in and zeroised. The residual verdict is re-taken in org-io's risk file
+once the keychain path lands (task T18).
 
 ## Hazards introduced by these controls
 
@@ -1066,7 +1101,7 @@ assessment and the remedy (key custody and a threshold of two or more) are
 unchanged.*
 
 **Admission delivered to an address the joiner did not prove.** Stated under
-HAZ-ep6uzs; filed as **PR-2dmjzj**. Assessed **S3 / P1** — it needs the
+HAZ-ep6uzs; filed as **the unchecked-Loopback-address report**. Assessed **S3 / P1** — it needs the
 join-request blob altered between the joiner and the administrator, and the
 blob travels out of band by copy and paste. The control is to dial the peer by
 the Device key the join request carries in loopback mode as the networked
@@ -1131,7 +1166,7 @@ Per hazard, after controls:
 | HAZ-tawvm2 | S3/P2 | not acceptable | decisive read rests on a provider's doc-comment until the finalised-block expectation now held by org-io (`org-io/docs/requirements/`) is met; one author key |
 | HAZ-p4gfv9 | S3/P1 | not acceptable | per-node mark; the Organisation-level bar is the contract's |
 | HAZ-5f9jcm | S3/P2 | not acceptable | shallow fuzzing at the gate; blobs unbounded; no accept-time limits |
-| HAZ-ep6uzs | S3/P2 | not acceptable | check skipped without an invite; revocation path unchecked; PR-2dmjzj |
+| HAZ-ep6uzs | S3/P2 | not acceptable | check skipped without an invite; revocation path unchecked; the unchecked-Loopback-address report |
 | HAZ-vxabf9 | S3/P2 | not acceptable | cooperative control; no fan-out; secret never rotated; REQ-q92yac open |
 | HAZ-45ucqx | S3/P2 | not acceptable | fixed salt, default file mode, no zeroise |
 | HAZ-uy8sxm | S3/P1 | not acceptable | formatting route closed (RC-8a4xjb); named accessor and no zeroise left to future work |
@@ -1160,14 +1195,15 @@ drop either — RC-jjsz97's residual.)*
 HAZ-tawvm2, "one author key" is gone: there is no author key, and nothing
 about the sender is checked; the decisive read is unchanged. For HAZ-ep6uzs,
 the sender checks are gone (RC-b6mydy amended in place); its residual is
-recorded there. PR-u4c2vp is resolved by the owner's ruling. PR-2dmjzj is
-still open. A re-scoring is the next risk analysis's job.
+recorded there. PR-u4c2vp is resolved by the owner's ruling. The
+unchecked-Loopback-address report is still open. *(It moved to org-io and was
+resolved there on 2026-10-13, S4 task T12.)* A re-scoring is the next risk analysis's job.
 
 And the seven prose hazards: publish before persist **not acceptable**
 (S3/P2, PR-vt244s); stale view **not acceptable** (S3/P2); secret retained
 after revocation **not acceptable** (S3/P2, Phase 3); administrator authority
 **not acceptable** (S3/P1, control outside software); admission address
-**not acceptable** (S3/P1, PR-2dmjzj); discarded root **not acceptable**
+**not acceptable** (S3/P1, the unchecked-Loopback-address report); discarded root **not acceptable**
 (S3/P1, evidence ungated); keys lost on crash **not acceptable** (S3/P1). The
 controls introduced three entries of their own and **none of the three is
 acceptable**. The frame bound is **not acceptable** (S3/P2), because its
@@ -1237,7 +1273,7 @@ given an RC identifier until it does.
    test is a send to an unreachable address after a successful chain write,
    asserting the record's epoch equals the chain's.
 2. **Bind the admission delivery to the joiner's Device key in loopback mode**
-   (HAZ-ep6uzs, PR-2dmjzj). Refuse a join-request address whose identity is
+   (HAZ-ep6uzs, the unchecked-Loopback-address report). Refuse a join-request address whose identity is
    not the Device key the request carries, or dial by the key as the
    networked branch does.
 3. **Make the invite mandatory on first admission** (HAZ-ep6uzs). Turn the
@@ -1417,9 +1453,15 @@ HAZ-vxabf9 respectively — and the dates they fall due.
 
 ## Added 2026-10-03 — the binding scope of the transport, assessed
 
-assesses: REQ-db6s7q
+*Moved 2026-10-13 (S4, task T10 of `docs/plans/2026-10-06-org-io-transport.md`,
+ruling A):* the two requirements this section and the next assess moved to
+org-io with the transport, and their assessments with them, re-read against
+org-io's hazards, to `org-io/docs/risk/2026-10-06-transport.md`
+("The binding scope of the transport"). The reasoning below is kept as this
+register's history, the requirements named in prose: **the binding-scope
+requirement** and **the sockets requirement**.
 
-**REQ-db6s7q** (in Loopback mode, bind only loopback addresses and offer a
+**The binding-scope requirement** (in Loopback mode, bind only loopback addresses and offer a
 peer only loopback addresses) was minted while resolving PR-d4nye8, and is
 assessed here because it is `satisfies: derived` and realises no control in
 this register. It is recorded as an assessment rather than as a new hazard,
@@ -1496,7 +1538,7 @@ written is, in full: "P2: relaying is what a network does, and the receiving
 device on first admission has no record yet to check the sender against." It
 carries no mode scoping, and its second clause — first admission with no record
 to check against — happens in both modes. The register's own Loopback-mode
-instance of this hazard, PR-2dmjzj, is assessed S3/**P1**.
+instance of this hazard, the unchecked-Loopback-address report, is assessed S3/**P1**.
 
 The same applies, and more directly, to HAZ-tawvm2 and HAZ-5f9jcm, whose
 rationales are quoted above and are *expressly* about who can reach the node.
@@ -1520,7 +1562,7 @@ holds ciphertext. That remains true, and it disposes of the **inbound**
 direction: the wildcard bind widened who could attempt a connection, not who
 could read one.
 
-It is wrong about the **outbound** direction, and PR-2dmjzj in this same
+It is wrong about the **outbound** direction, and the unchecked-Loopback-address report in this same
 register is why. In Loopback mode `admit_member` dials the full `EndpointAddr`
 carried in the join-request blob (the `TransportMode::Loopback` arm of the
 send in `admit_member`, `org-node/src/service.rs`), which is
@@ -1542,7 +1584,7 @@ That argument has a second leg, which an earlier draft left unstated.
 and never appears there, so loopback-only sockets do not by themselves confine
 an endpoint — traffic could still leave by a relay. The confinement therefore
 rests equally on `RelayMode::Disabled` and on no address-lookup service being
-configured, neither of which REQ-db6s7q states.
+configured, neither of which the binding-scope requirement states.
 
 **Of those two, one is asserted by the tests and one is not**, and an earlier
 draft of this paragraph claimed both were. Review round 3 measured the
@@ -1571,27 +1613,25 @@ no relay map on `Endpoint`, so there is no synchronous alternative. **The
 relay leg is therefore stated and unverified**, recorded here and in this
 change's verification record rather than asserted.
 
-**With both legs — one verified, one argued — this fix narrows PR-2dmjzj's
+**With both legs — one verified, one argued — this fix narrows the unchecked-Loopback-address report's
 reachable destination set from "anything this host can route to" to "this
 machine",**
 which is a real reduction in that defect's worst case and was not claimed when
-the fix was made. It does not resolve PR-2dmjzj: a hostile process on the same
+the fix was made. It does not resolve the unchecked-Loopback-address report: a hostile process on the same
 machine still receives the secret, and the control that would close it — dial
 the peer by the Device key the join request carries, as the networked branch
 does — is still not minted.
 
 **No control is minted.** RC-b6mydy already covers the harm. A control reading
-"the node binds only loopback in Loopback mode" would restate REQ-db6s7q in
+"the node binds only loopback in Loopback mode" would restate the binding-scope requirement in
 the register's vocabulary without mitigating anything RC-b6mydy does not
 already mitigate, and a control minted only so that a requirement has a parent
 to cite is a traceability artifact rather than a risk control.
 
-assesses: REQ-2wzfzv
-
-**REQ-2wzfzv, assessed: a deliberate unavailability, in the direction this
+**The sockets requirement, assessed: a deliberate unavailability, in the direction this
 register already prefers.** That requirement states which sockets must come up
 — IPv4 loopback required, IPv6 loopback optional — and it is `satisfies:
-derived` with no control, for the same reason as REQ-db6s7q.
+derived` with no control, for the same reason as the binding-scope requirement.
 
 Its first clause *chooses* an unavailability: on a host that cannot bind IPv4
 loopback the node gets no endpoint at all and its membership function is down,
@@ -1605,7 +1645,7 @@ that cannot bind the socket its mode requires should refuse to run.
 Its second clause removes an unavailability that the first draft of the fix
 would have introduced: `BindOpts::is_required` defaults to true, so a mandatory
 `[::1]` bind would have taken the whole endpoint down on every IPv6-less host,
-for no safety benefit — the IPv4 socket alone satisfies REQ-db6s7q. Caught by
+for no safety benefit — the IPv4 socket alone satisfies the binding-scope requirement. Caught by
 review round 1.
 
 Neither clause changes a hazard's S or P. The probability note above applies to

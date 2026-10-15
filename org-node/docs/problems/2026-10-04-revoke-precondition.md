@@ -2,14 +2,16 @@
 
 Opened by the architecture tooth
 (`docs/plans/2026-10-03-org-node-architecture.md`) while writing the test for
-LLR-pw369n, after review round 3 found that clause stated in no low-level
-requirement.
+the Loopback revocation's refusal without an address, after review round 3
+found that clause stated in no low-level requirement. *(That item moved to
+org-io with the send, 2026-10-13, S4 task T12; its ID left the `affects:`
+line below, which names org-node's items alone.)*
 
 **PR-b9wab3**: `revoke_member` in Loopback mode submits the new Membership root
 on chain before it checks that it was given a peer address, so a call with no
 address advances the on-chain epoch and then refuses, leaving the published
 root without the member while the administrator's own record still holds them.
-affects: SDD-72ddm6, LLR-pw369n, LLR-6dc598, LLR-qg9utu
+affects: SDD-72ddm6, LLR-6dc598, LLR-qg9utu
 opened: 2026-10-04
 status: resolved
 resolution: root cause — `revoke_member` wrote the chain before checking the

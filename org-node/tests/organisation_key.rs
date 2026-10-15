@@ -7,27 +7,25 @@
 //!
 //! The gate: `cargo test -p org-node --features app,test-support --test organisation_key`
 
-use std::path::PathBuf;
-
 use org_members::OrgMembersError;
 use org_node::chain::OrgState;
 use org_node::error::OrgNodeError;
 use org_node::ids::OrgId;
-use org_node::service::OrgService;
 use org_node::store::{OrgRecord, PersonaStatus, PersonaStore};
-use org_node::test_fixtures::ChainSlots;
-use org_node::{DeviceSeed, Epoch, MemberSeed, OrgPrivateKey, OrgPublicKey, PersonPublicKey};
+use org_node::test_fixtures::{device_key, device_keypair, device_secret, ChainSlots};
+use org_node::{Epoch, MemberSeed, OrgPrivateKey, OrgPublicKey, PersonPublicKey};
 use rand::rngs::OsRng;
 use rand::{CryptoRng, RngCore};
 
 mod support;
-use support::{found, h, nm, private_key_of, sn, store_dir, test_proxy, Node};
+use support::{found, h, nm, private_key_of, reopen_store, sn, store_bytes, test_proxy, Node, Party};
 
-const PASSWORD: &str = "pw_org_key";
-
-/// A fresh encrypted store, unique per test and party, and its file.
-fn open_store(tag: &str, party: &str) -> (PersonaStore, PathBuf) {
-    (support::open_store(tag, party, PASSWORD), store_dir(tag, party).join("store.bin"))
+/// A fresh storage, unique per test and party, and the tag and party that
+/// name it. *Adapted 2026-10-08 (S4, task T3):* the store is sealed bytes
+/// org-io keeps, not a file under a passphrase; "the file" in the tests
+/// below is those bytes (`store_bytes`).
+fn open_store(tag: &str, party: &str) -> (Party, (String, String)) {
+    (support::open_store(tag, party), (tag.to_string(), party.to_string()))
 }
 
 /// The Organisation public key the chain holds for `org_id`, as bytes.
@@ -110,8 +108,8 @@ impl CryptoRng for TwoRng {}
 // Normal case: the published key is the X25519 public key of the secret the
 // creator holds, and no member or device of the genesis record holds it.
 // verifies: REQ-ech45n, LLR-sj7cd5, LLR-3fwykc
-#[tokio::test(flavor = "multi_thread")]
-async fn a_created_organisation_publishes_a_fresh_key_no_genesis_key_equals() {
+#[test]
+fn a_created_organisation_publishes_a_fresh_key_no_genesis_key_equals() {
     let chain = ChainSlots::new();
     let (store, _) = open_store("fresh", "a");
     let mut svc = Node::new(store, chain.clone());
@@ -126,7 +124,7 @@ async fn a_created_organisation_publishes_a_fresh_key_no_genesis_key_equals() {
     );
 
     let org_id = chain.apply_genesis(update.resulting_root, update.org_pub_key);
-    svc.commit_genesis(&mut OsRng, &pid, org_id, test_proxy()).await.unwrap();
+    svc.commit_genesis(&mut OsRng, &pid, org_id, test_proxy()).unwrap();
     assert_eq!(published_key(&chain, &org_id), published, "the chain carries the update's key");
     let rec = svc.list_orgs()[0].clone();
     assert_eq!(record_key(&rec), published, "the record holds the key it published");
@@ -145,7 +143,7 @@ async fn a_created_organisation_publishes_a_fresh_key_no_genesis_key_equals() {
     }
     let persona = &svc.list_personas()[0];
     assert_ne!(secret.expose_secret(), persona.member_seed_for_test().expose_secret(), "the Organisation private key is the member seed");
-    assert_ne!(secret.expose_secret(), persona.device_seed_for_test().expose_secret(), "the Organisation private key is the device seed");
+    assert_ne!(secret.expose_secret(), &svc.keychain.seed(&persona.device_key), "the Organisation private key is the device seed");
 }
 
 // Freshness: one persona founding two Organisations publishes two keys. A
@@ -154,7 +152,7 @@ async fn a_created_organisation_publishes_a_fresh_key_no_genesis_key_equals() {
 #[test]
 fn two_organisations_of_one_persona_publish_two_keys() {
     let (store, _) = open_store("two-orgs", "a");
-    let mut svc = OrgService::new(store);
+    let mut svc = Node::new(store, ChainSlots::new());
     let pid = svc.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
     let first = svc.create_organisation(&mut OsRng, &pid).unwrap();
     let second = svc.create_organisation(&mut OsRng, &pid).unwrap();
@@ -165,30 +163,35 @@ fn two_organisations_of_one_persona_publish_two_keys() {
 // never in the store file in clear. (Renamed 2026-10-05 by review round 1:
 // "Organisation secret" was org-node's term for another value, removed since.)
 // verifies: REQ-ech45n, LLR-3fwykc, LLR-qjz3q4
-#[tokio::test(flavor = "multi_thread")]
-async fn the_organisation_private_key_is_kept_only_in_the_encrypted_store() {
+#[test]
+fn the_organisation_private_key_is_kept_only_in_the_encrypted_store() {
     let chain = ChainSlots::new();
-    let (store, path) = open_store("at-rest", "a");
+    let (store, (tag, party)) = open_store("at-rest", "a");
     let mut svc = Node::new(store, chain.clone());
     let pid = svc.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
     let update = svc.create_organisation(&mut OsRng, &pid).unwrap();
     let secret = private_key_of(&update);
 
-    let reopened = PersonaStore::open(path.clone(), PASSWORD).unwrap();
+    let reopened = reopen_store(&tag, &party);
     assert_eq!(reopened.data().provisional_updates, vec![update.clone()], "the update holds the key");
-    let bytes = std::fs::read(&path).unwrap();
+    let bytes = store_bytes(&tag, &party);
     assert!(!contains(&bytes, secret.expose_secret()), "the key waiting in the update is in the file in clear");
 
     let org_id = chain.apply_genesis(update.resulting_root, update.org_pub_key);
-    svc.commit_genesis(&mut OsRng, &pid, org_id, test_proxy()).await.unwrap();
+    svc.commit_genesis(&mut OsRng, &pid, org_id, test_proxy()).unwrap();
     assert_eq!(svc.list_orgs()[0].org_private_key_for_test().clone(), secret.clone());
 
-    let reopened = PersonaStore::open(path.clone(), PASSWORD).unwrap();
+    let reopened = reopen_store(&tag, &party);
     let rec = reopened.data().orgs.iter().find(|o| o.org_id == org_id).unwrap();
     assert_eq!(rec.org_private_key_for_test().clone(), secret.clone(), "the store holds the Organisation private key");
-    assert!(PersonaStore::open(path.clone(), "wrong").is_err(), "only under the passphrase");
+    for (device, sealed) in svc.disk.sealed() {
+        assert!(
+            PersonaStore::unseal(&sealed, device, device_secret([0x99; 32])).is_err(),
+            "only under the Persona's own device secret"
+        );
+    }
 
-    let bytes = std::fs::read(&path).unwrap();
+    let bytes = store_bytes(&tag, &party);
     assert!(!contains(&bytes, secret.expose_secret()), "the Organisation private key is in the file in clear");
 }
 
@@ -201,13 +204,13 @@ async fn the_organisation_private_key_is_kept_only_in_the_encrypted_store() {
 // REQ-ech45n too. LLR-2dvhz8 is derived since review round 3, and REQ-ech45n
 // says nothing of how a record renders.
 // verifies: LLR-2dvhz8
-#[tokio::test(flavor = "multi_thread")]
-async fn the_organisation_private_key_is_not_in_the_record_debug_output() {
+#[test]
+fn the_organisation_private_key_is_not_in_the_record_debug_output() {
     let chain = ChainSlots::new();
     let (store, _) = open_store("debug", "a");
     let mut svc = Node::new(store, chain.clone());
     let pid = svc.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    found(&mut svc, &chain, &pid).await;
+    found(&mut svc, &chain, &pid);
     let rec = &svc.list_orgs()[0];
     let secret = rec.org_private_key_for_test().clone();
 
@@ -228,15 +231,15 @@ async fn the_organisation_private_key_is_not_in_the_record_debug_output() {
 // verifies: REQ-ech45n, LLR-sj7cd5, LLR-s6qnht
 #[test]
 fn an_organisation_key_equal_to_a_genesis_key_is_refused() {
-    let (store, path) = open_store("collision", "a");
-    let mut svc = OrgService::new(store);
+    let (store, (tag, party)) = open_store("collision", "a");
+    let mut svc = Node::new(store, ChainSlots::new());
     let mut rng = ConstRng(0x5c);
     let pid = svc.create_persona(&mut rng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    let before = std::fs::read(&path).unwrap();
+    let before = store_bytes(&tag, &party);
     let err = svc.create_organisation(&mut rng, &pid).unwrap_err();
     assert_eq!(err, OrgNodeError::Trie(OrgMembersError::DuplicateKey));
     assert!(svc.genesis_provisional_updates(&pid).is_empty(), "no genesis update kept");
-    assert_eq!(std::fs::read(&path).unwrap(), before, "nothing written");
+    assert_eq!(store_bytes(&tag, &party), before, "nothing written");
     assert!(svc.list_orgs().is_empty(), "no Organisation recorded");
     assert_eq!(svc.list_personas()[0].status, PersonaStatus::Proposed);
 
@@ -251,25 +254,25 @@ fn an_organisation_key_equal_to_a_genesis_key_is_refused() {
 // written. A fresh draw is then accepted.
 // It is also LLR-ghja3x's abnormal case: never the record's current key.
 // verifies: LLR-e2b7gv, LLR-sj7cd5, REQ-stx9v3, LLR-ghja3x
-#[tokio::test(flavor = "multi_thread")]
-async fn an_update_key_equal_to_the_records_or_to_a_key_of_the_resulting_record_is_refused() {
+#[test]
+fn an_update_key_equal_to_the_records_or_to_a_key_of_the_resulting_record_is_refused() {
     let chain = ChainSlots::new();
-    let (store, path) = open_store("update-collision", "a");
+    let (store, (tag, party)) = open_store("update-collision", "a");
     let mut svc = Node::new(store, chain.clone());
     let pid = svc.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
     // A genesis whose founder id is 0x11…11 and whose Organisation private key is 0x3d…3d.
     let update = svc.create_organisation(&mut TwoRng::new(0x11, 0x3d), &pid).unwrap();
     let org_id = chain.apply_genesis(update.resulting_root, update.org_pub_key);
-    svc.commit_genesis(&mut OsRng, &pid, org_id, test_proxy()).await.unwrap();
+    svc.commit_genesis(&mut OsRng, &pid, org_id, test_proxy()).unwrap();
     let rec = svc.list_orgs()[0].clone();
     let carol = org_node::Joiner {
         handle: h("carol"),
         name: nm("Carol"),
         surname: sn("Coder"),
         member_key: MemberSeed::from([0x4e; 32]).x25519_keypair().member_key().unwrap(),
-        device_key: DeviceSeed::from([0x4f; 32]).signing_keypair().device_key().unwrap(),
+        device_key: device_key(0x4f),
     };
-    let before = std::fs::read(&path).unwrap();
+    let before = store_bytes(&tag, &party);
     // 0x3d: the record's current key; 0x4e: the joiner's Member key.
     for then in [0x3d, 0x4e] {
         let err = svc.admit_member(&mut TwoRng::new(0x22, then), org_id, &carol).unwrap_err();
@@ -277,7 +280,7 @@ async fn an_update_key_equal_to_the_records_or_to_a_key_of_the_resulting_record_
         assert!(svc.provisional_updates(org_id).is_empty(), "no update kept");
         let now = svc.list_orgs()[0].clone();
         assert_eq!((now.org_pub_key, now.org_private_key_for_test().clone()), (rec.org_pub_key, rec.org_private_key_for_test().clone()));
-        assert_eq!(std::fs::read(&path).unwrap(), before, "nothing written");
+        assert_eq!(store_bytes(&tag, &party), before, "nothing written");
     }
     svc.admit_member(&mut OsRng, org_id, &carol).expect("a fresh draw is accepted");
 }
@@ -289,29 +292,29 @@ async fn an_update_key_equal_to_the_records_or_to_a_key_of_the_resulting_record_
 // DuplicateKey — no update kept, the record's keys unchanged, nothing
 // written. A fresh draw is then accepted.
 // verifies: LLR-tax3pm
-#[tokio::test(flavor = "multi_thread")]
-async fn a_revocation_key_equal_to_the_records_or_to_a_key_of_the_resulting_record_is_refused() {
+#[test]
+fn a_revocation_key_equal_to_the_records_or_to_a_key_of_the_resulting_record_is_refused() {
     let chain = ChainSlots::new();
-    let (store, path) = open_store("revoke-collision", "a");
+    let (store, (tag, party)) = open_store("revoke-collision", "a");
     let mut svc = Node::new(store, chain.clone());
     let pid = svc.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    let org_id = found(&mut svc, &chain, &pid).await;
+    let org_id = found(&mut svc, &chain, &pid);
     let carol = org_node::Joiner {
         handle: h("carol"),
         name: nm("Carol"),
         surname: sn("Coder"),
         member_key: MemberSeed::from([0x4e; 32]).x25519_keypair().member_key().unwrap(),
-        device_key: DeviceSeed::from([0x4f; 32]).signing_keypair().device_key().unwrap(),
+        device_key: device_key(0x4f),
     };
     // Carol's admission, whose Organisation private key is 0x3e…3e.
     let update = svc.admit_member(&mut TwoRng::new(0x22, 0x3e), org_id, &carol).unwrap();
     chain.apply_update(org_id, update.resulting_root, update.org_pub_key, Epoch::new(1)).unwrap();
-    svc.commit_update(&mut OsRng, org_id).await.unwrap();
+    svc.commit_update(&mut OsRng, org_id).unwrap();
     let rec = svc.list_orgs()[0].clone();
     assert_eq!(rec.org_private_key_for_test().clone(), OrgPrivateKey::from([0x3e; 32]), "the record holds the admission's key");
     let carol_id = rec.trie_members.iter().find(|m| m.member_key == carol.member_key).unwrap().id;
     let founder_id = rec.trie_members.iter().find(|m| m.member_key != carol.member_key).unwrap().id;
-    let before = std::fs::read(&path).unwrap();
+    let before = store_bytes(&tag, &party);
     // 0x3e: the record's current key; 0x4e: Carol's Member key, left in the
     // record that removing the founder produces.
     for (removed, draw) in [(carol_id, 0x3e), (founder_id, 0x4e)] {
@@ -321,7 +324,7 @@ async fn a_revocation_key_equal_to_the_records_or_to_a_key_of_the_resulting_reco
         let now = svc.list_orgs()[0].clone();
         assert_eq!((now.org_pub_key, now.org_private_key_for_test().clone()), (rec.org_pub_key, rec.org_private_key_for_test().clone()));
         assert_eq!(now.trie_members, rec.trie_members, "the record unchanged");
-        assert_eq!(std::fs::read(&path).unwrap(), before, "nothing written");
+        assert_eq!(store_bytes(&tag, &party), before, "nothing written");
     }
     let accepted = svc.revoke_member(&mut OsRng, org_id, carol_id).expect("a fresh draw is accepted");
     assert_ne!(accepted.org_pub_key, rec.org_pub_key);
@@ -383,7 +386,7 @@ fn an_organisation_state_read_with_an_invalid_key_is_refused() {
 fn an_organisation_key_equal_to_any_genesis_member_or_device_key_is_refused() {
     use org_members::{Handle, MemberId, MemberLeaf, Name, Surname};
     let device = (0u8..=255)
-        .map(|b| DeviceSeed::from([b; 32]).signing_keypair())
+        .map(|b| device_keypair([b; 32]))
         .find(|d| OrgPublicKey::parse(d.verifying_key().as_bytes()).is_ok())
         .expect("some DevicePublicKey is also a valid X25519 key");
     let member = MemberSeed::from([0x71u8; 32]).x25519_keypair();

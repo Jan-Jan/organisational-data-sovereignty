@@ -25,6 +25,61 @@ fn dependency_tables(manifest: &str) -> Vec<(String, String)> {
     tables
 }
 
+/// Every `pub use` statement in `text`, from `pub use` to its `;`, comment
+/// lines dropped.
+fn pub_use_statements(text: &str) -> Vec<String> {
+    let code: String = text.lines().filter(|line| !line.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
+    let mut statements = vec![];
+    let mut rest = code.as_str();
+    while let Some(start) = rest.find("pub use ") {
+        let statement = &rest[start..];
+        let end = statement.find(';').map_or(statement.len(), |end| end + 1);
+        statements.push(statement[..end].to_string());
+        rest = &statement[end..];
+    }
+    statements
+}
+
+/// org-node's types the app must not reach through org-io: the service, the
+/// store and its records, the Device secret, and the Wire messages.
+const NOT_REEXPORTED: [&str; 12] = [
+    "OrgService",
+    "PersonaStore",
+    "DeviceSecret",
+    "DeviceSeed",
+    "MemberSeed",
+    "SealedStore",
+    "StoreData",
+    "PersonaRecord",
+    "OrgRecord",
+    "StoreWrite",
+    "wire",
+    "WireMessage",
+];
+
+// S4, task T15: the transitional `pub use org_node as node` is narrowed to
+// an explicit list of the value types the app names, so org-node's service,
+// store, secret and Wire types are no longer reachable through org-io.
+// verifies: LLR-3zdw8v
+#[test]
+fn org_io_reexports_no_service_store_secret_or_wire_type_of_org_node() {
+    let lib = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs")).unwrap();
+    let statements = pub_use_statements(&lib);
+    assert!(statements.iter().any(|statement| statement.contains("org_node")), "no re-export of org-node read: {statements:#?}");
+    let mut found = vec![];
+    for statement in statements.iter().filter(|statement| statement.contains("org_node")) {
+        if statement.contains("org_node as") {
+            found.push(format!("the whole of org-node: {statement}"));
+        }
+        for name in NOT_REEXPORTED {
+            if statement.split(|character: char| !character.is_alphanumeric() && character != '_').any(|word| word == name) {
+                found.push(format!("{name}: {statement}"));
+            }
+        }
+    }
+    assert!(found.is_empty(), "org-io re-exports org-node's internals:\n{}", found.join("\n"));
+}
+
 // verifies: LLR-n3zmt6
 #[test]
 fn the_app_depends_on_org_io_and_on_no_other_unit_or_chain_library() {
@@ -189,8 +244,10 @@ fn the_app_calls_no_chain_judging_operation_and_builds_no_service() {
                 ".commit_genesis(",
                 ".commit_update(",
                 ".reconcile(",
-                ".apply_receive(",
-                ".apply_self_delete(",
+                // *S4 T4, 2026-10-13:* the one receive path's names, in
+                // place of `apply_receive` and `apply_self_delete`.
+                ".check_received(",
+                ".commit_checked(",
                 "OrgService::new(",
             ];
             for operation in operations.iter().filter(|operation| line.contains(*operation)) {

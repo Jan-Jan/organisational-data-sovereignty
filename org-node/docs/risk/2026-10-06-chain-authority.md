@@ -57,6 +57,15 @@ Organisation named is one the app has declared it expects to join, because
 its user entered an Invite for it, and refuses any other first admission
 without reading the chain. mitigates: HAZ-bedm57
 
+*Note 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md),
+on HAZ-bedm57, RC-mj6gjq and RC-2ferct.* The two units now share the
+controls: org-node's `check_received` runs every check that needs no chain
+state (RC-mj6gjq) and the expectation gate (RC-2ferct), and returns a
+message to read only when they pass; org-io reads the chain for that message
+alone, once, and hands the state to org-node's `commit_checked`. One receive
+path carries them; the self-delete path, which ran its own copy, is gone.
+The controls and the hazard's assessment are unchanged.
+
 What these controls break. RC-mj6gjq reorders the checks so that a Change set
 is decoded before the chain is read; that was already the order inside
 verification, and only the node's own chain read moves later. RC-2ferct
@@ -204,7 +213,8 @@ administrator-Persona lookup by key, which the owner removed; the endpoint's
 identity is not an input to any receiver's decision now (nothing about a
 sender is checked), so binding from a different Persona of the same device
 could misroute a send but not make a receiver commit anything the chain does
-not carry. PR-8qsnhx's bind-once defect is unchanged.
+not carry. The endpoint-bound-once report's defect is unchanged. *(It moved
+to org-io and is resolved there, 2026-10-13, S4 task T10.)*
 
 **LLR-e58j8m, LLR-9fvb3y** (a keypair rebuilt from its seed has the same keys;
 another seed's has different ones): no hazard impact. They state the custody
@@ -240,7 +250,7 @@ the wrong-record hazard LLR-vdyu65 was written for is unchanged in kind.
 address, no Join request; `persona_public_keys` returns the two keys): no new
 hazard in this unit. The parse of the Invite and its reply moves to the app's
 edge, which the app's register assesses; the dialling address that
-PR-8qsnhx's reading side concerned no longer exists.
+the endpoint-bound-once report's reading side concerned no longer exists.
 
 **LLR-xq9nrq, LLR-e5c9ud** (no administrator key in the record; the Persona
 marked Active is the first whose DevicePublicKey is in the trie): no new hazard.
@@ -253,19 +263,28 @@ commit): HAZ-ep6uzs's residual is as assessed above (owner-accepted until the
 key-pair change); keeping the node's own secret on its own commit removes no
 control.
 
-**LLR-379hnv** (an unheld Organisation refused on the self-delete path before
-any chain read): realises RC-mj6gjq's intent on that path; no new hazard.
+The self-delete path's unheld-Organisation item (an unheld Organisation
+refused on that path before any chain read) realised RC-mj6gjq's intent on
+that path; no new hazard. *(Retired 2026-10-13 with the self-delete path, S4
+task T4; its `assesses:` entry below deleted in task T6 by the owner's ruling
+of that day, its ID listed in the S4 verification record. On the one receive
+path an unheld Organisation is refused before any chain read as LLR-38e2kn
+and LLR-s8xp7m state, so RC-mj6gjq's intent holds there.)*
 
-**LLR-pw369n, LLR-8hdu9x** (the send refuses a Loopback call with no address;
-it carries the secret its caller passes): no new hazard. The refusal now
-follows a commit the chain already agrees with, so it can no longer burn an
-epoch (PR-b9wab3's mechanism); the secret carried is as it was.
+**LLR-8hdu9x**, with the Loopback-address refusal item (the send refuses a
+Loopback call with no address; it carries the secret its caller passes): no
+new hazard. The refusal now follows a commit the chain already agrees with,
+so it can no longer burn an epoch (PR-b9wab3's mechanism); the secret carried
+is as it was. *(2026-10-13, S4 task T12: the refusal item moved to org-io
+with the send, its assessment with it, to
+`org-io/docs/risk/2026-10-06-transport.md`; its ID left
+the `assesses:` line below.)*
 
 **LLR-s7whrn, LLR-ayrdr8** (the chain account is opaque in org-node; the
 golden encodings drop the Invite, the Join request and the calldata): no
 hazard impact; both restate the types and encodings that remain.
 
-assesses: LLR-2xzys9, LLR-e58j8m, LLR-9fvb3y, LLR-rv4vux, LLR-rc74nq, LLR-txqmz4, LLR-66h529, LLR-463d89, LLR-8m3bwj, LLR-f74xwb, LLR-65py3d, LLR-ryzr8m, LLR-w3fhhg, LLR-dzte8x, LLR-q3aj8z, LLR-vdyu65, LLR-3v5nu9, LLR-drgdy8, LLR-zj88e6, LLR-qezw3n, LLR-437fvx, LLR-836z24, LLR-xq9nrq, LLR-e5c9ud, LLR-ckk5nz, LLR-379hnv, LLR-pw369n, LLR-8hdu9x, LLR-s7whrn, LLR-ayrdr8
+assesses: LLR-2xzys9, LLR-e58j8m, LLR-9fvb3y, LLR-rv4vux, LLR-rc74nq, LLR-txqmz4, LLR-66h529, LLR-463d89, LLR-8m3bwj, LLR-f74xwb, LLR-65py3d, LLR-ryzr8m, LLR-w3fhhg, LLR-dzte8x, LLR-q3aj8z, LLR-vdyu65, LLR-3v5nu9, LLR-drgdy8, LLR-zj88e6, LLR-qezw3n, LLR-437fvx, LLR-836z24, LLR-xq9nrq, LLR-e5c9ud, LLR-ckk5nz, LLR-8hdu9x, LLR-s7whrn, LLR-ayrdr8
 
 ## Derived low-level requirements re-traced or amended after the merge of master (2026-10-06)
 
@@ -290,11 +309,15 @@ hazard impact. It states how two keys the store already protects are
 computed; the X25519 rule is `person`'s, assessed there, and no decision of
 this unit rests on a sender's key any more (REQ-ztdza4 as amended).
 
-**LLR-g9vmbx** (org-node defines no Invite), re-traced to derived: no new
+The no-Invite item (org-node defines no Invite), re-traced to derived: no new
 hazard in this unit. It removes code; the Invite's parse moves to the app's
 edge, which the app's register assesses (its hazard of an Invite from someone
 who is not a Member), and a joining node keeps
-an expectation in its place (RC-2ferct, assessed above).
+an expectation in its place (RC-2ferct, assessed above). *(Retired
+2026-10-13, S4 task T6: the Invite returns to org-node; its `assesses:` entry
+below is deleted by the owner's ruling of that day and its ID listed in the
+S4 verification record. Its replacement, the Blob-parse requirement, is
+assessed with REQ-yazum3 at the end of this file.)*
 
 **LLR-rys5nx** (a first admission's record holds the chain's Organisation
 public key and no administrator key), amended: no new hazard. Dropping the
@@ -302,7 +325,7 @@ administrator key removes a value nothing verifies against; the key the record
 keeps is still the chain's, read in the same operation, never one from the
 Wire message, as master's assessment of this item relied on.
 
-assesses: LLR-ctzkv7, LLR-g9vmbx, LLR-rys5nx
+assesses: LLR-ctzkv7, LLR-rys5nx
 
 **REQ-hhva9d** (discard a provisional update on request, refusing an unknown
 one): no new hazard, and it narrows one. Without it a genesis that is never
@@ -347,3 +370,45 @@ the node out of that Organisation until it replies with an unbound Persona —
 a delay the app can show, not a loss.
 
 assesses: LLR-w3fhhg, LLR-q3aj8z, LLR-e5c9ud
+
+*Added 2026-10-13 (S4, task T6 of docs/plans/2026-10-06-org-io-transport.md;
+analyze-risks pass before LLR-yexf5m's tests).* **REQ-uy7kfq** (at most one of
+a node's Personas belongs to, or awaits admission to, any one Organisation;
+owner ruling 2026-10-13) is the other direction of REQ-yp75u9. Assessed
+against the existing hazards:
+
+- *The state it prevents.* With one Persona per sealed store (S4), two
+  Personas of one node in one Organisation would each hold a copy of its
+  record and its Organisation private key, while every received update, and
+  every verified revocation, commits into one store only. The other copy goes
+  stale. That touches HAZ-vxabf9: RC-wqgm2p deletes "every Persona bound to"
+  the Organisation, but a deletion made in one store leaves the other store's
+  copy, with a record that still lists the removed Device and an earlier
+  epoch's key, on the node. It also touches HAZ-tawvm2 only as a delay: an
+  update built from the stale copy names a base root the chain no longer
+  holds and is refused by RC-6a2dke, so nothing is committed on its word.
+  REQ-uy7kfq makes the state unreachable on a node, so RC-wqgm2p's deletion
+  and RC-ub82my's single trigger act on the only copy there is. It narrows
+  HAZ-vxabf9 and changes no control's effectiveness otherwise; no rating
+  changes.
+- *The refusal itself.* A person who wants a second Persona in an
+  Organisation they already belong to, or already await, on the same node is
+  refused with a typed error, and nothing is written (LLR-yexf5m). That is a
+  delay the app can show, not a loss: the first Persona already gives them
+  the membership. The rule is enforced within one node only; a second node is
+  a second Device under its own keys and stores, which the owner accepted as
+  enough (ruling of 2026-10-13). No new hazard.
+
+assesses: REQ-uy7kfq
+
+*Moved 2026-10-13 from app (`app/docs/risk/2026-10-06-invitation.md`), plan
+task T6 of docs/plans/2026-10-06-org-io-transport.md (ruling A).*
+**REQ-yazum3** (refuse an Invite or reply that does not parse, naming the
+field): no hazard impact; it is the parse-at-the-system-edge rule at the
+invitation Blob edge, now org-node's again, and refusing acts on nothing (the
+parse is pure and returns nothing to act on). The Blob decodes untrusted text
+pasted by the user (HAZ-5f9jcm's malformed-input pathway): a decode failure
+is a typed refusal, never a panic, which the bolero target
+`fuzz_invitation_parse` exercises.
+
+assesses: REQ-yazum3

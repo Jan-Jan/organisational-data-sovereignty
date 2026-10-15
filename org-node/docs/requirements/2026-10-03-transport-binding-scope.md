@@ -1,7 +1,18 @@
 # Requirements — the scope of the transport bind
 
-Two requirements, minted while resolving PR-d4nye8: REQ-db6s7q, which states
-which addresses Loopback mode may bind and advertise, and REQ-2wzfzv, which
+*Moved 2026-10-13 (S4, task T10 of `docs/plans/2026-10-06-org-io-transport.md`,
+ruling A):* both requirements this file defined moved to org-io with the
+transport, to `org-io/docs/requirements/2026-10-06-transport.md`
+("The binding scope of the transport"), with their verification notes; their
+assessments moved to org-io's S4 risk draft, and their tests to
+`org-io/tests/transport_handshake.rs`. What follows is this file's history,
+kept as written except that the two requirements are named in prose: **the
+binding-scope requirement** and **the sockets requirement**.
+
+Two requirements, minted while resolving PR-d4nye8: the binding-scope
+requirement, which states
+which addresses Loopback mode may bind and advertise, and the sockets
+requirement, which
 states which of those sockets must come up for the mode to be provided at all.
 The node's two transport modes differ in exactly one thing a reader cares
 about: which interfaces the endpoint listens on and which addresses it hands a
@@ -22,10 +33,9 @@ tooth 9's glossary work and this file is one of its inputs.
 
 ## Binding scope
 
-**REQ-db6s7q**: The software shall, when its transport is configured in
-Loopback mode, bind its endpoint only to loopback addresses, and shall offer a
-peer for dialling only loopback addresses.
-satisfies: derived
+*(The binding-scope requirement's definition moved to org-io, 2026-10-13: in
+Loopback mode, bind only loopback addresses and offer a peer only loopback
+addresses.)*
 
 Verified by two tests in `org-node/tests/transport_handshake.rs`, both of which
 assert the bound sockets and the advertised address set directly rather than
@@ -52,7 +62,7 @@ independent checks.
 the whole of the mode.** An endpoint can be bound entirely to loopback and
 still reach the network, by a relay or by publishing its address to a discovery
 service. Those are properties of the relay mode and of the address-lookup
-configuration, not of the bind addresses, and REQ-db6s7q does not state them.
+configuration, not of the bind addresses, and the binding-scope requirement does not state them.
 Review round 2 established this by measurement rather than by argument: it
 replaced `presets::Minimal` + `RelayMode::Disabled` with `presets::N0` — n0
 relay servers, Pkarr publishing, DNS lookup — and both tests stayed green.
@@ -83,11 +93,9 @@ this change's verification record,
 
 ## Which sockets must come up
 
-**REQ-2wzfzv**: The software shall, when its transport is configured in
-Loopback mode, fail to provide an endpoint when it cannot bind an IPv4
-loopback socket, and shall provide one when it cannot bind an IPv6 loopback
-socket.
-satisfies: derived
+*(The sockets requirement's definition moved to org-io, 2026-10-13: in
+Loopback mode, no endpoint without an IPv4 loopback socket; an endpoint
+without an IPv6 one.)*
 
 This is the policy the fix for PR-d4nye8 chose and did not, at first, write
 down anywhere a gate could see — which is the defect that report is about,
@@ -123,7 +131,7 @@ What the requirement rests on instead is a reading of iroh's source:
 `socket/transports/ip.rs`, where a bind error is returned only for a required
 transport. That is a correct reading, and it is not a measurement.
 
-**So REQ-2wzfzv is an unverified requirement in a class C unit.**
+**So the sockets requirement is an unverified requirement in a class C unit.**
 `check-trace.sh` does not report it, because MISSING-TEST is satisfied by a
 `verifies:` reference in a file under `test_paths` and the annotation is there
 — the same property this repository recorded on 2026-09-28 against the
@@ -165,8 +173,9 @@ Fifteen — all of them in `2026-09-09-verify-and-commit.md` — carry
 `(implements: RC-…)`. **Four do not**: the two expectations in
 `2026-09-06-dependency-expectations.md`, org-io's finalised-block expectation (moved 2026-10-07) and REQ-q92yac, where that
 file says at `:26` and `:35` that the withholding is deliberate pending the
-analysis; and the two minted here. So REQ-db6s7q is the third derived
-requirement in this unit citing no control and REQ-2wzfzv is the fourth.
+analysis; and the two minted here. So the binding-scope requirement was the
+third derived requirement in this unit citing no control and the sockets
+requirement the fourth.
 
 What is unprecedented is the reason. The expectations cite no control because
 they are owed by other units and their controls are not this unit's to name.

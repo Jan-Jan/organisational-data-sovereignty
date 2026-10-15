@@ -14,7 +14,8 @@ wording ("the Organisation private key of the epoch the update reaches") does
 not allow.
 affects: REQ-szq3ud, LLR-6ymd6d
 opened: 2026-10-07
-status: open
+status: resolved
+resolution: fixed 2026-10-13 (change `worktree-org-io-transport`, S4 task T5 of `docs/plans/2026-10-06-org-io-transport.md`; owner ruling 2026-10-07: S4 resolves it) — `send_update` is gone; the commit step builds every recipient's body inside the commit, an Organisation-information body carrying the Organisation private key that commit stored, and returns the bodies in `CommitOutcome.outgoing` (LLR-gdfqn9, LLR-6ymd6d as amended), so a later commit cannot change a body already returned; reproduced by `a_later_commit_cannot_change_an_earlier_body` (org-node/tests/outgoing_bodies.rs), red before against the send-time choice (`send_update`'s rule, through the test helper `body_to`: the earlier body carried the later commit's key), green after.
 
 Review finding-4. No key is disclosed beyond what the record's current
 Devices may hold, and the receiver refuses the message (its key does not match

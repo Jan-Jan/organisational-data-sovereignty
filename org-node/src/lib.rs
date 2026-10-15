@@ -9,28 +9,29 @@ pub mod keys;
 pub mod sequence;
 pub mod types;
 pub mod verify;
-
-#[cfg(feature = "transport")]
-pub mod transport;
+// The Wire message and its codec: values only, no feature gate.
+pub mod wire;
+// The notice and the acknowledgement the Wire message carries; the functions
+// that read the store stay under `app`.
+pub mod revocation;
 
 #[cfg(feature = "app")]
 pub mod store;
-// Under `transport`: the Wire message carries a notice or an acknowledgement.
-#[cfg(feature = "transport")]
-pub mod revocation;
+// The Invite and the Invite reply.
+#[cfg(feature = "app")]
+pub mod invitation;
 #[cfg(feature = "app")]
 pub mod service;
-// The transport check only, until S4 moves the transport into org-io.
-#[cfg(feature = "transport")]
-pub mod preflight;
 #[cfg(feature = "app")]
 pub mod reconcile;
 
 #[cfg(feature = "app")]
 pub use service::{
-    CommitOutcome, Joiner, OrgService, OutgoingUpdate, PendingReceive, Prepared, ProvisionalTarget, ReceiveOutcome,
-    SelfDeleteOutcome,
+    Checked, CheckedMessage, CommitOutcome, Joiner, OrgService, OutgoingMessage, ProvisionalTarget, ReceiveKind,
+    ReceiveOutcome, StoreChange,
 };
+#[cfg(feature = "app")]
+pub use store::{SealedStore, StoreWrite};
 
 // Deterministic fixtures for this crate's unit tests and, under the
 // `test-support` feature (never enabled in production builds), for the
@@ -42,12 +43,13 @@ pub use chain::OrgState;
 pub use envelope::Envelope;
 pub use error::OrgNodeError;
 pub use ids::OrgId;
-pub use keys::SigningKeypair;
+pub use keys::{DeviceSecret, SigningKeypair};
 pub use sequence::SeqGuard;
 pub use types::{
-    ChainAccount, DeviceSeed, Epoch, MemberSeed, OrgPrivateKey, OrgPublicKey, PersonaId, SequenceNumber,
+    ChainAccount, Epoch, MemberSeed, OrgPrivateKey, OrgPublicKey, PersonaId, SequenceNumber,
 };
 pub use verify::{verify_envelope_against_chain, VerifyContext, VerifiedUpdate};
+pub use wire::WireMessage;
 
 // org-members types that appear in org-node's public interface and that the
 // app names, re-exported so the app depends on org-node alone for them.

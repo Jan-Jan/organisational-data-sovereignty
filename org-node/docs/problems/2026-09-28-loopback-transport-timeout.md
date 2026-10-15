@@ -28,7 +28,8 @@ address; every "loopback" exchange left the machine. Fixed by clearing iroh's
 default IP transports and binding `127.0.0.1:0` and `[::1]:0` explicitly in
 `org-node/src/transport/endpoint.rs`. Verified by
 `loopback_mode_binds_and_advertises_loopback_only` in
-`org-node/tests/transport_handshake.rs` (REQ-db6s7q), which asserts the bound
+`org-node/tests/transport_handshake.rs` (the binding-scope requirement; it and
+that test moved to org-io 2026-10-13, S4 task T10), which asserts the bound
 sockets and the advertised address set rather than a delivery timeout.
 
 Where: `org-node/tests/transport_handshake.rs:91` panics with
@@ -227,7 +228,7 @@ That branch passes when `bound_sockets()` is non-empty, under a comment reading
 **unchanged by this fix**, it still tests only non-emptiness, and it would pass
 just as vacuously if the bind regressed to the wildcard tomorrow. Its verdict
 is true today because of code elsewhere, not because the check discriminates.
-A preflight that asserted what REQ-db6s7q states — that every bound socket is
+A preflight that asserted what the binding-scope requirement states — that every bound socket is
 loopback — would catch the regression; this one cannot, and that is left as
 found rather than fixed, because widening a preflight check is not this
 change's business and would arrive untested.

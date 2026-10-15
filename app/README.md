@@ -41,7 +41,6 @@ npm run check          # svelte-check
 | Var | Meaning | Default |
 |-----|---------|---------|
 | `ODS_DATA_DIR` | Persona/org store directory (use distinct dirs per instance) | Tauri `app_data_dir` |
-| `ODS_PASSPHRASE` | Passphrase for the encrypted store (S9) | `ods-dev-default` |
 | `ODS_CHAIN_WS` | Chain WS endpoint (e.g. `ws://localhost:8000`) | unset → chain not configured |
 | `ODS_CONTRACT_H160` | Deployed `OrgRegistry` address (40 hex chars) | — |
 | `ODS_ADMIN_SEED` | Your own sr25519 signatory seed (64 hex / 32 bytes; must be a funded account for writes). Read by org-io, and only in a build with the `dev-seed` feature; without it the chain is not configured | — |
@@ -49,6 +48,11 @@ npm run check          # svelte-check
 
 If the chain vars are unset, the app runs but on-chain commands return
 "chain not configured".
+
+There is no passphrase. Each Persona's store is sealed under a key derived
+from that Persona's device secret, which only the OS keychain holds; when the
+keychain refuses (locked, unavailable, item missing), the app refuses to
+start and names the store and the condition.
 
 ## Run the demo
 

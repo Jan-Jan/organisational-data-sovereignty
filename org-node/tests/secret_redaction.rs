@@ -10,10 +10,12 @@ use org_members::{Handle, Name, RootHash, Surname};
 use org_node::ids::OrgId;
 use org_node::revocation::{Acknowledgement, Signature64};
 use org_node::store::{self, OrgRecord, PersonaRecord, PersonaStatus, StoreData};
-use org_node::test_fixtures::{admin_device, admit_member_delta, bob_absence_notice, genesis_trie, org_public_key};
-use org_node::transport::wire::WireMessage;
+use org_node::test_fixtures::{
+    admin_device, admit_member_delta, bob_absence_notice, device_keypair, device_secret, genesis_trie, org_public_key,
+};
+use org_node::wire::WireMessage;
 use org_node::{
-    DeviceSeed, Envelope, Epoch, MemberSeed, OrgPrivateKey, PersonaId, SequenceNumber,
+    Envelope, Epoch, MemberSeed, OrgPrivateKey, PersonaId, SequenceNumber,
 };
 
 /// The Organisation private key every `org` record holds (this branch's
@@ -75,7 +77,9 @@ fn persona(member: [u8; 32], device: [u8; 32]) -> PersonaRecord {
         name: Name::parse("Alice").unwrap(),
         surname: Surname::parse("Smith").unwrap(),
         member_seed: MemberSeed::from(member),
-        device_seed: DeviceSeed::from(device),
+        // The record holds the Device public key since S4 task T3, never the
+        // device seed (LLR-bvt5up).
+        device_key: device_secret(device).device_key(),
         member_id: None,
         status: PersonaStatus::Active,
     })
@@ -112,16 +116,19 @@ fn records_and_wire_messages_never_render_secret_bytes() {
     let p = persona(member, device);
     let o = org(private);
     let data = StoreData {
-        personas: vec![p.clone()],
+        persona: p.clone(),
         orgs: vec![o.clone()],
         provisional_updates: vec![],
         expected_admissions: vec![],
+        outstanding_invites: vec![],
     };
     let w = wire(private);
     for rendered in [format!("{p:?}"), format!("{p:#?}"), format!("{data:?}"), format!("{data:#?}")] {
         assert_not_rendered(&rendered, &member, "member seed");
         assert_not_rendered(&rendered, &device, "device seed");
-        assert!(rendered.contains("MemberSeed([REDACTED])") && rendered.contains("DeviceSeed([REDACTED])"));
+        // *Adapted 2026-10-08 (S4, task T3):* no device seed is held, so none
+        // is rendered, redacted or not; the Member seed's marker stays.
+        assert!(rendered.contains("MemberSeed([REDACTED])"));
     }
     for rendered in [format!("{o:?}"), format!("{o:#?}"), format!("{data:?}"), format!("{data:#?}"), format!("{w:?}"), format!("{w:#?}")] {
         assert_not_rendered(&rendered, &private, "Organisation private key");
@@ -194,14 +201,20 @@ fn a_record_debug_renders_the_organisation_private_key_redacted() {
 /// verifies: LLR-bwb9pu
 #[test]
 fn secrets_at_the_high_byte_bound_and_many_records_stay_unrendered() {
+    // *Adapted 2026-10-08 (S4, task T3):* a store holds one Persona, so the
+    // many records are many stores' data, rendered together.
     let personas: Vec<PersonaRecord> =
         (0..3u8).map(|i| persona(sentinel_down(0xff - i), sentinel_down(0xef - i))).collect();
-    let data = StoreData {
-        personas: personas.clone(),
-        orgs: vec![org(sentinel_down(0xdf)), org(sentinel_down(0xcf))],
-        provisional_updates: vec![],
-        expected_admissions: vec![],
-    };
+    let data: Vec<StoreData> = personas
+        .iter()
+        .map(|persona| StoreData {
+            persona: persona.clone(),
+            orgs: vec![org(sentinel_down(0xdf)), org(sentinel_down(0xcf))],
+            provisional_updates: vec![],
+            expected_admissions: vec![],
+            outstanding_invites: vec![],
+        })
+        .collect();
     for rendered in [format!("{data:?}"), format!("{data:#?}")] {
         for i in 0..personas.len() as u8 {
             assert_not_rendered(&rendered, &sentinel_down(0xff - i), "member seed");
@@ -221,7 +234,7 @@ fn secrets_at_the_high_byte_bound_and_many_records_stay_unrendered() {
 #[test]
 fn a_signing_key_pair_never_renders_its_seed() {
     for seed in [sentinel(0x60), sentinel_down(0xff)] {
-        let device = DeviceSeed::from(seed).signing_keypair();
+        let device = device_keypair(seed);
         for rendered in [format!("{device:?}"), format!("{device:#?}")] {
             assert_not_rendered(&rendered, &seed, "device key pair seed");
         }
@@ -250,18 +263,20 @@ fn the_organisation_private_key_and_its_key_pair_never_render_its_bytes() {
     }
 }
 
+// *Adapted 2026-10-08 (S4, task T3):* the store key is derived from the
+// device secret by HKDF (LLR-2qqqx6), no longer from a passphrase; the probe
+// takes the secret.
 /// verifies: LLR-scgk5j
 #[test]
 fn the_store_key_renders_as_its_marker() {
-    assert_eq!(store::store_key_debug_for_test("hunter2").unwrap(), "StoreKey([REDACTED])");
+    assert_eq!(store::store_key_debug_for_test(&device_secret([0x5a; 32])).unwrap(), "StoreKey([REDACTED])");
 }
 
 /// verifies: LLR-scgk5j
 #[test]
 fn the_store_key_renders_the_same_for_every_passphrase() {
-    let long = "p".repeat(4096);
-    for passphrase in ["", "\u{1F511} \u{fc}n\u{ef}c\u{f8}d\u{e9}", long.as_str()] {
-        assert_eq!(store::store_key_debug_for_test(passphrase).unwrap(), "StoreKey([REDACTED])");
+    for seed in [[0u8; 32], [0xff; 32], sentinel(0x20)] {
+        assert_eq!(store::store_key_debug_for_test(&device_secret(seed)).unwrap(), "StoreKey([REDACTED])");
     }
 }
 

@@ -104,6 +104,12 @@ receive alike, and shall deliver a frame within that bound unchanged.
 (implements: RC-gfn6kr)
 satisfies: derived
 
+*Amended 2026-10-08 (S4, task T2 of `docs/plans/2026-10-06-org-io-transport.md`), a clarification:* "wire frame" reads "Wire
+message body": org-node bounds the Wire message's encoding (`encode_message`,
+`decode_message`), with no length prefix. The bound on the stream a peer
+sends is org-io's (its stream requirement, in
+`org-io/docs/requirements/`).
+
 ## Who the Wire message came from
 
 **REQ-xa6smf**: The software shall commit a first admission to an Organisation
@@ -213,6 +219,13 @@ satisfies: derived
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 The item named the Organisation secret, which that change removes in favour of
 the Organisation private key (REQ-szq3ud).
+
+*Amended 2026-10-08 (S4, task T3 of
+docs/plans/2026-10-06-org-io-transport.md):* "write the Persona store only as
+ciphertext" becomes "give the Persona store out only as ciphertext": org-node
+seals each Persona's store under a key derived from that Persona's device
+secret and returns the sealed bytes for org-io to write (REQ-x3jrh8,
+REQ-qthum6); no passphrase.
 
 ## What these requirements do not say
 

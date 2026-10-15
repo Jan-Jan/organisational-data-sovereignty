@@ -10,10 +10,10 @@
 //!
 //! - Data directory: `ODS_DATA_DIR`, else Tauri's `app_data_dir`, else — only
 //!   under `ODS_ALLOW_DEV_DEFAULTS` — a temporary directory (REQ-rxc8sp).
-//! - Passphrase: `ODS_PASSPHRASE`, else — only under `ODS_ALLOW_DEV_DEFAULTS` —
-//!   the built-in development passphrase (REQ-7g3k9a). Absent both, startup
-//!   REFUSES rather than silently protecting real key material with a published
-//!   literal.
+//! - No passphrase: org-io opens each Persona's store with its OS keychain
+//!   item. When the keychain refuses (locked, missing item, unavailable),
+//!   startup REFUSES with org-io's error, which names the store and the
+//!   condition (REQ-7g3k9a).
 //! - Chain mode: if `ODS_CHAIN_WS` + `ODS_CONTRACT_H160` are both set (and
 //!   `ODS_COSIGNER_PUB` optionally), they are handed to `OrgIo::connect`, which
 //!   is called EAGERLY here via `block_on`. org-io reads the signing seed
@@ -29,18 +29,16 @@
 //! state in which the app reports "chain not configured" beside an endpoint it
 //! is not talking to (REQ-e4ah9h, REQ-bvx4nh).
 //!
-//! The org-io handle is held behind a `tokio::sync::Mutex` so Tauri command
-//! handlers can take an async lock without blocking the thread pool.
+//! The org-io handle is shared (`Arc<OrgIo>`) and takes no app-side lock:
+//! org-io's methods take `&self` and lock org-node inside (LLR-5wb4vd), so the receiver loop's wait for a message blocks no command.
 
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use org_io::node::transport::TransportMode;
+use org_io::transport::TransportMode;
 use org_io::{ChainSettings, OrgIo};
-use tokio::sync::Mutex;
 
-use crate::invitation::OutstandingInvites;
 use crate::policy;
 
 /// Re-exported from `crate::policy`, where the projection now lives, so that no
@@ -52,10 +50,8 @@ pub use crate::policy::{connection_status_from_state, ConnectionStatus};
 pub struct AppState {
     /// The app's one way in to org-node, the chain and the signatory key's
     /// effects (REQ-m8sgjk: the app decides when, org-io submits).
-    pub org_io: Mutex<OrgIo>,
-    /// LLR-f35pda: the Invites this device issued and has not seen acted on,
-    /// kept in `outstanding_invites.json` in the data directory.
-    pub outstanding: Mutex<OutstandingInvites>,
+    /// Shared with the receiver loop, which holds its own clone (LLR-5wb4vd).
+    pub org_io: Arc<OrgIo>,
     /// The directory the store was actually opened in. Recorded here so that
     /// `connection_status` reports the directory in use rather than re-deriving
     /// one from the environment and possibly disagreeing with `init`.
@@ -73,7 +69,7 @@ pub struct AppState {
 }
 
 /// `policy::TransportModeName` — this unit's serialisable name for the mode —
-/// as the mode org-node's transport layer takes.
+/// as the mode org-io's transport takes.
 fn transport_mode_for(name: policy::TransportModeName) -> TransportMode {
     match name {
         policy::TransportModeName::Loopback => TransportMode::Loopback,
@@ -93,9 +89,9 @@ impl AppState {
     /// path by the caller any more, because whether that fallback is allowed is
     /// `resolve_data_dir`'s decision to make (REQ-rxc8sp).
     pub fn init(tauri_data_dir: Option<PathBuf>) -> Result<Self, String> {
-        // REQ-7g3k9a / REQ-rxc8sp: the built-in development values are
-        // available only behind an explicit opt-in. Absent it, a missing value
-        // is a refusal with a message that names both variables (REQ-bmk2z2).
+        // REQ-rxc8sp: the built-in development data directory is available
+        // only behind an explicit opt-in. Absent it, a missing value is a
+        // refusal with a message that names both variables (REQ-bmk2z2).
         let allow_dev = std::env::var("ODS_ALLOW_DEV_DEFAULTS").is_ok();
         let data_dir = policy::resolve_data_dir(
             std::env::var("ODS_DATA_DIR").ok().as_deref(),
@@ -103,11 +99,10 @@ impl AppState {
             allow_dev,
         )
         .map_err(|e| e.to_string())?;
-        let passphrase = policy::resolve_passphrase(
-            std::env::var("ODS_PASSPHRASE").ok().as_deref(),
-            allow_dev,
-        )
-        .map_err(|e| e.to_string())?;
+        // No passphrase is read. org-io opens each Persona's store with its
+        // keychain item, and a keychain refusal is returned below as the
+        // startup failure, naming the store and the condition (REQ-7g3k9a,
+        // LLR-tpkmh3).
 
         // Transport mode: `ODS_TRANSPORT=loopback` → Loopback (relay disabled,
         // same-machine app run or CI smoke-test); anything else (including
@@ -116,7 +111,8 @@ impl AppState {
         let transport_mode =
             policy::transport_mode_from(std::env::var("ODS_TRANSPORT").ok().as_deref());
 
-        let unconfigured = OrgIo::open(&data_dir, &passphrase, transport_mode_for(transport_mode))?;
+        let unconfigured =
+            OrgIo::open(&data_dir, transport_mode_for(transport_mode)).map_err(|error| error.to_string())?;
 
         // The chain: try to connect org-io from the environment; fall back to
         // a handle with the chain not configured. The endpoint is recorded
@@ -158,19 +154,17 @@ impl AppState {
         Self::assemble(org_io, data_dir, chain_endpoint, transport_mode)
     }
 
-    /// Wire the handle and the outstanding Invites beside the store. Shared
-    /// by `init` and `for_test` so the two cannot drift in how the state is
-    /// built.
+    /// Wire the handle beside the directory its stores were opened in.
+    /// Shared by `init` and `for_test` so the two cannot drift in how the
+    /// state is built.
     fn assemble(
         org_io: OrgIo,
         data_dir: PathBuf,
         chain_endpoint: Option<policy::ChainEndpoint>,
         transport_mode: policy::TransportModeName,
     ) -> Result<Self, String> {
-        let outstanding = OutstandingInvites::open(data_dir.join("outstanding_invites.json"))?;
         Ok(Self {
-            org_io: Mutex::new(org_io),
-            outstanding: Mutex::new(outstanding),
+            org_io: Arc::new(org_io),
             data_dir,
             chain_endpoint,
             transport_mode,
@@ -184,15 +178,36 @@ impl AppState {
     /// real handlers over the real boundary — but every input the environment
     /// would have supplied is a parameter, so two tests in one binary cannot
     /// interfere with each other. The chain is not configured.
+    ///
+    /// The Device secrets go to org-io's in-memory keychain, installed for
+    /// the test process, never the OS keychain. It takes no passphrase; a
+    /// keychain refusal is returned as the startup failure, as from `init`
+    /// (LLR-tpkmh3).
     #[cfg(feature = "test-support")]
     pub fn for_test(
         data_dir: PathBuf,
-        passphrase: &str,
         chain_endpoint: Option<policy::ChainEndpoint>,
         transport_mode: policy::TransportModeName,
     ) -> Result<Self, String> {
-        let org_io = OrgIo::open(&data_dir, passphrase, transport_mode_for(transport_mode))?;
+        org_io::test_support::MemoryKeychain::shared().install();
+        let org_io =
+            OrgIo::open(&data_dir, transport_mode_for(transport_mode)).map_err(|error| error.to_string())?;
         Self::assemble(org_io, data_dir, chain_endpoint, transport_mode)
+    }
+
+    /// `for_test`, over org-io's substitute chain `chain` (the read, the
+    /// write and the signatory-set reads), for the tests of the commands
+    /// that found an Organisation and run the invitation exchange.
+    #[cfg(feature = "test-support")]
+    pub fn for_test_over(
+        data_dir: PathBuf,
+        chain: &org_io::test_support::FakeChain,
+        transport_mode: policy::TransportModeName,
+    ) -> Result<Self, String> {
+        org_io::test_support::MemoryKeychain::shared().install();
+        let org_io = OrgIo::open_for_test(&data_dir, transport_mode_for(transport_mode), chain)
+            .map_err(|error| error.to_string())?;
+        Self::assemble(org_io, data_dir, None, transport_mode)
     }
 }
 

@@ -13,9 +13,9 @@ export const REPLY_WARNING =
 	'Your reply will reveal the handle, name and surname entered for the Persona you choose to whoever sent it.';
 
 /**
- * LLR-rt8gdz: the Personas to offer as the one to reply as — only those bound
- * to no Organisation (one Persona, one Organisation). The backend refuses a
- * bound one as well.
+ * LLR-pms47e: the Personas to offer as the one to reply as — only those bound
+ * to no Organisation (one Persona, one Organisation). org-io refuses a bound
+ * one as well (org-io's one-Persona-one-Organisation item).
  */
 export function unboundPersonas(personas: PersonaDto[]): PersonaDto[] {
 	return personas.filter((p) => p.org_id === null);

@@ -172,8 +172,9 @@ record lists, a revocation with no key to any other; a revocation is refused
 by a Device the verified record still lists): narrows where the key goes, from
 "whoever the caller names" to the Devices of the committed record, so the key
 never leaves for a Device the chain-valid record does not list (a wrong peer
-address in Loopback mode, PR-2dmjzj, still reaches whoever holds that
-address). Resolves PR-xwek5e, where a revocation cleared a remaining Member's
+address in Loopback mode, the unchecked-Loopback-address report, still
+reaches whoever holds that address; *that report moved to org-io with the
+send and is resolved there, 2026-10-13, S4 task T12*). Resolves PR-xwek5e, where a revocation cleared a remaining Member's
 secret: a remaining Member never commits a revocation now. A relay that
 relabels Organisation information as a revocation, to hold a listed Device on
 the previous epoch's key, is refused by that Device, which takes the update

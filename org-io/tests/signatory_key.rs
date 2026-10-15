@@ -58,9 +58,7 @@ async fn a_build_without_dev_seed_reads_no_seed_and_reports_why() {
     let dir = std::env::temp_dir().join(format!("org-io-no-dev-seed-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let service = org_io::node::service::OrgService::new(
-        org_io::node::store::PersonaStore::open(dir.join("store.bin"), "pw").unwrap(),
-    );
+    let service = org_node::service::OrgService::new(Vec::new()).unwrap();
     let settings = org_io::ChainSettings { ws_url: "ws://127.0.0.1:1".into(), contract_h160: [0u8; 20], co_signer: None };
     let refused = org_io::OrgIo::not_configured(service).connect(settings).await.err().unwrap();
     assert_eq!(
@@ -78,23 +76,25 @@ async fn a_build_without_dev_seed_reads_no_seed_and_reports_why() {
 #[tokio::test]
 async fn a_build_without_dev_seed_never_asks_for_the_seed_on_a_write_or_a_read() {
     use org_io::chain_read::StateReader;
-    use org_io::node::{Handle, Name, OrgId, Surname};
+    use org_node::{Handle, Name, OrgId, Surname};
 
     let dir = std::env::temp_dir().join(format!("org-io-not-configured-message-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let mut service = org_io::node::service::OrgService::new(
-        org_io::node::store::PersonaStore::open(dir.join("store.bin"), "pw").unwrap(),
-    );
-    let persona_id = service
+    // *Adapted 2026-10-13 (S4, task T8):* the device secret goes to org-io's
+    // in-memory keychain. *Adapted 2026-10-13 (S4, task T9):* a Persona is
+    // created by the handle itself (`OrgIo::create_persona`).
+    org_io::test_support::MemoryKeychain::shared().install();
+    let handle = org_io::OrgIo::not_configured(org_node::service::OrgService::new(Vec::new()).unwrap());
+    let persona_id = handle
         .create_persona(
             &mut rand::rngs::OsRng,
             Handle::parse("alice").unwrap(),
             Name::parse("Alice").unwrap(),
             Surname::parse("Smith").unwrap(),
         )
+        .await
         .unwrap();
-    let mut handle = org_io::OrgIo::not_configured(service);
 
     let write = handle.found_organisation(&mut rand::rngs::OsRng, &persona_id).await.unwrap_err();
     let read = org_io::connect::StateReaderNotConfigured.read_state(OrgId::new([7; 20])).await.unwrap_err().to_string();
@@ -112,12 +112,15 @@ async fn a_build_without_dev_seed_never_asks_for_the_seed_on_a_write_or_a_read()
 #[cfg(not(feature = "dev-seed"))]
 #[tokio::test]
 async fn a_build_without_dev_seed_says_why_the_own_admin_check_is_not_configured() {
-    use org_io::node::OrgId;
+    // *Reconciled with S3b-io part 1, 2026-10-14:* S3b-io's T16a port to the
+    // one `signatory_set` read needs no `AccountId`; `OrgId` from org-node
+    // directly, as S4's tests name it.
+    use org_node::OrgId;
     use org_io::signatory::{OwnAdminError, SignatorySetNotConfigured, SignatorySetReader};
 
     let dir = std::env::temp_dir().join(format!("org-io-own-admin-not-configured-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let handle = org_io::OrgIo::open(&dir, "pw", org_io::node::transport::TransportMode::Loopback).unwrap();
+    let handle = org_io::OrgIo::open(&dir, org_io::transport::TransportMode::Loopback).unwrap();
 
     let refused = handle.is_own_admin(OrgId::new([7; 20])).await.unwrap_err();
     assert_eq!(refused, OwnAdminError::NotConfigured);
@@ -139,21 +142,26 @@ async fn a_build_without_dev_seed_says_why_the_own_admin_check_is_not_configured
 #[tokio::test]
 async fn a_refused_connect_hands_back_the_service_it_was_given_and_says_why() {
     use org_io::connect::{ConnectFailed, ConnectFailure};
-    use org_io::node::{Handle, Name, Surname};
+    use org_node::{Handle, Name, Surname};
 
     let dir = std::env::temp_dir().join(format!("org-io-connect-hand-back-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let mut service = org_io::node::service::OrgService::new(
-        org_io::node::store::PersonaStore::open(dir.join("store.bin"), "pw").unwrap(),
-    );
-    let persona_id = service
+    // *Adapted 2026-10-08 (S4, task T3):* the Persona is created through the
+    // handle, which keeps its device secret; the hand-back keeps both.
+    // *Adapted 2026-10-13 (S4, task T8):* the device secret goes to org-io's
+    // in-memory keychain. *Adapted 2026-10-13 (S4, task T9):* a Persona is
+    // created by the handle itself (`OrgIo::create_persona`).
+    org_io::test_support::MemoryKeychain::shared().install();
+    let handle = org_io::OrgIo::not_configured(org_node::service::OrgService::new(Vec::new()).unwrap());
+    let persona_id = handle
         .create_persona(
             &mut rand::rngs::OsRng,
             Handle::parse("alice").unwrap(),
             Name::parse("Alice").unwrap(),
             Surname::parse("Smith").unwrap(),
         )
+        .await
         .unwrap();
     let settings = org_io::ChainSettings {
         ws_url: "ws://127.0.0.1:1".into(),
@@ -161,7 +169,7 @@ async fn a_refused_connect_hands_back_the_service_it_was_given_and_says_why() {
         co_signer: Some("not a key".into()),
     };
 
-    let refused: Box<ConnectFailed> = org_io::OrgIo::not_configured(service).connect(settings).await.err().unwrap();
+    let refused: Box<ConnectFailed> = handle.connect(settings).await.err().unwrap();
     let reason = &refused.reason;
 
     #[cfg(not(feature = "dev-seed"))]
@@ -171,7 +179,7 @@ async fn a_refused_connect_hands_back_the_service_it_was_given_and_says_why() {
     // The same service: the unconfigured handle is built from it, and its
     // Persona is there and its keys are readable.
     let handle = refused.into_not_configured();
-    let listed: Vec<_> = handle.view().personas().into_iter().map(|persona| persona.persona_id).collect();
+    let listed: Vec<_> = handle.personas().await.into_iter().map(|persona| persona.persona_id).collect();
     assert_eq!(listed, vec![persona_id.clone()]);
-    handle.view().persona_public_keys(&persona_id).unwrap();
+    handle.persona_public_keys(&persona_id).await.unwrap();
 }

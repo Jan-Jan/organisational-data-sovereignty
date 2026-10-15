@@ -16,46 +16,18 @@ provisional updates are described in
 and on-chain-client's submission in
 `on-chain-client/docs/requirements/2026-10-06-chain-write.md`.
 
-**REQ-prjja8**: The software shall produce, for an Organisation the user holds,
-an Invite as a Blob carrying the Organisation's name as the inviter typed it, the
-Organisation identifier, the inviter's guess of the invitee's full name, the
-inviter's DevicePublicKeys, and an invite identifier of 32 bytes drawn from its
-cryptographic random source, and shall keep that identifier as outstanding.
-satisfies: derived
-
-The Organisation's name is free text for display. It is stored nowhere and
-verified by nothing; the Organisation identifier is what the invitee's node
-reads the chain with (owner ruling 2026-10-05). The inviter's DevicePublicKeys are
-where the reply will be sent once the transport moves to the app; the invite
-identifier lets the inviter discard any reply it did not ask for (owner
-journey, 2026-10-05).
-
-**REQ-tcutr6**: The software shall produce, from an Invite the user imported
-and a Persona the user chose, an Invite reply as a Blob carrying that
-Persona's Member-as-a-group key, DevicePublicKey, handle, name and surname, and the Organisation identifier and
-invite identifier the Invite named; and shall declare to org-node that it
-expects a first admission to that Organisation.
-satisfies: derived
-
-*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
-The declaration named the invite identifier as well, which the admission's
-Wire message carried. The owner ruled that the invite identifier travels only
-in the Invite and its reply, never between peers; org-node matches a first
-admission against the Organisation alone
-(`org-node/docs/requirements/2026-10-06-chain-authority.md`).
-
-**REQ-65xqp8**: The software shall refuse an imported Invite reply whose invite
-identifier is not one it holds as outstanding for the Organisation the reply
-names, acting on nothing from it; shall act on a reply only for the
-Organisation the Invite was issued for; and shall stop holding an invite
-identifier as outstanding once a reply naming it has been acted on.
-satisfies: derived
-
-*Amended 2026-10-06 (independent review round 2, finding-1).* An invite
-identifier is outstanding for the Organisation it was issued for, not for any
-Organisation: before this amendment a reply to an Invite for one Organisation
-could name another Organisation this device holds, and the first Invite's
-identifier let it through to an admission there.
+*Moved 2026-10-14 (S4, task T13 of docs/plans/2026-10-06-org-io-transport.md,
+ruling A).* The three requirements that stood here — produce an Invite and
+keep its identifier outstanding; produce an Invite reply and declare the
+expected first admission; refuse a reply that is not outstanding for the
+Organisation it names, act on a reply only for the Organisation its Invite
+was issued for, and settle the identifier once acted on — moved, with their
+IDs, their text and their notes, to org-io's requirements
+(`org-io/docs/requirements/`, the transport file of change
+`worktree-org-io-transport`, "The invitation exchange"), with the code that
+runs the exchange (`org-io/src/exchange.rs`). org-io exports them, so this
+unit may still cite them. What the app keeps is the confirmation below
+(REQ-ab2mfz), the panels, and the decision to call each operation.
 
 **REQ-ab2mfz**: The software shall, before it produces an Invite reply, show
 the user that nothing has verified who sent the Invite or the Organisation
@@ -64,10 +36,14 @@ entered for the chosen Persona to its sender, and shall produce the reply only o
 the user has confirmed. (implements: RC-wzb48r)
 satisfies: derived
 
-**REQ-yazum3**: The software shall refuse an imported Invite or Invite reply whose
-Organisation identifier, keys, handle, name or surname does not parse, naming
-the field that failed, and shall act on nothing from it.
-satisfies: derived
+*Moved 2026-10-13 (S4, task T6 of docs/plans/2026-10-06-org-io-transport.md,
+ruling A).* The requirement that stood here — refuse an imported Invite or
+Invite reply whose Organisation identifier, keys, handle, name or surname
+does not parse, naming the field, and act on nothing from it — moved, with
+its ID and its text, to org-node's requirements
+(`org-node/docs/requirements/`, the sans-IO file of change
+`worktree-org-io-transport`), with the parse that realises it: the Invite and
+its reply return to org-node.
 
 *Moved 2026-10-08 (change `worktree-org-io-create`, task T9, ruling A).* The
 requirement that stood here — submit org-node's provisional update to the

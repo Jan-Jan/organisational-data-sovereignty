@@ -63,14 +63,48 @@ test_paths:
 # Since T12, the second line runs with `test-support,dev-seed`, as the plan
 # header's final form gives it.
 # Since review round 3 (2026-10-08), `open` (`OrgIo::open`) joins the first line.
+# Since S4 task T8 (2026-10-13), `keychain` (the keychain module, over
+# `test_support::MemoryKeychain`) joins the first line.
+# Since S4 task T9 (2026-10-13), `store_files` (the store files) joins it.
+# Since S4 task T10 (2026-10-13), the transport's four targets join it:
+# `transport_handshake` and `transport_networked` (moved from org-node),
+# `endpoints` (one endpoint per Persona) and `preflight_transport` (the
+# transport preflight by the keychain path).
+# Since S4 task T11 (2026-10-13), `receive_step` (the lock-free receive step)
+# joins it.
+# Since S4 task T11a (2026-10-13), `acknowledgement_inbound` (a revoked
+# Device's acknowledgement, and the verdict byte) joins it.
+# Since S4 task T12 (2026-10-13), `send_fanout` (the fan-out and the Loopback
+# address check), `peer_addr` (the peer-address parse) and its fuzz target
+# `fuzz_peer_addr` join it.
+# Since S4 task T13 (2026-10-14), `invitation_exchange` (the invitation
+# exchange runner, with the app's moved tests) and `node_stories` (the five
+# stories end to end over two Loopback endpoints) join it.
+# Since S3b-io part 1 (master `68ec432`, merged into S4 2026-10-14),
+# `publish_path` (the unknown-outcome write, its settle, the background
+# discard) and `startup_reconcile` (reconcile at start and on request, the
+# unverified state) join it.
+# Since S4 task T18 (2026-10-14), the final form: a clippy line with no
+# features joins the feature line, so the library and every target that needs
+# no feature are linted as a production build compiles them
+# (`key_custody_config` now declares `required-features = ["test-support"]`).
+# Since S4 task T19 (2026-10-14), `expectations_met` (the six expectations
+# org-io declared on org-node, shown to hold through the handle) joins it.
+# Since the S4 TEST review round 1 (2026-10-15, finding-1),
+# `keychain_contract` (MemoryKeychain's contract test; its OS-keychain run
+# skips unless ODS_REAL_KEYCHAIN_TESTS=1) joins it. Since the S4 review round 2
+# (2026-10-15, finding-8) that OS-keychain run is `#[ignore]`d as well.
 verify_commands:
-  - cargo test -p org-io --features test-support --lib --test key_custody_config --test fuzz_seed_parse --test signatory_key --test absences --test chain_read_rule --test receive_order --test submit_flow --test signatory_rule --test app_boundary --test open --test publish_path --test startup_reconcile
+  - cargo test -p org-io --features test-support --lib --test key_custody_config --test fuzz_seed_parse --test signatory_key --test absences --test chain_read_rule --test receive_order --test submit_flow --test signatory_rule --test app_boundary --test open --test keychain --test keychain_contract --test store_files --test transport_handshake --test transport_networked --test endpoints --test preflight_transport --test receive_step --test acknowledgement_inbound --test send_fanout --test peer_addr --test fuzz_peer_addr --test invitation_exchange --test node_stories --test publish_path --test startup_reconcile --test expectations_met
   - cargo test -p org-io --features test-support,dev-seed --test key_custody_config --test signatory_key --test dev_seed_env
   - cargo build -p org-io
   - cargo clippy -p org-io --all-targets --features test-support,dev-seed -- -D warnings
+  - cargo clippy -p org-io --all-targets -- -D warnings
 
 problem_age_days: 30
-problem_open_max: 10
+# Raised from 10 to 15: owner ruling 2026-10-15 (S4 review round 2), which
+# files the review's larger lows as one open umbrella report.
+problem_open_max: 15
 
 # Statement and branch coverage from the first merge (owner ruling,
 # 2026-10-06); floors in the root Makefile (ORG_IO_LINES, ORG_IO_REGIONS,

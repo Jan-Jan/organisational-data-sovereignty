@@ -52,28 +52,40 @@ pub fn normal_dependencies() -> String {
     rest[..rest.find("\n[").unwrap_or(rest.len())].to_string()
 }
 
-// org-node defines, exports and imports no Invite or Join request, decodes no
-// armoured text, and returns no dialling address (absences: no input side).
-// verifies: LLR-g9vmbx, LLR-zj88e6, LLR-qezw3n, LLR-836z24, LLR-8qxwst, REQ-qn2erx
+// org-node defines, exports and imports no Join request, and returns no
+// dialling address (absences: no input side).
+// *Amended 2026-10-13 (S4, task T6):* the Invite returns to org-node (owner
+// ruling 1 on the chain-authority sweep). The `export_invite`/`import_invite`
+// absences are inverted into the presence of `fn build_invite` and
+// `fn build_reply` (LLR-zj88e6 as rewritten); armoured text reaches org-node
+// only through the Invite and reply parse, so `base64` is named only in
+// `invitation.rs` (LLR-8qxwst as rewritten). The retired item of the old
+// "no Invite" absence (S4 T6; see the S4 verification record) leaves the
+// annotation.
+// verifies: LLR-zj88e6, LLR-qezw3n, LLR-836z24, LLR-8qxwst, REQ-qn2erx
 #[test]
 fn org_node_holds_no_invitation_exchange() {
     for (needle, why) in [
         ("pub mod blobs", "no blob module"),
-        ("fn export_invite", "LLR-zj88e6"),
-        ("fn import_invite", "LLR-g9vmbx"),
         ("fn export_join_request", "LLR-437fvx"),
         ("fn import_join_request", "LLR-836z24"),
-        ("struct Invite {", "LLR-g9vmbx"),
         ("struct JoinRequest {", "LLR-836z24"),
         ("PendingInvite", "no pending invites"),
         ("pending_invites", "no pending invites"),
         // a call, not the definition, which stays in transport/endpoint.rs
         (".node_addr_for_dial(", "LLR-qezw3n: no value carries a dialling address"),
-        ("base64", "LLR-8qxwst: no armoured text"),
     ] {
         assert_absent(needle, why);
     }
-    assert!(!normal_dependencies().lines().any(|l| l.trim_start().starts_with("base64")), "no base64 dependency");
+    let service = sources().into_iter().find(|(path, _)| path.ends_with("service.rs")).expect("service.rs").1;
+    for present in ["fn build_invite<", "fn build_reply<"] {
+        assert!(service.contains(present), "LLR-zj88e6: the service builds the Invite and the reply ({present})");
+    }
+    for (path, text) in sources() {
+        if !path.ends_with("invitation.rs") {
+            assert!(!text.contains("base64"), "{} contains `base64`: LLR-8qxwst, armour only in invitation.rs", path.display());
+        }
+    }
 }
 
 // org-node has no administrator: no record carries one and no Persona is
@@ -97,13 +109,24 @@ fn org_node_holds_no_organisation_secret() {
 }
 
 // The invite identifier never travels between peers: org-node defines no type
-// for it, no Wire message or expectation holds one, and `send_update` takes
-// none (REQ-8amu2a as amended).
+// for it, no Wire message or expectation holds one, and no outgoing body
+// carries one (REQ-8amu2a as amended; `send_update` until S4 task T5).
+// *Narrowed 2026-10-13 (S4, task T6; LLR-ms8njy as narrowed):* the Invite and
+// its `InviteId` return to org-node, so the scan reads the Wire message
+// (`wire.rs`, which every outgoing body encodes) and the `ExpectedAdmission`
+// struct body only.
 // verifies: LLR-ms8njy, LLR-48jakr
 #[test]
 fn org_node_holds_no_invite_identifier() {
-    assert_absent("InviteId", "LLR-ms8njy: no invite identifier type");
-    assert_absent("invite_id", "LLR-ms8njy, LLR-48jakr: no field or argument carries one");
+    assert_absent_in("wire.rs", "InviteId", "LLR-ms8njy: no Wire message names the invite identifier type");
+    assert_absent_in("wire.rs", "invite_id", "LLR-ms8njy, LLR-48jakr: no Wire message or outgoing body carries one");
+    let store = sources().into_iter().find(|(path, _)| path.ends_with("store.rs")).expect("store.rs").1;
+    let start = store.find("pub struct ExpectedAdmission {").expect("the ExpectedAdmission struct");
+    let body = &store[start..start + store[start..].find('}').expect("its closing brace")];
+    assert!(body.contains("org_id"), "the scan reads the struct body: {body}");
+    for needle in ["invite_id", "InviteId"] {
+        assert!(!body.contains(needle), "LLR-ms8njy: an expectation names the Organisation alone: {body}");
+    }
 }
 
 // The service writes nothing to the chain; the proxy account is never handed
@@ -176,6 +199,151 @@ fn org_node_names_no_chain_library_and_reads_no_chain() {
     );
 }
 
+// --- S4 (org-io transport): org-node is sans-IO ------------------------------
+
+/// The whole of org-node's manifest.
+fn manifest() -> String {
+    std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap()
+}
+
+/// What in `text` names `std`'s file system or environment in a form the
+/// plain `std::fs` needle misses (review round 1 of S4, finding-9): `fs` or
+/// `env` inside a grouped `std::{…}` import, and any environment read by
+/// path (`env::var(`, `env::var_os(`, `env::vars(`, `std::env`).
+fn file_and_environment_reads(text: &str) -> Vec<String> {
+    let mut found = vec![];
+    for needle in ["std::env", "env::var(", "env::var_os(", "env::vars(", "env::vars_os("] {
+        if text.contains(needle) {
+            found.push(needle.to_owned());
+        }
+    }
+    let mut rest = text;
+    while let Some(start) = rest.find("std::{") {
+        let group = &rest[start + "std::{".len()..];
+        let mut depth = 1;
+        let end = group
+            .char_indices()
+            .find(|&(_, c)| {
+                depth += match c {
+                    '{' => 1,
+                    '}' => -1,
+                    _ => 0,
+                };
+                depth == 0
+            })
+            .map_or(group.len(), |(index, _)| index);
+        // Each top-level item of the group: `fs`, `fs::File`, `env::{self, var}` …
+        let mut item_depth = 0;
+        let mut item_start = 0;
+        let mut items = vec![];
+        for (index, c) in group[..end].char_indices() {
+            match c {
+                '{' => item_depth += 1,
+                '}' => item_depth -= 1,
+                ',' if item_depth == 0 => {
+                    items.push(&group[item_start..index]);
+                    item_start = index + 1;
+                }
+                _ => {}
+            }
+        }
+        items.push(&group[item_start..end]);
+        for item in items {
+            let head = item.trim().split("::").next().unwrap_or_default().trim();
+            if head == "fs" || head == "env" {
+                found.push(format!("std::{{{}}}", item.trim()));
+            }
+        }
+        rest = &group[end..];
+    }
+    found
+}
+
+/// The self-check `org_node_is_sans_io` runs before its real scan: the
+/// helper catches each grouped import and environment read, and passes
+/// grouped imports of neither (review round 1 of S4, finding-9). A helper
+/// that stops catching them would let the real scan pass on a crate that
+/// does IO, so the annotated test fails instead.
+/// *Folded in 2026-10-15 (S4 TEST review round 2, finding-1):* this was the
+/// separate, unannotated test
+/// `the_sans_io_scan_catches_grouped_file_imports_and_environment_reads`.
+fn assert_the_scan_catches_grouped_file_imports_and_environment_reads() {
+    for (text, expected) in [
+        ("use std::{fs, io};", vec!["std::{fs}"]),
+        ("use std::{io::Read, fs::File};", vec!["std::{fs::File}"]),
+        ("use std::{\n    collections::{BTreeMap, HashMap},\n    env::{self, var},\n};", vec!["std::{env::{self, var}}"]),
+        ("let x = env::var(\"X\");", vec!["env::var("]),
+        ("let x = std::env::var(\"X\");", vec!["std::env", "env::var("]),
+        ("let x = env::var_os(\"X\");", vec!["env::var_os("]),
+    ] {
+        assert_eq!(file_and_environment_reads(text), expected, "{text}");
+    }
+    for clean in ["use std::{fmt, io};", "use std::{collections::{BTreeMap, HashSet}, fmt::Debug};", "let envelope = 1;"] {
+        assert!(file_and_environment_reads(clean).is_empty(), "{clean}");
+    }
+}
+
+// org-node binds no endpoint, sends and receives nothing, opens no file and
+// awaits nothing: it has no transport, no file IO, no async and no keychain
+// (S4, task T14). The transport and its preflight check are org-io's.
+// Subsumes `revocation_and_reconcile_do_no_io` for the whole crate.
+// *Strengthened 2026-10-14 (review round 1 of S4, finding-9):* a grouped
+// `use std::{fs, …}` import and an environment read (`env::var(` and its
+// kin) are caught too (`file_and_environment_reads`).
+// *2026-10-15 (S4 TEST review round 2, finding-1):* the helper is checked on
+// strings first, so a helper that misses grouped imports fails this test.
+// verifies: LLR-4tcxsu, REQ-x3jrh8
+#[test]
+fn org_node_is_sans_io() {
+    assert_the_scan_catches_grouped_file_imports_and_environment_reads();
+    for (needle, why) in [
+        ("iroh", "LLR-4tcxsu: the transport is org-io's"),
+        ("OrgEndpoint", "LLR-4tcxsu: org-node has no endpoint"),
+        ("pub mod transport", "LLR-4tcxsu: no transport module"),
+        ("crate::transport", "LLR-4tcxsu: no transport module"),
+        ("fn bind_endpoint", "LLR-4tcxsu: nothing binds an endpoint"),
+        ("fn send_body", "LLR-4tcxsu: nothing sends"),
+        ("fn receive_body", "LLR-4tcxsu: nothing receives"),
+        ("std::fs", "REQ-x3jrh8: org-node opens no file"),
+        ("PathBuf", "REQ-x3jrh8: org-node names no file path"),
+        ("tokio", "org-node runs no runtime"),
+        ("async fn", "org-node awaits nothing"),
+        (".await", "org-node awaits nothing"),
+        ("keyring", "org-node never touches the OS keychain (REQ-26mjqa)"),
+        ("ODS_DEVICE_SEED", "no seed from the environment: the preflight left with owner ruling 7"),
+        ("DeviceSeed", "the device seed is the move-only DeviceSecret"),
+        ("fn check_transport", "the transport check is org-io's (owner ruling 7)"),
+    ] {
+        assert_absent(needle, why);
+    }
+    for (path, text) in sources() {
+        let found = file_and_environment_reads(&text);
+        assert!(found.is_empty(), "{} reads a file or the environment: {found:?} (REQ-x3jrh8)", path.display());
+    }
+    let dependencies = normal_dependencies();
+    for crate_name in ["iroh", "tokio", "async-trait", "argon2", "keyring"] {
+        assert!(!dependencies.contains(&format!("{crate_name} =")), "org-node depends on {crate_name}");
+    }
+    let manifest = manifest();
+    for needle in ["iroh", "tokio", "transport = [", "\"transport\"", "name = \"preflight\""] {
+        assert!(!manifest.contains(needle), "org-node's manifest names `{needle}` (LLR-4tcxsu: no transport, no runtime)");
+    }
+}
+
+// No value org-node returns carries a dialling address: org-node holds no
+// endpoint address type and no function that builds one for a dial.
+// verifies: LLR-qezw3n
+#[test]
+fn org_node_holds_no_dialling_address() {
+    for (needle, why) in [
+        ("node_addr_for_dial", "LLR-qezw3n: no dialling address is built"),
+        ("EndpointAddr", "LLR-qezw3n: no value carries an endpoint address"),
+        ("peer_addr", "LLR-qezw3n: no peer address is taken or returned"),
+    ] {
+        assert_absent(needle, why);
+    }
+}
+
 // --- S3 (commit workflow): scans of the code, not of its comments ----------
 //
 // The scans below read code only: every `//` comment (doc comments included)
@@ -232,7 +400,9 @@ fn expression_from(squeezed_code: &str, start: usize) -> &str {
 /// `code` without the item `fn <function_name>`: from its `fn` keyword to
 /// the brace that closes its body. Unchanged if there is no such function.
 fn without_function(code: &str, function_name: &str) -> String {
-    let Some(fn_start) = code.find(&format!("fn {function_name}(")) else {
+    let Some(fn_start) =
+        code.find(&format!("fn {function_name}(")).or_else(|| code.find(&format!("fn {function_name}<")))
+    else {
         return code.to_string();
     };
     let body_start = fn_start + code[fn_start..].find('{').unwrap();
@@ -306,26 +476,60 @@ fn revocation_and_reconcile_do_no_io() {
     }
 }
 
-/// No code in org-node removes an `OrgRecord` or a `PersonaRecord` except
-/// `StoreData::forget_organisation`: no removing method on `orgs` or
-/// `personas`, no rebuild of either through a filter, no reassignment to an
-/// empty list and no `mem::take`/`mem::replace` of either (LLR-23sfdh).
-/// verifies: LLR-23sfdh
+/// No code in org-node removes an `OrgRecord` or a Persona's store except
+/// `StoreData::forget_organisation`, `OrgService::adopt` (a removal step's
+/// forgotten store) and `OrgService::drop_store` (org-io's two local-IO
+/// cases): no removing method on `orgs` or `stores`, no rebuild of either
+/// through a filter, no reassignment to an empty list and no
+/// `mem::take`/`mem::replace` of either (LLR-jd82t6).
+///
+/// *Replaces 2026-10-13 (S4, task T9; owner ruling of that day, option A)*
+/// the scan of the retired removal item, which exempted `adopt` alone. It was
+/// written red first, against a temporary `stores.retain` in
+/// `restore_store`.
+/// verifies: LLR-jd82t6
 #[test]
-fn only_forget_organisation_removes_records_and_personas() {
+fn only_the_removal_step_adopt_and_drop_store_remove_records_or_stores() {
     let removing_methods =
         ["retain(", "retain_mut(", "remove(", "swap_remove(", "clear()", "drain(", "truncate(", "pop()", "split_off(", "dedup"];
+    let service = code_of(&std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/service.rs")).unwrap());
+    let adopt = &service[service.find("fn adopt<").expect("OrgService::adopt")..];
+    let adopt = &adopt[..adopt.find("\n    }\n").expect("the end of adopt")];
+    // *Loosened 2026-10-15 (S4 TEST review round 1, finding-11; Seams 1):*
+    // the two exemptions were checked by the exact statement each removes
+    // with; they are checked now by the rule alone: each exempt function
+    // removes from `stores` by some removing method (so the exemption names
+    // the function that does it), adopt reports the removal as forgotten,
+    // and neither removes a record. Mutation check, that day: a
+    // `self.stores.retain(|_| true);` added to `restore_store` failed the
+    // scan below; it was removed.
+    let removes_from = |body: &str, collection: &str| {
+        let body = squeezed(body);
+        removing_methods.iter().any(|method| !identifier_occurrences(&body, &format!("{collection}.{method}")).is_empty())
+    };
+    assert!(removes_from(adopt, "stores"), "adopt is where a removal step's forgotten store is removed");
+    assert!(adopt.contains("StoreChange::Forgotten"), "and reports it as forgotten");
+    let drop_store = &service[service.find("fn drop_store(").expect("OrgService::drop_store")..];
+    let drop_store = &drop_store[..drop_store.find("\n    }\n").expect("the end of drop_store")];
+    assert!(removes_from(drop_store, "stores"), "drop_store removes a store");
+    for (name, body) in [("adopt", adopt), ("drop_store", drop_store)] {
+        assert!(!removes_from(body, "orgs"), "{name} removes no record inside a store");
+    }
+    assert!(!drop_store.contains("orgs"), "drop_store touches no record inside a store");
     for (path, text) in sources() {
         let mut code = code_of(&text);
         if path.ends_with("store.rs") {
             code = without_function(&code, "forget_organisation");
         }
+        if path.ends_with("service.rs") {
+            code = without_function(&without_function(&code, "adopt"), "drop_store");
+        }
         let squeezed_code = squeezed(&code);
         let file = path.display();
-        for collection in ["orgs", "personas"] {
+        for collection in ["orgs", "stores"] {
             for method in removing_methods {
                 let call = format!("{collection}.{method}");
-                assert!(identifier_occurrences(&squeezed_code, &call).is_empty(), "{file} calls `{call}` (LLR-23sfdh)");
+                assert!(identifier_occurrences(&squeezed_code, &call).is_empty(), "{file} calls `{call}` (LLR-jd82t6)");
             }
             for binding in [format!("{collection}:"), format!("{collection}=")] {
                 for offset in identifier_occurrences(&squeezed_code, &binding) {
@@ -335,11 +539,11 @@ fn only_forget_organisation_removes_records_and_personas() {
                     }
                     assert!(
                         !value.contains(".filter(") && !value.contains(".retain"),
-                        "{file} rebuilds `{collection}` through a filter: `{binding}{value}` (LLR-23sfdh)"
+                        "{file} rebuilds `{collection}` through a filter: `{binding}{value}` (LLR-jd82t6)"
                     );
                     if binding.ends_with('=') {
                         for empty in ["Vec::new()", "vec![]", "Default::default()"] {
-                            assert!(!value.contains(empty), "{file} empties `{collection}`: `{binding}{value}` (LLR-23sfdh)");
+                            assert!(!value.contains(empty), "{file} empties `{collection}`: `{binding}{value}` (LLR-jd82t6)");
                         }
                     }
                 }
@@ -347,7 +551,7 @@ fn only_forget_organisation_removes_records_and_personas() {
             for swap in ["mem::take(", "mem::replace("] {
                 for offset in squeezed_code.match_indices(swap).map(|(offset, _)| offset) {
                     let argument = expression_from(&squeezed_code, offset + swap.len());
-                    assert!(!argument.ends_with(collection), "{file} takes `{collection}` out with `{swap}{argument}` (LLR-23sfdh)");
+                    assert!(!argument.ends_with(collection), "{file} takes `{collection}` out with `{swap}{argument}` (LLR-jd82t6)");
                 }
             }
         }
@@ -356,9 +560,14 @@ fn only_forget_organisation_removes_records_and_personas() {
 
 /// `forget_organisation` is defined once, in store.rs (`OrgService` has none
 /// of its own), and called from exactly two functions: `revocation::accept`
-/// and the commit paths' one removal step, `removal_step` in service.rs
-/// (LLR-23sfdh).
-/// verifies: LLR-23sfdh
+/// and the commit paths' one removal step, `removal_step` in service.rs.
+///
+/// *Pointed at the successor 2026-10-15 (S4 TEST review round 2, finding-2;
+/// the upgraded guardrails rule on superseded IDs):* this verified the
+/// removal item LLR-jd82t6 superseded on 2026-10-13 (S4, task T9). That
+/// item's definition is deleted (owner ruling of 2026-10-13), so only the
+/// successor, whose first clause this checks, is cited.
+/// verifies: LLR-jd82t6
 #[test]
 fn forget_organisation_is_defined_once_and_called_only_from_accept_and_the_removal_step() {
     let mut definitions = Vec::new();
@@ -379,11 +588,11 @@ fn forget_organisation_is_defined_once_and_called_only_from_accept_and_the_remov
             callers.push(format!("{file_name}::{}", enclosing_function(&code, offset).unwrap_or_default()));
         }
     }
-    assert_eq!(definitions, ["store.rs"], "forget_organisation is defined once, in store.rs (LLR-23sfdh)");
+    assert_eq!(definitions, ["store.rs"], "forget_organisation is defined once, in store.rs");
     callers.sort();
     assert_eq!(
         callers,
         ["revocation.rs::accept", "service.rs::removal_step"],
-        "forget_organisation is called from accept and the removal step only (LLR-23sfdh)"
+        "forget_organisation is called from accept and the removal step only"
     );
 }

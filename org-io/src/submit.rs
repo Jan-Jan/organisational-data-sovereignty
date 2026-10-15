@@ -16,15 +16,15 @@ use on_chain_client::write::subxt_ops::{FinalitySink, SubxtWriteOps};
 use on_chain_client::write::{genesis, submit_update, AccountId, WriteWindow};
 use on_chain_client::{OnChainRootHash, OrgPubKey, OrgRegistryClient};
 use org_node::service::OrgService;
-use org_node::{
-    ChainAccount, CommitOutcome, DevicePublicKey, Epoch, OrgId, OrgNodeError, OrgPublicKey, PersonaId, RootHash,
-};
+use org_node::{ChainAccount, Epoch, OrgId, OrgNodeError, OrgPublicKey, PersonaId, RootHash};
 use rand_core::{CryptoRng, RngCore};
 
 use crate::chain_read::StateReader;
 use crate::custody::SignatoryKey;
+use crate::peer_addr::PeerAddr;
 use crate::publish::{self, PublishState, Reconciliation, Settled};
-use crate::view::BuiltUpdate;
+use crate::view::{BuiltUpdate, Submitted};
+use crate::{LocalStore, StoreFailure};
 
 /// How long one chain write may take before org-io gives up on it
 /// (LLR-be3zv9): the settle timeout org-node used before the write moved.
@@ -192,16 +192,28 @@ fn refused_after_write(error: OrgNodeError, nothing_done: &str) -> String {
     }
 }
 
+/// A commit whose store change was not written (LLR-murjr6, org-node's
+/// save-after-mutate report): the chain write executed and the
+/// commit was made, so it is not reported as "nothing committed"; the
+/// failure says whether the Persona was reloaded from its file.
+fn committed_but_not_stored(failure: &StoreFailure, after: &str) -> String {
+    format!("the chain write executed and the commit was made, but {failure}{after}")
+}
+
 /// Found an Organisation: build the genesis update, write it, read back the
 /// state it left, commit against that state.
 pub async fn found_organisation<R: RngCore + CryptoRng + Send>(
-    svc: &mut OrgService,
+    service: &mut OrgService,
+    local: &LocalStore,
     writer: &dyn ChainWriter,
     reader: &dyn StateReader,
     rng: &mut R,
     persona_id: &PersonaId,
 ) -> Result<OrgId, String> {
-    let update = svc.create_organisation(rng, persona_id).map_err(|error| error.to_string())?;
+    let (update, kept) = service.create_organisation(rng, persona_id).map_err(|error| error.to_string())?;
+    local
+        .write(service, kept)
+        .map_err(|failure| format!("the genesis update was built, but {failure}; nothing written or committed"))?;
     let (org_id, proxy) = bounded(writer.genesis(update.resulting_root, update.org_pub_key))
         .await
         .map_err(|not_done| not_done.report("nothing committed"))?;
@@ -209,8 +221,13 @@ pub async fn found_organisation<R: RngCore + CryptoRng + Send>(
         .read_state(org_id)
         .await
         .map_err(|error| format!("the chain write executed, but reading it back failed; nothing committed: {error}"))?;
-    svc.commit_genesis(rng, persona_id, org_id, proxy, chain_state)
+    let (_, committed) = service
+        .commit_genesis(rng, persona_id, org_id, proxy, chain_state)
         .map_err(|error| refused_after_write(error, "nothing committed"))?;
+    // A failed write is a storage failure, not a refused commit: the chain
+    // write executed and org-node committed; the Persona is reloaded from
+    // its file (LLR-murjr6, org-node's save-after-mutate report).
+    local.write(service, committed).map_err(|failure| committed_but_not_stored(&failure, ""))?;
     Ok(org_id)
 }
 
@@ -230,28 +247,32 @@ pub(crate) const NOT_EXECUTED_RESUBMITTED: &str = "refused before any write: thi
 
 /// Write the update `update` names, as org-node holds it, to the chain;
 /// only once that executed, read back the state it left, commit against it
-/// and send the committed update to `recipient` (LLR-qhjp6g, LLR-9r2bxd).
+/// and send the committed update to every recipient the commit names
+/// (LLR-qhjp6g, LLR-9r2bxd; `send::send_committed`).
 /// Before any write it refuses an Organisation the store does not hold
 /// (`OrgNotHeld`), a record with no proxy account, and an update org-node
-/// does not hold built on the record's current root. org-node chooses the
-/// kind of message from its committed record. An earlier write for the
+/// does not hold built on the record's current root. org-node builds the
+/// body for each recipient inside the commit; this returns the committed
+/// update's public data only. An earlier write for the
 /// Organisation whose outcome is unknown is settled first, and unless it
 /// was not executed nothing is written (LLR-nqvbb6); a write that times out
-/// is recorded as unknown (LLR-2yjuaj).
+/// is recorded as unknown, with the address the submission was given
+/// (LLR-2yjuaj): it names no recipient, so the late commit goes to every
+/// recipient as this one would have.
 #[allow(clippy::too_many_arguments)]
 pub async fn submit_commit_send<R: RngCore + CryptoRng + Send>(
-    svc: &mut OrgService,
+    service: &mut OrgService,
     publish: &mut PublishState,
+    local: &LocalStore,
     writer: &dyn ChainWriter,
     reader: &dyn StateReader,
     rng: &mut R,
     update: &BuiltUpdate,
-    recipient: DevicePublicKey,
-    peer_addr: Option<iroh::EndpointAddr>,
-) -> Result<CommitOutcome, String> {
+    peer_addr: Option<PeerAddr>,
+) -> Result<Submitted, String> {
     let org_id = update.org_id;
     let resubmitted = publish.is_unknown_write(update);
-    match publish::settle_unknown(publish, svc, reader, rng, org_id).await {
+    match publish::settle_unknown(publish, service, local, reader, rng, org_id).await {
         Settled::NotExecuted { .. } if resubmitted => return Err(NOT_EXECUTED_RESUBMITTED.into()),
         // An executed write whose update was already committed is settled
         // (review round 1, finding-1): the record is in step with the chain.
@@ -261,15 +282,15 @@ pub async fn submit_commit_send<R: RngCore + CryptoRng + Send>(
     // Read by reference and copy only public fields: no record and no held
     // update, with the Organisation private key each holds, is cloned here
     // (review round 4, finding 2; org-node's `holds_provisional`).
-    let record = svc
+    let record = service
         .list_orgs()
-        .iter()
+        .into_iter()
         .find(|record| record.org_id == org_id)
         .ok_or_else(|| OrgNodeError::OrgNotHeld { org_id }.to_string())?;
     let (proxy, epoch, current_root) = (record.proxy_account, record.epoch, record.root_hash);
     let proxy =
         proxy.ok_or("this device holds no proxy account for the Organisation; only its founding device can submit")?;
-    let held = svc.holds_provisional(org_id, update.base_root, update.resulting_root, update.org_pub_key);
+    let held = service.holds_provisional(org_id, update.base_root, update.resulting_root, update.org_pub_key);
     // The root comparison is defensive: every path that moves a record's root
     // also discards the updates built on the old one, so today `held` alone
     // refuses a stale update (LLR-qhjp6g, note of 2026-10-08).
@@ -287,18 +308,27 @@ pub async fn submit_commit_send<R: RngCore + CryptoRng + Send>(
     })?;
     if let Err(not_done) = bounded(writer.update(proxy, update.resulting_root, update.org_pub_key, epoch, window)).await {
         if matches!(not_done, WriteNotDone::TimedOut) {
-            publish.record_unknown(*update, recipient, peer_addr, window.last_valid_block(), epoch);
+            publish.record_unknown(*update, peer_addr, window.last_valid_block(), epoch);
         }
         return Err(not_done.report("nothing committed or sent"));
     }
     let chain_state = reader.read_state(org_id).await.map_err(|error| {
         format!("the chain write executed, but reading it back failed; nothing committed or sent: {error}")
     })?;
-    let outcome = svc
-        .commit_update(rng, org_id, chain_state)
+    let (outcome, change) = service
+        .commit_update(rng, org_id, chain_state, |keys| local.device_secrets_for_signing(keys))
         .map_err(|error| refused_after_write(error, "nothing committed or sent"))?;
-    svc.send_update(&outcome, recipient, peer_addr)
-        .await
-        .map_err(|error| format!("committed at epoch {}, but the send failed: {error}", outcome.epoch.get()))?;
-    Ok(outcome)
+    // A failed write is a storage failure, as in `found_organisation`
+    // (LLR-murjr6).
+    local
+        .store(service, change)
+        .map_err(|failure| committed_but_not_stored(&failure, &format!(" (epoch {}); nothing sent", outcome.epoch.get())))?;
+    // Every body the commit built (org-node builds them), sent unchanged to
+    // its recipient, from the endpoint of the Persona the commit names as
+    // its sender, never another Persona's (LLR-d2pzzk). A failed send is
+    // reported per Device and leaves the commit in place (LLR-znhmh2,
+    // LLR-r9sh6k).
+    let sender = service.persona_public_keys(&outcome.sender).map(|(_, device)| device).map_err(|error| error.to_string());
+    let sends = local.send_committed(sender, &outcome, peer_addr).await;
+    Ok(Submitted { org_id: outcome.org_id, epoch: outcome.epoch, root: outcome.root, sends })
 }

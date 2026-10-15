@@ -1,50 +1,16 @@
-//! The handle's read surface (SDD-z3ychz; review round 3, finding 1): an
-//! allowlist, not org-node's whole service. `NodeView` offers only the
-//! queries the app makes, and each returns public data only: ids, names,
-//! public keys, roots, epochs, and the summaries below, which copy the
-//! public fields of org-node's records and leave the secrets they hold
-//! behind. `BuiltUpdate` names a provisional update org-node holds without
-//! carrying it.
+//! The values the handle's read surface returns (SDD-z3ychz): ids, names, public keys, roots, epochs, and the summaries
+//! below, which copy the public fields of org-node's records and leave the
+//! secrets they hold behind. `BuiltUpdate` names a provisional update
+//! org-node holds without carrying it. The queries are `OrgIo`'s own
+//! methods, each taking the service's lock inside.
 
-use org_node::service::OrgService;
 use org_node::store::{MemberSnapshot, OrgRecord, PersonaRecord, PersonaStatus, ProvisionalUpdate};
-use org_node::{DevicePublicKey, Epoch, Handle, MemberId, Name, OrgId, OrgNodeError, OrgPublicKey, PersonPublicKey, PersonaId, RootHash, Surname};
+use org_node::{Epoch, Handle, MemberId, Name, OrgId, OrgPublicKey, PersonaId, RootHash, Surname};
 
-/// org-node's queries the app makes, over the handle's service, each
-/// returning public data only (LLR-3zdw8v, clarified 2026-10-08, review
-/// round 3).
-pub struct NodeView<'handle> {
-    service: &'handle OrgService,
-}
+use crate::send::SendReport;
 
-impl<'handle> NodeView<'handle> {
-    pub(crate) fn new(service: &'handle OrgService) -> Self {
-        Self { service }
-    }
-
-    /// Every Persona this node holds, public fields only.
-    pub fn personas(&self) -> Vec<PersonaSummary> {
-        self.service.list_personas().iter().map(PersonaSummary::from).collect()
-    }
-
-    /// Every Organisation this node holds, public fields only.
-    pub fn organisations(&self) -> Vec<OrgSummary> {
-        self.service.list_orgs().iter().map(OrgSummary::from).collect()
-    }
-
-    /// The Organisation `org_id`, when this node holds it.
-    pub fn organisation(&self, org_id: OrgId) -> Option<OrgSummary> {
-        self.service.list_orgs().iter().find(|record| record.org_id == org_id).map(OrgSummary::from)
-    }
-
-    /// The Persona's Member-as-a-group key and DevicePublicKey (org-node's
-    /// `persona_public_keys`).
-    pub fn persona_public_keys(&self, persona_id: &PersonaId) -> Result<(PersonPublicKey, DevicePublicKey), OrgNodeError> {
-        self.service.persona_public_keys(persona_id)
-    }
-}
-
-/// A Persona's public fields: its seeds are not copied.
+/// A Persona's public fields: its Member seed is not copied (and the store
+/// holds no device seed).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PersonaSummary {
     pub persona_id: PersonaId,
@@ -105,6 +71,20 @@ pub struct BuiltUpdate {
     pub base_root: RootHash,
     pub resulting_root: RootHash,
     pub org_pub_key: OrgPublicKey,
+}
+
+/// What `submit_commit_send` reports of a committed update:
+/// the Organisation and the committed epoch and root, public data only. The
+/// commit's `CommitOutcome` stays in org-io: its Organisation-information
+/// bodies carry the Organisation private key (LLR-3zdw8v).
+/// `sends` is what became of each recipient's body, by Device
+/// public key (LLR-znhmh2, LLR-r9sh6k).
+#[derive(Debug)]
+pub struct Submitted {
+    pub org_id: OrgId,
+    pub epoch: Epoch,
+    pub root: RootHash,
+    pub sends: SendReport,
 }
 
 impl BuiltUpdate {

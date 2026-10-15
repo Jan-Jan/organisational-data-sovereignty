@@ -6,7 +6,8 @@
 //! without a Tauri application, an OrgService, a chain or a peer — none of
 //! which any gate in this repository can stand up.
 
-use org_io::node::OrgNodeError;
+use org_io::node::{OrgNodeError, ReceiveKind};
+use org_io::ReceiveError;
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -50,9 +51,11 @@ pub enum ReceiverOutcome {
 /// like two of the plainest ones. Each is also reachable from a purely LOCAL
 /// condition on the receive path, with no bearing on whether anything verified:
 ///
-/// - `receive_and_self_delete_if_revoked` in `org-node/src/service.rs` returns
-///   `OrgNotOnChain` when the local store holds no record of the organisation;
-/// - the same function returns `Trie(_)` when the local members snapshot
+/// - org-node's receive path (`OrgService::check_received` and
+///   `OrgService::commit_checked`, `org-node/src/service.rs`) returns
+///   `OrgNotOnChain` when the local store holds no record of the organisation,
+///   and also when org-io read no chain state for it;
+/// - the same path returns `Trie(_)` when the local members snapshot
 ///   fails to reconstruct (and `verify.rs` returns it again for the
 ///   local trie's own `root_hash()`).
 ///
@@ -108,18 +111,31 @@ pub fn classify_receive_error(e: &OrgNodeError) -> ReceiverOutcome {
         // anything is verified; a key that is not the chain's
         // (`OrgKeyMismatch`) and a revocation that leaves this node listed
         // (`RevocationNotForThisDevice`) after it, on a rule about the key or
-        // this node. The ten refusals of the commit workflow (S3) are not
+        // this node. The nine refusals of the commit workflow (S3) are not
         // verdicts on an update either: reconcile's refusals concern a chain
         // state read or the node's own record (`OrgNotHeld`,
         // `StaleChainState`, `ChainStateConflict`); a revocation's proof and
         // an acknowledgement are not updates (`RevocationProofRefused`, the
-        // four `Acknowledgement*`); and the last two concern what the caller
-        // supplied (`DeviceSecretNotSupplied`, `NoRevocationForRecipient`).
+        // four `Acknowledgement*`); and the last concerns what the caller
+        // supplied (`DeviceSecretNotSupplied`).
         // The two sender refusals of the owner rulings of 2026-10-07 are
         // made before anything is verified, before the chain is read: a
         // message from a Device the record does not list (`SenderNotListed`)
         // and an acknowledgement not sent by its own Device
-        // (`AcknowledgementNotFromItsDevice`).
+        // (`AcknowledgementNotFromItsDevice`). A Wire message over the bound
+        // (`MessageTooLarge`) is refused before it is decoded.
+        // The store and invitation refusals are about this node's own store
+        // or its invitation bookkeeping, never verdicts on an update: a sealed
+        // store refused (`StoreRefused`), a Device secret that is not the
+        // store's (`DeviceSecretMismatch`), two stores for one Device
+        // (`DuplicatePersonaStore`), a reply for another Organisation or not
+        // outstanding (`ReplyForAnotherOrganisation`, `InviteNotOutstanding`),
+        // and an Organisation another Persona holds or expects
+        // (`OrganisationHeldByAnotherPersona`).
+        // A commit refused because this node's own record
+        // moved after the message was checked (`RecordMovedSinceCheck`) is
+        // about this node's store, not a verdict on the update; org-io
+        // checks the body once more before it reports one.
         OrgNodeError::Chain(_)
         | OrgNodeError::OrgNotOnChain
         | OrgNodeError::Trie(_)
@@ -131,6 +147,7 @@ pub fn classify_receive_error(e: &OrgNodeError) -> ReceiverOutcome {
         | OrgNodeError::NoProvisionalUpdate
         | OrgNodeError::PersonaAlreadyBound { .. }
         | OrgNodeError::MalformedMessage
+        | OrgNodeError::MessageTooLarge { .. }
         | OrgNodeError::OrgKeyMismatch { .. }
         | OrgNodeError::RevocationNotHeld { .. }
         | OrgNodeError::RevocationNotForThisDevice { .. }
@@ -143,71 +160,83 @@ pub fn classify_receive_error(e: &OrgNodeError) -> ReceiverOutcome {
         | OrgNodeError::AcknowledgementForListedDevice { .. }
         | OrgNodeError::AcknowledgementSignatureInvalid { .. }
         | OrgNodeError::DeviceSecretNotSupplied { .. }
-        | OrgNodeError::NoRevocationForRecipient { .. }
         | OrgNodeError::SenderNotListed { .. }
-        | OrgNodeError::AcknowledgementNotFromItsDevice { .. } => ReceiverOutcome::ReceiveError {
+        | OrgNodeError::AcknowledgementNotFromItsDevice { .. }
+        | OrgNodeError::StoreRefused(_)
+        | OrgNodeError::DeviceSecretMismatch
+        | OrgNodeError::DuplicatePersonaStore
+        | OrgNodeError::ReplyForAnotherOrganisation
+        | OrgNodeError::InviteNotOutstanding
+        | OrgNodeError::OrganisationHeldByAnotherPersona { .. }
+        | OrgNodeError::RecordMovedSinceCheck { .. } => ReceiverOutcome::ReceiveError {
             message: e.to_string(),
         },
     }
 }
 
-/// The message fragments that mean the loop cannot continue and must exit.
+/// LLR-zw6jqy (REQ-jfxah3, REQ-kn5rtx, REQ-x3c8n2). The outcomes one FAILED
+/// receive iteration produces, in emission order, decided by the variant of
+/// org-io's `ReceiveError` and never by its text.
 ///
-/// Each one is a fragment org-node or the transport actually formats:
+/// A refusal from org-node is classified by `classify_receive_error`. Every
+/// other failure is not a verdict on any update and is one receiver error.
+/// Only `ReceiveError::Terminal` (the endpoint closed, or a bind failed:
+/// org-io's REQ-8e57wm) stops the loop: it is followed by a `Stopped` outcome
+/// with the same message, because REQ-jfxah3 announces the stop "before that
+/// loop exits" and emission order is what a consumer sees.
 ///
-/// - `endpoint bind:` — `ensure_endpoint` in `org-node/src/service.rs`, the
-///   bind itself failed;
-/// - `endpoint bind failed unexpectedly` — `ensure_endpoint` again, the
-///   endpoint is still absent after a bind that reported success;
-/// - `endpoint closed` — `recv_one` in `org-node/src/transport/endpoint.rs`,
-///   `accept()` returned `None`; it reaches the app as
-///   `chain read failed: iroh recv: iroh accept error: endpoint closed`.
-///
-/// The previous value was the single string `"endpoint not bound"`, which
-/// appears nowhere in org-node or iroh, so the match never fired: the loop never
-/// broke, `receiver-stopped` was never emitted, and the guard was never released
-/// by task exit.
-///
-/// This is still a SUBSTRING MATCH on messages org-node formats, and that is
-/// still a real weakness: a reworded message would once again turn a terminal
-/// failure into an infinite retry. REQ-x3c8n2 is the expectation on `org-node`
-/// that would make this a typed condition instead, and it stands — correcting
-/// the fragments makes a dead mechanism live, it does not make it sound. What
-/// this change buys is that the consequence is now visible (`receiver-stopped`
-/// carries the reason, REQ-jfxah3) and recoverable (the guard is released,
-/// REQ-3hfggn) at all.
-const TERMINAL_ERRORS: [&str; 3] = [
-    "endpoint bind:",
-    "endpoint bind failed unexpectedly",
-    "endpoint closed",
-];
-
-/// REQ-jfxah3. Whether a rendered receive-path error message means the loop
-/// cannot continue.
-pub fn is_terminal_error(message: &str) -> bool {
-    TERMINAL_ERRORS.iter().any(|marker| message.contains(marker))
+/// Classified by variant, not by matching the error's text: under a text
+/// match a reworded message would turn a terminal failure into an endless
+/// retry, and a transient failure whose text happened to contain a fragment
+/// would stop the loop. No wildcard arm: a new `ReceiveError` variant is a
+/// compile error here.
+pub fn outcomes_for_receive_error(error: &ReceiveError) -> Vec<ReceiverOutcome> {
+    match error {
+        ReceiveError::Refused(refused) => vec![classify_receive_error(refused)],
+        ReceiveError::Terminal(_) => {
+            let message = error.to_string();
+            vec![
+                ReceiverOutcome::ReceiveError { message: message.clone() },
+                // REQ-jfxah3: say that the loop is stopping, and why.
+                ReceiverOutcome::Stopped { reason: message },
+            ]
+        }
+        ReceiveError::Connection(_) | ReceiveError::Chain(_) | ReceiveError::Store(_) | ReceiveError::Keychain(_) => {
+            vec![ReceiverOutcome::ReceiveError { message: error.to_string() }]
+        }
+    }
 }
 
-/// REQ-jfxah3 / REQ-kn5rtx. The outcomes one FAILED receive iteration produces,
-/// in emission order.
-///
-/// A `Vec` rather than a single outcome because a terminal error produces two:
-/// the failure itself (REQ-affyf5 or REQ-kn5rtx) and then the loop's exit
-/// (REQ-jfxah3), in that order — the requirement says the stop is announced
-/// "before that loop exits", and emission order is what a consumer sees. Every
-/// other failed iteration produces exactly one.
-///
-/// Terminality is orthogonal to the class: a terminal endpoint failure is a
-/// `ReceiveError` that ALSO stops the loop, so the `Stopped` push applies to
-/// whichever class `classify_receive_error` returned.
-pub fn outcomes_for_receive_error(e: &OrgNodeError) -> Vec<ReceiverOutcome> {
-    let message = e.to_string();
-    let mut out = vec![classify_receive_error(e)];
-    if is_terminal_error(&message) {
-        // REQ-jfxah3: say that the loop is stopping, and why.
-        out.push(ReceiverOutcome::Stopped { reason: message });
+/// What org-io's `next_received` returned, as far as the announcement
+/// depends on it: a committed message of a `ReceiveKind`, or a revoked
+/// Device's acknowledgement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Arrival {
+    Committed(ReceiveKind),
+    Acknowledged,
+}
+
+/// LLR-bym4md. The outcome of one received message for `org_id`, given the
+/// record as read back after it (`(epoch, root)`, or `None` when it could not
+/// be read). `Removed` and `Revoked` are a self-delete, whatever the record
+/// read; `Updated` and `Admitted` are `Updated` with the record read, or
+/// `RecordUnreadable` without one (REQ-2k7ys4, REQ-dp95pv); an
+/// acknowledgement is `AcknowledgementReceived`.
+pub fn outcome_for_arrival(arrival: Arrival, org_id: String, record: Option<(u64, String)>) -> ReceiverOutcome {
+    match (arrival, record) {
+        (Arrival::Acknowledged, _) => ReceiverOutcome::AcknowledgementReceived { org_id },
+        (Arrival::Committed(ReceiveKind::Removed | ReceiveKind::Revoked), _) => ReceiverOutcome::SelfDeleted { org_id },
+        (Arrival::Committed(ReceiveKind::Updated | ReceiveKind::Admitted), Some((epoch, root))) => {
+            ReceiverOutcome::Updated { org_id, epoch, root }
+        }
+        // REQ-2k7ys4 / REQ-dp95pv. No record, no epoch or root to announce: a
+        // default such as `(0, String::new())` would announce a verified
+        // update at genesis with an empty root — indistinguishable from a
+        // real one.
+        (Arrival::Committed(ReceiveKind::Updated | ReceiveKind::Admitted), None) => {
+            ReceiverOutcome::RecordUnreadable { org_id }
+        }
     }
-    out
 }
 
 /// One event to emit: a name and a payload.

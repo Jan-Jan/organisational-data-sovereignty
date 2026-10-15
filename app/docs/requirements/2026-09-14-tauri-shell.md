@@ -11,6 +11,11 @@ and none was ever noted below; the register's §9 says "all twenty-two" and is
 correct. Found by the verification gate, round 4. The count was twenty when that
 note was written; the independent review later added REQ-kn5rtx and REQ-wu6z9p.)*
 
+*(2026-10-14, review round 1 of change `worktree-org-io-transport`: REQ-q89tjr
+was added to this file, split from REQ-x3c8n2. It is derived too, and is
+assessed in the same register's §9; the "twenty-two" above counts the
+first change's items.)*
+
 **What "the software" means here.** This unit is a desktop shell in two
 languages: a Rust Tauri backend at `app/src-tauri/src` and a SvelteKit frontend
 at `app/src`. Both are inside `strict_paths` as of this change. A requirement
@@ -45,6 +50,13 @@ about transport. `AppState::init` already computes the mode from
 be reported rather than discarded. It is the prerequisite for REQ-vgr7s2, and
 it is written separately because it is the backend's obligation and REQ-vgr7s2
 is the frontend's.
+
+*Checked 2026-10-14 (S4, task T15 of
+`docs/plans/2026-10-06-org-io-transport.md`); text unchanged.* "The running
+service" is org-io's handle since the transport moved there: `init` hands
+the mode to `OrgIo::open` as org-io's `transport::TransportMode`
+(`transport_mode_for`), and the mode name reported is still the app's
+decision and the app's type.
 
 **REQ-e4ah9h**: The software shall report an endpoint and a contract address in
 the connection status only when chain operations are configured, and shall
@@ -364,6 +376,33 @@ silent degradations into startup failures while PR-w5dae4 records that a startup
 failure is currently delivered as a panic. Naming the variable is what makes the
 message worth surfacing once PR-w5dae4 is closed.
 
+*Amended 2026-10-14 (S4, task T17 of
+`docs/plans/2026-10-06-org-io-transport.md`; owner ruling of 2026-10-06,
+plan §13, "IDs kept"):* no persona store is sealed under a passphrase any
+more. org-io seals each Persona's store under a key derived from that
+Persona's device secret, which lives only in the OS keychain, and the app
+reads no passphrase. REQ-7g3k9a now reads: *the software shall fail to start
+when the OS keychain refuses the item of a Persona whose store it opens
+(locked, unavailable, or the item missing), naming that Persona's store and
+the condition, and shall not fall back to any other key source.* The
+refusal itself is org-io's (its requirements draft, the keychain section:
+refuse when the keychain is locked or unavailable, and when a store's item
+is missing); this unit's part is that a refusal at startup stops startup with org-io's
+error rather than running without the store. There is no development
+default: `ODS_ALLOW_DEV_DEFAULTS` no longer waives anything here.
+Classification: a narrowing of the same safety intent (key material never
+protected by a published or substituted value) onto the mechanism that
+replaced the passphrase, under the owner's ruling to keep the ID.
+
+REQ-bmk2z2 is narrowed the same day: the passphrase is no longer a required
+startup value, so the one required value it still covers is the data
+directory (`ODS_DATA_DIR`, REQ-rxc8sp). Its wording is unchanged and its
+`implements: RC-xt4qr3` line is kept: RC-xt4qr3's clause that a startup
+refusal must be one the operator can act on still holds (see its dated note
+in `app/docs/risk/2026-09-14-app-hazards.md`). A keychain refusal has no
+variable and no waiver, so its failure names the store and the condition
+instead (REQ-7g3k9a as amended).
+
 **REQ-rxc8sp**: The software shall fail to start when the application data
 directory cannot be resolved, unless development defaults are explicitly
 enabled. (implements: RC-djzms3)
@@ -420,6 +459,27 @@ clarification (the provider the app reaches the same error through), not a
 change of meaning — flagged for the owner, since the unit owing the work
 changes.
 
+*Met 2026-10-14 (change `worktree-org-io-transport`, S4 task T16).* org-io's
+REQ-8e57wm, now `exported: yes` with `satisfies: REQ-x3c8n2`, answers it:
+org-io's receive step reports the end of the receive loop as
+`ReceiveError::Terminal` (the endpoint closed, or a bind failed), distinct
+from every other failure. The receiver loop stops on that variant and on
+nothing else, whatever any message says (LLR-zw6jqy); the substring match
+described below is deleted. The text below is the history of why the
+expectation was opened.
+
+*Clarified 2026-10-14 (review round 1, finding 3).* The "Met" note above
+covers the terminal-versus-transient half only. The second half, added by
+the 2026-09-14 widening below (which Organisation a failed verification
+belongs to), is not met: org-io's receive error carries no Organisation for
+a refusal, and the app's failure event still sets `org_id: None`. That half
+is now its own expectation, REQ-q89tjr, after this item, carrying the same
+deadline. Classification under the hybrid rule: a clarification (it narrows
+what the "Met" note claims, and moves the open half to an item of its own
+without changing what is expected), not a change of meaning. Read "both
+halves" in the widening below as REQ-x3c8n2's met half and REQ-q89tjr's open
+one.
+
 Why this is an expectation and not this unit's own requirement. The receiver
 loop must decide, on every error, whether to keep looping or to stop. Today it
 decides by substring:
@@ -475,3 +535,39 @@ Met when org-node defines an exported requirement carrying
 and org-node's reports one open expectation standing against it, which is the
 intent: the prompt lands on the unit that owes the work. At
 `expectation_age_days: 90` the deadline is **2026-12-13**.
+
+**REQ-q89tjr**: The software shall rely on org-io to name, in the error it
+returns from the receive path when an inbound update fails verification, the
+Organisation that update belongs to wherever the update names one, so that
+the failure event REQ-affyf5 requires can carry the Organisation and a failed
+verification can be located beside the rows it should be read with.
+expects: org-io
+opened: 2026-09-14
+satisfies: derived
+
+*Minted 2026-10-14 (change `worktree-org-io-transport`, review round 1,
+finding 3)*, from the second half of REQ-x3c8n2: the scope the independent
+review added to that item on 2026-09-14 (see "Scope widened" above). When
+org-io met REQ-x3c8n2's terminal half (S4, task T16) this half stayed open,
+and a single met item hid it; it is its own item so that this unit's gate
+reports it as UNMET-EXPECTATION again. Its `opened:` date is the widening's,
+not the minting's: the need has been owed since then, so the deadline is
+unchanged, **2026-12-13**.
+
+What is expected. REQ-affyf5 requires the app to carry an Organisation
+identifier on a failure "where the failing update names one". Today the
+qualifier resolves to never: org-io's `ReceiveError::Refused` carries
+org-node's error alone, no variant names an Organisation, and the app's
+failure event is built with `org_id: None` (`app/src-tauri/src/events.rs`).
+REQ-affyf5 is therefore satisfied vacuously, and HAZ-9fmhm4's "failures are
+unlocatable" half is not reduced (its residual, and the dated note there).
+The app cannot supply the Organisation itself: the envelope is opened and
+checked inside org-io and org-node, and an Organisation the app guessed from
+anything else would be the defect HAZ-9fmhm4 is about. A failure before any
+Organisation is known (a connection error, a malformed envelope) carries
+none, as REQ-affyf5 allows.
+
+Met when org-io defines an exported requirement carrying
+`satisfies: REQ-q89tjr`. Until then this unit's gate reports
+UNMET-EXPECTATION and org-io's reports one open expectation standing
+against it.

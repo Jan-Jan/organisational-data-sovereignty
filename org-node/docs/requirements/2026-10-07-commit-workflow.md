@@ -151,6 +151,14 @@ it.
 (implements: RC-ub82my)
 satisfies: derived
 
+*Clarified 2026-10-13 (S4, task T9 of docs/plans/2026-10-06-org-io-transport.md;
+owner ruling of that day, option A):* "data it holds" is the Persona's
+sealed store on disk, which org-io writes and reopens. A Persona's store
+taken out of the in-memory service after a local IO failure is not deleted:
+its file and its keychain item stay, and it returns on the next open
+(LLR-jd82t6). Classification under the hybrid rule: a clarification, not a
+change of meaning.
+
 **REQ-y99c9w**: The software shall, when it deletes an Organisation's data on
 a verified revocation, first produce for each Persona bound to that
 Organisation an acknowledgement naming the Organisation, the Persona's
@@ -174,6 +182,13 @@ whether the store still holds it (today) or holds only the Device public key
 (after S4), this requirement takes it from its caller. The transient value's
 own type, move-only and zeroised, is S4's; whichever of S3 and S4 merges
 second makes this signing take that type.
+
+*Amended 2026-10-08 (S4, task T3 of
+docs/plans/2026-10-06-org-io-transport.md):* S4 merges second: the Device
+secret key the removal paths sign with is now S4's transient type, the
+move-only, zeroised `DeviceSecret`, supplied by the caller's `device_secrets`
+source on the signing path only (LLR-uw7nmv, LLR-hby4jr); the store holds no
+device seed.
 
 ## The acknowledgement a receiver checks
 

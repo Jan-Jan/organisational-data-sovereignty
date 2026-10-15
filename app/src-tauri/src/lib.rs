@@ -5,7 +5,6 @@
 
 pub mod commands;
 pub mod events;
-pub mod invitation;
 pub mod parsing;
 pub mod policy;
 pub mod state;

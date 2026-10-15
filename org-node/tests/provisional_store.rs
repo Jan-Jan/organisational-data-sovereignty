@@ -10,7 +10,10 @@ use org_node::store::{
     ExpectedAdmission, MemberSnapshot, PersonaStore, ProvisionalChange, ProvisionalUpdate, ProvisionalUpdateParts,
     StoreData, MAX_PROVISIONAL_BYTES,
 };
-use org_node::test_fixtures::{device_key, member_key, org_public_key};
+use org_node::service::OrgService;
+use org_node::test_fixtures::{
+    device_key, device_secret, empty_store, member_key, org_public_key, persona_record, store_for_test,
+};
 use org_node::{Handle, Name, OrgNodeError, OrgPrivateKey, PersonaId, RootHash, SequenceNumber, Surname};
 use rand::rngs::OsRng;
 
@@ -52,11 +55,13 @@ fn genesis(persona: &str, root: u8) -> ProvisionalUpdate {
     })
 }
 
-fn store_path(tag: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("ods-provisional-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir.join("store.bin")
+/// The device seed of the store's one Persona (S4, task T3: one store per
+/// Persona, keyed from its device secret).
+const DEVICE: u8 = 0x42;
+
+/// A store holding one unbound Persona and nothing else.
+fn empty() -> StoreData {
+    empty_store(persona_record("p-alice", 0x41, DEVICE))
 }
 
 fn contains(hay: &[u8], needle: &[u8]) -> usize {
@@ -64,18 +69,27 @@ fn contains(hay: &[u8], needle: &[u8]) -> usize {
 }
 
 // Normal: provisional updates and expected admissions reach the encrypted
-// file and are read back, typed, when it is opened.
+// file and are read back, typed, when it is opened. *Adapted 2026-10-08 (S4,
+// task T3):* "the encrypted file" is the sealed store org-io writes.
+// *Moved 2026-10-15 (S4 TEST review round 1, finding-5; Existing suites 1):*
+// the sealed store is the `StoreWrite` an operation returns (LLR-bvt5up):
+// `expect_admission` records the expectation and hands back the write, where
+// the test had pushed the expectation itself and sealed through the test
+// hook `seal_for_test`. The assertions are unchanged. Mutation checks, that
+// day (each removed): `OrgService::change` sealing the store as it was
+// before the change, and `seal_bytes` appending the plaintext in place of
+// the ciphertext, each failed this test.
 // verifies: REQ-xs4ab8, LLR-95753m, LLR-g76zqd
 #[test]
 fn provisional_updates_round_trip_through_the_encrypted_file() {
-    let path = store_path("round-trip");
-    let mut store = PersonaStore::open(path.clone(), "pw").unwrap();
+    let mut store = store_for_test(&device_secret([DEVICE; 32]), empty());
     store.data_mut().insert_provisional(genesis("p-alice", 0x10)).unwrap();
     store.data_mut().insert_provisional(change_set(0xbb, 0x66, 4)).unwrap();
+    let persona_id = store.data().persona.persona_id.clone();
+    let mut service = OrgService::new(vec![store]).unwrap();
     let expectation = ExpectedAdmission { org_id: OrgId::new([0xcc; 20]) };
-    store.data_mut().expected_admissions.push(expectation);
-    store.save(&mut OsRng).unwrap();
-    let reopened = PersonaStore::open(path, "pw").unwrap();
+    let write = service.expect_admission(&mut OsRng, &persona_id, expectation.org_id).unwrap();
+    let reopened = PersonaStore::unseal(&write.sealed, write.device_key, device_secret([DEVICE; 32])).unwrap();
     assert_eq!(reopened.data().provisional_updates, vec![genesis("p-alice", 0x10), change_set(0xbb, 0x66, 4)]);
     assert_eq!(reopened.data().expected_admissions, vec![expectation]);
 }
@@ -85,7 +99,7 @@ fn provisional_updates_round_trip_through_the_encrypted_file() {
 // verifies: REQ-xs4ab8, LLR-95753m
 #[test]
 fn an_update_with_the_same_identity_replaces_and_others_are_kept() {
-    let mut data = StoreData::default();
+    let mut data = empty();
     data.insert_provisional(change_set(0xbb, 0x66, 4)).unwrap();
     data.insert_provisional(change_set(0xbb, 0x66, 5)).unwrap();
     assert_eq!(data.provisional_updates, vec![change_set(0xbb, 0x66, 5)], "replaced, not added");
@@ -110,7 +124,7 @@ fn an_update_with_the_same_identity_replaces_and_others_are_kept() {
 // verifies: REQ-ech45n, REQ-stx9v3, LLR-qjz3q4
 #[test]
 fn every_updates_private_key_lives_only_in_its_provisional_update() {
-    let mut data = StoreData::default();
+    let mut data = empty();
     let update = genesis("p-alice", 0x10);
     let ProvisionalChange::Genesis { org_private_key, .. } = update.change_for_test() else { panic!("genesis") };
     assert_eq!(org_private_key.x25519_keypair().org_public_key().unwrap(), update.org_pub_key);
@@ -136,11 +150,13 @@ fn group_len(n: usize) -> usize {
 // verifies: REQ-fwfku9, LLR-jq7qh7
 #[test]
 fn a_group_of_exactly_the_bound_is_kept() {
-    assert_eq!(MAX_PROVISIONAL_BYTES, org_node::transport::MAX_FRAME);
+    // *2026-10-14 (S4, task T14):* the transport's frame bound left with the
+    // transport; it was the Wire message bound, which stays here.
+    assert_eq!(MAX_PROVISIONAL_BYTES, org_node::wire::MAX_MESSAGE);
     let fixed = group_len(20_000) - 20_000; // the varint is three bytes from 16 384 up
     let n = MAX_PROVISIONAL_BYTES - fixed;
     assert_eq!(group_len(n), MAX_PROVISIONAL_BYTES);
-    let mut data = StoreData::default();
+    let mut data = empty();
     data.insert_provisional(change_set(0xbb, 0x66, n)).unwrap();
     assert_eq!(data.provisional_updates.len(), 1);
 }
@@ -152,7 +168,7 @@ fn a_group_of_exactly_the_bound_is_kept() {
 #[test]
 fn an_update_that_would_exceed_the_bound_is_refused_and_nothing_changes() {
     let fixed = group_len(20_000) - 20_000;
-    let mut data = StoreData::default();
+    let mut data = empty();
     assert_eq!(
         data.insert_provisional(change_set(0xbb, 0x66, MAX_PROVISIONAL_BYTES - fixed + 1)).unwrap_err(),
         OrgNodeError::ProvisionalLimit { limit: MAX_PROVISIONAL_BYTES }
