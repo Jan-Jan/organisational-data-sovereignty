@@ -14,7 +14,7 @@
 # Scripts run from the repository root, so paths and commands below are
 # repository-relative.
 guardrails_version: 0.5.1
-guardrails_commit: 6a9d6eb8507752fa4e52fc7519740f69c9113ffe
+guardrails_commit: 344faa33a09fdc2a4d381c7ef710e1f5631e24c8
 
 # IEC 62304 software safety class. C: org-members (class C) is to depend on
 # this unit for the device key, device slots, device sub-trie, Name and Surname
