@@ -310,7 +310,7 @@ fn length_bounds_apply_after_nfc() {
 }
 
 fn slot_device(seed: u8) -> org_members::types::DevicePublicKey {
-    common::device_key(&format!("slot-{seed}"))
+    common::positioned_device_key(&format!("slot-{seed}"), seed)
 }
 
 // Master's LLR-k6dhz7 and LLR-t3p9zk tests, carried over to `person`'s types

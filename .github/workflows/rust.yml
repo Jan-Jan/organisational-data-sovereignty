@@ -2,8 +2,8 @@
 #
 # Multi-unit repository since 2026-09-05 (.guardrails/units.yaml): each unit's
 # `verify_commands` live in `<unit>/.guardrails/config.yaml`. The `test` job
-# runs the cargo entries of org-members, on-chain-client, org-node, person and
-# org-io verbatim, so that CI and the local merge gate cannot disagree about what
+# runs the cargo entries of org-members, on-chain-client, org-node, person,
+# org-io and sparse-merkle-tree verbatim, so that CI and the local merge gate cannot disagree about what
 # "passing" means; person's clippy entry runs verbatim in the `clippy` job
 # (since 2026-10-05), and org-io's (since 2026-10-08). The app unit has THREE verify_commands as of 2026-09-14,
 # and TWO of them run here, in the `app-frontend` job below:
@@ -88,6 +88,9 @@ jobs:
             --test fuzz_invitation_parse --test stale_check
       # person's verify_commands test entry: every target, none excluded.
       - run: cargo test -p person
+      # sparse-merkle-tree's verify_commands test entries.
+      - run: cargo test -p sparse-merkle-tree
+      - run: cargo test -p sparse-merkle-tree --no-default-features
       # org-io's two verify_commands test entries (since 2026-10-08). The
       # chopsticks-dependent `preflight` target is excluded there too; the
       # second line is the dev-seed build, whose `dev_seed_env` target is its
@@ -122,6 +125,8 @@ jobs:
       - run: cargo test -p org-members
       # person declares the same rust-version.
       - run: cargo test -p person
+      # sparse-merkle-tree declares the same rust-version.
+      - run: cargo test -p sparse-merkle-tree
 
   # app's npm verify_commands. The cargo entry still runs NOWHERE in CI: it
   # needs Tauri's Linux system packages (webkit2gtk, libsoup, …) this workflow
@@ -173,6 +178,8 @@ jobs:
       # covers --all-targets: person inherits the workspace lints, and its test
       # targets allow `expect` by an explicit attribute where they use it.
       - run: cargo clippy -p person --all-targets -- -D warnings
+      # sparse-merkle-tree's verify_commands clippy entry, verbatim.
+      - run: cargo clippy -p sparse-merkle-tree --all-targets -- -D warnings
       # org-io's verify_commands clippy entry, verbatim (since 2026-10-08):
       # --all-targets under both features, as person's.
       - run: cargo clippy -p org-io --all-targets --features test-support,dev-seed -- -D warnings
@@ -202,11 +209,15 @@ jobs:
       # feature.
       - run: cargo check -p person --target wasm32-unknown-unknown
       - run: cargo check -p person --no-default-features --target wasm32-unknown-unknown
+      # sparse-merkle-tree likewise, with and without its default `serde`
+      # feature.
+      - run: cargo check -p sparse-merkle-tree --target wasm32-unknown-unknown
+      - run: cargo check -p sparse-merkle-tree --no-default-features --target wasm32-unknown-unknown
 
-  # The statement-coverage gate, running all four per-unit coverage targets
+  # The statement-coverage gate, running all five per-unit coverage targets
   # the merge gates run (`make coverage` = coverage-org-members +
-  # coverage-on-chain-client + coverage-person + coverage-org-io, the last
-  # since 2026-10-08). Floors live in the Makefile and ratchet upward
+  # coverage-on-chain-client + coverage-person + coverage-org-io, since
+  # 2026-10-08, + coverage-sparse-merkle-tree, since 2026-10-25). Floors live in the Makefile and ratchet upward
   # only. This covers the statement half of the class C target; the decision
   # half is the `coverage-branch` job below.
   #

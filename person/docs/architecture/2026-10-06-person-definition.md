@@ -124,6 +124,7 @@ two children's 32 bytes concatenated, each key padded with `_` to 32 bytes
 Neither its domain keys nor its sentinel are org-members'
 (`org-members::device-leaf________`, `org-members::device-node________`,
 `EMPTY_SENTINEL_ORG_MEMBERS_DEVICE_V1`). satisfies: REQ-9m5pq2
+superseded-by: LLR-qwp8d7
 
 **LLR-4ebtn4**: The `V1` hash is `blake3::keyed_hash` of the `V1` encoding under
 the 32-byte key `person::definition::v1`, padded with `_` to 32 bytes

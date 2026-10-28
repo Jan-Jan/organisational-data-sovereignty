@@ -20,6 +20,7 @@ fields. `KeyWithoutDevice`, `MissingPersonKey`, `PersonKeyIsDeviceKey`,
 org-members calls none of those, so one reaching org-members is an internal
 invariant violation.
 satisfies: REQ-ds8ryr
+superseded-by: LLR-hbb4je
 
 The five `InvariantViolated` arms are provisional. The change that aligns the
 Member key rules with the Person's (`docs/plans/2026-10-04-person-sequencing.md`,

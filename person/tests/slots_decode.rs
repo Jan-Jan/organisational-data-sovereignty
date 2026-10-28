@@ -5,13 +5,10 @@
 // library, not its tests.
 #![allow(clippy::expect_used)]
 
-use ed25519_dalek::SigningKey;
-use person::{DevicePublicKey, DeviceSlots};
+mod common;
 
-fn device(seed: u8) -> DevicePublicKey {
-    DevicePublicKey::try_from(SigningKey::from_bytes(&[seed; 32]).verifying_key())
-        .expect("valid key")
-}
+use common::device;
+use person::{DevicePublicKey, DeviceSlots};
 
 fn sorted(mut devices: Vec<DevicePublicKey>) -> Vec<DevicePublicKey> {
     devices.sort();
@@ -50,8 +47,8 @@ fn decoding_accepts_only_strictly_increasing_sets() {
 /// verifies: LLR-sjrh7z, REQ-4szc22, REQ-vxx8k3
 #[test]
 fn decoding_rejects_a_set_over_the_bound() {
-    let five = sorted(vec![device(1), device(2), device(3), device(4), device(5)]);
-    let bytes = postcard::to_allocvec(&five).expect("encode");
+    let nine = sorted((1..=9).map(device).collect());
+    let bytes = postcard::to_allocvec(&nine).expect("encode");
     assert!(postcard::from_bytes::<DeviceSlots>(&bytes).is_err());
 }
 
@@ -65,18 +62,18 @@ fn decoding_a_huge_declared_length_with_no_elements_fails() {
     assert!(postcard::from_bytes::<DeviceSlots>(&HUGE_LENGTH_VARINT).is_err());
 }
 
-/// A declared length of 2^32 - 1 followed by five valid, strictly increasing
-/// keys is rejected by the bound at the fifth key, not by the end of the
+/// A declared length of 2^32 - 1 followed by nine valid, strictly increasing
+/// keys is rejected by the bound at the ninth key, not by the end of the
 /// input. A decoder that reads the whole sequence before checking the bound
 /// reaches the end of the input first and fails with
 /// `DeserializeUnexpectedEnd` instead.
 /// verifies: LLR-sjrh7z, REQ-vxx8k3
 #[test]
 fn decoding_a_huge_declared_length_stops_at_the_bound() {
-    let five = sorted(vec![device(1), device(2), device(3), device(4), device(5)]);
-    let encoded = postcard::to_allocvec(&five).expect("encode");
-    // The encoding is the length varint 5 (one byte), then 5 x 32 key bytes.
-    assert_eq!(encoded.len(), 1 + 5 * 32);
+    let nine = sorted((1..=9).map(device).collect());
+    let encoded = postcard::to_allocvec(&nine).expect("encode");
+    // The encoding is the length varint 9 (one byte), then 9 x 32 key bytes.
+    assert_eq!(encoded.len(), 1 + 9 * 32);
     let mut bytes = HUGE_LENGTH_VARINT.to_vec();
     bytes.extend_from_slice(encoded.get(1..).expect("keys follow the length"));
 
@@ -100,7 +97,7 @@ fn encoding_round_trips() {
     );
 }
 
-/// verifies: LLR-5za6mp
+/// verifies: LLR-cyx9a3
 #[test]
 fn slots_encode_as_the_sequence_of_their_keys_in_sorted_order() {
     let slots = DeviceSlots::parse(vec![device(3), device(1), device(2)]).expect("three");
@@ -113,7 +110,7 @@ fn slots_encode_as_the_sequence_of_their_keys_in_sorted_order() {
 }
 
 /// A decoder asked for something other than a sequence names what it expects.
-/// verifies: LLR-5za6mp, LLR-eeq89n
+/// verifies: LLR-cyx9a3, LLR-eeq89n
 #[test]
 fn decoding_a_non_sequence_names_the_expected_form() {
     use serde::de::{value, Deserialize, IntoDeserializer};
@@ -122,7 +119,18 @@ fn decoding_a_non_sequence_names_the_expected_form() {
     assert!(
         error
             .to_string()
-            .contains("at most 4 device keys in strictly increasing order"),
+            .contains("at most 8 DevicePublicKeys in strictly increasing order, at distinct device positions"),
         "{error}"
     );
+}
+
+/// verifies: LLR-pjf9qn, REQ-4e23xr, REQ-vxx8k3
+#[test]
+fn decoding_refuses_two_keys_of_one_position() {
+    let colliding = sorted(vec![device(1), device(17)]);
+    let bytes = postcard::to_allocvec(&colliding).expect("encode");
+    assert_eq!(postcard::from_bytes::<DeviceSlots>(&bytes), Err(postcard::Error::SerdeDeCustom));
+    let json = serde_json::to_string(&colliding).expect("json");
+    let error = serde_json::from_str::<DeviceSlots>(&json).expect_err("refused");
+    assert!(error.to_string().starts_with("two DevicePublicKeys share a device position"), "{error}");
 }

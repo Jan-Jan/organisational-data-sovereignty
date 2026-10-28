@@ -1,15 +1,14 @@
-use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
 
 use hashbrown::HashMap;
+use person::prove_device_absent_in;
 
 use crate::delta::{CandidateTrie, Delta};
 use crate::error::OrgMembersError;
-use crate::hasher::TrieHasher;
-use crate::node::Node;
-use crate::proof::AbsenceProof;
-use crate::smt::{self, DefaultHashes};
+use crate::hasher::MemberHasher;
+use crate::member_tree::{calculated, changes_between, member_of, MemberTree, TreeMember};
+use crate::proof::{AbsenceProof, ProvenMember};
 use crate::types::{
     DevicePublicKey, DeviceSlots, Handle, HandleSkeleton, HeldKey, MemberId, MemberLeaf, Name,
     PersonPublicKey, RootHash, Surname,
@@ -34,17 +33,17 @@ use crate::types::{
 ///
 /// Future optimization: wrap indexes in `Arc<Indexes>` shared across path-copies,
 /// only rebuilt at `recalculate()`. For uncommitted mutations, find pending
-/// leaves by walking the trie under unhashed nodes (subtrees whose root has an
-/// unset `Once` cell). See discussion in the org-members worktree history.
-pub struct OrgTrie<H: TrieHasher> {
-    root: Arc<Node>,
-    defaults: Arc<DefaultHashes>,
+/// leaves by walking the trie under unhashed nodes (subtrees of the Membership
+/// record whose root's node hash is not yet calculated). See discussion in the
+/// org-members worktree history.
+pub struct OrgTrie<H: MemberHasher> {
+    tree: MemberTree<H>,
     member_count: usize,
     cached_root_hash: Option<RootHash>,
-    /// The trie root at the time of the last `recalculate()` (or `genesis()`).
-    /// Always populated -- every constructor sets it, and mutations propagate
+    /// The tree at the time of the last `recalculate()` (or `genesis()`).
+    /// Always calculated -- every constructor sets it, and mutations propagate
     /// it forward unchanged. Used as the diff base for `pending_changes()`.
-    last_calculated_root: Arc<Node>,
+    last_calculated: MemberTree<H>,
     /// Maps skeleton → handle for confusable detection.
     skeleton_index: HashMap<HandleSkeleton, Handle>,
     /// Maps handle → MemberId for handle-based lookups.
@@ -86,7 +85,7 @@ fn unindex_leaf_keys(index: &mut KeyIndex, leaf: &MemberLeaf) {
     }
 }
 
-impl<H: TrieHasher> OrgTrie<H> {
+impl<H: MemberHasher> OrgTrie<H> {
     /// Creates a genesis trie from initial members.
     /// Checks both id and handle uniqueness (including confusables), then
     /// key uniqueness: no key may be held in two places -- two members' member
@@ -95,8 +94,7 @@ impl<H: TrieHasher> OrgTrie<H> {
     /// (LLR-v6gfc7). Check order per member: `DuplicateId`, handle checks,
     /// `DuplicateKey`.
     pub fn genesis(members: Vec<MemberLeaf>) -> Result<Self, OrgMembersError> {
-        let defaults = Arc::new(DefaultHashes::compute::<H>());
-        let mut root = smt::empty_root(&defaults)?;
+        let mut tree = MemberTree::<H>::new();
         let mut count = 0;
         let mut skeleton_index = HashMap::new();
         let mut handle_index = HashMap::new();
@@ -104,7 +102,7 @@ impl<H: TrieHasher> OrgTrie<H> {
 
         for member in members {
             // Check for duplicate key
-            if smt::get_member(&root, member.id()).is_some() {
+            if tree.contains(member.id()) {
                 return Err(OrgMembersError::DuplicateId);
             }
 
@@ -122,18 +120,18 @@ impl<H: TrieHasher> OrgTrie<H> {
 
             skeleton_index.insert(skeleton, member.handle().clone());
             handle_index.insert(member.handle().clone(), *member.id());
-            root = smt::insert::<H>(&root, member, &defaults)?;
+            tree = tree.insert(TreeMember::new::<H>(member)?)?;
             count += 1;
         }
 
-        let root_hash = smt::recalculate_hashes::<H>(&root)?;
+        let tree = calculated(tree)?;
+        let root_hash = tree.root()?;
 
         Ok(Self {
-            root: root.clone(),
-            defaults,
+            tree: tree.clone(),
             member_count: count,
             cached_root_hash: Some(root_hash.into()),
-            last_calculated_root: root,
+            last_calculated: tree,
             skeleton_index,
             handle_index,
             key_index,
@@ -156,7 +154,7 @@ impl<H: TrieHasher> OrgTrie<H> {
     }
 
     pub fn contains(&self, id: &MemberId) -> bool {
-        smt::get_member(&self.root, id).is_some()
+        self.tree.contains(id)
     }
 
     /// LLR-f3zrwd.
@@ -165,37 +163,37 @@ impl<H: TrieHasher> OrgTrie<H> {
     }
 
     pub fn get(&self, id: &MemberId) -> Option<MemberLeaf> {
-        smt::get_member(&self.root, id)
+        member_of(&self.tree, id)
     }
 
     /// LLR-f3zrwd.
     pub fn get_by_handle(&self, handle: &Handle) -> Option<MemberLeaf> {
         let id = self.handle_index.get(handle)?;
-        smt::get_member(&self.root, id)
+        member_of(&self.tree, id)
     }
 
-    /// A proof that `device` is absent under `id`: `id` holds no Member, or
-    /// the Member it holds lacks `device`. Refuses with `HashesNotCalculated`
-    /// on an uncalculated trie and with `DeviceStillHeld` when that Member
-    /// holds `device`. A key another Member holds does not refuse
-    /// (LLR-4xz255).
-    pub fn prove_absent(
-        &self,
-        id: &MemberId,
-        device: &DevicePublicKey,
-    ) -> Result<AbsenceProof, OrgMembersError> {
+    /// A Vacant proof when `id` holds no Member, a Held proof when the Member
+    /// under `id` lacks `device`; `HashesNotCalculated` when the Membership
+    /// record's hashes are not calculated, `DeviceStillHeld` when that Member
+    /// holds `device`. A DevicePublicKey another Member holds does not refuse
+    /// (LLR-bh53rr).
+    pub fn prove_absent(&self, id: &MemberId, device: &DevicePublicKey) -> Result<AbsenceProof, OrgMembersError> {
         if !self.is_calculated() {
             return Err(OrgMembersError::HashesNotCalculated);
         }
-        let (siblings, ending) = smt::path(&self.root, id, &self.defaults)?;
-        if ending.holds(device) {
+        let Some(held) = self.tree.get(id) else {
+            return Ok(AbsenceProof::vacant(self.tree.prove_absent(id)?));
+        };
+        if held.member().has_p2p_device(device) {
             return Err(OrgMembersError::DeviceStillHeld);
         }
-        AbsenceProof::from_path(siblings, ending, &self.defaults)
+        let (_, inclusion) = self.tree.prove_included(id)?;
+        let device_root_absence = prove_device_absent_in::<H::DeviceRootHasher>(held.member().p2p_devices(), device)?;
+        Ok(AbsenceProof::held(ProvenMember::of(held), inclusion, device_root_absence))
     }
 
     pub fn members(&self) -> Vec<MemberLeaf> {
-        smt::collect_members(&self.root)
+        self.tree.leaves().into_iter().map(|held| held.member().clone()).collect()
     }
 
     // ====================================================================
@@ -248,14 +246,14 @@ impl<H: TrieHasher> OrgTrie<H> {
         name: Name,
         surname: Surname,
     ) -> Result<Self, OrgMembersError> {
-        let existing = smt::get_member(&self.root, id).ok_or(OrgMembersError::IdNotFound)?;
+        let existing = member_of(&self.tree, id).ok_or(OrgMembersError::IdNotFound)?;
         self.update_leaf(existing.with_name_surname(name, surname))
     }
 
     /// Updates a member's handle. The handle is valid by construction; it must
     /// not be taken by, or confusably collide with, another member's. LLR-mmst86.
     pub fn update_handle(&self, id: &MemberId, new_handle: Handle) -> Result<Self, OrgMembersError> {
-        let existing = smt::get_member(&self.root, id).ok_or(OrgMembersError::IdNotFound)?;
+        let existing = member_of(&self.tree, id).ok_or(OrgMembersError::IdNotFound)?;
         self.update_leaf(existing.with_handle(new_handle))
     }
 
@@ -282,7 +280,7 @@ impl<H: TrieHasher> OrgTrie<H> {
         id: &MemberId,
         new_p2p_key: PersonPublicKey,
     ) -> Result<Self, OrgMembersError> {
-        let existing = smt::get_member(&self.root, id).ok_or(OrgMembersError::IdNotFound)?;
+        let existing = member_of(&self.tree, id).ok_or(OrgMembersError::IdNotFound)?;
         if existing.p2p_key() == &new_p2p_key {
             return Err(OrgMembersError::P2pKeyNotReplaced);
         }
@@ -292,7 +290,7 @@ impl<H: TrieHasher> OrgTrie<H> {
     }
 
     /// Adds a peer-to-peer device key to a member. Fails if the device is
-    /// already present or the member already has `MAX_DEVICES` (4) devices.
+    /// already present or the member already has `MAX_DEVICES` (8) devices.
     /// Does NOT rotate the p2p_key -- a new device is trusted with the
     /// current key.
     ///
@@ -300,13 +298,13 @@ impl<H: TrieHasher> OrgTrie<H> {
     /// another member, or equal to any member key, this member's own included
     /// -- is refused with `DuplicateKey` (LLR-v6gfc7); the refusal changes
     /// nothing. Check order: `IdNotFound`, `DeviceSlotsFull`,
-    /// `DuplicateDevice`, `DuplicateKey`.
+    /// `DuplicateDevice`, `DevicePositionTaken` (LLR-5jh6t3), `DuplicateKey`.
     pub fn add_p2p_device(
         &self,
         id: &MemberId,
         device: DevicePublicKey,
     ) -> Result<Self, OrgMembersError> {
-        let existing = smt::get_member(&self.root, id).ok_or(OrgMembersError::IdNotFound)?;
+        let existing = member_of(&self.tree, id).ok_or(OrgMembersError::IdNotFound)?;
         let new_slots = existing.p2p_device_slots().add_device(device)?;
         self.refuse_held_key(HeldKey::from(&device))?;
         let new_leaf = existing.with_p2p_device_slots(new_slots);
@@ -341,7 +339,7 @@ impl<H: TrieHasher> OrgTrie<H> {
         device: &DevicePublicKey,
         new_p2p_key: PersonPublicKey,
     ) -> Result<Self, OrgMembersError> {
-        let existing = smt::get_member(&self.root, id).ok_or(OrgMembersError::IdNotFound)?;
+        let existing = member_of(&self.tree, id).ok_or(OrgMembersError::IdNotFound)?;
         let new_slots = existing.p2p_device_slots().remove_device(device)?;
         if existing.p2p_key() == &new_p2p_key {
             return Err(OrgMembersError::P2pKeyNotReplaced);
@@ -381,7 +379,7 @@ impl<H: TrieHasher> OrgTrie<H> {
         id: &MemberId,
         new_p2p_key: PersonPublicKey,
     ) -> Result<Self, OrgMembersError> {
-        let existing = smt::get_member(&self.root, id).ok_or(OrgMembersError::IdNotFound)?;
+        let existing = member_of(&self.tree, id).ok_or(OrgMembersError::IdNotFound)?;
         if existing.p2p_key() == &new_p2p_key {
             return Err(OrgMembersError::P2pKeyNotReplaced);
         }
@@ -400,7 +398,7 @@ impl<H: TrieHasher> OrgTrie<H> {
     // ====================================================================
 
     fn insert_leaf(&self, leaf: MemberLeaf) -> Result<Self, OrgMembersError> {
-        if smt::get_member(&self.root, leaf.id()).is_some() {
+        if self.tree.contains(leaf.id()) {
             return Err(OrgMembersError::DuplicateId);
         }
 
@@ -420,16 +418,15 @@ impl<H: TrieHasher> OrgTrie<H> {
         let mut new_key_index = self.key_index.clone();
         index_leaf_keys(&mut new_key_index, &leaf)?;
 
-        let new_root = smt::insert::<H>(&self.root, leaf, &self.defaults)?;
+        let new_tree = self.tree.insert(TreeMember::new::<H>(leaf)?)?;
 
         Ok(Self {
-            root: new_root,
-            defaults: self.defaults.clone(),
+            tree: new_tree,
             member_count: self.member_count
                 .checked_add(1)
                 .ok_or(OrgMembersError::InvariantViolated)?,
             cached_root_hash: None,
-            last_calculated_root: self.last_calculated_root.clone(),
+            last_calculated: self.last_calculated.clone(),
             skeleton_index: new_skeleton_index,
             handle_index: new_handle_index,
             key_index: new_key_index,
@@ -447,7 +444,7 @@ impl<H: TrieHasher> OrgTrie<H> {
 
     fn update_leaf(&self, leaf: MemberLeaf) -> Result<Self, OrgMembersError> {
         let existing =
-            smt::get_member(&self.root, leaf.id()).ok_or(OrgMembersError::IdNotFound)?;
+            member_of(&self.tree, leaf.id()).ok_or(OrgMembersError::IdNotFound)?;
 
         let mut new_skeleton_index = self.skeleton_index.clone();
         let mut new_handle_index = self.handle_index.clone();
@@ -476,14 +473,13 @@ impl<H: TrieHasher> OrgTrie<H> {
             new_handle_index.insert(leaf.handle().clone(), *leaf.id());
         }
 
-        let new_root = smt::insert::<H>(&self.root, leaf, &self.defaults)?;
+        let new_tree = self.tree.insert(TreeMember::new::<H>(leaf)?)?;
 
         Ok(Self {
-            root: new_root,
-            defaults: self.defaults.clone(),
+            tree: new_tree,
             member_count: self.member_count,
             cached_root_hash: None,
-            last_calculated_root: self.last_calculated_root.clone(),
+            last_calculated: self.last_calculated.clone(),
             skeleton_index: new_skeleton_index,
             handle_index: new_handle_index,
             key_index: new_key_index,
@@ -492,9 +488,9 @@ impl<H: TrieHasher> OrgTrie<H> {
     }
 
     fn delete_by_id(&self, id: &MemberId) -> Result<Self, OrgMembersError> {
-        let existing = smt::get_member(&self.root, id).ok_or(OrgMembersError::IdNotFound)?;
+        let existing = member_of(&self.tree, id).ok_or(OrgMembersError::IdNotFound)?;
 
-        let new_root = smt::remove(&self.root, id, &self.defaults)?;
+        let new_tree = self.tree.remove(id)?;
 
         let mut new_skeleton_index = self.skeleton_index.clone();
         let mut new_handle_index = self.handle_index.clone();
@@ -505,13 +501,12 @@ impl<H: TrieHasher> OrgTrie<H> {
         unindex_leaf_keys(&mut new_key_index, &existing);
 
         Ok(Self {
-            root: new_root,
-            defaults: self.defaults.clone(),
+            tree: new_tree,
             member_count: self.member_count
                 .checked_sub(1)
                 .ok_or(OrgMembersError::InvariantViolated)?,
             cached_root_hash: None,
-            last_calculated_root: self.last_calculated_root.clone(),
+            last_calculated: self.last_calculated.clone(),
             skeleton_index: new_skeleton_index,
             handle_index: new_handle_index,
             key_index: new_key_index,
@@ -526,19 +521,10 @@ impl<H: TrieHasher> OrgTrie<H> {
     /// to commit a new root hash via `recalculate()`.
     ///
     /// Returns an empty delta if no changes are pending.
-    /// Returns `Err(InvariantViolated)` if the internal `last_calculated_root`
-    /// invariant is broken (its hash must always be populated).
     pub fn pending_changes(&self) -> Result<Delta, OrgMembersError> {
-        let (removed, upserted) = smt::diff_tries(&self.last_calculated_root, &self.root);
-        // Invariant: last_calculated_root's hash is always populated -- every
-        // constructor sets it via genesis(), recalculate(), or from_candidate(),
-        // and mutations propagate it unchanged.
-        let base_hash = self
-            .last_calculated_root
-            .hash()
-            .ok_or(OrgMembersError::InvariantViolated)?;
+        let (removed, upserted) = changes_between(&self.last_calculated, &self.tree);
         Ok(Delta {
-            base_root: (*base_hash).into(),
+            base_root: self.last_calculated.root()?.into(),
             removed,
             upserted,
         })
@@ -550,27 +536,28 @@ impl<H: TrieHasher> OrgTrie<H> {
         self.cached_root_hash.is_none()
     }
 
-    /// Walks the trie bottom-up, filling every unset `spin::Once` hash cell.
+    /// Walks the trie bottom-up, calculating every node hash of the Membership
+    /// record not yet calculated.
     /// Returns the trie (now fully hashed) and a delta of all pending changes.
     ///
     /// Returns `Err(HashesAlreadyCalculated)` if the trie has not been mutated
     /// since it was calculated: a trie from `genesis()`, `recalculate()` or
-    /// `verify_against()` already has every cell filled. A mutated trie
+    /// `verify_against()` already has every node hash calculated. A mutated trie
     /// recalculates even when its change set is empty (LLR-j35sxz).
     pub fn recalculate(&self) -> Result<(Self, Delta), OrgMembersError> {
         if !self.has_pending_changes() {
             return Err(OrgMembersError::HashesAlreadyCalculated);
         }
         let delta = self.pending_changes()?;
-        let root_hash = smt::recalculate_hashes::<H>(&self.root)?;
+        let tree = calculated(self.tree.clone())?;
+        let root_hash = tree.root()?;
 
         Ok((
             Self {
-                root: self.root.clone(),
-                defaults: self.defaults.clone(),
+                tree: tree.clone(),
                 member_count: self.member_count,
                 cached_root_hash: Some(root_hash.into()),
-                last_calculated_root: self.root.clone(),
+                last_calculated: tree,
                 skeleton_index: self.skeleton_index.clone(),
                 handle_index: self.handle_index.clone(),
                 key_index: self.key_index.clone(),
@@ -616,7 +603,7 @@ impl<H: TrieHasher> OrgTrie<H> {
             }
         }
         for id in &delta.removed {
-            if smt::get_member(&self.root, id).is_none() {
+            if member_of(&self.tree, id).is_none() {
                 return Err(OrgMembersError::MalformedDelta(
                     "removed id not present in trie",
                 ));
@@ -631,7 +618,7 @@ impl<H: TrieHasher> OrgTrie<H> {
             }
         }
         for leaf in &delta.upserted {
-            if let Some(existing) = smt::get_member(&self.root, leaf.id()) {
+            if let Some(existing) = member_of(&self.tree, leaf.id()) {
                 if &existing == leaf {
                     return Err(OrgMembersError::MalformedDelta(
                         "upserted leaf identical to existing trie state",
@@ -702,7 +689,7 @@ impl<H: TrieHasher> OrgTrie<H> {
         self.validate_canonical_delta(delta)?;
 
         // --- Apply (every operation is now guaranteed meaningful) ---
-        let mut root = self.root.clone();
+        let mut tree = self.tree.clone();
         let mut count = self.member_count;
         let mut new_skeleton_index = self.skeleton_index.clone();
         let mut new_handle_index = self.handle_index.clone();
@@ -710,10 +697,10 @@ impl<H: TrieHasher> OrgTrie<H> {
         for id in &delta.removed {
             // Existence verified in validate_canonical_delta; the lookup here is
             // to extract the handle/skeleton for index maintenance.
-            let existing = smt::get_member(&root, id).ok_or(OrgMembersError::InvariantViolated)?;
+            let existing = member_of(&tree, id).ok_or(OrgMembersError::InvariantViolated)?;
             new_skeleton_index.remove(&HandleSkeleton::of(existing.handle()));
             new_handle_index.remove(existing.handle());
-            root = smt::remove(&root, id, &self.defaults)?;
+            tree = tree.remove(id)?;
             count = count.checked_sub(1).ok_or(OrgMembersError::InvariantViolated)?;
         }
 
@@ -722,7 +709,7 @@ impl<H: TrieHasher> OrgTrie<H> {
         // judged against the record after the whole set, in any identifier
         // order (PR-vf5hdm).
         for member in &delta.upserted {
-            if let Some(old) = smt::get_member(&root, member.id()) {
+            if let Some(old) = member_of(&tree, member.id()) {
                 if old.handle() != member.handle() {
                     new_skeleton_index.remove(&HandleSkeleton::of(old.handle()));
                     new_handle_index.remove(old.handle());
@@ -731,7 +718,7 @@ impl<H: TrieHasher> OrgTrie<H> {
         }
 
         for member in &delta.upserted {
-            let existing = smt::get_member(&root, member.id());
+            let existing = member_of(&tree, member.id());
 
             let needs_check = match &existing {
                 Some(old) => old.handle() != member.handle(),
@@ -751,7 +738,7 @@ impl<H: TrieHasher> OrgTrie<H> {
                 new_handle_index.insert(member.handle().clone(), *member.id());
             }
 
-            root = smt::insert::<H>(&root, member.clone(), &self.defaults)?;
+            tree = tree.insert(TreeMember::new::<H>(member.clone())?)?;
             if existing.is_none() {
                 count = count.checked_add(1).ok_or(OrgMembersError::InvariantViolated)?;
             }
@@ -759,11 +746,11 @@ impl<H: TrieHasher> OrgTrie<H> {
 
         let new_key_index = self.delta_key_index(delta)?;
 
-        let root_hash = smt::recalculate_hashes::<H>(&root)?;
+        let tree = calculated(tree)?;
+        let root_hash = tree.root()?;
 
         Ok(CandidateTrie {
-            root,
-            defaults: self.defaults.clone(),
+            tree,
             member_count: count,
             root_hash: root_hash.into(),
             skeleton_index: new_skeleton_index,
@@ -783,7 +770,7 @@ impl<H: TrieHasher> OrgTrie<H> {
         let mut index = self.key_index.clone();
 
         for id in &delta.removed {
-            let old = smt::get_member(&self.root, id).ok_or(OrgMembersError::InvariantViolated)?;
+            let old = member_of(&self.tree, id).ok_or(OrgMembersError::InvariantViolated)?;
             unindex_leaf_keys(&mut index, &old);
         }
         // Drop every replaced leaf's keys before adding any new ones, so a key
@@ -791,7 +778,7 @@ impl<H: TrieHasher> OrgTrie<H> {
         // judged on the final record in any identifier order, as the handle
         // check is (LLR-n5t6bn).
         for member in &delta.upserted {
-            if let Some(old) = smt::get_member(&self.root, member.id()) {
+            if let Some(old) = member_of(&self.tree, member.id()) {
                 unindex_leaf_keys(&mut index, &old);
             }
         }
@@ -807,7 +794,7 @@ impl<H: TrieHasher> OrgTrie<H> {
             return Err(OrgMembersError::HashesNotCalculated);
         }
 
-        let (removed, upserted) = smt::diff_tries(&old.root, &self.root);
+        let (removed, upserted) = changes_between(&old.tree, &self.tree);
 
         Ok(Delta {
             base_root: old.root_hash()?,
@@ -817,8 +804,7 @@ impl<H: TrieHasher> OrgTrie<H> {
     }
 
     pub(crate) fn from_candidate(
-        root: Arc<Node>,
-        defaults: Arc<DefaultHashes>,
+        tree: MemberTree<H>,
         member_count: usize,
         root_hash: RootHash,
         skeleton_index: HashMap<HandleSkeleton, Handle>,
@@ -826,11 +812,10 @@ impl<H: TrieHasher> OrgTrie<H> {
         key_index: KeyIndex,
     ) -> Self {
         Self {
-            root: root.clone(),
-            defaults,
+            tree: tree.clone(),
             member_count,
             cached_root_hash: Some(root_hash),
-            last_calculated_root: root,
+            last_calculated: tree,
             skeleton_index,
             handle_index,
             key_index,
@@ -839,14 +824,13 @@ impl<H: TrieHasher> OrgTrie<H> {
     }
 }
 
-impl<H: TrieHasher> Clone for OrgTrie<H> {
+impl<H: MemberHasher> Clone for OrgTrie<H> {
     fn clone(&self) -> Self {
         Self {
-            root: self.root.clone(),
-            defaults: self.defaults.clone(),
+            tree: self.tree.clone(),
             member_count: self.member_count,
             cached_root_hash: self.cached_root_hash,
-            last_calculated_root: self.last_calculated_root.clone(),
+            last_calculated: self.last_calculated.clone(),
             skeleton_index: self.skeleton_index.clone(),
             handle_index: self.handle_index.clone(),
             key_index: self.key_index.clone(),
@@ -855,7 +839,7 @@ impl<H: TrieHasher> Clone for OrgTrie<H> {
     }
 }
 
-impl<H: TrieHasher> fmt::Debug for OrgTrie<H> {
+impl<H: MemberHasher> fmt::Debug for OrgTrie<H> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OrgTrie")
             .field("member_count", &self.member_count)

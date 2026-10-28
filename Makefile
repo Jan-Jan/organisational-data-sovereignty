@@ -5,7 +5,8 @@
 # on-chain-client/.guardrails/config.yaml and person/.guardrails/config.yaml
 # (per-unit configs since 2026-09-05; person's since 2026-10-04; `coverage`
 # runs all three and is what CI calls; since 2026-10-08 it runs org-io's
-# `coverage-org-io` too, named by org-io/.guardrails/config.yaml). Since 2026-10-06 each of those configs
+# `coverage-org-io` too, named by org-io/.guardrails/config.yaml; since
+# 2026-10-25 sparse-merkle-tree's `coverage-sparse-merkle-tree`). Since 2026-10-06 each of those configs
 # also names its `coverage-branch-<unit>` twin, the decision-coverage half, run
 # by `coverage-branch` and CI's job of the same name (nightly; see
 # BRANCH_TOOLCHAIN). Note what that does and does not mean: NO check
@@ -22,8 +23,9 @@
 #   rustup toolchain install $(BRANCH_TOOLCHAIN) --component llvm-tools-preview
 
 .PHONY: coverage coverage-org-members coverage-on-chain-client coverage-person \
-	coverage-org-io coverage-branch coverage-branch-org-members \
-	coverage-branch-on-chain-client coverage-branch-person coverage-branch-org-io
+	coverage-org-io coverage-sparse-merkle-tree coverage-branch coverage-branch-org-members \
+	coverage-branch-on-chain-client coverage-branch-person coverage-branch-org-io \
+	coverage-branch-sparse-merkle-tree
 
 # TWO metrics, because the STATEMENT-coverage half of the class target (class
 # C: statement AND decision) is measured two ways here and the two
@@ -208,6 +210,38 @@ ON_CHAIN_CLIENT_REGIONS := 47
 # For stale nightly binaries and `cargo llvm-cov clean`, see BRANCH_TARGET_DIR.
 PERSON_LINES := 99
 PERSON_REGIONS := 99
+# sparse-merkle-tree, first floors, 2026-10-25 — same rule: one point below
+# the measurement, rounded down. Measured with `make coverage-sparse-merkle-tree`
+# (stable rustc 1.99.0 (b940084d7 2026-09-28), cargo-llvm-cov 0.9.0,
+# aarch64-darwin):
+#
+#   measured 2026-10-25        lines     regions
+#   sparse-merkle-tree         98.80%     96.59%   (492 of 498 lines; 1049 of 1086 regions)
+#   measured 2026-10-27        98.79%     96.60%   (491 of 497 lines; 1051 of 1088 regions)
+#
+# What no test reaches, and why:
+#   - tree.rs, `impl Default` and `impl Debug` for SparseMerkleTree (the six
+#     lines): conveniences no requirement states (Default is `new()`, Debug
+#     prints the depth only), so no test has an LLR to verify through them;
+#   - every `?` after `DefaultHashes::at` in the store and the proofs
+#     (`calculate`, `hash_of`, `compact_hash`, `pad`, `path`'s
+#     `stored_hash`, `prove_absent`, `prove_included`, `Path::from_siblings`,
+#     `fold`): `at` refuses only a level above DEPTH, and each caller asks
+#     for a level at most DEPTH by construction (LLR-yuyn8f's refusal itself
+#     is tested through `empty_subtree_hash`);
+#   - `Path::from_siblings`' `ok_or(LevelOutOfRange)?` on the map byte: the
+#     map is DEPTH.div_ceil(8) bytes and the level below DEPTH, so the byte
+#     exists;
+#   - `fold`'s `explicit.next().ok_or(ProofMalformed)?` and the `?` on `fold`
+#     in both `verify`s: `Path::parse` admits only a map whose marks equal the
+#     sibling count, so the siblings never run out;
+#   - the `?` on `serialize_tuple` in both `Serialize` impls: postcard, the
+#     measured format, writes nothing there and never fails; a failing
+#     serde_json writer reaches it in another instantiation, which llvm-cov
+#     does not add to the counted one (a generic function's figure is its
+#     best single instantiation's).
+SPARSE_MERKLE_TREE_LINES := 97
+SPARSE_MERKLE_TREE_REGIONS := 95
 # org-io, first floors, 2026-10-08 (worktree-org-io-create, task T12 of
 # docs/plans/2026-10-06-org-io-create.md) — same rule: one point below the
 # measurement, rounded down. Measured with `make coverage-org-io` (stable
@@ -337,6 +371,16 @@ ORG_MEMBERS_BRANCHES := 98
 # nightly: 58 of 58, 100%; the floor stays at 99.
 ON_CHAIN_CLIENT_BRANCHES := 99
 PERSON_BRANCHES := 99
+# sparse-merkle-tree, first floor, 2026-10-25: 77 of 78 branches, 98.72%, on
+# nightly-2026-10-03 (rustc 1.101.0-nightly 0abfedbc7 2026-10-02),
+# cargo-llvm-cov 0.9.0, aarch64-darwin; the one outcome no test reached then,
+# `Path::from_siblings`' `if let Some(byte)` else, is an
+# `ok_or(LevelOutOfRange)?`, which is no branch to llvm-cov (the byte exists by
+# construction, as above). Re-measured 2026-10-27, same nightly: 76 of 76,
+# 100%; the floor stays 97. The depth the serde form writes is the
+# compile-time constant `Depth::<DEPTH>::AS_U16` (DEPTH is at most 256,
+# LLR-ggu9bh): no branch.
+SPARSE_MERKLE_TREE_BRANCHES := 97
 # org-io, first floor, 2026-10-08 (task T12): 17 of 26 branches, 65.38%, on
 # nightly-2026-10-03 (rustc 1.101.0-nightly 0abfedbc7 2026-10-02),
 # cargo-llvm-cov 0.9.0, aarch64-darwin. The nine outcomes no test reaches:
@@ -384,7 +428,8 @@ ORG_IO_BRANCHES := 82
 # 64.29%, so the block is gone and enabling it is available work (see the
 # RESOLVED note above). Figures updated 2026-09-10; the pre-relocation ones
 # were 353 of 715 and 96.23%.
-coverage: coverage-org-members coverage-on-chain-client coverage-person coverage-org-io
+coverage: coverage-org-members coverage-on-chain-client coverage-person coverage-org-io \
+	coverage-sparse-merkle-tree
 
 # Scope note: this omits `mbt_conformance` (`newtypes` and `encoding_golden`,
 # added 2026-10-04, and `person_error_mapping` and `absence_proofs`, both
@@ -477,6 +522,15 @@ coverage-person:
 		--fail-under-lines $(PERSON_LINES) \
 		--fail-under-regions $(PERSON_REGIONS)
 
+# Every target, none excluded, as person's.
+SPARSE_MERKLE_TREE_COVERAGE_ARGS := -p sparse-merkle-tree
+
+coverage-sparse-merkle-tree:
+	cargo llvm-cov $(SPARSE_MERKLE_TREE_COVERAGE_ARGS) \
+		--summary-only \
+		--fail-under-lines $(SPARSE_MERKLE_TREE_LINES) \
+		--fail-under-regions $(SPARSE_MERKLE_TREE_REGIONS)
+
 # org-io's verify_commands test targets, in one run with both features so
 # `dev_seed_env` (its own binary, so it races nothing) is measured beside the
 # `test-support` targets. The chopsticks-only `preflight` target is excluded, as
@@ -511,7 +565,7 @@ coverage-org-io:
 # same *_COVERAGE_ARGS variable, so the statement and decision figures always
 # describe one suite.
 coverage-branch: coverage-branch-org-members coverage-branch-on-chain-client coverage-branch-person \
-	coverage-branch-org-io
+	coverage-branch-org-io coverage-branch-sparse-merkle-tree
 
 # $(1) report name, $(2) floor. Prints the figure, then fails below the floor.
 define judge_branches
@@ -543,6 +597,14 @@ coverage-branch-person:
 		--branch --json --summary-only \
 		--output-path $(BRANCH_REPORT_DIR)/person.json
 	$(call judge_branches,person,$(PERSON_BRANCHES))
+
+coverage-branch-sparse-merkle-tree:
+	mkdir -p $(BRANCH_REPORT_DIR)
+	CARGO_TARGET_DIR=$(BRANCH_TARGET_DIR) cargo +$(BRANCH_TOOLCHAIN) llvm-cov \
+		$(SPARSE_MERKLE_TREE_COVERAGE_ARGS) \
+		--branch --json --summary-only \
+		--output-path $(BRANCH_REPORT_DIR)/sparse-merkle-tree.json
+	$(call judge_branches,sparse-merkle-tree,$(SPARSE_MERKLE_TREE_BRANCHES))
 
 coverage-branch-org-io:
 	mkdir -p $(BRANCH_REPORT_DIR)

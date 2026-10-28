@@ -46,13 +46,15 @@ key, Device keys); a proof that reaches anyone other than a former device of
 that Member discloses that Member's identity and keys; exposure of a protected
 identity in the deployments this project is classified for. Severity: S3.
 Probability: P2.
+superseded-by: HAZ-r5tc4m
 
 P2: a proof is produced on request, and without a control the content would
 be whatever the producer chose to include.
 
 **RC-qa2758**: an absence proof carries no Member's data when its MemberId
 holds no Member, and only the data of the Member under its MemberId
-otherwise; it never carries another Member's data. mitigates: HAZ-gwbn5n
+otherwise; it never carries another Member's data. mitigates: HAZ-gwbn5n,
+HAZ-r5tc4m
 
 To whom a proof is given is not decided here. Owner ruling, 2026-10-06:
 exclusion is by design, part of the path that produces the proof. A node

@@ -26,6 +26,7 @@ slot. Where the path enters an empty subtree, every sibling below it is that
 level's default hash (LLR-wm5hpc). This holds at every boundary: a trie
 with one member, and the lowest and highest identifiers (all bits 0, all
 bits 1). satisfies: REQ-535jcd
+retired: 2026-10-24 — the path walk is sparse-merkle-tree's proofs (2026-10-24-on-sparse-merkle-tree.md)
 
 The walk runs only on a calculated trie. `prove_absent` refuses an
 uncalculated one first (LLR-4xz255). The walk's own `HashesNotCalculated` on an
@@ -36,18 +37,24 @@ interface, and it was moved to LLR-4xz255, which tests it.
 
 ## The absence proof
 
-**SDD-57vaj4**: the absence proof (`org-members/src/proof.rs`): produces,
-from a calculated trie, a proof that a MemberId holds no Member or that the
-Member it holds lacks a Device key; parses that proof when it arrives from
-outside the process; and verifies it against a membership root. It is the
-only item that interprets a leaf for this purpose. traces: REQ-535jcd,
-REQ-yyuxh8, REQ-tk2qqj
+**SDD-57vaj4**: the absence proof (`org-members/src/proof.rs`), the one
+value showing against a Membership root that a MemberId's Member, if any,
+lacks a DevicePublicKey. traces: REQ-535jcd,
+REQ-yyuxh8, REQ-tk2qqj, REQ-sb2frw, REQ-65xrgh
+
+(Amended 2026-10-24, `worktree-generic-smt`: the proof is composed of
+`sparse-merkle-tree`'s proofs in two steps, under REQ-sb2frw and REQ-65xrgh,
+which supersede REQ-535jcd and REQ-tk2qqj; its LLRs are in
+`2026-10-24-on-sparse-merkle-tree.md`. The statement above was restated on
+2026-10-28, guideline review round 5, as one responsibility; producing,
+parsing and verifying the proof are its LLRs.)
 
 **LLR-4xz255**: `OrgTrie::prove_absent(id, device)` returns an `AbsenceProof`
 when `device` is not among the Device keys of the Member under `id`, or when
 `id` holds no Member. It refuses with `HashesNotCalculated` when the trie is not
 calculated, and with `DeviceStillHeld` when that Member holds `device`. A
 Device key held by a different Member does not refuse. satisfies: REQ-535jcd
+superseded-by: LLR-bh53rr
 
 **LLR-25tpdp**: an `AbsenceProof` holds exactly three things: a 256-bit map
 marking which siblings are their level's default hash, the hashes of the
@@ -55,6 +62,7 @@ siblings that are not, in path order, and an ending that is either `Empty` or
 the leaf of the Member under the proof's MemberId. It holds no other Member's
 data, and holds no Member data at all when the ending is `Empty`.
 satisfies: REQ-yyuxh8
+superseded-by: LLR-v6smww
 
 **LLR-4rju5r**: an `AbsenceProof`'s fields are private, and the only ways to
 obtain one are `prove_absent` and parsing. `AbsenceProof::from_parts` refuses
@@ -67,6 +75,7 @@ refuses a 257th sibling before storing it. A leaf in the ending is decoded
 through `MemberLeaf`'s validating `Deserialize`, so it meets every rule a
 received record meets (REQ-shk82j). (Amended 2026-10-06, review finding-3.)
 satisfies: REQ-tk2qqj, REQ-ds8ryr
+superseded-by: LLR-9g2kjg
 
 **LLR-dgzy7e**: `AbsenceProof::verify::<H>(root, id, device)` recomputes the
 root. It starts from the empty-leaf hash for an `Empty` ending, or for a
@@ -76,10 +85,12 @@ taking the default hash at each level the map marks. The identifier's bit for
 that level says whether the running hash is the left or the right child. When
 the result differs from `root`, it refuses with `AbsenceProofRootMismatch`, and
 it checks this before anything else. satisfies: REQ-tk2qqj
+superseded-by: LLR-54gp2f
 
 **LLR-p2p8qy**: once the root matches, `verify` refuses a `Leaf` ending whose
 Device keys include `device` with `DeviceStillHeld`. It accepts an `Empty`
 ending, and a `Leaf` ending without `device`. satisfies: REQ-tk2qqj
+superseded-by: LLR-25nmwc
 
 There is no separate check that a `Leaf` ending's MemberId is `id`. The fold
 in LLR-dgzy7e takes its left and right turns from `id`'s bits, and a trie
@@ -95,6 +106,7 @@ variant, so the error says which check failed (`HashesNotCalculated`,
 Through a serde format the variant arrives as that format's custom error. No
 input to `prove_absent`, to parsing or to `verify` reaches a panic. (Amended
 2026-10-06, review finding-3.) satisfies: REQ-tk2qqj, REQ-535jcd, REQ-ds8ryr
+superseded-by: LLR-v3cysh
 
 ## No panics in the path primitives (resolves PR-jq43gx)
 
@@ -106,3 +118,4 @@ identifier's bits from `MemberId::path_bits`, an iterator over its 256 bits,
 most significant first, that cannot go out of range. The callers of `at_level`
 (`empty_root`, `insert`, `remove`, the path walk, the proof) pass its error on
 and never discard it. satisfies: REQ-ds8ryr
+retired: 2026-10-24 — position bits and empty-subtree levels are sparse-merkle-tree's, bounded there (2026-10-24-on-sparse-merkle-tree.md)

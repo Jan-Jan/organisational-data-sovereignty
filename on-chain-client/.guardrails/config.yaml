@@ -74,7 +74,10 @@ verify_commands:
 # change: PR-w5sk5k, PR-h4mb8y, PR-uq5r97 and PR-qpp28h reach 30 days around
 # 2026-10-10 while that change, which gives this unit the chain writer, is
 # under way.
-problem_age_days: 45
+# Raised from 45 to 90 on 2026-10-28 by owner ruling, during the
+# sparse-merkle-tree change (worktree-generic-smt): the same four reports
+# reach 45 days while it is merged.
+problem_age_days: 90
 problem_open_max: 10
 
 # Structural coverage against the class C target. `make coverage-on-chain-client`

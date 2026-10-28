@@ -5,6 +5,7 @@ members = [
     "org-io",
     "org-node",
     "person",
+    "sparse-merkle-tree",
     "spike-common",
     "spike-keyhive",
     "spike-p2panda",

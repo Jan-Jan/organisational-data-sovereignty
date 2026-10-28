@@ -40,8 +40,14 @@ pub enum OrgMembersError {
     #[error("invalid person public key")]
     InvalidPersonKey,
 
-    #[error("device slots full (max 4)")]
+    #[error("device slots full (max 8)")]
     DeviceSlotsFull,
+
+    /// A DevicePublicKey at a device position another DevicePublicKey of the
+    /// member holds.
+    /// LLR-5jh6t3.
+    #[error("device position taken by another device public key of the member")]
+    DevicePositionTaken,
 
     #[error("member must have at least one device")]
     EmptyDeviceList,
@@ -64,23 +70,18 @@ pub enum OrgMembersError {
     #[error("hashes already calculated")]
     HashesAlreadyCalculated,
 
-    /// A bit index of 256 or more given to `MemberId::bit`, or a level of 257
-    /// or more given to `DefaultHashes::at_level`. LLR-7jkcba (PR-jq43gx).
-    #[error("index out of range")]
-    IndexOutOfRange,
-
     /// The Member under an absence proof's MemberId holds the Device key.
-    /// LLR-4xz255, LLR-p2p8qy.
+    /// LLR-bh53rr, LLR-25nmwc.
     #[error("device key still held by the member")]
     DeviceStillHeld,
 
-    /// An absence proof whose sibling hashes do not match its default map.
-    /// LLR-4rju5r.
+    /// An absence proof that does not parse, or a Vacant proof ending in the
+    /// leaf of the MemberId asked about. LLR-9g2kjg, LLR-25nmwc.
     #[error("malformed absence proof")]
     AbsenceProofMalformed,
 
     /// An absence proof that does not resolve to the root it was checked
-    /// against. LLR-dgzy7e.
+    /// against. LLR-54gp2f.
     #[error("absence proof does not resolve to the root")]
     AbsenceProofRootMismatch,
 
@@ -95,7 +96,7 @@ pub enum OrgMembersError {
 }
 
 /// Exhaustive on purpose, with no wildcard arm: a variant `person` adds stops
-/// this crate compiling until its mapping is chosen. LLR-28ekrv.
+/// this crate compiling until its mapping is chosen. LLR-hbb4je.
 impl From<person::IdentityError> for OrgMembersError {
     fn from(e: person::IdentityError) -> Self {
         use person::IdentityError as I;
@@ -106,13 +107,42 @@ impl From<person::IdentityError> for OrgMembersError {
             I::DeviceSlotsFull => Self::DeviceSlotsFull,
             I::DuplicateDevice => Self::DuplicateDevice,
             I::DeviceNotFound => Self::DeviceNotFound,
-            // Only person's Person operations produce these, and org-members
-            // calls none of them. Provisional: see LLR-28ekrv.
+            I::DevicePositionTaken => Self::DevicePositionTaken,
+            I::DeviceStillHeld => Self::DeviceStillHeld,
+            // Only person's Person operations and Person-hash proofs produce
+            // these, and org-members calls none of them (LLR-hbb4je).
             I::KeyWithoutDevice
             | I::MissingPersonKey
             | I::PersonKeyIsDeviceKey
             | I::PersonKeyNotRotated
-            | I::UnsupportedEncodingVersion(_) => Self::InvariantViolated,
+            | I::UnsupportedEncodingVersion(_)
+            | I::PersonHashMismatch
+            | I::DeviceRootMismatch
+            | I::ProofMalformed => Self::InvariantViolated,
+        }
+    }
+}
+
+/// Exhaustive on purpose: every refusal of the tree reaches this crate's
+/// callers as one of its own variants, never as `TreeError`. LLR-w5yahk.
+impl From<sparse_merkle_tree::TreeError> for OrgMembersError {
+    fn from(error: sparse_merkle_tree::TreeError) -> Self {
+        use sparse_merkle_tree::TreeError;
+        match error {
+            TreeError::HashesNotCalculated => Self::HashesNotCalculated,
+            TreeError::HashesAlreadyCalculated => Self::HashesAlreadyCalculated,
+            TreeError::ProofMalformed => Self::AbsenceProofMalformed,
+            TreeError::ProofRootMismatch => Self::AbsenceProofRootMismatch,
+            TreeError::ProofLeafHeld => Self::DeviceStillHeld,
+            // A Member's position is its MemberId and `DuplicateId` and
+            // `IdNotFound` are checked first, so none of the first three
+            // reaches here. Nor does `LevelOutOfRange`: the tree raises it
+            // only for a level above its depth, org-members asks for no
+            // level, and every level the tree walks is its own, bounded by
+            // its depth.
+            TreeError::Collision | TreeError::LeafNotHeld | TreeError::LeafHeld | TreeError::LevelOutOfRange => {
+                Self::InvariantViolated
+            }
         }
     }
 }

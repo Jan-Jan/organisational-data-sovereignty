@@ -24,6 +24,7 @@ with an error that says which, when the record is not calculated or when that
 Member holds that Device key.
 satisfies: derived
 exported: yes
+superseded-by: REQ-sb2frw
 
 A Device key held by a different Member does not stop the proof (owner ruling
 2026-10-06). The case it raises — a key revoked from one Member and later held
@@ -50,3 +51,4 @@ other proof with an error that says which of these failed.
 (implements: RC-j2znx8)
 satisfies: derived
 exported: yes
+superseded-by: REQ-65xrgh

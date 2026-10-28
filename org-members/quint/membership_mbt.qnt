@@ -43,8 +43,9 @@ module membership_mbt {
   /// Small finite universes so the simulator explores a bounded space.
   pure val IDS = Set("a", "b", "c")
   pure val HANDLES = Set("h1", "h2", "h3")
-  /// Four generations, so a member can reach the device cap (MAX_DEVICES).
-  pure val GENS = 0.to(3)
+  /// Nine generations, so a member can reach the device cap (MAX_DEVICES = 8)
+  /// with distinct positions.
+  pure val GENS = 0.to(8)
   pure val NAMES = Set("n", "n2")
   pure val SURNAMES = Set("s", "s2")
 
@@ -123,7 +124,7 @@ module membership_mbt {
       else if (flaw == 0 and n >= 2) valid.replaceAt(1, valid[1].with("id", valid[0].id))
       else if (flaw == 1 and n >= 2) valid.replaceAt(1, valid[1].with("h", valid[0].h))
       else if (flaw == 2) valid.replaceAt(n - 1, valid[n - 1].with("devs", 0))
-      else if (flaw == 3) valid.replaceAt(n - 1, valid[n - 1].with("devs", 5))
+      else if (flaw == 3) valid.replaceAt(n - 1, valid[n - 1].with("devs", 9))
       else valid
     initWith(seeds)
   }
@@ -308,18 +309,23 @@ module membership_mbt {
   // key, a to b's old key -- each step accepted on its own record.
   run scenarioMemberKeySwap = initWith(TWO)
     .then(applyHonest([rop("a", "a", 2), rop("b", "a", 0), rop("a", "b", 0)], "true"))
-  // A device key moves from b to a: the record delete_p2p_device(b, (b,1),
-  // (b,3)) then add_p2p_device(a, (b,1)) reaches, sent as one built delta.
+  // A device key moves from b to a: the record delete_p2p_device(b, (b,2),
+  // (b,3)) then add_p2p_device(a, (b,2)) reaches, sent as one built delta
+  // (positions 1 and 2 for a, distinct).
   run scenarioDeviceKeyMoves = initWith(TWO)
     .then(doAddDevice("b", key("b", 2)))
     .then(applyBuilt(Set(), Set(
-      mkLeaf("a", "h1").with("devices", Set(key("a", 1), key("b", 1))),
-      mkLeaf("b", "h2").with("pKey", key("b", 3)).with("devices", Set(key("b", 2)))), "true"))
+      mkLeaf("a", "h1").with("devices", Set(key("a", 1), key("b", 2))),
+      mkLeaf("b", "h2").with("pKey", key("b", 3)).with("devices", Set(key("b", 1)))), "true"))
 
   // DuplicateKey on each direct path (LLR-v6gfc7, LLR-fym7dy), in the crate's
   // check order.
   run scenarioRotateKeyDuplicate = initWith(TWO).then(doRotateKey("a", key("b", 1)))
   run scenarioAddDeviceDuplicate = initWith(TWO).then(doAddDevice("a", key("b", 0)))
+  // verifies: LLR-5jh6t3, REQ-2sz7j8
+  // A device key at a position the member's own device holds: refused with
+  // DevicePositionTaken, not DuplicateKey.
+  run scenarioDevicePositionTaken = initWith(TWO).then(doAddDevice("a", key("c", 1)))
   run scenarioDeleteDeviceRemovedKey = initWith(TWO).then(doAddDevice("a", key("a", 2)))
     .then(doDeleteDevice("a", key("a", 2), key("a", 2)))
   run scenarioIsolateDuplicate = initWith(TWO).then(doIsolate("a", key("a", 1)))
@@ -331,8 +337,10 @@ module membership_mbt {
 
   // Error branches random runs reach rarely (measured in the plan, T6).
   run scenarioDeviceSlotsFull = initWith(TWO)
-    .then(doAddDevice("a", key("a", 2))).then(doAddDevice("a", key("a", 3))).then(doAddDevice("a", key("c", 0)))
-    .then(doAddDevice("a", key("a", 0)))
+    .then(doAddDevice("a", key("a", 2))).then(doAddDevice("a", key("a", 3))).then(doAddDevice("a", key("a", 4)))
+    .then(doAddDevice("a", key("a", 5))).then(doAddDevice("a", key("a", 6))).then(doAddDevice("a", key("a", 7)))
+    .then(doAddDevice("a", key("c", 0)))
+    .then(doAddDevice("a", key("a", 8)))
   run scenarioRemoveUpsertOverlap = initWith(TWO)
     .then(applyBuilt(Set("a"), Set(mkLeaf("a", "h3")), "true"))
   // A member both removed and re-upserted unchanged: the crate reports the
@@ -346,6 +354,7 @@ module membership_mbt {
   val mbtInv = and {
     skeletonsUnique(trie),
     deviceCapOk(trie),
+    positionsOk(trie),
     keysUnique(trie),
     orgExists or trie == Map(),
   }

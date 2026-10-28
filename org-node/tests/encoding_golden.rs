@@ -125,14 +125,19 @@ const GOLDEN_STORE: &str = "07702d616c69636501aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 const GOLDEN_WIRE: &str = "00aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa029101b642ec203b364f4807ea74b0a63ab680c1c94d38b23246b1042f520394477e860001020202020202020202020202020202020202020202020202020202020202020203626f628139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b3940454657374045573657201ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1720101010101010101010101010101010101010101010101010101010101010101010561646d696e04546573740455736572d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c977873701ca93ac1705187071d67b83c7ff0efe8108e8ec4530575d7726879333dbdabe7c4444444444444444444444444444444444444444444444444444444444444444";
 // Re-pinned 2026-10-07 (change worktree-org-io-commit-workflow, S3 T4;
 // LLR-ayrdr8 as amended that day): index 01 now precedes a revocation
-// notice (LLR-dc45ur), not an Envelope. The value is derived from the
-// notice's field order, never captured from the code: `01` ‖ `org_id`
-// (`aa`x20) ‖ `member_id` (`02`x32) ‖ `device` (the snapshot's Device key
-// `ca93…be7c` from GOLDEN_WIRE) ‖ the org-members wire proof — `default_map`
-// (`ff`x32, all 256 levels default) ‖ `siblings` (`00`, none) ‖ `ending`
-// (`00`, an empty leaf). The value before S3 T4 (`01` ‖ the Envelope):
+// notice (LLR-dc45ur), not an Envelope. The value before S3 T4 (`01` ‖ the
+// Envelope):
 // GOLDEN_REVOCATION = "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa029101b642ec203b364f4807ea74b0a63ab680c1c94d38b23246b1042f520394477e860001020202020202020202020202020202020202020202020202020202020202020203626f628139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b3940454657374045573657201ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1"
-const GOLDEN_REVOCATION: &str = "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0202020202020202020202020202020202020202020202020202020202020202ca93ac1705187071d67b83c7ff0efe8108e8ec4530575d7726879333dbdabe7cffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff0000";
+// The value, 123 bytes, is derived from the notice's field order, never
+// captured from the code: `01` ‖ `org_id` (`aa`x20) ‖ `member_id` (`02`x32)
+// ‖ `device` (the snapshot's Device key `ca93…be7c` from GOLDEN_WIRE) ‖ the
+// proof, the empty tree's absence proof in the sparse-merkle-tree unit's
+// serde form: `00` (Vacant) ‖ the depth-256 absence proof as the tuple
+// (depth, map, siblings, ending): depth 256 as a postcard varint (`8002`) ‖
+// the map, `20` (its length, 32) ‖ `00`x32 (the map marks the siblings that
+// are NOT their level's empty-subtree hash, so none) ‖ `siblings` (`00`,
+// none) ‖ `ending` (`00`, Empty).
+const GOLDEN_REVOCATION: &str = "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0202020202020202020202020202020202020202020202020202020202020202ca93ac1705187071d67b83c7ff0efe8108e8ec4530575d7726879333dbdabe7c0080022000000000000000000000000000000000000000000000000000000000000000000000";
 
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
@@ -237,6 +242,7 @@ fn organisation_information_wire_message_is_pinned() {
 
 // *Re-pinned 2026-10-07 (change worktree-org-io-commit-workflow, S3 T4).*
 // Asserted the Envelope a revocation held; it holds a notice now.
+// The notice's proof is in the sparse-merkle-tree form: 38 bytes.
 /// verifies: LLR-ayrdr8, LLR-ms8njy, LLR-js9dsu, LLR-dc45ur
 #[test]
 fn revocation_wire_message_is_pinned() {
@@ -249,7 +255,7 @@ fn revocation_wire_message_is_pinned() {
     assert_eq!(fields.len(), 4, "org_id, member_id, device and proof, nothing else: {fields:?}");
     assert_eq!(notice["org_id"][0], json!(0xaa));
     assert!(notice.get("envelope").is_none() && notice.get("org_private_key").is_none());
-    assert_eq!(body.len(), 119, "the variant index, 20 + 32 + 32 identity bytes and a 34-byte proof");
+    assert_eq!(body.len(), 123, "the variant index, 20 + 32 + 32 identity bytes and a 38-byte proof");
 }
 
 /// Abnormal input: a pinned value cut short is refused, never decoded into

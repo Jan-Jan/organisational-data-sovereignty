@@ -186,7 +186,7 @@ fn debug_is_the_type_name_and_a_hex_prefix() {
     assert_eq!(format!("{key:?}"), "PersonPublicKey(09000000..)");
 }
 
-/// verifies: LLR-5za6mp
+/// verifies: LLR-cyx9a3
 #[cfg(feature = "serde")]
 #[test]
 fn a_key_encodes_as_its_32_bytes() {

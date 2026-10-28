@@ -1,14 +1,14 @@
 mod common;
 
-use common::{device_key, member_key};
-use org_members::hasher::{Blake3Hasher, TrieHasher};
+use common::{device_key, free_position_keys, member_key, positioned_device_key};
+use org_members::hasher::{Blake3DeviceRootHasher, Blake3Hasher, MemberHasher};
 use org_members::trie::OrgTrie;
 use org_members::types::{
     Handle, DevicePublicKey, MemberId, Name, NodeHash, PersonPublicKey, MemberLeaf, RootHash, Surname,
     MAX_DEVICES, MAX_NAME_LEN,
 };
 use org_members::OrgMembersError;
-use person::DeviceTrieHasher;
+use person::DeviceRootHasher;
 
 type TestTrie = OrgTrie<Blake3Hasher>;
 
@@ -454,27 +454,46 @@ fn add_p2p_device_rejects_duplicate() {
     assert_eq!(err.unwrap_err(), OrgMembersError::DuplicateDevice);
 }
 
-/// verifies: REQ-xdx2c2, LLR-pys2ek, LLR-4phmjf
+/// verifies: REQ-xdx2c2, LLR-utk6uy, LLR-4phmjf
 ///
-/// The bound itself (MAX_DEVICES, 4 today) is design data, not part of the
+/// The bound itself (MAX_DEVICES) is design data, not part of the
 /// requirement — see the note on REQ-xdx2c2 in the requirements ledger. This
 /// test is the only place the number is currently exercised.
 #[test]
 fn add_p2p_device_rejects_when_full() {
-    // alice starts with 1 device; add 3 more to fill (max 4)
     let trie = TestTrie::genesis(vec![alice()]).unwrap();
-    let trie = trie
-        .add_p2p_device(&member_id("alice-id"), device_key("d2"))
-        .unwrap();
-    let trie = trie
-        .add_p2p_device(&member_id("alice-id"), device_key("d3"))
-        .unwrap();
-    let trie = trie
-        .add_p2p_device(&member_id("alice-id"), device_key("d4"))
-        .unwrap();
-    // 5th device should fail
-    let err = trie.add_p2p_device(&member_id("alice-id"), device_key("d5"));
+    let mut full = trie;
+    for key in free_position_keys("alice-extra", &[device_key("alice-d1")], 7) {
+        full = full.add_p2p_device(&member_id("alice-id"), key).unwrap();
+    }
+    assert_eq!(full.get(&member_id("alice-id")).unwrap().p2p_device_count(), 8);
+    // Eight positions of sixteen are free: a ninth key that collides with none.
+    let ninth = free_position_keys("alice-ninth", full.get(&member_id("alice-id")).unwrap().p2p_devices(), 1)[0];
+    let err = full.add_p2p_device(&member_id("alice-id"), ninth);
     assert_eq!(err.unwrap_err(), OrgMembersError::DeviceSlotsFull);
+}
+
+/// verifies: LLR-5jh6t3, REQ-2sz7j8
+///
+/// A key at a position another of the member's keys holds is refused, from
+/// `add_p2p_device` and from `MemberLeaf::new`, and the record is unchanged.
+#[test]
+fn a_device_at_a_taken_position_is_refused() {
+    let held = device_key("alice-d1");
+    let position = person::device_position_bytes(&held)[0] >> 4;
+    let colliding = positioned_device_key("alice-collides", position);
+    let trie = TestTrie::genesis(vec![alice()]).unwrap();
+    let root = trie.root_hash().unwrap();
+    assert_eq!(
+        trie.add_p2p_device(&member_id("alice-id"), colliding).unwrap_err(),
+        OrgMembersError::DevicePositionTaken
+    );
+    assert_eq!(trie.root_hash().unwrap(), root);
+    assert_eq!(trie.get(&member_id("alice-id")).unwrap().p2p_devices(), &[held]);
+    assert_eq!(
+        MemberLeaf::new(member_id("x"), h("xavier"), member_key("x-mk"), nm("X"), sn("Y"), vec![held, colliding]).unwrap_err(),
+        OrgMembersError::DevicePositionTaken
+    );
 }
 
 /// verifies: LLR-v3jqau
@@ -1305,10 +1324,10 @@ fn member_leaf_nfc_normalization() {
     assert_eq!(m1.name(), m2.name());
 }
 
-/// verifies: LLR-pys2ek
+/// verifies: LLR-utk6uy
 #[test]
 fn member_leaf_too_many_devices() {
-    let devices: Vec<_> = (0..5).map(|i| device_key(&format!("d{}", i))).collect();
+    let devices: Vec<_> = (0..9).map(|position| positioned_device_key(&format!("d{position}"), position)).collect();
     let err = MemberLeaf::new(
         member_id("k"),
         h("alice"),
@@ -1896,11 +1915,11 @@ fn deserialize_rejects_duplicate_devices() {
 }
 
 #[cfg(feature = "serde")]
-/// verifies: REQ-shk82j, REQ-xdx2c2, LLR-pys2ek, LLR-xyv6p9
+/// verifies: REQ-shk82j, REQ-xdx2c2, LLR-utk6uy, LLR-xyv6p9
 #[test]
 fn deserialize_rejects_too_many_devices() {
     use postcard::{from_bytes, to_allocvec};
-    let many: Vec<DevicePublicKey> = (0..5).map(|i| device_key(&format!("d{}", i))).collect();
+    let many: Vec<DevicePublicKey> = (0..9).map(|position| positioned_device_key(&format!("d{position}"), position)).collect();
     // Sort so we hit the count check, not the order check.
     let mut sorted = many.clone();
     sorted.sort();
@@ -2417,7 +2436,7 @@ fn encodes_no_device_public_key(bytes: &[u8]) -> bool {
 /// no DevicePublicKey's encoding keeps an empty slot from hashing as a device.
 #[test]
 fn the_device_empty_sentinel_encodes_no_device_public_key() {
-    let sentinel = <Blake3Hasher as DeviceTrieHasher>::DEVICE_EMPTY_SENTINEL;
+    let sentinel = <Blake3DeviceRootHasher as DeviceRootHasher>::DEVICE_EMPTY_SENTINEL;
     assert!(encodes_no_device_public_key(sentinel), "the sentinel is a DevicePublicKey");
 }
 
@@ -2434,121 +2453,130 @@ fn the_sentinel_check_tells_a_device_public_key_from_other_bytes() {
     assert!(encodes_no_device_public_key(&device_key("d1").as_bytes()[..31]));
 }
 
-/// verifies: LLR-72p8bz
+/// verifies: LLR-4rdqyn, LLR-uudst2
 ///
-/// The four hash domains are separated: the same bytes hashed as a member leaf,
-/// a member node, a device leaf and a device node yield four different values.
-/// Without separation, a device key could be presented as a member leaf.
+/// Eight separated domains: the same input in each yields a different value,
+/// and each is the keyed blake3 of its documented key; the device empty leaf
+/// hashes the documented device sentinel.
 #[test]
 fn hasher_domains_are_separated() {
+    use sparse_merkle_tree::TreeHasher;
     let input = [7u8; 32];
     let node = NodeHash::new(input);
-
-    let member_leaf = Blake3Hasher::hash_member_leaf(&input);
-    let device_leaf = Blake3Hasher::hash_device_leaf(&input);
-    let member_node = Blake3Hasher::hash_member_node(&node, &node);
-    let device_node = Blake3Hasher::hash_device_node(&node, &node);
-
-    let all = [member_leaf, device_leaf, member_node, device_node];
+    let all = [
+        <Blake3Hasher as TreeHasher>::leaf(&node, &node),
+        <Blake3Hasher as TreeHasher>::node(&node, &node),
+        Blake3Hasher::member_identity_hash(&input),
+        Blake3Hasher::member_content_hash(&input),
+        <Blake3DeviceRootHasher as TreeHasher>::leaf(&node, &node),
+        <Blake3DeviceRootHasher as TreeHasher>::node(&node, &node),
+        Blake3DeviceRootHasher::device_identity_hash(&input),
+        Blake3DeviceRootHasher::device_content_hash(),
+    ];
     for i in 0..all.len() {
         for j in (i + 1)..all.len() {
             assert_ne!(all[i], all[j], "domains {i} and {j} collide");
         }
     }
+    let keys: [&[u8; 32]; 8] = [
+        b"org-members::member-leaf________",
+        b"org-members::member-node________",
+        b"org-members::member-identity____",
+        b"org-members::member-content_____",
+        b"org-members::device-leaf________",
+        b"org-members::device-node________",
+        b"org-members::device-identity____",
+        b"org-members::device-content_____",
+    ];
+    assert_eq!(Blake3Hasher::member_identity_hash(&input), common::keyed(keys[2], &[&input]));
+    assert_eq!(Blake3Hasher::member_content_hash(&input), common::keyed(keys[3], &[&input]));
+    assert_eq!(<Blake3Hasher as TreeHasher>::leaf(&node, &node), common::keyed(keys[0], &[&input, &input]));
+    assert_eq!(<Blake3Hasher as TreeHasher>::node(&node, &node), common::keyed(keys[1], &[&input, &input]));
+    assert_eq!(
+        <Blake3Hasher as TreeHasher>::empty_leaf(),
+        common::keyed(keys[0], &[b"EMPTY_SENTINEL_ORG_MEMBERS_V1"])
+    );
+    assert_eq!(<Blake3DeviceRootHasher as TreeHasher>::leaf(&node, &node), common::keyed(keys[4], &[&input, &input]));
+    assert_eq!(<Blake3DeviceRootHasher as TreeHasher>::node(&node, &node), common::keyed(keys[5], &[&input, &input]));
+    assert_eq!(Blake3DeviceRootHasher::DEVICE_EMPTY_SENTINEL, b"EMPTY_SENTINEL_ORG_MEMBERS_DEVICE_V1");
+    assert_eq!(
+        <Blake3DeviceRootHasher as TreeHasher>::empty_leaf(),
+        common::keyed(keys[4], &[b"EMPTY_SENTINEL_ORG_MEMBERS_DEVICE_V1"])
+    );
+    assert_eq!(Blake3DeviceRootHasher::device_identity_hash(&input), common::keyed(keys[6], &[&input]));
+    assert_eq!(Blake3DeviceRootHasher::device_content_hash(), common::keyed(keys[7], &[]));
 }
 
-/// verifies: LLR-kdhd2v
+/// verifies: LLR-4rdqyn
 ///
-/// Device keys are held sorted, so the order they are supplied in does not
-/// change the member record's contribution to the root.
+/// The device domains are this unit's own: no device set's root under them
+/// is its root under `person`'s `PersonDeviceRootHasher`, whose domains and
+/// sentinel person/docs/architecture/2026-10-24-device-root-tree.md states
+/// are none of this unit's.
 #[test]
-fn device_slot_order_does_not_change_the_root() {
-    let d1 = device_key("dev-a");
-    let d2 = device_key("dev-b");
-
-    let forward = MemberLeaf::new(
-        member_id("m"),
-        h("alice"),
-        member_key("k"),
-        nm("Alice"),
-        sn("Anderson"),
-        vec![d1, d2],
-    )
-    .unwrap();
-    let reverse = MemberLeaf::new(
-        member_id("m"),
-        h("alice"),
-        member_key("k"),
-        nm("Alice"),
-        sn("Anderson"),
-        vec![d2, d1],
-    )
-    .unwrap();
-
-    let a = TestTrie::genesis(vec![forward]).unwrap().root_hash().unwrap();
-    let b = TestTrie::genesis(vec![reverse]).unwrap().root_hash().unwrap();
-
-    assert_eq!(a, b);
+fn no_device_set_shares_its_root_with_the_person_device_root() {
+    use person::device_root_hasher::PersonDeviceRootHasher;
+    for count in [0, 1, 2, 8] {
+        let devices = common::free_position_keys("separate", &[], count);
+        assert_ne!(
+            person::compute_device_root::<Blake3DeviceRootHasher>(&devices),
+            person::compute_device_root::<PersonDeviceRootHasher>(&devices),
+            "{count} devices"
+        );
+    }
 }
 
-/// verifies: LLR-kdhd2v, LLR-pys2ek
+/// verifies: LLR-t465mb, LLR-4rdqyn, LLR-zbe553
 ///
-/// Every one of the MAX_DEVICES slots reaches the root. `to_fixed_slots` is
-/// sized by MAX_DEVICES while `compute_device_root` is sized by the literal 4;
-/// nothing but this test couples them, and a device that does not reach the
-/// root is invisible to every verifier.
-///
-/// LLR-pys2ek added 2026-09-17: this is the item's normal case, and it is
-/// where its second clause -- MAX_DEVICES is 4 *because* the sub-trie has four
-/// slots -- is actually asserted. Its other three carriers are all refusals of
-/// a fifth device. Raising MAX_DEVICES to 5 reds this test at `device slot 4
-/// does not reach the root`, which is precisely the coupling the clause
-/// states.
-///
-/// Rewritten 2026-09-17 (independent review, finding-3): the first version
-/// substituted one fixed key, `device_key("replacement")`, into each slot, and
-/// the MAX_DEVICES 4 -> 5 red depended on that key's BLAKE3 digest happening to
-/// sort after the fourth key of the base set. Changing that one seed string
-/// left the mutation GREEN. The substitute is now the pool's largest key by
-/// construction, so the red no longer turns on a digest coincidence and is
-/// reproduced under any device-key seeds.
+/// One Member's root, from blake3 alone: its identity hash (member-identity
+/// domain over the MemberId), content hash (member-content domain over
+/// handle, member key, name, surname and device root), leaf hash
+/// (member-leaf domain over both), folded up 256 levels along the MemberId's
+/// bits, most significant first, beside the empty-subtree hashes.
 #[test]
-fn every_device_slot_reaches_the_root() {
-    // `DeviceSlots` stores devices in sorted order, so which slot a key
-    // lands in is decided by its digest, not by the order it is written here.
-    // Sort a pool of MAX_DEVICES + 1 keys and take the first MAX_DEVICES as
-    // the base: `base[i]` is then the key in slot `i`, by construction rather
-    // than by coincidence. The spare is the pool's largest, so substituting it
-    // for any base key leaves it in the LAST slot -- which is the only
-    // substitution that can be invisible to a root that hashes fewer slots
-    // than MAX_DEVICES. Picking an arbitrary replacement key instead makes the
-    // detection depend on where that one digest happens to sort.
-    let mut pool: Vec<DevicePublicKey> =
-        (0..=MAX_DEVICES).map(|i| device_key(&format!("dev-{i}"))).collect();
-    pool.sort();
-    let base: Vec<DevicePublicKey> = pool[..MAX_DEVICES].to_vec();
-    let spare = pool[MAX_DEVICES];
+fn a_member_leaf_hashes_as_documented() {
+    use sparse_merkle_tree::TreeHasher;
+    let alice = alice();
+    let device_root = person::compute_device_root::<Blake3DeviceRootHasher>(alice.p2p_devices()).unwrap();
+    let identity = common::keyed(b"org-members::member-identity____", &[alice.id().as_bytes()]);
+    let content = common::keyed(
+        b"org-members::member-content_____",
+        &[&common::member_content_bytes(&alice, device_root.as_bytes())],
+    );
+    let mut hash = common::keyed(b"org-members::member-leaf________", &[identity.as_bytes(), content.as_bytes()]);
+    let mut empty = <Blake3Hasher as TreeHasher>::empty_leaf();
+    for level in 0..256 {
+        let index = 255 - level;
+        let right = (alice.id().as_bytes()[index / 8] >> (7 - index % 8)) & 1 == 1;
+        let node = |left: &NodeHash, right: &NodeHash| common::keyed(b"org-members::member-node________", &[left.as_bytes(), right.as_bytes()]);
+        hash = if right { node(&empty, &hash) } else { node(&hash, &empty) };
+        empty = node(&empty, &empty);
+    }
+    let root = TestTrie::genesis(vec![alice]).unwrap().root_hash().unwrap();
+    assert_eq!(root.as_bytes(), hash.as_bytes());
+}
 
+/// verifies: LLR-uudst2, LLR-utk6uy, REQ-xdx2c2
+///
+/// A member at the bound of MAX_DEVICES (8) keys: removing any one of them,
+/// or putting another key at its position, moves the root. A device that
+/// did not reach the root would be invisible to every verifier.
+#[test]
+fn every_device_reaches_the_root() {
+    assert_eq!(MAX_DEVICES, 8);
+    let base: Vec<DevicePublicKey> = (0..8).map(|position| positioned_device_key(&format!("dev-{position}"), position)).collect();
     let root_of = |devices: Vec<DevicePublicKey>| {
-        let leaf = MemberLeaf::new(
-            member_id("m"),
-            h("alice"),
-            member_key("k"),
-            nm("Alice"),
-            sn("Anderson"),
-            devices,
-        )
-        .unwrap();
+        let leaf = MemberLeaf::new(member_id("m"), h("alice"), member_key("k"), nm("Alice"), sn("Anderson"), devices).unwrap();
         TestTrie::genesis(vec![leaf]).unwrap().root_hash().unwrap()
     };
-
     let all = root_of(base.clone());
-
-    // Vary each slot in turn; every one must move the root.
-    for i in 0..MAX_DEVICES {
-        let mut varied = base.clone();
-        varied[i] = spare;
-        assert_ne!(all, root_of(varied), "device slot {i} does not reach the root");
+    for index in 0..MAX_DEVICES {
+        let mut fewer = base.clone();
+        fewer.remove(index);
+        assert_ne!(all, root_of(fewer), "device {index} does not reach the root");
+        let mut swapped = base.clone();
+        swapped[index] = positioned_device_key(&format!("other-{index}"), index as u8);
+        assert_ne!(all, root_of(swapped), "device {index}'s key does not reach the root");
     }
 }
 
@@ -2556,60 +2584,43 @@ fn every_device_slot_reaches_the_root() {
 
 /// verifies: LLR-zbe553
 ///
-/// Index 0 is the most significant bit of byte 0, and index 255 the least
-/// significant bit of byte 31. The SMT traverses by this, so the convention is
-/// the addressing scheme, not a detail.
+/// A Member's position is its MemberId's 256 bits, most significant first:
+/// an absent MemberId that differs from the only Member's in one bit, `bit`, alone
+/// has one non-empty sibling in its proof, at level `255 - bit`.
 #[test]
-fn member_id_bit_indexes_msb_first() {
-    let mut bytes = [0u8; 32];
-    bytes[0] = 0b1000_0000;
-    bytes[31] = 0b0000_0001;
-    let id = MemberId::new(bytes);
-
-    assert_eq!(id.bit(0), Ok(true), "index 0 must be the MSB of byte 0");
-    assert_eq!(id.bit(1), Ok(false));
-    assert_eq!(id.bit(255), Ok(true), "index 255 must be the LSB of byte 31");
-    assert_eq!(id.bit(254), Ok(false));
+fn a_member_is_addressed_by_its_id_bits_most_significant_first() {
+    for bit in [0usize, 1, 7, 8, 254, 255] {
+        let held = [0u8; 32];
+        let mut absent = held;
+        absent[bit / 8] ^= 0x80 >> (bit % 8);
+        let member = MemberLeaf::new(MemberId::new(held), h("alice"), member_key("k"), nm("A"), sn("B"), vec![device_key("d")]).unwrap();
+        let trie = TestTrie::genesis(vec![member]).unwrap();
+        let proof = trie.prove_absent(&MemberId::new(absent), &device_key("probe")).unwrap();
+        let map = proof.vacancy().expect("vacant").map();
+        let marked: Vec<usize> = (0..256).filter(|level| (map[level / 8] >> (level % 8)) & 1 == 1).collect();
+        assert_eq!(marked, [255 - bit], "bit {bit}");
+    }
 }
 
-/// verifies: LLR-7jkcba, PR-jq43gx
+/// verifies: PR-jq43gx, LLR-zbe553
 ///
-/// PR-jq43gx's reproduction: an index the type admits must not panic.
+/// PR-jq43gx's subject, the ends of the MemberId range: the all-0 and all-1
+/// MemberIds are held, looked up and proved absent without a panic or an
+/// error.
 #[test]
-fn member_id_bit_out_of_range_does_not_panic() {
-    let id = MemberId::new([0xff; 32]);
-    let outcome = std::panic::catch_unwind(|| {
-        let _ = id.bit(256);
-        let _ = id.bit(u16::MAX);
-    });
-    assert!(outcome.is_ok(), "MemberId::bit panicked on an out-of-range index (PR-jq43gx)");
-}
-
-/// verifies: LLR-7jkcba, PR-jq43gx
-///
-/// PR-jq43gx's second site.
-#[test]
-fn default_hashes_at_level_out_of_range_does_not_panic() {
-    let defaults = org_members::smt::DefaultHashes::compute::<Blake3Hasher>();
-    let outcome = std::panic::catch_unwind(|| {
-        let _ = defaults.at_level(257);
-        let _ = defaults.at_level(u16::MAX);
-    });
-    assert!(outcome.is_ok(), "DefaultHashes::at_level panicked on an out-of-range level (PR-jq43gx)");
-}
-
-/// verifies: LLR-7jkcba
-#[test]
-fn out_of_range_path_index_is_index_out_of_range() {
-    let id = MemberId::new([0xff; 32]);
-    assert_eq!(id.bit(255), Ok(true));
-    assert_eq!(id.bit(256), Err(OrgMembersError::IndexOutOfRange));
-    assert_eq!(id.bit(u16::MAX), Err(OrgMembersError::IndexOutOfRange));
-
-    let defaults = org_members::smt::DefaultHashes::compute::<Blake3Hasher>();
-    assert!(defaults.at_level(256).is_ok());
-    assert!(matches!(defaults.at_level(257), Err(OrgMembersError::IndexOutOfRange)));
-    assert!(matches!(defaults.at_level(u16::MAX), Err(OrgMembersError::IndexOutOfRange)));
+fn the_extreme_member_ids_are_handled() {
+    let ids = [MemberId::new([0; 32]), MemberId::new([0xff; 32])];
+    let members: Vec<MemberLeaf> = ids
+        .iter()
+        .zip(["low", "high"])
+        .map(|(id, handle)| MemberLeaf::new(*id, h(handle), member_key(handle), nm("A"), sn("B"), vec![device_key(&format!("{handle}-d"))]).unwrap())
+        .collect();
+    let trie = TestTrie::genesis(members).unwrap();
+    for id in &ids {
+        assert!(trie.contains(id));
+        let proof = trie.prove_absent(id, &device_key("probe")).unwrap();
+        assert_eq!(proof.verify::<Blake3Hasher>(&trie.root_hash().unwrap(), id, &device_key("probe")), Ok(()));
+    }
 }
 
 /// verifies: LLR-wm5hpc, LLR-4n8zqx
@@ -2836,8 +2847,8 @@ fn add_p2p_device_reports_earlier_refusals_before_shared_key() {
     assert_eq!(err, OrgMembersError::DuplicateDevice);
     // A full member offered a key another member holds.
     let mut full = trie.clone();
-    for seed in ["alice-d2", "alice-d3", "alice-d4"] {
-        full = full.add_p2p_device(&member_id("alice-id"), device_key(seed)).unwrap();
+    for key in free_position_keys("alice-fill", &[device_key("alice-d1")], 7) {
+        full = full.add_p2p_device(&member_id("alice-id"), key).unwrap();
     }
     let err = full.add_p2p_device(&member_id("alice-id"), device_key("bob-d1")).unwrap_err();
     assert_eq!(err, OrgMembersError::DeviceSlotsFull);

@@ -20,8 +20,9 @@ pub use person::{
 /// non-ASCII handles after NFC expansion.
 pub const MAX_HANDLE_LEN: usize = 128;
 
-/// Immutable member identifier. Used as the SMT key and as a stable reference
-/// to a member regardless of changes to their handle or p2p key.
+/// Immutable member identifier. Used as the tree's position (its 256 bits,
+/// most significant first; LLR-zbe553) and as a stable reference to a member
+/// regardless of changes to their handle or Member-as-a-group key.
 ///
 /// The 32 bytes are opaque -- the caller is responsible for generating unique,
 /// immutable values (e.g., random bytes, or a hash of a stable input).
@@ -48,27 +49,6 @@ impl MemberId {
 
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
-    }
-
-    /// Returns the bit at the given index (0 = MSB of byte 0, 255 = LSB of
-    /// byte 31), or `IndexOutOfRange` for an index of 256 or more
-    /// (LLR-zbe553, LLR-7jkcba).
-    pub fn bit(&self, index: u16) -> Result<bool, OrgMembersError> {
-        let byte = self
-            .0
-            .get(usize::from(index / 8))
-            .ok_or(OrgMembersError::IndexOutOfRange)?;
-        Ok((byte >> (7 - (index % 8))) & 1 == 1)
-    }
-
-    /// The identifier's 256 bits, most significant first: the path the
-    /// store walks (LLR-zbe553). It cannot go out of range (LLR-7jkcba).
-    pub(crate) fn path_bits(&self) -> impl DoubleEndedIterator<Item = bool> + '_ {
-        self.0.iter().flat_map(|byte| {
-            (0..8u8)
-                .rev()
-                .map(move |shift| (byte >> shift) & 1 == 1)
-        })
     }
 }
 
@@ -352,33 +332,6 @@ impl MemberLeaf {
 
     pub(crate) fn p2p_device_slots(&self) -> &DeviceSlots {
         &self.p2p_devices
-    }
-
-    /// Canonical byte encoding for hashing. Crate-private because external
-    /// callers cannot meaningfully compute `p2p_device_sub_trie_root` without
-    /// invoking internal device-trie hashing -- exposing this would invite
-    /// callers to produce bytes that don't match what the trie actually hashes.
-    pub(crate) fn canonical_bytes(&self, p2p_device_sub_trie_root: &NodeHash) -> Vec<u8> {
-        let mut buf = Vec::new();
-        // id: 32 bytes raw
-        buf.extend_from_slice(self.id.as_bytes());
-        // handle_len + handle bytes
-        let handle_bytes = self.handle.as_str().as_bytes();
-        buf.extend_from_slice(&(handle_bytes.len() as u32).to_le_bytes());
-        buf.extend_from_slice(handle_bytes);
-        // p2p_key: 32 bytes raw
-        buf.extend_from_slice(self.p2p_key.as_bytes());
-        // name_len + name bytes
-        let name_bytes = self.name.as_str().as_bytes();
-        buf.extend_from_slice(&(name_bytes.len() as u32).to_le_bytes());
-        buf.extend_from_slice(name_bytes);
-        // surname_len + surname bytes
-        let surname_bytes = self.surname.as_str().as_bytes();
-        buf.extend_from_slice(&(surname_bytes.len() as u32).to_le_bytes());
-        buf.extend_from_slice(surname_bytes);
-        // p2p_device_sub_trie_root: 32 bytes raw
-        buf.extend_from_slice(p2p_device_sub_trie_root.as_bytes());
-        buf
     }
 }
 

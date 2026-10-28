@@ -75,3 +75,37 @@ _Avoid_: smart constructor, checked type
 A value type with no invariant beyond its representation, used to keep values
 of different meaning apart.
 _Avoid_: wrapper, marker type
+
+**Proven member**:
+A Member's leaf without its DevicePublicKeys, as a Held proof carries it: its
+MemberId, handle, Member-as-a-group key, name, surname and device root.
+_Avoid_: member summary, member header, partial member
+
+**Device absence proof**:
+An absence proof that a DevicePublicKey is not held, under a Membership root,
+by the Member a MemberId names there: a Vacant proof or a Held proof.
+_Avoid_: device proof, device exclusion proof
+
+**Vacant proof**:
+A Device absence proof in which the MemberId holds no Member under the
+Membership root: a Tree absence proof of that MemberId under the Membership
+root, its vacancy.
+_Avoid_: empty proof, non-member proof
+
+**Held proof**:
+A Device absence proof in which the MemberId holds a Member under the
+Membership root and that Member lacks the DevicePublicKey: the Proven member,
+its inclusion proof, and a Tree absence proof under the Member's device root,
+its device-root absence.
+_Avoid_: member proof
+
+**Member hasher**:
+The hash domains of the Membership record: its Tree hasher, the domains of a
+MemberId's identity hash and of a Member's content hash, and the Device root
+hasher every Member's device root tree is built under.
+_Avoid_: trie hasher, org hasher
+
+**Empty-leaf sentinel**:
+The bytes whose hash in a Tree hasher's leaf domain is that tree's Empty
+leaf, chosen so that they encode no leaf the tree can hold.
+_Avoid_: empty marker, null leaf, padding

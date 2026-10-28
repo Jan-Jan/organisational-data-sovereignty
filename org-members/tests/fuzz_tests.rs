@@ -1,6 +1,6 @@
 mod common;
 
-use common::{default_level_count, device_key, member_id, member_key};
+use common::{device_key, member_id, member_key, positioned_device_key};
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
 use org_members::types::{Handle, DevicePublicKey, MemberId, Name, PersonPublicKey, MemberLeaf, Surname};
@@ -613,7 +613,7 @@ proptest! {
 const REMOVAL_POOL: usize = 3;
 /// Device seeds per member. Wider than MAX_DEVICES so some ops name a
 /// device the member does not hold, or overflow the slots.
-const DEVICE_POOL: usize = 6;
+const DEVICE_POOL: usize = 10;
 
 /// The replacement key an op supplies.
 #[derive(Debug, Clone)]
@@ -667,8 +667,9 @@ fn pool_id(member_idx: usize) -> MemberId {
     member_id(&format!("{}-id-0", HANDLES[member_idx]))
 }
 
+/// The device at position `device_idx` of the member's pool.
 fn pool_device(member_idx: usize, device_idx: usize) -> DevicePublicKey {
-    device_key(&format!("{}-d-{}", HANDLES[member_idx], device_idx))
+    positioned_device_key(&format!("{}-d-{}", HANDLES[member_idx], device_idx), device_idx as u8)
 }
 
 fn pool_key(member_idx: usize, variant: u8) -> PersonPublicKey {
@@ -1065,32 +1066,31 @@ proptest! {
 // Absence proofs (SDD-57vaj4)
 // ============================================================
 
-/// Bytes in an absence proof's wire form: a default-sibling map, siblings and
-/// an ending. The sibling count is either the one the map implies or any count
-/// up to past the 256 bound, so decoding succeeds often enough for `verify` to
-/// run. Uniformly random bytes almost never decode to a proof.
+/// Encodings of real Vacant and Held proofs, cut short, extended, or with
+/// one byte changed: shaped like proofs, so decoding reaches the inner
+/// parses that random bytes rarely do.
 fn arb_wire_proof() -> impl Strategy<Value = Vec<u8>> {
-    let ending = prop_oneof![
-        Just(None),
-        arb_handle_idx().prop_map(|index| make_member(HANDLES[index], 0)),
-    ];
-    (any::<[u8; 32]>(), any::<bool>(), 0usize..300, any::<[u8; 32]>(), ending).prop_map(
-        |(map, consistent, free_len, fill, ending)| {
-            let len = if consistent { 256 - default_level_count(&map) } else { free_len };
-            let siblings: Vec<[u8; 32]> = (0..len)
-                .map(|index| {
-                    let mut sibling = fill;
-                    sibling[0] ^= index as u8;
-                    sibling
-                })
-                .collect();
-            postcard::to_allocvec(&(map, siblings, ending)).unwrap()
-        },
-    )
+    let trie = TestTrie::genesis(vec![make_member(HANDLES[0], 0).unwrap(), make_member(HANDLES[1], 0).unwrap()]).unwrap();
+    let vacant = postcard::to_allocvec(&trie.prove_absent(&member_id("nobody"), &device_key("probe")).unwrap()).unwrap();
+    let held_id = member_id(&format!("{}-id-0", HANDLES[0]));
+    let held = postcard::to_allocvec(&trie.prove_absent(&held_id, &device_key("probe")).unwrap()).unwrap();
+    (prop_oneof![Just(vacant), Just(held)], any::<usize>(), any::<u8>(), 0u8..3).prop_map(|(mut bytes, offset, filler, mutation)| {
+        let offset = offset % bytes.len().max(1);
+        match mutation {
+            0 => bytes.truncate(offset),
+            1 => bytes.extend(std::iter::repeat_n(filler, offset % 64)),
+            _ => {
+                if let Some(byte) = bytes.get_mut(offset) {
+                    *byte = filler;
+                }
+            }
+        }
+        bytes
+    })
 }
 
 proptest! {
-    /// verifies: REQ-ds8ryr, LLR-2dcnbp, LLR-4rju5r
+    /// verifies: REQ-ds8ryr, LLR-9g2kjg, LLR-v3cysh
     #[test]
     fn absence_proof_decoding_and_verify_never_panic(
         bytes in prop_oneof![
@@ -1105,7 +1105,7 @@ proptest! {
         }
     }
 
-    /// verifies: LLR-utp6x4, LLR-dgzy7e, LLR-4xz255, REQ-535jcd, REQ-tk2qqj
+    /// verifies: LLR-bh53rr, LLR-54gp2f, REQ-sb2frw, REQ-65xrgh
     #[test]
     fn every_honest_absence_proof_verifies(
         handle_indexes in proptest::collection::btree_set(0usize..HANDLES.len(), 1..6),
@@ -1116,11 +1116,16 @@ proptest! {
             .iter()
             .filter_map(|&index| make_member(HANDLES[index], 0))
             .collect();
+        let members_ids: Vec<MemberId> = members.iter().map(|member| *member.id()).collect();
         let trie = TestTrie::genesis(members).map_err(fail)?;
         let root = trie.root_hash().map_err(fail)?;
         let absent = member_id(&format!("absent-{absent_seed}"));
         let probe = device_key("probe-device");
         let proof = trie.prove_absent(&absent, &probe).map_err(fail)?;
         prop_assert_eq!(proof.verify::<Blake3Hasher>(&root, &absent, &probe), Ok(()));
+        if let Some(first) = members_ids.first() {
+            let proof = trie.prove_absent(first, &probe).map_err(fail)?;
+            prop_assert_eq!(proof.verify::<Blake3Hasher>(&root, first, &probe), Ok(()));
+        }
     }
 }

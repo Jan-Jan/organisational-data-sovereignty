@@ -1,6 +1,9 @@
 //! Property tests: no input makes a constructor, a decoder or a Person
 //! operation panic, and every accepted value satisfies its type's rules.
 
+mod common;
+
+use common::device_position;
 use curve25519_dalek::montgomery::MontgomeryPoint;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use person::{
@@ -51,7 +54,7 @@ proptest! {
         }
     }
 
-    /// verifies: LLR-sjrh7z, REQ-vxx8k3
+    /// verifies: LLR-sjrh7z, LLR-pjf9qn, REQ-vxx8k3
     #[cfg(feature = "serde")]
     #[test]
     fn decoding_any_bytes_does_not_panic(bytes in proptest::collection::vec(any::<u8>(), 0..300)) {
@@ -62,17 +65,18 @@ proptest! {
         if let Ok(slots) = postcard::from_bytes::<DeviceSlots>(&bytes) {
             prop_assert!(slots.device_count() <= MAX_DEVICES);
             prop_assert!(slots.devices().windows(2).all(|pair| matches!(pair, [a, b] if a < b)));
+            prop_assert!(positions_distinct(slots.devices()));
         }
     }
 
     /// Byte strings shaped like a slots encoding — a small length, then keys —
     /// reach the per-key and ordering checks that random bytes rarely do.
-    /// verifies: LLR-sjrh7z, REQ-vxx8k3
+    /// verifies: LLR-sjrh7z, LLR-pjf9qn, REQ-vxx8k3
     #[cfg(feature = "serde")]
     #[test]
     fn decoding_slot_shaped_bytes_does_not_panic(
-        length in 0u8..8,
-        keys in proptest::collection::vec(any::<[u8; 32]>(), 0..6),
+        length in 0u8..10,
+        keys in proptest::collection::vec(any::<[u8; 32]>(), 0..10),
     ) {
         let mut bytes = vec![length];
         for key in &keys {
@@ -80,6 +84,7 @@ proptest! {
         }
         if let Ok(slots) = postcard::from_bytes::<DeviceSlots>(&bytes) {
             prop_assert!(slots.device_count() <= MAX_DEVICES);
+            prop_assert!(positions_distinct(slots.devices()));
         }
     }
 }
@@ -105,6 +110,13 @@ fn person_from_small_seeds(key_seed: Option<u8>, device_seeds: &[u8]) -> Option<
     Person::new(name, surname, key, DeviceSlots::parse(devices).ok()?).ok()
 }
 
+/// Whether no two of `devices` share a 4-bit device position.
+fn positions_distinct(devices: &[DevicePublicKey]) -> bool {
+    devices.iter().enumerate().all(|(index, key)| {
+        devices.iter().skip(index + 1).all(|other| device_position(key) != device_position(other))
+    })
+}
+
 /// The rules every accepted Person satisfies (REQ-ht3x78, REQ-7qgx2q, REQ-4szc22).
 fn satisfies_the_person_rules(person: &Person) -> bool {
     let devices = person.devices().devices();
@@ -120,7 +132,8 @@ fn satisfies_the_person_rules(person: &Person) -> bool {
                     .all(|device| device.as_bytes() != key.as_bytes())
         }
     };
-    devices.len() <= MAX_DEVICES && sorted && key_rule
+    let positions_distinct = positions_distinct(devices);
+    devices.len() <= MAX_DEVICES && sorted && key_rule && positions_distinct
 }
 
 proptest! {
@@ -128,14 +141,14 @@ proptest! {
 
     /// Person::new on arbitrary fields never panics, accepts exactly what
     /// check_group_key accepts, and every Person it returns satisfies the rules.
-    /// verifies: LLR-sjkmr6, LLR-kbhc43, LLR-4ku56h, LLR-3n3kxx
+    /// verifies: LLR-sjkmr6, LLR-kbhc43, LLR-4ku56h, LLR-3n3kxx, LLR-xsx6gg
     #[test]
     fn person_new_on_any_fields(
         name in any::<String>(),
         surname in any::<String>(),
         key_bytes in proptest::option::of(any::<[u8; 32]>()),
         copy_a_device_key in any::<bool>(),
-        seeds in proptest::collection::vec(any::<[u8; 32]>(), 0..6),
+        seeds in proptest::collection::vec(any::<[u8; 32]>(), 0..10),
     ) {
         let devices: Vec<DevicePublicKey> = seeds.iter().filter_map(device_from_seed).collect();
         let key = if copy_a_device_key {
@@ -241,8 +254,8 @@ proptest! {
         key_tag in 0u8..3,
         key_bytes in any::<[u8; 32]>(),
         copy_a_device_key in any::<bool>(),
-        slot_count in 0u8..6,
-        seeds in proptest::collection::vec(any::<[u8; 32]>(), 0..6),
+        slot_count in 0u8..10,
+        seeds in proptest::collection::vec(any::<[u8; 32]>(), 0..10),
     ) {
         let mut devices: Vec<[u8; 32]> = seeds
             .iter()

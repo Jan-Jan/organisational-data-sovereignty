@@ -53,7 +53,7 @@ main worktree, not always in feature worktrees).
   anchored to a `base_root`. The wire format between admins.
 - **CandidateTrie** -- result of applying a delta. Cannot be queried; must be
   verified against an expected root hash before becoming a usable `OrgTrie`.
-- **NodeHash** -- 32-byte hash output from `TrieHasher` (any internal node,
+- **NodeHash** -- 32-byte hash output from `MemberHasher` (any internal node,
   leaf, or root of a subtree).
 - **RootHash** -- type-distinct wrapper for the externally-meaningful root
   of the whole trie. `From<NodeHash> for RootHash` converts at the boundary.
@@ -233,7 +233,7 @@ Test count varies by commit; `cargo test` is the source of truth.
 - `src/smt.rs` -- low-level SMT operations (path copying, recalculate)
 - `src/delta.rs` -- Delta, CandidateTrie
 - `src/node.rs` -- internal Node type with `spin::Once` hash
-- `src/hasher.rs` -- TrieHasher trait + Blake3Hasher default
+- `src/hasher.rs` -- MemberHasher trait + Blake3Hasher default
 
 ## Known follow-ups (in code review)
 

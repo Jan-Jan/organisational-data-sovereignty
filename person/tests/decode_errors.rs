@@ -8,7 +8,9 @@
 // library, not its tests.
 #![allow(clippy::expect_used)]
 
-use ed25519_dalek::SigningKey;
+mod common;
+
+use common::{device_bytes, sorted_device_bytes};
 use person::{DevicePublicKey, DeviceSlots, Name, PersonPublicKey, Surname};
 use serde::de::value::{Error, SeqDeserializer, StrDeserializer};
 use serde::de::{Deserialize, IntoDeserializer};
@@ -20,18 +22,6 @@ fn bytes_deserializer(bytes: [u8; 32]) -> SeqDeserializer<std::array::IntoIter<u
 fn slots_deserializer(keys: &[[u8; 32]]) -> SeqDeserializer<std::vec::IntoIter<Vec<u8>>, Error> {
     let keys: Vec<Vec<u8>> = keys.iter().map(|key| key.to_vec()).collect();
     SeqDeserializer::new(keys.into_iter())
-}
-
-fn device_bytes(seed: u8) -> [u8; 32] {
-    *SigningKey::from_bytes(&[seed; 32])
-        .verifying_key()
-        .as_bytes()
-}
-
-fn sorted_device_bytes(seeds: &[u8]) -> Vec<[u8; 32]> {
-    let mut keys: Vec<[u8; 32]> = seeds.iter().map(|seed| device_bytes(*seed)).collect();
-    keys.sort();
-    keys
 }
 
 /// verifies: LLR-eeq89n, LLR-7guspr, LLR-vs7etb
@@ -67,11 +57,11 @@ fn a_rejected_name_names_the_field_and_the_bound() {
     );
 }
 
-/// verifies: LLR-eeq89n, LLR-sjrh7z
+/// verifies: LLR-eeq89n, LLR-sjrh7z, LLR-pjf9qn
 #[test]
 fn rejected_slots_name_the_bound_or_the_order() {
-    let five = sorted_device_bytes(&[1, 2, 3, 4, 5]);
-    let error = DeviceSlots::deserialize(slots_deserializer(&five)).expect_err("over the bound");
+    let nine = sorted_device_bytes(&[1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    let error = DeviceSlots::deserialize(slots_deserializer(&nine)).expect_err("over the bound");
     assert_eq!(error.to_string(), "device slots exceed MAX_DEVICES");
 
     let mut reversed = sorted_device_bytes(&[1, 2]);
@@ -90,12 +80,16 @@ fn rejected_slots_name_the_bound_or_the_order() {
         "device slots must be strictly increasing (sorted, no duplicates)"
     );
 
+    let colliding = sorted_device_bytes(&[1, 17]);
+    let error = DeviceSlots::deserialize(slots_deserializer(&colliding)).expect_err("one position");
+    assert_eq!(error.to_string(), "two DevicePublicKeys share a device position");
+
     let mut identity = [0u8; 32];
     identity[0] = 1;
     let error = DeviceSlots::deserialize(slots_deserializer(&[identity])).expect_err("bad key");
     assert_eq!(error.to_string(), "invalid device public key");
 
-    let four = sorted_device_bytes(&[1, 2, 3, 4]);
-    let slots = DeviceSlots::deserialize(slots_deserializer(&four)).expect("within the bound");
-    assert_eq!(slots.device_count(), 4);
+    let eight = sorted_device_bytes(&[1, 2, 3, 4, 5, 6, 7, 8]);
+    let slots = DeviceSlots::deserialize(slots_deserializer(&eight)).expect("within the bound");
+    assert_eq!(slots.device_count(), 8);
 }

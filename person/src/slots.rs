@@ -2,12 +2,15 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use crate::device_key::DevicePublicKey;
+use crate::device_root::same_device_position;
 use crate::error::IdentityError;
 
-/// Maximum number of devices: the device sub-trie has four slots.
-pub const MAX_DEVICES: usize = 4;
+/// Maximum number of devices, held below the device root tree's 16 positions
+/// (owner ruling 2026-10-23). LLR-xsx6gg.
+pub const MAX_DEVICES: usize = 8;
 
-/// A bounded, sorted, duplicate-free set of device keys. LLR-9p34cv.
+/// A bounded, sorted, duplicate-free set of DevicePublicKeys at distinct device
+/// positions. LLR-xsx6gg.
 #[derive(Clone, PartialEq, Eq)]
 pub struct DeviceSlots {
     slots: Vec<DevicePublicKey>,
@@ -25,6 +28,9 @@ impl DeviceSlots {
         {
             return Err(IdentityError::DuplicateDevice);
         }
+        if devices.iter().any(|key| position_shared(&devices, key)) {
+            return Err(IdentityError::DevicePositionTaken);
+        }
         Ok(Self { slots: devices })
     }
 
@@ -40,12 +46,21 @@ impl DeviceSlots {
         self.slots.len()
     }
 
+    /// Whether a key of the set other than `candidate` has `candidate`'s
+    /// device position. LLR-vraz7n.
+    pub fn position_taken(&self, candidate: &DevicePublicKey) -> bool {
+        position_shared(&self.slots, candidate)
+    }
+
     pub fn add_device(&self, device: DevicePublicKey) -> Result<Self, IdentityError> {
         if self.slots.len() >= MAX_DEVICES {
             return Err(IdentityError::DeviceSlotsFull);
         }
         if self.has_device(&device) {
             return Err(IdentityError::DuplicateDevice);
+        }
+        if self.position_taken(&device) {
+            return Err(IdentityError::DevicePositionTaken);
         }
         let mut slots = self.slots.clone();
         slots.push(device);
@@ -62,15 +77,12 @@ impl DeviceSlots {
         slots.remove(index);
         Ok(Self { slots })
     }
+}
 
-    /// The slots padded with `None` to `MAX_DEVICES`, in sorted order.
-    pub(crate) fn to_fixed_slots(&self) -> [Option<DevicePublicKey>; MAX_DEVICES] {
-        let mut fixed = [None; MAX_DEVICES];
-        for (slot, device) in fixed.iter_mut().zip(self.slots.iter()) {
-            *slot = Some(*device);
-        }
-        fixed
-    }
+/// Whether a key of `keys` other than `candidate` has `candidate`'s device
+/// position.
+fn position_shared(keys: &[DevicePublicKey], candidate: &DevicePublicKey) -> bool {
+    keys.iter().any(|held| held != candidate && same_device_position(held, candidate))
 }
 
 impl TryFrom<Vec<DevicePublicKey>> for DeviceSlots {
@@ -105,7 +117,7 @@ impl<'de> serde::Deserialize<'de> for DeviceSlots {
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 write!(
                     formatter,
-                    "at most {MAX_DEVICES} device keys in strictly increasing order"
+                    "at most {MAX_DEVICES} DevicePublicKeys in strictly increasing order, at distinct device positions"
                 )
             }
 
@@ -122,6 +134,9 @@ impl<'de> serde::Deserialize<'de> for DeviceSlots {
                         return Err(serde::de::Error::custom(
                             "device slots must be strictly increasing (sorted, no duplicates)",
                         ));
+                    }
+                    if position_shared(&slots, &device) {
+                        return Err(serde::de::Error::custom("two DevicePublicKeys share a device position"));
                     }
                     slots.push(device);
                 }

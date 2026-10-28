@@ -27,7 +27,11 @@ design items for that code gain a note naming `person` as the provider.
 `PersonPublicKey` and `DeviceSlots`, each constructible only through a
 validating constructor, deserialisation included — and the X25519 validity
 check `PersonPublicKey` applies, exported for other units' key types.
-traces: REQ-r7mytp, REQ-q6xkna, REQ-3vqs9b, REQ-4szc22, REQ-tq4ms4, REQ-7gz72r
+traces: REQ-r7mytp, REQ-q6xkna, REQ-3vqs9b, REQ-4szc22, REQ-tq4ms4, REQ-7gz72r,
+REQ-4e23xr
+
+(Amended 2026-10-24, `worktree-generic-smt`: `DeviceSlots` refuses two keys
+of one position, LLR-xsx6gg and LLR-pjf9qn in `2026-10-24-device-root-tree.md`.)
 
 **LLR-ayu93n**: `Name::parse` and `Surname::parse` (and the `TryFrom` impls and
 `serde(try_from = "String")` decoding that delegate to them) are the only
@@ -87,6 +91,7 @@ each returns a new set and leaves the receiver unchanged. `devices` returns
 the keys in sorted order, `device_count` their number, and `has_device` whether
 a given key is in the set.
 satisfies: REQ-4szc22
+superseded-by: LLR-xsx6gg
 
 **LLR-sjrh7z**: `DeviceSlots`' `Deserialize` impl rejects a sequence longer than
 `MAX_DEVICES` before storing a key beyond the bound, and rejects one that is
@@ -129,14 +134,24 @@ a `DeviceSlots` as the sequence of its keys in sorted order. Decoding a
 `DeviceSlots` from anything other than a sequence fails with an error that
 names the expected form, `at most 4 device keys in strictly increasing order`.
 satisfies: derived
+superseded-by: LLR-cyx9a3
 
-**SDD-7r833z**: Device sub-trie — the fixed-shape tree over a `DeviceSlots`
-whose root commits to the set, hashed through a trait whose domains the
-implementor chooses. traces: REQ-mu3qgz, REQ-aj6x3n
+**SDD-7r833z**: Device root — the root of the device root tree, the depth-4
+sparse Merkle tree that commits to a set of DevicePublicKeys, each at its
+position, under hash domains the implementor chooses.
+traces: REQ-mu3qgz, REQ-aj6x3n, REQ-9sh8qb
+
+(Amended 2026-10-24, `worktree-generic-smt`: the fixed depth-2 tree of four
+slots became a sparse Merkle tree of depth 4 built on the
+`sparse-merkle-tree` unit, and the item gained the position and its collision
+check; its LLRs are in `2026-10-24-device-root-tree.md`. Its statement was
+restated as one responsibility on 2026-10-27, guideline review round 1, and
+on 2026-10-28, round 6, to name the tree the device root tree.)
 
 **LLR-4vsm8d**: `DeviceTrieHasher` provides `hash_device_leaf(&[u8]) -> NodeHash`,
 `hash_device_node(&NodeHash, &NodeHash) -> NodeHash` and an associated
 `DEVICE_EMPTY_SENTINEL: &'static [u8]`. satisfies: REQ-mu3qgz, REQ-aj6x3n
+superseded-by: LLR-9mjfjn
 
 Its associated constant and its functions without a receiver make the trait
 not object-safe, so callers use it through generics.
@@ -148,12 +163,14 @@ slot contains `H::hash_device_leaf(H::DEVICE_EMPTY_SENTINEL)`; the two levels
 above are `H::hash_device_node`. It is the code org-members uses today, with
 the sentinel and both hashes taken from `H`. satisfies: REQ-mu3qgz,
 REQ-aj6x3n
+superseded-by: LLR-8y8tqr
 
 **LLR-z99qee**: A `NodeHash` wraps any 32 bytes, unvalidated:
 `NodeHash::new` and `From<[u8; 32]>` construct it, `as_bytes` returns the
 bytes, its `Debug` form is `NodeHash(` and the first four bytes in lowercase hex
 and `..)`, and with the `serde` feature it serialises as the 32 bytes.
 satisfies: derived
+retired: 2026-10-24 — NodeHash is sparse-merkle-tree's, which this unit re-exports (2026-10-24-device-root-tree.md)
 
 **SDD-u9cddc**: Errors — the error type every constructor in the unit returns,
 and the no-panic discipline. traces: REQ-vxx8k3, REQ-bczz87, REQ-r4keha

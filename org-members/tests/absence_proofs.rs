@@ -1,23 +1,37 @@
+//! Two-step absence proofs (SDD-57vaj4): a Vacant proof that a MemberId
+//! holds no Member, or a Held proof that the Member it holds lacks a
+//! DevicePublicKey, checked against a Membership root.
+
+#![allow(clippy::expect_used, clippy::unwrap_used, clippy::indexing_slicing)]
+
 mod common;
 
-use common::{default_level_count, device_key, member_id, member_key};
-use org_members::hasher::{Blake3Hasher, TrieHasher};
-use org_members::proof::{AbsenceProof, ProofEnding};
-use org_members::smt::DefaultHashes;
+use common::{keyed, member_content_bytes, member_id, member_key, positioned_device_key};
+use org_members::hasher::{Blake3DeviceRootHasher, Blake3Hasher};
 use org_members::trie::OrgTrie;
-use org_members::types::{Handle, MemberId, MemberLeaf, Name, NodeHash, RootHash, Surname};
-use org_members::OrgMembersError;
+use org_members::types::{Handle, MemberId, MemberLeaf, Name, RootHash, Surname};
+use org_members::{AbsenceProof, OrgMembersError};
+use sparse_merkle_tree::ProofEnding;
 
 type TestTrie = OrgTrie<Blake3Hasher>;
 
-fn leaf(name: &str, devices: &[&str]) -> MemberLeaf {
+fn leaf(handle: &str, devices: &[&str]) -> MemberLeaf {
+    leaf_at(*member_id(handle).as_bytes(), handle, "Test", "User", devices)
+}
+
+fn leaf_at(id: [u8; 32], handle: &str, name: &str, surname: &str, devices: &[&str]) -> MemberLeaf {
+    let keys = devices
+        .iter()
+        .enumerate()
+        .map(|(position, seed)| positioned_device_key(seed, position as u8))
+        .collect();
     MemberLeaf::new(
-        member_id(name),
-        Handle::parse(name).unwrap(),
-        member_key(&format!("{name}-mk")),
-        Name::parse("Test").unwrap(),
-        Surname::parse("User").unwrap(),
-        devices.iter().map(|seed| device_key(seed)).collect(),
+        MemberId::new(id),
+        Handle::parse(handle).unwrap(),
+        member_key(&format!("{handle}-mk")),
+        Name::parse(name).unwrap(),
+        Surname::parse(surname).unwrap(),
+        keys,
     )
     .unwrap()
 }
@@ -34,550 +48,324 @@ fn org() -> TestTrie {
 
 /// `org()` after alice's second device is removed and recalculated.
 fn org_without_alice_d2() -> TestTrie {
-    let changed = org()
-        .delete_p2p_device(
-            &member_id("alice"),
-            &device_key("alice-d2"),
-            member_key("alice-mk2"),
-        )
-        .unwrap();
-    changed.recalculate().unwrap().0
-}
-
-/// verifies: LLR-4xz255, REQ-535jcd
-#[test]
-fn prove_absent_refuses_an_uncalculated_trie() {
-    let pending = org().add_member(leaf("dave", &["dave-d1"])).unwrap();
-    assert_eq!(
-        pending
-            .prove_absent(&member_id("zed"), &device_key("zed-d1"))
-            .unwrap_err(),
-        OrgMembersError::HashesNotCalculated
-    );
-}
-
-/// verifies: LLR-4xz255, LLR-2dcnbp, REQ-535jcd
-#[test]
-fn prove_absent_refuses_a_device_the_member_holds() {
-    assert_eq!(
-        org()
-            .prove_absent(&member_id("alice"), &device_key("alice-d1"))
-            .unwrap_err(),
-        OrgMembersError::DeviceStillHeld
-    );
-}
-
-/// verifies: LLR-4xz255, REQ-535jcd
-///
-/// A key held by a different Member does not stop the proof (owner ruling
-/// 2026-10-06; the never-again rule belongs to the unit holding the
-/// revoked-device list).
-#[test]
-fn prove_absent_ignores_a_key_another_member_holds() {
-    assert!(org()
-        .prove_absent(&member_id("alice"), &device_key("bob-d1"))
-        .is_ok());
-}
-
-/// verifies: LLR-25tpdp, REQ-yyuxh8
-#[test]
-fn proof_for_an_absent_member_carries_no_member_data() {
-    let proof = org()
-        .prove_absent(&member_id("zed"), &device_key("zed-d1"))
-        .unwrap();
-    assert_eq!(proof.ending(), &ProofEnding::Empty);
-    assert_eq!(
-        proof.siblings().len() + default_level_count(proof.default_map()),
-        256
-    );
-}
-
-/// verifies: LLR-25tpdp, REQ-yyuxh8
-#[test]
-fn proof_for_a_removed_device_carries_only_that_member() {
-    let trie = org_without_alice_d2();
-    let proof = trie
-        .prove_absent(&member_id("alice"), &device_key("alice-d2"))
-        .unwrap();
-    match proof.ending() {
-        ProofEnding::Leaf(member) => {
-            assert_eq!(member.id(), &member_id("alice"));
-            assert_eq!(member, &trie.get(&member_id("alice")).unwrap());
-        }
-        ProofEnding::Empty => panic!("expected alice's leaf"),
-    }
-    assert_eq!(
-        proof.siblings().len() + default_level_count(proof.default_map()),
-        256
-    );
-}
-
-/// verifies: LLR-utp6x4, LLR-dgzy7e, LLR-p2p8qy, REQ-tk2qqj
-#[test]
-fn proof_for_an_absent_member_verifies() {
-    let trie = org();
-    let root = trie.root_hash().unwrap();
-    let proof = trie
-        .prove_absent(&member_id("zed"), &device_key("zed-d1"))
-        .unwrap();
-    assert_eq!(
-        proof.verify::<Blake3Hasher>(&root, &member_id("zed"), &device_key("zed-d1")),
-        Ok(())
-    );
-}
-
-/// verifies: LLR-utp6x4, LLR-dgzy7e, LLR-p2p8qy, REQ-tk2qqj
-///
-/// A deleted member's path ends in an empty leaf at depth 256, not an empty
-/// subtree higher up: the walk must handle both.
-#[test]
-fn proof_for_a_deleted_member_verifies() {
-    let trie = org()
-        .delete_member(&member_id("bob"))
-        .unwrap()
-        .recalculate()
-        .unwrap()
-        .0;
-    let root = trie.root_hash().unwrap();
-    let proof = trie
-        .prove_absent(&member_id("bob"), &device_key("bob-d1"))
-        .unwrap();
-    assert_eq!(proof.ending(), &ProofEnding::Empty);
-    assert_eq!(
-        proof.verify::<Blake3Hasher>(&root, &member_id("bob"), &device_key("bob-d1")),
-        Ok(())
-    );
-}
-
-/// verifies: LLR-utp6x4, LLR-dgzy7e, LLR-p2p8qy, REQ-tk2qqj
-#[test]
-fn proof_for_a_removed_device_verifies() {
-    let trie = org_without_alice_d2();
-    let root = trie.root_hash().unwrap();
-    let proof = trie
-        .prove_absent(&member_id("alice"), &device_key("alice-d2"))
-        .unwrap();
-    assert_eq!(
-        proof.verify::<Blake3Hasher>(&root, &member_id("alice"), &device_key("alice-d2")),
-        Ok(())
-    );
-}
-
-/// verifies: LLR-dgzy7e, LLR-2dcnbp, REQ-tk2qqj, RC-j2znx8
-///
-/// A proof genuine under the new root fails against the old one: the
-/// stale-root case org-io must prevent (HAZ-adm7gv) is at least never
-/// accepted across roots.
-#[test]
-fn proof_is_refused_against_another_root() {
-    let old_root = org().root_hash().unwrap();
-    let trie = org_without_alice_d2();
-    let proof = trie
-        .prove_absent(&member_id("alice"), &device_key("alice-d2"))
-        .unwrap();
-    assert_eq!(
-        proof.verify::<Blake3Hasher>(&old_root, &member_id("alice"), &device_key("alice-d2")),
-        Err(OrgMembersError::AbsenceProofRootMismatch)
-    );
-}
-
-/// verifies: LLR-dgzy7e, LLR-2dcnbp, REQ-tk2qqj
-#[test]
-fn proof_is_refused_for_another_member_id() {
-    let trie = org();
-    let root = trie.root_hash().unwrap();
-    let proof = trie
-        .prove_absent(&member_id("zed"), &device_key("zed-d1"))
-        .unwrap();
-    assert_eq!(
-        proof.verify::<Blake3Hasher>(&root, &member_id("bob"), &device_key("zed-d1")),
-        Err(OrgMembersError::AbsenceProofRootMismatch)
-    );
-}
-
-/// verifies: LLR-p2p8qy, LLR-2dcnbp, REQ-tk2qqj
-///
-/// The root matches, but the leaf holds the device asked about.
-#[test]
-fn proof_is_refused_when_the_member_holds_the_device() {
-    let trie = org();
-    let root = trie.root_hash().unwrap();
-    let proof = trie
-        .prove_absent(&member_id("alice"), &device_key("alice-d9"))
-        .unwrap();
-    assert_eq!(
-        proof.verify::<Blake3Hasher>(&root, &member_id("alice"), &device_key("alice-d1")),
-        Err(OrgMembersError::DeviceStillHeld)
-    );
-}
-
-/// verifies: LLR-4rju5r, LLR-2dcnbp
-#[test]
-fn from_parts_refuses_a_count_that_does_not_match_the_map() {
-    let all_default = [0xffu8; 32];
-    assert_eq!(
-        AbsenceProof::from_parts(
-            all_default,
-            vec![NodeHash::new([7; 32])],
-            ProofEnding::Empty
-        )
-        .unwrap_err(),
-        OrgMembersError::AbsenceProofMalformed
-    );
-    assert_eq!(
-        AbsenceProof::from_parts([0u8; 32], vec![], ProofEnding::Empty).unwrap_err(),
-        OrgMembersError::AbsenceProofMalformed
-    );
-}
-
-/// verifies: LLR-4rju5r, LLR-dgzy7e, REQ-tk2qqj
-#[test]
-fn a_tampered_sibling_is_refused_by_root() {
-    let trie = org_without_alice_d2();
-    let root = trie.root_hash().unwrap();
-    let proof = trie
-        .prove_absent(&member_id("alice"), &device_key("alice-d2"))
-        .unwrap();
-    let mut siblings = proof.siblings().to_vec();
-    siblings[0] = NodeHash::new([0xab; 32]);
-    let tampered =
-        AbsenceProof::from_parts(*proof.default_map(), siblings, proof.ending().clone()).unwrap();
-    assert_eq!(
-        tampered.verify::<Blake3Hasher>(&root, &member_id("alice"), &device_key("alice-d2")),
-        Err(OrgMembersError::AbsenceProofRootMismatch)
-    );
-}
-
-/// verifies: LLR-4rju5r, REQ-tk2qqj
-#[test]
-fn a_proof_survives_the_wire_and_still_verifies() {
-    let trie = org_without_alice_d2();
-    let root = trie.root_hash().unwrap();
-    let proof = trie
-        .prove_absent(&member_id("alice"), &device_key("alice-d2"))
-        .unwrap();
-    let bytes = postcard::to_allocvec(&proof).unwrap();
-    let back: AbsenceProof = postcard::from_bytes(&bytes).unwrap();
-    assert_eq!(back, proof);
-    assert_eq!(
-        back.verify::<Blake3Hasher>(&root, &member_id("alice"), &device_key("alice-d2")),
-        Ok(())
-    );
-}
-
-/// The wire shape, written independently of the crate, so a test can send
-/// what the crate itself would never produce.
-#[derive(serde::Serialize)]
-struct RawProof {
-    default_map: [u8; 32],
-    siblings: Vec<[u8; 32]>,
-    ending: Option<MemberLeaf>,
-}
-
-/// verifies: LLR-4rju5r, LLR-2dcnbp, REQ-ds8ryr
-#[test]
-fn the_wire_refuses_inconsistent_or_oversized_proofs() {
-    let mismatch = RawProof {
-        default_map: [0xff; 32],
-        siblings: vec![[1; 32]],
-        ending: None,
-    };
-    let err = postcard::from_bytes::<AbsenceProof>(&postcard::to_allocvec(&mismatch).unwrap())
-        .unwrap_err();
-    assert!(matches!(err, postcard::Error::SerdeDeCustom), "{err:?}");
-
-    let oversized = RawProof {
-        default_map: [0; 32],
-        siblings: vec![[1; 32]; 257],
-        ending: None,
-    };
-    assert!(
-        postcard::from_bytes::<AbsenceProof>(&postcard::to_allocvec(&oversized).unwrap()).is_err()
-    );
-}
-
-/// verifies: LLR-4rju5r, REQ-ds8ryr
-///
-/// The length prefix claims a million siblings but only 257 follow. Refusing
-/// at the 257th shows the decoder stops at the bound; reading on would end in
-/// `DeserializeUnexpectedEnd` instead.
-#[test]
-fn the_wire_stops_reading_siblings_at_the_bound() {
-    let mut bytes = vec![0u8; 32];
-    bytes.extend_from_slice(&[0xc0, 0x84, 0x3d]); // varint 1_000_000
-    bytes.extend(std::iter::repeat_n(1u8, 257 * 32));
-    let err = postcard::from_bytes::<AbsenceProof>(&bytes).unwrap_err();
-    assert!(matches!(err, postcard::Error::SerdeDeCustom), "{err:?}");
-}
-
-/// verifies: LLR-4rju5r, REQ-tk2qqj
-#[test]
-fn an_empty_ending_proof_survives_the_wire_and_still_verifies() {
-    let trie = org();
-    let root = trie.root_hash().unwrap();
-    let proof = trie
-        .prove_absent(&member_id("zed"), &device_key("zed-d1"))
-        .unwrap();
-    assert_eq!(proof.ending(), &ProofEnding::Empty);
-    let bytes = postcard::to_allocvec(&proof).unwrap();
-    let back: AbsenceProof = postcard::from_bytes(&bytes).unwrap();
-    assert_eq!(back, proof);
-    assert_eq!(
-        back.verify::<Blake3Hasher>(&root, &member_id("zed"), &device_key("zed-d1")),
-        Ok(())
-    );
-}
-
-/// `bytes` with its last bit (bit 255, the leaf-level turn) flipped.
-fn last_bit_flipped(mut bytes: [u8; 32]) -> [u8; 32] {
-    bytes[31] ^= 1;
-    bytes
-}
-
-/// A Member at a chosen MemberId, with its own handle, names and keys.
-fn leaf_at(id: [u8; 32], handle: &str, name: &str, surname: &str, devices: &[&str]) -> MemberLeaf {
-    MemberLeaf::new(
-        MemberId::new(id),
-        Handle::parse(handle).unwrap(),
-        member_key(&format!("{handle}-mk")),
-        Name::parse(name).unwrap(),
-        Surname::parse(surname).unwrap(),
-        devices.iter().map(|seed| device_key(seed)).collect(),
-    )
-    .unwrap()
-}
-
-fn contains(haystack: &[u8], needle: &[u8]) -> bool {
-    haystack.windows(needle.len()).any(|window| window == needle)
-}
-
-/// Fails unless none of the neighbour's handle, name, surname, member key or
-/// device key appears in `bytes`.
-fn assert_no_neighbour_data(bytes: &[u8]) {
-    let member_key = member_key("neighbour-mk");
-    let device_key = device_key("neighbour-d1");
-    for (what, needle) in [
-        ("handle", b"neighbour".as_slice()),
-        ("name", b"Zebulon".as_slice()),
-        ("surname", b"Quixote".as_slice()),
-        ("member key", member_key.as_bytes().as_slice()),
-        ("device key", device_key.as_bytes().as_slice()),
-    ] {
-        assert!(!contains(bytes, needle), "proof bytes carry the neighbour's {what}");
-    }
-}
-
-/// verifies: LLR-25tpdp, REQ-yyuxh8, RC-qa2758
-///
-/// Abnormal input: the neighbour shares all but the last bit of the path, so
-/// its leaf is the level-0 sibling, in an organisation where several members
-/// sit next to each other.
-#[test]
-fn a_proof_next_to_a_neighbour_carries_none_of_its_data() {
-    let subject: [u8; 32] = blake3::hash(b"subject").into();
-    let neighbour = last_bit_flipped(subject);
-    let mut near = subject;
-    near[31] ^= 2;
-    let mut nearer = subject;
-    nearer[31] ^= 3;
-    let genesis = TestTrie::genesis(vec![
-        leaf_at(subject, "subject", "Test", "User", &["subject-d1", "subject-d2"]),
-        leaf_at(neighbour, "neighbour", "Zebulon", "Quixote", &["neighbour-d1"]),
-        leaf_at(near, "near", "Test", "User", &["near-d1"]),
-        leaf_at(nearer, "nearer", "Test", "User", &["nearer-d1"]),
-    ])
-    .unwrap();
-    let id = MemberId::new(subject);
-
-    // (a) an absent id whose level-0 sibling is the neighbour's leaf.
-    let without_subject = genesis.delete_member(&id).unwrap().recalculate().unwrap().0;
-    let absent = without_subject
-        .prove_absent(&id, &device_key("subject-d1"))
-        .unwrap();
-    assert_no_neighbour_data(&postcard::to_allocvec(&absent).unwrap());
-    assert_eq!(absent.ending(), &ProofEnding::Empty);
-    assert_eq!(
-        absent.verify::<Blake3Hasher>(
-            &without_subject.root_hash().unwrap(),
-            &id,
-            &device_key("subject-d1")
-        ),
-        Ok(())
-    );
-
-    // (b) a removed device of the Member whose level-0 sibling is the neighbour.
-    let removed = without_device(&genesis, subject, "subject-d2", "subject-mk2");
-    let device_gone = removed
-        .prove_absent(&id, &device_key("subject-d2"))
-        .unwrap();
-    assert_no_neighbour_data(&postcard::to_allocvec(&device_gone).unwrap());
-    assert!(matches!(device_gone.ending(), ProofEnding::Leaf(_)));
-    assert_eq!(
-        device_gone.verify::<Blake3Hasher>(
-            &removed.root_hash().unwrap(),
-            &id,
-            &device_key("subject-d2")
-        ),
-        Ok(())
-    );
-}
-
-const LOWEST: [u8; 32] = [0u8; 32];
-const HIGHEST: [u8; 32] = [0xffu8; 32];
-
-/// Proves `device` absent under `id` in `trie` and verifies it against the root.
-fn proves_and_verifies(trie: &TestTrie, id: [u8; 32], device: &str) {
-    let id = MemberId::new(id);
-    let proof = trie.prove_absent(&id, &device_key(device)).unwrap();
-    assert_eq!(
-        proof.verify::<Blake3Hasher>(&trie.root_hash().unwrap(), &id, &device_key(device)),
-        Ok(()),
-        "{id:?}"
-    );
-}
-
-/// `trie` after `id`'s Member drops `device` and rotates to `new_key`.
-fn without_device(trie: &TestTrie, id: [u8; 32], device: &str, new_key: &str) -> TestTrie {
-    trie.delete_p2p_device(&MemberId::new(id), &device_key(device), member_key(new_key))
+    org()
+        .delete_p2p_device(&member_id("alice"), &positioned_device_key("alice-d2", 1), member_key("alice-mk2"))
         .unwrap()
         .recalculate()
         .unwrap()
         .0
 }
 
-/// verifies: LLR-utp6x4
-///
-/// Boundary: the lowest and highest MemberIds (all bits 0, all bits 1), absent
-/// from a multi-member organisation.
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.windows(needle.len()).any(|window| window == needle)
+}
+
+fn verifies(trie: &TestTrie, proof: &AbsenceProof, id: &MemberId, device: &org_members::types::DevicePublicKey) -> Result<(), OrgMembersError> {
+    proof.verify::<Blake3Hasher>(&trie.root_hash().unwrap(), id, device)
+}
+
+/// verifies: LLR-bh53rr, LLR-v3cysh, REQ-sb2frw
 #[test]
-fn proofs_at_the_lowest_and_highest_ids_verify_when_absent() {
+fn prove_absent_refuses_an_uncalculated_trie() {
+    let pending = org().add_member(leaf("dave", &["dave-d1"])).unwrap();
+    assert_eq!(
+        pending.prove_absent(&member_id("eve"), &positioned_device_key("eve-d1", 0)).unwrap_err(),
+        OrgMembersError::HashesNotCalculated
+    );
+    assert_eq!(
+        pending.prove_absent(&member_id("alice"), &positioned_device_key("alice-d9", 9)).unwrap_err(),
+        OrgMembersError::HashesNotCalculated
+    );
+}
+
+/// verifies: LLR-bh53rr, LLR-v3cysh, REQ-sb2frw
+#[test]
+fn prove_absent_refuses_a_device_the_member_holds() {
+    assert_eq!(
+        org().prove_absent(&member_id("alice"), &positioned_device_key("alice-d2", 1)).unwrap_err(),
+        OrgMembersError::DeviceStillHeld
+    );
+}
+
+/// verifies: LLR-bh53rr, REQ-sb2frw
+#[test]
+fn prove_absent_ignores_a_key_another_member_holds() {
     let trie = org();
-    proves_and_verifies(&trie, LOWEST, "low-d1");
-    proves_and_verifies(&trie, HIGHEST, "high-d1");
+    let proof = trie.prove_absent(&member_id("alice"), &positioned_device_key("bob-d1", 0)).unwrap();
+    assert_eq!(verifies(&trie, &proof, &member_id("alice"), &positioned_device_key("bob-d1", 0)), Ok(()));
 }
 
-/// verifies: LLR-utp6x4
+/// verifies: LLR-v6smww, LLR-bh53rr, REQ-yyuxh8, REQ-sb2frw
 ///
-/// Boundary: Members at the lowest and highest MemberIds, each with a removed
-/// Device key, in a multi-member organisation.
+/// A MemberId holding no Member gets a Vacant proof, with no Member data.
 #[test]
-fn proofs_at_the_lowest_and_highest_ids_verify_for_a_removed_device() {
-    let trie = TestTrie::genesis(vec![
-        leaf_at(LOWEST, "low", "Test", "User", &["low-d1", "low-d2"]),
-        leaf_at(HIGHEST, "high", "Test", "User", &["high-d1", "high-d2"]),
-        leaf("alice", &["alice-d1"]),
-        leaf("bob", &["bob-d1"]),
-    ])
-    .unwrap();
-    let trie = without_device(&trie, LOWEST, "low-d2", "low-mk2");
-    let trie = without_device(&trie, HIGHEST, "high-d2", "high-mk2");
-    proves_and_verifies(&trie, LOWEST, "low-d2");
-    proves_and_verifies(&trie, HIGHEST, "high-d2");
-}
-
-/// verifies: LLR-utp6x4
-///
-/// Boundary: a one-member organisation, its Member at either extreme; the
-/// other extreme is absent.
-#[test]
-fn proofs_in_a_one_member_organisation_verify() {
-    for (present, absent, handle) in [(LOWEST, HIGHEST, "low"), (HIGHEST, LOWEST, "high")] {
-        let d1 = format!("{handle}-d1");
-        let d2 = format!("{handle}-d2");
-        let trie =
-            TestTrie::genesis(vec![leaf_at(present, handle, "Test", "User", &[&d1, &d2])])
-                .unwrap();
-        proves_and_verifies(&trie, absent, "other-d1");
-        let trie = without_device(&trie, present, &d2, &format!("{handle}-mk2"));
-        proves_and_verifies(&trie, present, &d2);
-        proves_and_verifies(&trie, absent, "other-d1");
+fn a_vacant_proof_carries_no_member_data() {
+    let trie = org();
+    let proof = trie.prove_absent(&member_id("ghost"), &positioned_device_key("ghost-d1", 0)).unwrap();
+    assert!(proof.is_vacant());
+    assert!(proof.member().is_none() && proof.inclusion().is_none() && proof.device_root_absence().is_none());
+    let bytes = postcard::to_allocvec(&proof).unwrap();
+    for name in ["alice", "bob", "carol"] {
+        assert!(!contains(&bytes, name.as_bytes()), "{name}");
+        assert!(!contains(&bytes, member_key(&format!("{name}-mk")).as_bytes()), "{name}'s key");
     }
 }
 
-/// The root of a one-Member organisation whose Member at `id` hashes to
-/// `leaf_hash`: folded up `id`'s path with every sibling its level's default.
-fn lone_member_root(leaf_hash: NodeHash, id: &MemberId) -> RootHash {
-    let defaults = DefaultHashes::compute::<Blake3Hasher>();
-    let root = (0..256u16).fold(leaf_hash, |computed, level| {
-        let sibling = defaults.at_level(level).unwrap();
-        if id.bit(255 - level).unwrap() {
-            Blake3Hasher::hash_member_node(sibling, &computed)
-        } else {
-            Blake3Hasher::hash_member_node(&computed, sibling)
-        }
-    });
-    RootHash::from(root)
+/// verifies: LLR-v6smww, LLR-bh53rr, REQ-yyuxh8, REQ-sb2frw
+///
+/// A Member lacking the device gets a Held proof: its own fields and device
+/// root, and no DevicePublicKey — not the absent one, not its held ones.
+#[test]
+fn a_held_proof_carries_the_member_without_device_keys() {
+    let trie = org_without_alice_d2();
+    let proof = trie.prove_absent(&member_id("alice"), &positioned_device_key("alice-d2", 1)).unwrap();
+    let member = proof.member().expect("held");
+    let alice = trie.get(&member_id("alice")).unwrap();
+    assert_eq!(member.id(), alice.id());
+    assert_eq!(member.handle(), alice.handle());
+    assert_eq!(member.person_key(), alice.p2p_key());
+    assert_eq!(member.name(), alice.name());
+    assert_eq!(member.surname(), alice.surname());
+    assert_eq!(
+        Ok(*member.device_root()),
+        person::compute_device_root::<Blake3DeviceRootHasher>(alice.p2p_devices())
+    );
+    assert_eq!(proof.device_root_absence().unwrap().map().len(), 1, "a depth-4 device proof");
+    assert_eq!(proof.inclusion().unwrap().map().len(), 32, "a depth-256 inclusion proof");
+    let bytes = postcard::to_allocvec(&proof).unwrap();
+    for key in [positioned_device_key("alice-d1", 0), positioned_device_key("alice-d2", 1)] {
+        assert!(!contains(&bytes, key.as_bytes()), "a DevicePublicKey in the proof");
+    }
+    for name in ["bob", "carol"] {
+        assert!(!contains(&bytes, name.as_bytes()), "{name}");
+    }
 }
 
-/// verifies: LLR-25tpdp, LLR-utp6x4
+/// verifies: LLR-54gp2f, LLR-25nmwc, REQ-65xrgh, REQ-sb2frw
 ///
-/// The map's layout is bit `level % 8` of byte `level / 8`, level 0 the
-/// leaf's; only non-default siblings travel, from the leaf's level up.
+/// Every honest proof verifies: an absent member, a deleted member, a removed
+/// device.
 #[test]
-fn a_proof_sends_only_non_default_siblings() {
-    // (a) One Member at the lowest id; the highest id differs in the first
-    // bit, so only the top-level sibling (level 255, the Member's subtree) is
-    // not default.
-    let lone =
-        TestTrie::genesis(vec![leaf_at(LOWEST, "low", "Test", "User", &["low-d1"])]).unwrap();
-    let proof = lone
-        .prove_absent(&MemberId::new(HIGHEST), &device_key("high-d1"))
-        .unwrap();
-    let mut expected_map = [0xffu8; 32];
-    expected_map[31] = 0x7f;
-    assert_eq!(proof.default_map(), &expected_map);
-    assert_eq!(proof.siblings().len(), 1);
-    let defaults = DefaultHashes::compute::<Blake3Hasher>();
-    assert_eq!(
-        RootHash::from(Blake3Hasher::hash_member_node(
-            &proof.siblings()[0],
-            defaults.at_level(255).unwrap()
-        )),
-        lone.root_hash().unwrap()
-    );
+fn honest_proofs_verify() {
+    let trie = org();
+    let ghost = trie.prove_absent(&member_id("ghost"), &positioned_device_key("ghost-d1", 0)).unwrap();
+    assert_eq!(verifies(&trie, &ghost, &member_id("ghost"), &positioned_device_key("ghost-d1", 0)), Ok(()));
 
-    // (b) Two Members differing only in the last bit: the removed-device
-    // proof's one explicit sibling is the neighbour's leaf, at level 0.
+    let without_bob = trie.delete_member(&member_id("bob")).unwrap().recalculate().unwrap().0;
+    let deleted = without_bob.prove_absent(&member_id("bob"), &positioned_device_key("bob-d1", 0)).unwrap();
+    assert!(deleted.is_vacant());
+    assert_eq!(verifies(&without_bob, &deleted, &member_id("bob"), &positioned_device_key("bob-d1", 0)), Ok(()));
+
+    let removed = org_without_alice_d2();
+    let gone = removed.prove_absent(&member_id("alice"), &positioned_device_key("alice-d2", 1)).unwrap();
+    assert!(!gone.is_vacant());
+    assert_eq!(verifies(&removed, &gone, &member_id("alice"), &positioned_device_key("alice-d2", 1)), Ok(()));
+}
+
+/// verifies: LLR-54gp2f, LLR-v3cysh, REQ-65xrgh, RC-j2znx8
+///
+/// The root is checked first, for each step.
+#[test]
+fn a_proof_is_refused_against_another_root() {
+    let removed = org_without_alice_d2();
+    let other = RootHash::new([0; 32]);
+    let held = removed.prove_absent(&member_id("alice"), &positioned_device_key("alice-d2", 1)).unwrap();
+    assert_eq!(
+        held.verify::<Blake3Hasher>(&other, &member_id("alice"), &positioned_device_key("alice-d2", 1)),
+        Err(OrgMembersError::AbsenceProofRootMismatch)
+    );
+    let vacant = removed.prove_absent(&member_id("ghost"), &positioned_device_key("ghost-d1", 0)).unwrap();
+    assert_eq!(
+        vacant.verify::<Blake3Hasher>(&other, &member_id("ghost"), &positioned_device_key("ghost-d1", 0)),
+        Err(OrgMembersError::AbsenceProofRootMismatch)
+    );
+    // The previous root: alice still held alice-d2 there.
+    let before = org().root_hash().unwrap();
+    assert_eq!(
+        held.verify::<Blake3Hasher>(&before, &member_id("alice"), &positioned_device_key("alice-d2", 1)),
+        Err(OrgMembersError::AbsenceProofRootMismatch)
+    );
+}
+
+/// verifies: LLR-54gp2f, REQ-65xrgh
+///
+/// A proof answers for its own MemberId and device only.
+#[test]
+fn a_proof_is_refused_for_another_member_or_device() {
+    let removed = org_without_alice_d2();
+    let held = removed.prove_absent(&member_id("alice"), &positioned_device_key("alice-d2", 1)).unwrap();
+    assert_eq!(
+        verifies(&removed, &held, &member_id("bob"), &positioned_device_key("alice-d2", 1)),
+        Err(OrgMembersError::AbsenceProofRootMismatch),
+        "a Held proof for another MemberId"
+    );
+    let vacant = removed.prove_absent(&member_id("ghost"), &positioned_device_key("ghost-d1", 0)).unwrap();
+    assert_eq!(
+        verifies(&removed, &vacant, &member_id("bob"), &positioned_device_key("ghost-d1", 0)),
+        Err(OrgMembersError::AbsenceProofRootMismatch),
+        "a Vacant proof for a held MemberId at another position"
+    );
+    // A device at another position than the proof's: the device step does not resolve.
+    assert_eq!(
+        verifies(&removed, &held, &member_id("alice"), &positioned_device_key("other", 5)),
+        Err(OrgMembersError::AbsenceProofRootMismatch)
+    );
+}
+
+/// verifies: LLR-25nmwc, LLR-v3cysh, REQ-65xrgh
+///
+/// A resolving Held proof whose device step ends in the asked key is
+/// `DeviceStillHeld`: a proof for a key at alice-d1's position, asked about
+/// alice-d1.
+#[test]
+fn a_proof_ending_in_the_asked_device_is_refused_as_held() {
+    let trie = org();
+    let probe = positioned_device_key("probe", 0); // alice-d1's position, another key
+    let proof = trie.prove_absent(&member_id("alice"), &probe).unwrap();
+    assert_eq!(verifies(&trie, &proof, &member_id("alice"), &probe), Ok(()));
+    assert!(matches!(proof.device_root_absence().unwrap().ending(), ProofEnding::Occupied { .. }));
+    assert_eq!(
+        verifies(&trie, &proof, &member_id("alice"), &positioned_device_key("alice-d1", 0)),
+        Err(OrgMembersError::DeviceStillHeld)
+    );
+}
+
+/// verifies: LLR-25nmwc, LLR-9g2kjg, REQ-65xrgh
+///
+/// A Vacant proof that resolves to the root while ending in the asked
+/// MemberId's own leaf is refused as malformed: built from alice's inclusion
+/// path and her leaf's two hashes, as only a forger would build it.
+#[test]
+fn a_vacant_proof_ending_in_the_member_is_refused() {
+    let trie = org();
+    let held = trie.prove_absent(&member_id("alice"), &positioned_device_key("probe", 5)).unwrap();
+    let inclusion = held.inclusion().unwrap();
+    let alice = trie.get(&member_id("alice")).unwrap();
+    let device_root = held.member().unwrap().device_root();
+    let identity_hash = keyed(b"org-members::member-identity____", &[alice.id().as_bytes()]);
+    let content_hash = keyed(b"org-members::member-content_____", &[&member_content_bytes(&alice, device_root.as_bytes())]);
+    let forged = sparse_merkle_tree::AbsenceProof::<256>::from_parts(
+        inclusion.map().to_vec(),
+        inclusion.siblings().to_vec(),
+        ProofEnding::Occupied { identity_hash, content_hash },
+    )
+    .unwrap();
+    let forged: AbsenceProof =
+        serde_json::from_value(serde_json::json!({ "Vacant": serde_json::to_value(&forged).unwrap() })).unwrap();
+    assert_eq!(
+        verifies(&trie, &forged, &member_id("alice"), &positioned_device_key("probe", 5)),
+        Err(OrgMembersError::AbsenceProofMalformed)
+    );
+}
+
+/// verifies: LLR-9g2kjg, LLR-54gp2f, REQ-65xrgh
+#[test]
+fn a_proof_survives_the_wire_and_still_verifies() {
+    let removed = org_without_alice_d2();
+    for (id, probe) in [("alice", positioned_device_key("alice-d2", 1)), ("ghost", positioned_device_key("ghost-d1", 0))] {
+        let proof = removed.prove_absent(&member_id(id), &probe).unwrap();
+        let back: AbsenceProof = postcard::from_bytes(&postcard::to_allocvec(&proof).unwrap()).unwrap();
+        assert_eq!(back, proof);
+        assert_eq!(verifies(&removed, &back, &member_id(id), &probe), Ok(()));
+    }
+}
+
+/// verifies: LLR-9g2kjg, LLR-v3cysh, REQ-ds8ryr
+///
+/// Whatever a field's own parse or an inner proof's bounded parse refuses,
+/// parsing refuses as `AbsenceProofMalformed`; postcard sees its custom
+/// error.
+#[test]
+fn the_wire_refuses_malformed_proofs() {
+    let removed = org_without_alice_d2();
+    let proof = removed.prove_absent(&member_id("alice"), &positioned_device_key("alice-d2", 1)).unwrap();
+    let json = serde_json::to_value(&proof).unwrap();
+    let mut bad_handle = json.clone();
+    bad_handle["Held"]["member"]["handle"] = serde_json::json!("NOT A HANDLE");
+    let mut bad_depth = json.clone();
+    bad_depth["Held"]["device_root_absence"][0] = serde_json::json!(8);
+    let mut bad_inclusion = json.clone();
+    bad_inclusion["Held"]["inclusion"][1] = serde_json::json!([]);
+    for broken in [bad_handle, bad_depth, bad_inclusion, serde_json::json!({ "Other": 1 })] {
+        let error = serde_json::from_value::<AbsenceProof>(broken).unwrap_err();
+        assert_eq!(error.to_string(), "malformed absence proof");
+    }
+    let bytes = postcard::to_allocvec(&proof).unwrap();
+    let mut truncated = bytes.clone();
+    truncated.pop();
+    assert_eq!(postcard::from_bytes::<AbsenceProof>(&truncated), Err(postcard::Error::SerdeDeCustom));
+}
+
+fn last_bit_flipped(mut bytes: [u8; 32]) -> [u8; 32] {
+    bytes[31] ^= 1;
+    bytes
+}
+
+/// verifies: LLR-v6smww, REQ-yyuxh8, RC-qa2758
+///
+/// A neighbour sharing all but the last bit of the MemberId: neither a
+/// Vacant nor a Held proof next to it carries its handle, names, member key
+/// or device key.
+#[test]
+fn a_proof_next_to_a_neighbour_carries_none_of_its_data() {
     let subject: [u8; 32] = blake3::hash(b"subject").into();
     let neighbour = last_bit_flipped(subject);
-    let neighbour_leaf = leaf_at(neighbour, "neighbour", "Zebulon", "Quixote", &["neighbour-d1"]);
-    let pair = TestTrie::genesis(vec![
+    let genesis = TestTrie::genesis(vec![
         leaf_at(subject, "subject", "Test", "User", &["subject-d1", "subject-d2"]),
-        neighbour_leaf.clone(),
+        leaf_at(neighbour, "neighbour", "Zebulon", "Quixote", &["neighbour-d1"]),
     ])
     .unwrap();
-    let pair = without_device(&pair, subject, "subject-d2", "subject-mk2");
-    let proof = pair
-        .prove_absent(&MemberId::new(subject), &device_key("subject-d2"))
-        .unwrap();
-    let mut expected_map = [0xffu8; 32];
-    expected_map[0] = 0xfe;
-    assert_eq!(proof.default_map(), &expected_map);
-    assert_eq!(proof.siblings().len(), 1);
-    let neighbour_alone = TestTrie::genesis(vec![neighbour_leaf]).unwrap();
-    assert_eq!(
-        lone_member_root(proof.siblings()[0], &MemberId::new(neighbour)),
-        neighbour_alone.root_hash().unwrap()
-    );
+    let no_neighbour = |bytes: &[u8]| {
+        for needle in [
+            b"neighbour".as_slice(),
+            b"Zebulon".as_slice(),
+            b"Quixote".as_slice(),
+            member_key("neighbour-mk").as_bytes().as_slice(),
+            positioned_device_key("neighbour-d1", 0).as_bytes().as_slice(),
+        ] {
+            assert!(!contains(bytes, needle));
+        }
+    };
+    let id = MemberId::new(subject);
+    let without = genesis.delete_member(&id).unwrap().recalculate().unwrap().0;
+    let vacant = without.prove_absent(&id, &positioned_device_key("subject-d1", 0)).unwrap();
+    no_neighbour(&postcard::to_allocvec(&vacant).unwrap());
+    assert_eq!(verifies(&without, &vacant, &id, &positioned_device_key("subject-d1", 0)), Ok(()));
+    let removed = genesis
+        .delete_p2p_device(&id, &positioned_device_key("subject-d2", 1), member_key("subject-mk2"))
+        .unwrap()
+        .recalculate()
+        .unwrap()
+        .0;
+    let held = removed.prove_absent(&id, &positioned_device_key("subject-d2", 1)).unwrap();
+    no_neighbour(&postcard::to_allocvec(&held).unwrap());
+    assert_eq!(verifies(&removed, &held, &id, &positioned_device_key("subject-d2", 1)), Ok(()));
 }
 
-/// verifies: LLR-4xz255, REQ-535jcd
+/// verifies: LLR-54gp2f, LLR-bh53rr
 ///
-/// alice's own path keeps hashed siblings after an uncalculated change, so
-/// only the calculated-trie guard refuses.
+/// The lowest and highest MemberIds (all bits 0, all bits 1), present and
+/// absent, and a one-member organisation.
 #[test]
-fn prove_absent_refuses_an_uncalculated_trie_even_on_a_hashed_path() {
-    let pending = org()
-        .delete_p2p_device(
-            &member_id("alice"),
-            &device_key("alice-d2"),
-            member_key("alice-mk2"),
-        )
-        .unwrap();
-    assert_eq!(
-        pending
-            .prove_absent(&member_id("alice"), &device_key("alice-d2"))
-            .unwrap_err(),
-        OrgMembersError::HashesNotCalculated
-    );
+fn proofs_at_the_edges_verify() {
+    const LOWEST: [u8; 32] = [0; 32];
+    const HIGHEST: [u8; 32] = [0xff; 32];
+    let edges = TestTrie::genesis(vec![
+        leaf_at(LOWEST, "low", "Test", "User", &["low-d1"]),
+        leaf_at(HIGHEST, "high", "Test", "User", &["high-d1"]),
+    ])
+    .unwrap();
+    for id in [LOWEST, HIGHEST] {
+        let proof = edges.prove_absent(&MemberId::new(id), &positioned_device_key("probe", 7)).unwrap();
+        assert_eq!(verifies(&edges, &proof, &MemberId::new(id), &positioned_device_key("probe", 7)), Ok(()));
+    }
+    let one = TestTrie::genesis(vec![leaf("solo", &["solo-d1"])]).unwrap();
+    for id in [LOWEST, HIGHEST, *member_id("solo").as_bytes()] {
+        let proof = one.prove_absent(&MemberId::new(id), &positioned_device_key("probe", 7)).unwrap();
+        assert_eq!(verifies(&one, &proof, &MemberId::new(id), &positioned_device_key("probe", 7)), Ok(()));
+    }
+    let empty = TestTrie::genesis(vec![]).unwrap();
+    let proof = empty.prove_absent(&MemberId::new(HIGHEST), &positioned_device_key("probe", 7)).unwrap();
+    assert!(proof.vacancy().unwrap().siblings().is_empty());
+    assert_eq!(verifies(&empty, &proof, &MemberId::new(HIGHEST), &positioned_device_key("probe", 7)), Ok(()));
 }

@@ -1,5 +1,7 @@
 //! Crate-level discipline of the person unit.
 
+#![allow(clippy::expect_used)]
+
 use person::IdentityError;
 
 /// The lines of the `[name]` table of a TOML manifest: from its header to the
@@ -114,4 +116,76 @@ fn the_person_variants_name_their_rule() {
         IdentityError::UnsupportedEncodingVersion(2),
         IdentityError::UnsupportedEncodingVersion(3)
     );
+}
+
+#[path = "support/public_signatures.rs"]
+mod public_signatures;
+
+use public_signatures::{crate_public_signatures, public_signatures};
+
+/// A source with every shape the scan must read: a signature over several
+/// lines, a public enum's variants, a public struct's public fields and a
+/// trait impl's methods; and every shape it must not: a crate-private item,
+/// a private field, a private method, a comment, an attribute and a body.
+const SHAPES: &str = r#"pub fn f(
+    a: u8,
+) -> Result<(), TreeError> {
+    let inner: TreeError = todo();
+}
+pub(crate) type T = DeviceTree;
+pub use x::y;
+/// A doc line naming TreeError.
+pub enum E {
+    #[error("{0}")]
+    Tree(TreeError),
+    Held { cause: TreeError },
+}
+pub struct S {
+    pub tree: SparseMerkleTree,
+    private: DeviceTree,
+}
+pub struct W(pub DeviceTree);
+impl From<TreeError> for E {
+    fn from(error: TreeError) -> Self {
+        let inner = 1;
+    }
+}
+impl S {
+    fn helper() -> TreeError {}
+    pub fn get(&self) -> Result<(), TreeError> {
+    }
+}
+"#;
+
+/// verifies: LLR-3dvfjb
+///
+/// No public signature of the crate's own (function, method, trait-impl
+/// method, type, re-export, enum variant or public field) names the tree's
+/// error or its tree type, so no `TreeError` crosses this unit's own
+/// functions. The tree's proof types, shared by design, are not checked.
+/// The scan is first run over `SHAPES`, so a scan blind to one of those
+/// shapes fails here instead of passing the source unread.
+#[test]
+fn no_public_signature_names_the_tree_or_its_error() {
+    assert_eq!(
+        public_signatures(SHAPES),
+        [
+            "pub fn f( a: u8, ) -> Result<(), TreeError> { ",
+            "pub use x::y; ",
+            "pub enum E { ",
+            "Tree(TreeError), ",
+            "Held { cause: TreeError }, ",
+            "pub struct S { ",
+            "pub tree: SparseMerkleTree, ",
+            "pub struct W(pub DeviceTree); ",
+            "fn from(error: TreeError) -> Self { ",
+            "pub fn get(&self) -> Result<(), TreeError> { ",
+        ]
+    );
+    let source_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    for (path, signature) in crate_public_signatures(&source_dir) {
+        for name in ["TreeError", "SparseMerkleTree", "DeviceTree"] {
+            assert!(!signature.contains(name), "{} exposes {name}: {signature}", path.display());
+        }
+    }
 }

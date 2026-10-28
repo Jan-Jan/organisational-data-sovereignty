@@ -61,9 +61,11 @@ coverage_command:
 expectation_age_days: 90
 expectation_open_max: 10
 
-# person depends on no unit, by owner decision (2026-10-04): org-members may
-# depend on person, never the reverse.
-# depends_on:
-#   - <unit>
+# org-members may depend on person, never the reverse (owner decision,
+# 2026-10-04). person depends on sparse-merkle-tree since 2026-10-24, after the
+# assessment in docs/plans/2026-10-24-sparse-merkle-tree-edges.md; class C, as
+# this unit.
+depends_on:
+  - sparse-merkle-tree
 # segregated_from:
 #   - <unit> (RC-xxxxxx)

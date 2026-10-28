@@ -18,7 +18,7 @@
 
 mod common;
 
-use common::dual_key_bytes;
+use common::positioned_key_bytes;
 use quint_connect::runner::{self, RunConfig, TestConfig};
 use quint_connect::*;
 use serde::Deserialize;
@@ -36,10 +36,10 @@ type Trie = OrgTrie<Blake3Hasher>;
 
 const SPEC: &str = "quint/membership_mbt.qnt";
 const IDS: [&str; 3] = ["a", "b", "c"];
-/// Key generations the model draws (0..=3) plus 4 and 5, which only a refused
-/// five-device genesis record uses (devices 1..=5), so every key the driver
+/// Key generations the model draws (0..=8) plus 9, which only a refused
+/// nine-device genesis record uses (devices 1..=9), so every key the driver
 /// builds inverts.
-const GENS: [i64; 6] = [0, 1, 2, 3, 4, 5];
+const GENS: [i64; 10] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 /// Random-run bounds (decision 7): explicit, per unit.
 const MAX_SAMPLES: usize = 100;
 const MAX_STEPS: usize = 15;
@@ -145,10 +145,10 @@ fn real_id(model_id: &str) -> MemberId {
     MemberId::new(blake3::hash(format!("id:{model_id}").as_bytes()).into())
 }
 /// One derivation for member and device keys, so model key equality is real
-/// key equality: the model `Key { owner, gen }` used as a member key and as a
-/// device key is the same 32 bytes, exactly as the crate's key index sees it.
+/// key equality; the device position is the generation, so the model's
+/// positions are the crate's.
 fn real_key_bytes(k: &Key) -> [u8; 32] {
-    dual_key_bytes(&format!("k:{}:{}", k.owner, k.gen))
+    positioned_key_bytes(&format!("k:{}:{}", k.owner, k.gen), u8::try_from(k.gen).expect("gen 0..=15"))
 }
 fn real_member_key(k: &Key) -> PersonPublicKey {
     PersonPublicKey::parse(&real_key_bytes(k)).expect("dual-valid bytes")
@@ -254,6 +254,7 @@ fn err_tag(e: &OrgMembersError) -> String {
         OrgMembersError::DuplicateDevice => "DuplicateDevice",
         OrgMembersError::DeviceNotFound => "DeviceNotFound",
         OrgMembersError::DeviceSlotsFull => "DeviceSlotsFull",
+        OrgMembersError::DevicePositionTaken => "DevicePositionTaken",
         OrgMembersError::EmptyDeviceList => "EmptyDeviceList",
         OrgMembersError::DeltaBaseMismatch => "DeltaBaseMismatch",
         OrgMembersError::VerificationFailed => "VerificationFailed",
@@ -968,9 +969,17 @@ fn scenario_add_member_duplicate() {
 fn scenario_apply_delta_duplicate() {
     run_scenario("scenarioApplyDeltaDuplicate")
 }
+/// verifies: LLR-utk6uy, REQ-xdx2c2
 #[test]
 fn scenario_device_slots_full() {
     run_scenario("scenarioDeviceSlotsFull")
+}
+/// verifies: LLR-5jh6t3, REQ-2sz7j8
+///
+/// The model's position rule agrees with the crate's on the direct path.
+#[test]
+fn scenario_device_position_taken() {
+    run_scenario("scenarioDevicePositionTaken")
 }
 /// verifies: LLR-xmpqn2
 ///

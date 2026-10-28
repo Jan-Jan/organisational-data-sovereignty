@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
 license = "GPL-3.0-only"
-description = "An individual's identity types and Person definition: names, device keys, the PersonPublicKey, device slots, the device sub-trie and the Person hash"
+description = "An individual's identity types and Person definition: names, DevicePublicKeys, the PersonPublicKey, device slots, the device root and the Person hash"
 
 [features]
 default = ["serde"]
-serde = ["dep:serde"]
+serde = ["dep:serde", "sparse-merkle-tree/serde"]
 
 [dependencies]
 ed25519-dalek = { version = "2", default-features = false, features = ["alloc"] }
@@ -16,6 +16,7 @@ unicode-normalization = { version = "0.1", default-features = false }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"], optional = true }
 thiserror = { version = "2", default-features = false }
 blake3 = { version = "1", default-features = false }
+sparse-merkle-tree = { path = "../sparse-merkle-tree", default-features = false }
 
 [dev-dependencies]
 postcard = { version = "1", features = ["alloc"] }

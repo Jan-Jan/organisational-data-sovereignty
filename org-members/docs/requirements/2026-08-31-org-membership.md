@@ -85,6 +85,12 @@ restates it as "`MAX_DEVICES` (4)", the test that exercises it, the crate's own
 the bound without touching this requirement, which is the point of putting it
 this way — and writing the LLR is what gives the number a controlled home.
 
+Amended 2026-10-23 (worktree-generic-smt): the device root tree becomes a sparse
+Merkle tree of depth 4, whose 16 positions no longer set the bound. The bound
+is 8 by owner ruling of that day, a domain rule held strictly below the tree's
+16 positions so that the tree is never full; its LLR is written with the
+design of that change.
+
 **REQ-ewdg2q**: The software shall replace a member's member-as-a-group key in
 the same operation that removes a device key from that member, and shall reject
 a removal whose replacement key is the key being replaced, so that a removed

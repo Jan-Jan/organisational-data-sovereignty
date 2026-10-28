@@ -4805,7 +4805,7 @@ dependencies = [
  "quint-connect",
  "serde",
  "serde_json",
- "spin 0.9.9",
+ "sparse-merkle-tree",
  "thiserror 2.0.20",
  "unicode-normalization",
  "unicode-security",
@@ -5125,6 +5125,7 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "sparse-merkle-tree",
  "thiserror 2.0.20",
  "unicode-normalization",
 ]
@@ -6986,6 +6987,18 @@ dependencies = [
  "sha2 0.10.9",
  "sha3",
  "twox-hash 1.6.3",
+]
+
+[[package]]
+name = "sparse-merkle-tree"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "postcard",
+ "proptest",
+ "serde",
+ "serde_json",
+ "spin 0.9.9",
 ]
 
 [[package]]

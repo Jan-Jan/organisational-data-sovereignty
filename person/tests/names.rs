@@ -192,7 +192,7 @@ fn display_and_into_string_give_the_nfc_value() {
     assert_eq!(String::from(surname), "Jos\u{00e9}");
 }
 
-/// verifies: LLR-5za6mp
+/// verifies: LLR-cyx9a3
 #[cfg(feature = "serde")]
 #[test]
 fn names_encode_as_the_string_of_their_nfc_value() {

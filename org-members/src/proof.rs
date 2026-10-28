@@ -1,241 +1,223 @@
-//! Absence proofs (SDD-57vaj4): a proof that a MemberId holds no Member, or
-//! that the Member it holds lacks a Device key, checked against a membership
-//! root. The only code that interprets a leaf for this purpose.
+//! Absence proofs (SDD-57vaj4): a Vacant proof that a MemberId holds no
+//! Member, or a Held proof that the Member it holds lacks a DevicePublicKey,
+//! composed of the `sparse-merkle-tree` unit's proofs.
 
-use alloc::vec::Vec;
+use alloc::boxed::Box;
+use core::fmt;
 
-use person::compute_device_root;
+use person::{DeviceLeaf, DEVICE_ROOT_DEPTH};
+use sparse_merkle_tree::{InclusionProof, Leaf, NodeHash, TreeError};
 
 use crate::error::OrgMembersError;
-use crate::hasher::TrieHasher;
-use crate::smt::{DefaultHashes, SMT_DEPTH};
-use crate::types::{DevicePublicKey, MemberId, MemberLeaf, NodeHash, RootHash};
+use crate::hasher::MemberHasher;
+use crate::member_tree::{
+    member_content_hash, member_identity_hash, member_position_bytes, TreeMember, MEMBER_DEPTH,
+};
+use crate::types::{DevicePublicKey, Handle, MemberId, Name, PersonPublicKey, RootHash, Surname};
 
-/// What an absence proof's path ends in (LLR-25tpdp).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProofEnding {
-    /// The MemberId holds no Member: the proof carries no Member data.
-    Empty,
-    /// The Member under the proof's MemberId, and no one else.
-    Leaf(MemberLeaf),
+/// The Member's leaf without its DevicePublicKeys: its MemberId, handle,
+/// Member-as-a-group key, name, surname and device root. LLR-v6smww.
+#[derive(Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ProvenMember {
+    id: MemberId,
+    handle: Handle,
+    person_key: PersonPublicKey,
+    name: Name,
+    surname: Surname,
+    device_root: NodeHash,
 }
 
-impl ProofEnding {
-    /// Whether the ending is a Member that holds `device`.
-    pub(crate) fn holds(&self, device: &DevicePublicKey) -> bool {
-        match self {
-            Self::Empty => false,
-            Self::Leaf(member) => member.has_p2p_device(device),
+impl ProvenMember {
+    pub(crate) fn of(held: &TreeMember) -> Self {
+        let member = held.member();
+        Self {
+            id: *member.id(),
+            handle: member.handle().clone(),
+            person_key: *member.p2p_key(),
+            name: member.name().clone(),
+            surname: member.surname().clone(),
+            device_root: *held.device_root(),
         }
+    }
+
+    pub fn id(&self) -> &MemberId {
+        &self.id
+    }
+
+    pub fn handle(&self) -> &Handle {
+        &self.handle
+    }
+
+    pub fn person_key(&self) -> &PersonPublicKey {
+        &self.person_key
+    }
+
+    pub fn name(&self) -> &Name {
+        &self.name
+    }
+
+    pub fn surname(&self) -> &Surname {
+        &self.surname
+    }
+
+    pub fn device_root(&self) -> &NodeHash {
+        &self.device_root
     }
 }
 
-/// A proof of absence (LLR-25tpdp). Fields are private; the only ways to get
-/// one are `OrgTrie::prove_absent` and parsing (LLR-4rju5r).
+impl fmt::Debug for ProvenMember {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.debug_struct("ProvenMember")
+            .field("id", &self.id)
+            .field("handle", &"[REDACTED]")
+            .field("person_key", &self.person_key)
+            .field("name", &"[REDACTED]")
+            .field("surname", &"[REDACTED]")
+            .field("device_root", &self.device_root)
+            .finish()
+    }
+}
+
+/// The leaf a Held proof's fields rebuild: hashed as `TreeMember` hashes.
+impl<H: MemberHasher> Leaf<H> for ProvenMember {
+    type Identity = MemberId;
+
+    fn identity(&self) -> &MemberId {
+        &self.id
+    }
+
+    fn position_bytes(identity: &MemberId) -> [u8; 32] {
+        member_position_bytes(identity)
+    }
+
+    fn identity_hash(identity: &MemberId) -> NodeHash {
+        member_identity_hash::<H>(identity)
+    }
+
+    fn content_hash(&self) -> NodeHash {
+        member_content_hash::<H>(&self.handle, &self.person_key, &self.name, &self.surname, &self.device_root)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(
-    feature = "serde",
-    serde(try_from = "wire::RawAbsenceProof", into = "wire::RawAbsenceProof")
-)]
-pub struct AbsenceProof {
-    default_map: [u8; 32],
-    /// The non-default siblings, from the leaf's level up.
-    siblings: Vec<NodeHash>,
-    ending: ProofEnding,
+enum Kind {
+    Vacant(sparse_merkle_tree::AbsenceProof<MEMBER_DEPTH>),
+    Held {
+        member: Box<ProvenMember>,
+        inclusion: InclusionProof<MEMBER_DEPTH>,
+        device_root_absence: sparse_merkle_tree::AbsenceProof<DEVICE_ROOT_DEPTH>,
+    },
 }
 
-/// Whether a default-sibling map marks `level` (bit `level % 8` of byte
-/// `level / 8`) as that level's default hash.
-fn is_default_level(map: &[u8; 32], level: u16) -> bool {
-    map.get(usize::from(level / 8))
-        .is_some_and(|byte| (byte >> (level % 8)) & 1 == 1)
-}
-
-fn mark_default_level(map: &mut [u8; 32], level: u16) -> Result<(), OrgMembersError> {
-    let byte = map
-        .get_mut(usize::from(level / 8))
-        .ok_or(OrgMembersError::InvariantViolated)?;
-    *byte |= 1 << (level % 8);
-    Ok(())
-}
-
-fn default_level_count(map: &[u8; 32]) -> usize {
-    map.iter().map(|byte| byte.count_ones() as usize).sum()
-}
+/// A proof of absence (LLR-v6smww). It holds no DevicePublicKey and no other
+/// Member's data; its fields are private, and it comes from
+/// `OrgTrie::prove_absent` or parsing (LLR-9g2kjg).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AbsenceProof(Kind);
 
 impl AbsenceProof {
-    /// Builds a proof from a path walk (LLR-utp6x4), sending only the
-    /// siblings that are not their level's default (LLR-25tpdp).
-    pub(crate) fn from_path(
-        siblings: Vec<NodeHash>,
-        ending: ProofEnding,
-        defaults: &DefaultHashes,
-    ) -> Result<Self, OrgMembersError> {
-        let mut default_map = [0u8; 32];
-        let mut explicit_siblings = Vec::new();
-        for (level, hash) in (0..SMT_DEPTH).zip(siblings) {
-            if hash == *defaults.at_level(level)? {
-                mark_default_level(&mut default_map, level)?;
-            } else {
-                explicit_siblings.push(hash);
+    pub(crate) fn vacant(vacancy: sparse_merkle_tree::AbsenceProof<MEMBER_DEPTH>) -> Self {
+        Self(Kind::Vacant(vacancy))
+    }
+
+    pub(crate) fn held(
+        member: ProvenMember,
+        inclusion: InclusionProof<MEMBER_DEPTH>,
+        device_root_absence: sparse_merkle_tree::AbsenceProof<DEVICE_ROOT_DEPTH>,
+    ) -> Self {
+        Self(Kind::Held { member: Box::new(member), inclusion, device_root_absence })
+    }
+
+    pub fn is_vacant(&self) -> bool {
+        matches!(self.0, Kind::Vacant(_))
+    }
+
+    /// A Vacant proof's vacancy: the tree's proof, at depth 256, that its
+    /// MemberId is vacant.
+    pub fn vacancy(&self) -> Option<&sparse_merkle_tree::AbsenceProof<MEMBER_DEPTH>> {
+        match &self.0 {
+            Kind::Vacant(vacancy) => Some(vacancy),
+            Kind::Held { .. } => None,
+        }
+    }
+
+    /// A Held proof's Member without its DevicePublicKeys.
+    pub fn member(&self) -> Option<&ProvenMember> {
+        match &self.0 {
+            Kind::Held { member, .. } => Some(member.as_ref()),
+            Kind::Vacant(_) => None,
+        }
+    }
+
+    /// A Held proof's inclusion proof at depth 256.
+    pub fn inclusion(&self) -> Option<&InclusionProof<MEMBER_DEPTH>> {
+        match &self.0 {
+            Kind::Held { inclusion, .. } => Some(inclusion),
+            Kind::Vacant(_) => None,
+        }
+    }
+
+    /// A Held proof's device-root absence: the tree's proof, at depth 4 under
+    /// its device root, that the DevicePublicKey is absent.
+    pub fn device_root_absence(&self) -> Option<&sparse_merkle_tree::AbsenceProof<DEVICE_ROOT_DEPTH>> {
+        match &self.0 {
+            Kind::Held { device_root_absence, .. } => Some(device_root_absence),
+            Kind::Vacant(_) => None,
+        }
+    }
+
+    /// A Vacant proof as the absence of `id` under `root`; a Held proof as
+    /// the inclusion under `root`, at `id`'s position, of the leaf its fields
+    /// rebuild, then the absence of `device` under its device root. Either
+    /// step not resolving is `AbsenceProofRootMismatch`, before any other
+    /// check (LLR-54gp2f); then `DeviceStillHeld` when the device step shows
+    /// `device` held, `AbsenceProofMalformed` when a Vacant step shows `id`
+    /// held (LLR-25nmwc).
+    pub fn verify<H: MemberHasher>(&self, root: &RootHash, id: &MemberId, device: &DevicePublicKey) -> Result<(), OrgMembersError> {
+        let root = NodeHash::new(*root.as_bytes());
+        match &self.0 {
+            Kind::Vacant(vacancy) => vacancy.verify::<TreeMember, H>(&root, id).map_err(|error| match error {
+                TreeError::ProofLeafHeld => OrgMembersError::AbsenceProofMalformed,
+                other => other.into(),
+            }),
+            Kind::Held { member, inclusion, device_root_absence } => {
+                if member.id != *id {
+                    return Err(OrgMembersError::AbsenceProofRootMismatch);
+                }
+                inclusion.verify::<ProvenMember, H>(&root, member)?;
+                device_root_absence.verify::<DeviceLeaf, H::DeviceRootHasher>(&member.device_root, device)?;
+                Ok(())
             }
         }
-        Ok(Self {
-            default_map,
-            siblings: explicit_siblings,
-            ending,
-        })
-    }
-
-    /// Parses a proof from its parts: refuses with `AbsenceProofMalformed`
-    /// unless the number of siblings is the number of levels the map does not
-    /// mark default, which caps it at 256 (LLR-4rju5r).
-    pub fn from_parts(
-        default_map: [u8; 32],
-        siblings: Vec<NodeHash>,
-        ending: ProofEnding,
-    ) -> Result<Self, OrgMembersError> {
-        if siblings.len() + default_level_count(&default_map) != usize::from(SMT_DEPTH) {
-            return Err(OrgMembersError::AbsenceProofMalformed);
-        }
-        Ok(Self {
-            default_map,
-            siblings,
-            ending,
-        })
-    }
-
-    /// The default-sibling map: bit `level % 8` of byte `level / 8` set means
-    /// the sibling at `level` (0 = the leaf's level) is that level's default
-    /// hash and is not among `siblings()`.
-    pub fn default_map(&self) -> &[u8; 32] {
-        &self.default_map
-    }
-
-    /// The siblings that are not their level's default, from the leaf's
-    /// level up.
-    pub fn siblings(&self) -> &[NodeHash] {
-        &self.siblings
-    }
-
-    pub fn ending(&self) -> &ProofEnding {
-        &self.ending
-    }
-
-    /// Accepts the proof only when it resolves to `root` along `id`'s path
-    /// (LLR-dgzy7e) and its ending shows `device` absent (LLR-p2p8qy).
-    pub fn verify<H: TrieHasher>(
-        &self,
-        root: &RootHash,
-        id: &MemberId,
-        device: &DevicePublicKey,
-    ) -> Result<(), OrgMembersError> {
-        let defaults = DefaultHashes::compute::<H>();
-        let mut computed = match &self.ending {
-            ProofEnding::Empty => *defaults.empty_leaf(),
-            ProofEnding::Leaf(member) => {
-                let device_root = compute_device_root::<H>(member.p2p_device_slots());
-                H::hash_member_leaf(&member.canonical_bytes(&device_root))
-            }
-        };
-        let mut explicit_siblings = self.siblings.iter();
-        // `path_bits` runs from the root down; the fold runs from the leaf up.
-        for (level, went_right) in (0..SMT_DEPTH).zip(id.path_bits().rev()) {
-            let sibling = if is_default_level(&self.default_map, level) {
-                *defaults.at_level(level)?
-            } else {
-                *explicit_siblings
-                    .next()
-                    .ok_or(OrgMembersError::AbsenceProofMalformed)?
-            };
-            computed = if went_right {
-                H::hash_member_node(&sibling, &computed)
-            } else {
-                H::hash_member_node(&computed, &sibling)
-            };
-        }
-        // No surplus check: from_path and from_parts fix the count (LLR-4rju5r).
-        if computed.as_bytes() != root.as_bytes() {
-            return Err(OrgMembersError::AbsenceProofRootMismatch);
-        }
-        if self.ending.holds(device) {
-            return Err(OrgMembersError::DeviceStillHeld);
-        }
-        Ok(())
     }
 }
 
+/// Parsing goes through each field's validating `Deserialize` and each inner
+/// proof's bounded parse; whatever they refuse is `AbsenceProofMalformed`,
+/// which a postcard caller sees as its custom error (LLR-9g2kjg).
 #[cfg(feature = "serde")]
 mod wire {
-    use alloc::vec::Vec;
-    use core::fmt;
+    use serde::de::Error as _;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    use serde::de::{Error as _, SeqAccess, Visitor};
-    use serde::{Deserialize, Deserializer, Serialize};
-
-    use super::{AbsenceProof, ProofEnding};
+    use super::{AbsenceProof, Kind};
     use crate::error::OrgMembersError;
-    use crate::smt::SMT_DEPTH;
-    use crate::types::{MemberLeaf, NodeHash};
 
-    #[derive(Serialize, Deserialize)]
-    pub(super) struct RawAbsenceProof {
-        default_map: [u8; 32],
-        #[serde(deserialize_with = "bounded_siblings")]
-        siblings: Vec<[u8; 32]>,
-        ending: Option<MemberLeaf>,
-    }
-
-    /// Refuses a 257th sibling while decoding, so memory never grows past
-    /// the bound (LLR-4rju5r).
-    fn bounded_siblings<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Vec<[u8; 32]>, D::Error> {
-        struct BoundedSiblings;
-        impl<'de> Visitor<'de> for BoundedSiblings {
-            type Value = Vec<[u8; 32]>;
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("at most 256 sibling hashes")
-            }
-            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-                let mut siblings = Vec::new();
-                while let Some(hash) = seq.next_element::<[u8; 32]>()? {
-                    if siblings.len() == usize::from(SMT_DEPTH) {
-                        return Err(A::Error::custom(OrgMembersError::AbsenceProofMalformed));
-                    }
-                    siblings.push(hash);
-                }
-                Ok(siblings)
-            }
-        }
-        deserializer.deserialize_seq(BoundedSiblings)
-    }
-
-    impl From<AbsenceProof> for RawAbsenceProof {
-        fn from(proof: AbsenceProof) -> Self {
-            Self {
-                default_map: proof.default_map,
-                siblings: proof.siblings.iter().map(|hash| *hash.as_bytes()).collect(),
-                ending: match proof.ending {
-                    ProofEnding::Empty => None,
-                    ProofEnding::Leaf(member) => Some(member),
-                },
-            }
+    impl Serialize for AbsenceProof {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            self.0.serialize(serializer)
         }
     }
 
-    impl TryFrom<RawAbsenceProof> for AbsenceProof {
-        type Error = OrgMembersError;
-        fn try_from(raw: RawAbsenceProof) -> Result<Self, Self::Error> {
-            AbsenceProof::from_parts(
-                raw.default_map,
-                raw.siblings.into_iter().map(NodeHash::new).collect(),
-                match raw.ending {
-                    None => ProofEnding::Empty,
-                    Some(member) => ProofEnding::Leaf(member),
-                },
-            )
+    impl<'de> Deserialize<'de> for AbsenceProof {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            Kind::deserialize(deserializer)
+                .map(AbsenceProof)
+                // Whatever a field or inner proof refuses is one refusal,
+                // `AbsenceProofMalformed` (LLR-9g2kjg).
+                .map_err(|_| D::Error::custom(OrgMembersError::AbsenceProofMalformed))
         }
     }
 }

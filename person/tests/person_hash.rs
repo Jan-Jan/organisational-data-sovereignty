@@ -8,7 +8,7 @@ mod common;
 
 use common::{hex, person, person_key, slots};
 use person::definition::Person;
-use person::device_hasher::PersonDeviceHasher;
+use person::device_root_hasher::PersonDeviceRootHasher;
 use person::encoding::EncodingVersion;
 use person::hash::{encode, person_hash, verify, PersonHash, PERSON_DEFINITION_V1_KEY};
 use person::{compute_device_root, IdentityError, MAX_NAME_LEN, MAX_SURNAME_LEN};
@@ -17,7 +17,7 @@ fn hash_v1(definition: &Person) -> PersonHash {
     person_hash(definition, 1).expect("version 1 is implemented")
 }
 
-/// verifies: LLR-edn55h
+/// verifies: LLR-qwp8d7
 #[test]
 fn the_v1_encoding_is_the_documented_layout() {
     let alice = person("Alice", "Example", Some(9), &[1, 2]);
@@ -29,19 +29,19 @@ fn the_v1_encoding_is_the_documented_layout() {
     expected.push(0x01);
     expected.extend_from_slice(person_key(9).as_bytes());
     expected
-        .extend_from_slice(compute_device_root::<PersonDeviceHasher>(&slots(&[1, 2])).as_bytes());
-    assert_eq!(encode(&alice, EncodingVersion::V1), expected);
+        .extend_from_slice(compute_device_root::<PersonDeviceRootHasher>(slots(&[1, 2]).devices()).expect("distinct positions").as_bytes());
+    assert_eq!(encode(&alice, EncodingVersion::V1).expect("encodes"), expected);
 }
 
 /// The boundary definitions: empty names, no key, no device; and names at
 /// their byte bound, given decomposed and encoded in NFC.
-/// verifies: LLR-edn55h
+/// verifies: LLR-qwp8d7
 #[test]
 fn the_v1_encoding_of_the_boundary_definitions() {
     let empty = person("", "", None, &[]);
     let mut expected = vec![0, 0, 0, 0, 0, 0, 0, 0, 0x00];
-    expected.extend_from_slice(compute_device_root::<PersonDeviceHasher>(&slots(&[])).as_bytes());
-    assert_eq!(encode(&empty, EncodingVersion::V1), expected);
+    expected.extend_from_slice(compute_device_root::<PersonDeviceRootHasher>(slots(&[]).devices()).expect("distinct positions").as_bytes());
+    assert_eq!(encode(&empty, EncodingVersion::V1).expect("encodes"), expected);
 
     let longest = person(
         &"a".repeat(MAX_NAME_LEN),
@@ -49,7 +49,7 @@ fn the_v1_encoding_of_the_boundary_definitions() {
         Some(9),
         &[1, 2, 3, 4],
     );
-    let encoding = encode(&longest, EncodingVersion::V1);
+    let encoding = encode(&longest, EncodingVersion::V1).expect("encodes");
     assert_eq!(
         encoding.len(),
         4 + MAX_NAME_LEN + 4 + MAX_SURNAME_LEN + 1 + 32 + 32
@@ -67,18 +67,18 @@ fn the_v1_encoding_of_the_boundary_definitions() {
 }
 
 /// The device keys enter the encoding through the Person device root only.
-/// verifies: LLR-edn55h
+/// verifies: LLR-qwp8d7
 #[test]
 fn equal_device_sets_encode_equally_whatever_their_order() {
     assert_eq!(
         encode(
             &person("Alice", "Example", Some(9), &[3, 1, 2]),
             EncodingVersion::V1
-        ),
+        ).expect("encodes"),
         encode(
             &person("Alice", "Example", Some(9), &[1, 2, 3]),
             EncodingVersion::V1
-        )
+        ).expect("encodes")
     );
 }
 
@@ -90,7 +90,7 @@ fn the_v1_hash_is_blake3_keyed_by_the_v1_domain_key() {
         b"person::definition::v1__________"
     );
     let alice = person("Alice", "Example", Some(9), &[1, 2]);
-    let encoding = encode(&alice, EncodingVersion::V1);
+    let encoding = encode(&alice, EncodingVersion::V1).expect("encodes");
     assert_eq!(
         hash_v1(&alice),
         PersonHash::new(blake3::keyed_hash(PERSON_DEFINITION_V1_KEY, &encoding).into())
@@ -101,25 +101,26 @@ fn the_v1_hash_is_blake3_keyed_by_the_v1_domain_key() {
     );
 }
 
-/// Pinned values. Computed 2026-10-06 against the implementation in
-/// docs/plans/2026-10-06-person-definition.md; a change here is a change of
-/// the V1 encoding, which needs a new version (REQ-wg7z4s).
-/// verifies: LLR-4ebtn4, LLR-edn55h
+/// Pinned values: see "Golden values" in
+/// docs/plans/2026-10-24-sparse-merkle-tree.md (T7). V1 is defined over the
+/// root of the depth-4 device root tree (LLR-qwp8d7); a change here is a change of the V1
+/// encoding, which needs a new version (REQ-wg7z4s).
+/// verifies: LLR-4ebtn4, LLR-qwp8d7
 #[test]
 fn the_v1_hash_is_pinned() {
     assert_eq!(
         hex(hash_v1(&person("Alice", "Example", Some(9), &[1, 2])).as_bytes()),
-        "d6177f1cbed18504b63666dd45b5f54834667606fa73de40c2dbaf28a704e292"
+        "0d8019c330b4279c02cf747b911a9cb6f1357dbb164bbd9183265e90ca951c8a"
     );
     assert_eq!(
         hex(hash_v1(&person("Alice", "Example", None, &[])).as_bytes()),
-        "225bc8ac0117ae0b3c4aaaec7654b81b3aa45a8f27a58eab7f365dd6fc8183f0"
+        "943411327947df5cd3f96b581d5c466cb0c8202ff00d72516fda45e4bbdd8bc3"
     );
 }
 
 /// A change to any one of the four fields changes the hash, and the length
 /// prefixes keep a byte moved between name and surname from colliding.
-/// verifies: LLR-4ebtn4, LLR-edn55h
+/// verifies: LLR-4ebtn4, LLR-qwp8d7
 #[test]
 fn distinct_definitions_give_distinct_hashes() {
     let definitions = [
@@ -252,7 +253,9 @@ fn the_hash_sources_hold_no_state() {
     for (file, source) in [
         ("hash.rs", include_str!("../src/hash.rs")),
         ("encoding.rs", include_str!("../src/encoding.rs")),
-        ("device_hasher.rs", include_str!("../src/device_hasher.rs")),
+        ("device_root_hasher.rs", include_str!("../src/device_root_hasher.rs")),
+        ("keyed_hash.rs", include_str!("../src/keyed_hash.rs")),
+        ("position.rs", include_str!("../src/position.rs")),
     ] {
         let code_lines = source
             .lines()

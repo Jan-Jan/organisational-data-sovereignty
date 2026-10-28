@@ -7,8 +7,21 @@ module membership {
   import membership_types.* from "./membership_types"
   export membership_types.*
 
-  /// Crate constant: members cap at 4 devices.
-  pure val MAX_DEVICES = 4
+  /// Crate constant: members cap at 8 devices.
+  pure val MAX_DEVICES = 8
+
+  /// A device key's position in its member's device root tree: the crate's
+  /// 4-bit device position, which the conformance driver makes equal to
+  /// the key's generation (LLR-exwx4n).
+  pure def devicePosition(key: Key): int = key.gen
+
+  /// True iff a key of `devs` other than `device` has `device`'s position.
+  pure def positionTaken(devs: Set[Key], device: Key): bool =
+    devs.exists(other => other != device and devicePosition(other) == devicePosition(device))
+
+  /// True iff no two keys of `devs` share a position.
+  pure def positionsDistinct(devs: Set[Key]): bool =
+    devs.forall(device => not(positionTaken(devs, device)))
 
   /// Every key a leaf holds: its member key and its devices. A member key and
   /// a device key that are equal records are the same key (crate: same bytes).
@@ -38,8 +51,8 @@ module membership {
   /// Insert a brand-new member. Mirrors OrgTrie::add_member: a leaf holding a
   /// key already held, or its member key among its own devices, is refused
   /// with "DuplicateKey" (LLR-v6gfc7). Check order: DuplicateId, handle
-  /// checks, (leaf construction: EmptyDeviceList, DeviceSlotsFull),
-  /// DuplicateKey.
+  /// checks, (leaf construction: EmptyDeviceList, DeviceSlotsFull,
+  /// DevicePositionTaken), DuplicateKey.
   pure def addMember(s: Snapshot, l: Leaf): Result =
     if (s.keys().contains(l.id))
       Err("DuplicateId")
@@ -49,6 +62,8 @@ module membership {
       Err("EmptyDeviceList")
     else if (l.devices.size() > MAX_DEVICES)
       Err("DeviceSlotsFull")
+    else if (not(positionsDistinct(l.devices)))
+      Err("DevicePositionTaken")
     else if (leafSharesKey(l) or leafKeys(l).intersect(heldKeys(s)) != Set())
       Err("DuplicateKey")
     else
@@ -56,10 +71,12 @@ module membership {
 
   /// The device-list error a member record is refused with when it is built,
   /// or "" when its device list is acceptable. Mirrors `MemberLeaf::new`
-  /// (empty list) and `DeviceSlots::parse` (over the cap).
+  /// (empty list) and `DeviceSlots::parse` (over the cap, then two keys of
+  /// one position).
   pure def leafDeviceError(l: Leaf): str =
     if (l.devices.size() == 0) "EmptyDeviceList"
     else if (l.devices.size() > MAX_DEVICES) "DeviceSlotsFull"
+    else if (not(positionsDistinct(l.devices))) "DevicePositionTaken"
     else ""
 
   /// Build a trie from a list of leaves (genesis ceremony). Every record is
@@ -173,7 +190,7 @@ module membership {
   /// held -- under another member, or equal to any member key, this member's
   /// own included -- is refused with "DuplicateKey" (LLR-v6gfc7); the refusal
   /// changes nothing. Check order: IdNotFound, DeviceSlotsFull,
-  /// DuplicateDevice, DuplicateKey.
+  /// DuplicateDevice, DevicePositionTaken, DuplicateKey.
   pure def addDevice(s: Snapshot, id: str, d: Key): Result =
     if (not(s.keys().contains(id)))
       Err("IdNotFound")
@@ -181,6 +198,8 @@ module membership {
       Err("DeviceSlotsFull")
     else if (s.get(id).devices.contains(d))
       Err("DuplicateDevice")
+    else if (positionTaken(s.get(id).devices, d))
+      Err("DevicePositionTaken")
     else if (heldKeys(s).contains(d))
       Err("DuplicateKey")
     else
@@ -302,9 +321,10 @@ module membership {
   /// crate's check order: base must match; removed subseteq base; upserts
   /// observable; removed/upserted disjoint; post-state skeletons unique (over
   /// the whole set, independent of identifier order — LLR-n5t6bn); device caps
-  /// hold; then post-state keys unique, else "DuplicateKey" (LLR-gjj6bx). The
-  /// cap branch is unreachable from the crate, whose member records cannot
-  /// hold more than MAX_DEVICES keys by type. Only the resulting record is
+  /// hold; device positions are distinct; then post-state keys unique, else
+  /// "DuplicateKey" (LLR-gjj6bx). The cap branch and the position branch are
+  /// unreachable from the crate, whose member records cannot hold more than
+  /// MAX_DEVICES keys, nor two keys of one position, by type. Only the resulting record is
   /// checked for keys, not keys held in the base: a delta collapses a sequence
   /// of direct operations, each judged on the record it ran on, and a key may
   /// move or swap between members within one delta.
@@ -327,6 +347,8 @@ module membership {
         Err("ConfusableHandle")
       else if (afterUpsert.keys().exists(k => afterUpsert.get(k).devices.size() > MAX_DEVICES))
         Err("DeviceSlotsFull")
+      else if (afterUpsert.keys().exists(k => not(positionsDistinct(afterUpsert.get(k).devices))))
+        Err("DevicePositionTaken")
       else if (not(keysUnique(afterUpsert)))
         Err("DuplicateKey")
       else
@@ -369,6 +391,8 @@ module membership {
 
   pure def deviceCapOk(s: Snapshot): bool =
     s.keys().forall(k => s.get(k).devices.size() <= MAX_DEVICES)
+
+  pure def positionsOk(s: Snapshot): bool = s.keys().forall(id => positionsDistinct(s.get(id).devices))
 
   run skeletonsUniqueHoldsTest = {
     assert(skeletonsUnique(Map("a" -> leaf("a","alice","alice"), "b" -> leaf("b","bob","bob"))))
@@ -467,8 +491,11 @@ module membership {
   // DuplicateKey: the member's current key is held (by itself).
 
   // verifies: LLR-v6gfc7 (addDevice)
+  /// b's device (b,2) is at a position a does not hold, so the refusal is
+  /// the held key's, not the position's.
   run addDeviceOtherMemberDeviceTest = {
-    assert(addDevice(twoMembers, "a", { owner: "b", gen: 1 }) == Err("DuplicateKey"))
+    val bAtTwo = twoMembers.put("b", twoMembers.get("b").with("devices", Set({ owner: "b", gen: 2 })))
+    assert(addDevice(bAtTwo, "a", { owner: "b", gen: 2 }) == Err("DuplicateKey"))
   }
 
   run addDeviceOtherMemberKeyTest = {
@@ -481,7 +508,7 @@ module membership {
 
   /// Member a with MAX_DEVICES devices.
   pure val fullA: Snapshot = Map("a" -> leaf("a", "alice", "alice").with("devices",
-    Set({ owner: "a", gen: 1 }, { owner: "a", gen: 2 }, { owner: "c", gen: 1 }, { owner: "c", gen: 2 })))
+    Set({ owner: "a", gen: 1 }, { owner: "a", gen: 2 }, { owner: "a", gen: 3 }, { owner: "a", gen: 4 }, { owner: "a", gen: 5 }, { owner: "a", gen: 6 }, { owner: "c", gen: 7 }, { owner: "c", gen: 8 })))
 
   /// Check order: DeviceSlotsFull before DuplicateDevice (the crate's slot
   /// check runs first).
@@ -496,6 +523,18 @@ module membership {
 
   // addDeviceDuplicateTest above fixes DuplicateDevice before DuplicateKey:
   // the member's own device is also a held key.
+
+  // verifies: LLR-5jh6t3 (addDevice)
+  /// A key at a position the member's own device holds.
+  run addDevicePositionTakenTest = {
+    assert(addDevice(twoMembers, "a", { owner: "c", gen: 1 }) == Err("DevicePositionTaken"))
+  }
+
+  /// Check order: DevicePositionTaken before DuplicateKey (b's device (b,1)
+  /// is held, and takes a's position 1).
+  run addDevicePositionBeforeDuplicateKeyTest = {
+    assert(addDevice(twoMembers, "a", { owner: "b", gen: 1 }) == Err("DevicePositionTaken"))
+  }
 
   // verifies: LLR-fym7dy (deleteDevice)
   /// Member a with devices (a,1) and (a,2), member b as in twoMembers.
@@ -598,16 +637,17 @@ module membership {
     }
   }
 
-  /// A device key moves from b to a in one delta: b drops device (b,1)
-  /// rotating to (b,2), a enrols (b,1) -- each step accepted on its own record.
+  /// A device key moves from b to a in one delta: b drops device (b,2)
+  /// rotating to (b,3), a enrols (b,2) at its free position 2 -- each step
+  /// accepted on its own record.
   run applyDeltaDeviceKeyMovesTest = {
-    val bWithTwo = twoMembers.put("b", twoMembers.get("b").with("devices", Set({ owner: "b", gen: 1 }, { owner: "b", gen: 3 })))
+    val bWithTwo = twoMembers.put("b", twoMembers.get("b").with("devices", Set({ owner: "b", gen: 1 }, { owner: "b", gen: 2 })))
     val s1 = bWithTwo.put("b", bWithTwo.get("b")
-      .with("devices", Set({ owner: "b", gen: 3 })).with("pKey", { owner: "b", gen: 2 }))
-    val s2 = s1.put("a", s1.get("a").with("devices", Set({ owner: "a", gen: 1 }, { owner: "b", gen: 1 })))
+      .with("devices", Set({ owner: "b", gen: 1 })).with("pKey", { owner: "b", gen: 3 }))
+    val s2 = s1.put("a", s1.get("a").with("devices", Set({ owner: "a", gen: 1 }, { owner: "b", gen: 2 })))
     all {
-      assert(deleteDevice(bWithTwo, "b", { owner: "b", gen: 1 }, { owner: "b", gen: 2 }) == Ok(s1)),
-      assert(addDevice(s1, "a", { owner: "b", gen: 1 }) == Ok(s2)),
+      assert(deleteDevice(bWithTwo, "b", { owner: "b", gen: 2 }, { owner: "b", gen: 3 }) == Ok(s1)),
+      assert(addDevice(s1, "a", { owner: "b", gen: 2 }) == Ok(s2)),
       assert(applyDelta(bWithTwo, calculateDelta(bWithTwo, s2)) == Ok(s2)),
     }
   }

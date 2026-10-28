@@ -7,7 +7,7 @@ use crate::error::IdentityError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EncodingVersion {
     /// Name, surname, optional PersonPublicKey (X25519), the device root over
-    /// ed25519 DevicePublicKeys. LLR-edn55h.
+    /// ed25519 DevicePublicKeys. LLR-qwp8d7.
     V1,
 }
 

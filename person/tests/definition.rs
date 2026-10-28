@@ -22,9 +22,9 @@ fn surname() -> Surname {
 /// verifies: LLR-4ku56h
 #[test]
 fn a_person_holds_up_to_max_devices_sorted() {
-    assert_eq!(MAX_DEVICES, 4);
-    let given = vec![device(4), device(1), device(3), device(2)];
-    let devices = DeviceSlots::parse(given.clone()).expect("four");
+    assert_eq!(MAX_DEVICES, 8);
+    let given: Vec<DevicePublicKey> = (1..=8).rev().map(device).collect();
+    let devices = DeviceSlots::parse(given.clone()).expect("eight");
     let person = Person::new(name(), surname(), Some(person_key(9)), devices.clone())
         .expect("valid definition");
     let mut sorted = given;
@@ -36,23 +36,23 @@ fn a_person_holds_up_to_max_devices_sorted() {
     assert_eq!(person.person_key(), Some(&person_key(9)));
 }
 
-/// A fifth key or a key given twice is refused while the slots are built, so
+/// A ninth key or a key given twice is refused while the slots are built, so
 /// no Person holding them can exist.
 /// verifies: LLR-4ku56h
 #[test]
 fn over_the_bound_or_a_duplicate_is_refused_before_any_person_exists() {
-    let five: Vec<DevicePublicKey> = (1..=5).map(device).collect();
+    let nine: Vec<DevicePublicKey> = (1..=9).map(device).collect();
     assert_eq!(
-        DeviceSlots::parse(five),
+        DeviceSlots::parse(nine),
         Err(IdentityError::DeviceSlotsFull)
     );
     assert_eq!(
         DeviceSlots::parse(vec![device(1), device(1)]),
         Err(IdentityError::DuplicateDevice)
     );
-    let full = slots(&[1, 2, 3, 4]);
+    let full = slots(&[1, 2, 3, 4, 5, 6, 7, 8]);
     assert_eq!(
-        full.add_device(device(5)),
+        full.add_device(device(9)),
         Err(IdentityError::DeviceSlotsFull)
     );
 }

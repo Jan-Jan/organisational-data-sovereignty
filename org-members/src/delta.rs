@@ -1,13 +1,11 @@
-use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
 
 use hashbrown::HashMap;
 
 use crate::error::OrgMembersError;
-use crate::hasher::TrieHasher;
-use crate::node::Node;
-use crate::smt::DefaultHashes;
+use crate::hasher::MemberHasher;
+use crate::member_tree::MemberTree;
 use crate::trie::{KeyIndex, OrgTrie};
 use crate::types::{Handle, HandleSkeleton, MemberId, MemberLeaf, RootHash};
 
@@ -122,9 +120,8 @@ pub mod test_support {
 }
 
 /// Result of `apply_delta()`. Cannot query members -- can only verify or drop.
-pub struct CandidateTrie<H: TrieHasher> {
-    pub(crate) root: Arc<Node>,
-    pub(crate) defaults: Arc<DefaultHashes>,
+pub struct CandidateTrie<H: MemberHasher> {
+    pub(crate) tree: MemberTree<H>,
     pub(crate) member_count: usize,
     pub(crate) root_hash: RootHash,
     pub(crate) skeleton_index: HashMap<HandleSkeleton, Handle>,
@@ -133,7 +130,7 @@ pub struct CandidateTrie<H: TrieHasher> {
     pub(crate) _hasher: core::marker::PhantomData<H>,
 }
 
-impl<H: TrieHasher> CandidateTrie<H> {
+impl<H: MemberHasher> CandidateTrie<H> {
     pub fn root_hash(&self) -> RootHash {
         self.root_hash
     }
@@ -144,8 +141,7 @@ impl<H: TrieHasher> CandidateTrie<H> {
         }
 
         Ok(OrgTrie::from_candidate(
-            self.root,
-            self.defaults,
+            self.tree,
             self.member_count,
             self.root_hash,
             self.skeleton_index,
@@ -155,7 +151,7 @@ impl<H: TrieHasher> CandidateTrie<H> {
     }
 }
 
-impl<H: TrieHasher> fmt::Debug for CandidateTrie<H> {
+impl<H: MemberHasher> fmt::Debug for CandidateTrie<H> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CandidateTrie")
             .field("root_hash", &self.root_hash)

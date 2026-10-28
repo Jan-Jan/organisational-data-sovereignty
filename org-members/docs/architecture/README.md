@@ -56,8 +56,8 @@ had to go back to the dated file; the items are defined in
 | Item | Responsibility | Source |
 |---|---|---|
 | SDD-4yr9ge | the validated, canonically serialisable member record — identifier, handle, member-as-a-group key, device key set, personal fields — and the validation and normalisation every construction path applies, the path from deserialised bytes included | `src/types.rs`, `src/normalize.rs` |
-| SDD-d6x85b | the hash interface the record is committed through — four separated domains — and the fixed-shape device sub-trie whose root enters the member leaf hash | `src/hasher.rs`, `src/device_trie.rs` |
-| SDD-d9svdj | the immutable 256-level sparse Merkle store — addressing, path-copying, lazy hashing, the diff walk — holding member records without interpreting them | `src/smt.rs`, `src/node.rs` |
+| SDD-d6x85b | the hash interface that provides the Membership record's eight separated hash domains, four member, four device, per LLR-4rdqyn | `src/hasher.rs` |
+| SDD-d9svdj | the Membership record's leaf on the `sparse-merkle-tree` unit's tree at depth 256 — a member record, held with its device root, that the tree places by its MemberId | `src/member_tree.rs` |
 | SDD-k5wa4n | the organisation trie and its eight membership operations, with the handle and skeleton indexes that make uniqueness and confusability decidable without walking the store | `src/trie.rs` |
 | SDD-55b2zj | the change set that crosses a process boundary — anchored to the record it was computed against, canonical in its encoding, usable only after its result is verified against an independently supplied root | `src/delta.rs`, and `apply_delta` / `calculate_delta` / the canonical-form check in `src/trie.rs` |
 | SDD-m9gs5g | the single typed error by which every rejection leaves the crate, and the lint posture that keeps a rejection from becoming a panic | `src/error.rs`, `src/lib.rs` |

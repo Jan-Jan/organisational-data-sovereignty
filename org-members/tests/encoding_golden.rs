@@ -16,6 +16,12 @@
 //! the first of those claims. The old root cannot be recomputed here: the old
 //! key is refused by `PersonPublicKey`, so no member set holding it can be
 //! built.
+//! The pins cover the device root over a depth-4 device root tree under four
+//! device domains (LLR-uudst2, LLR-4rdqyn), and the member leaf hash as
+//! H::leaf(identity hash, content hash) under the member identity and content
+//! domains (LLR-t465mb, LLR-4rdqyn); the wire bytes are the record's.
+//! a_member_leaf_hashes_as_documented (integration_test.rs) recomputes a
+//! one-member root from blake3 alone.
 mod common;
 
 use common::dual_key_bytes;
@@ -25,7 +31,7 @@ use org_members::trie::OrgTrie;
 use org_members::types::{Handle, MemberId, MemberLeaf, Name, DevicePublicKey, PersonPublicKey, Surname};
 
 const GOLDEN_ALICE_LEAF: &str = "902e667049de9cc485facf64b9a88b7ddf9ce1b5f4e7fb61aa7146e201d644bd05616c696365bf74dcf9814eaf82aa907e23790285763c28cd82bad0bdb8954a09d67d7dbe7805416c69636505536d697468015726e5bd4b887fcc929566a772f0fd5eb37d5695b4b60d4b298886b53c0bc567";
-const GOLDEN_ROOT: &str = "4740435a055ef3825a1a96a9a72361c3bc22bd2c47a992cda21161048d17efd4";
+const GOLDEN_ROOT: &str = "830f1f7341de3d5ff2ba752e76a25db2c3a8bc180e72a5af8e026b5d16e20c96";
 /// The pinned record as captured on master @ 0f85cb9, with the ed25519 member
 /// key of the seed "alice-mk".
 const OLD_GOLDEN_ALICE_LEAF: &str = "902e667049de9cc485facf64b9a88b7ddf9ce1b5f4e7fb61aa7146e201d644bd05616c6963658092f31ae728a56911fc508958c73fadbe6a9b050aec7114e4412a3dc87298c805416c69636505536d697468015726e5bd4b887fcc929566a772f0fd5eb37d5695b4b60d4b298886b53c0bc567";

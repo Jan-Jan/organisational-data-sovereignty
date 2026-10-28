@@ -151,7 +151,7 @@ Deleting a member is permanent. A `MemberId` is a fresh random value chosen by t
 
 `AbsenceProof::verify` accepts a proof that resolves to the root you pass. It cannot know whether that root is current. A proof that was genuine under an older root fails against a newer one (`AbsenceProofRootMismatch`). But a proof checked against a stale root that predates a device's admission says "absent" truthfully, and a device that acts on it deletes its data while it is still a member (HAZ-adm7gv). Pass only the latest finalised on-chain root, read by the caller at the moment of checking.
 
-A proof that a Device key is absent from a Member who remains carries that Member's leaf: MemberId, handle, name, surname and keys (HAZ-gwbn5n). `prove_absent` cannot know who is asking. Produce a proof only for a requester whose authenticated Device key and supplied MemberId match a pair on your revoked-device list, and send it only over the connection that authenticated that key.
+A proof that a Device key is absent from a Member who remains (a Held proof) carries that Member's MemberId, handle, Member-as-a-group key, name, surname and device root — but no `DevicePublicKey` (HAZ-gwbn5n, HAZ-r5tc4m, RC-5nka8z). `prove_absent` cannot know who is asking. Produce a proof only for a requester whose authenticated Device key and supplied MemberId match a pair on your revoked-device list, and send it only over the connection that authenticated that key.
 
 `prove_absent` does not refuse a Device key that another Member holds. Keeping a revoked Device key from ever being admitted again, to any Member, is the duty of whoever keeps the revoked-device list.
 
@@ -162,7 +162,7 @@ For completeness, what the caller does **not** need to re-do:
 - Handle validation (UTS#39, NFC, lowercase, single-script, no `.`, length-capped) is re-run on every wire-format `MemberLeaf` deserialise.
 - Confusable/homoglyph collision is re-checked in `apply_delta` for both newly-upserted and renamed members.
 - Keys are re-validated on deserialise through `person`'s `parse`: a `DevicePublicKey` must be a canonically encoded, prime-order ed25519 point, a `PersonPublicKey` a canonical, non-small-order X25519 key.
-- Device-slot constraints (≤ `MAX_DEVICES`, no duplicates, sorted) are enforced on deserialise (after the H-2 fix) — non-canonical wire forms are rejected, not normalised.
+- Device-slot constraints (≤ `MAX_DEVICES`, no duplicates, sorted, no two device public keys of one member at one device position — refused with `DevicePositionTaken`) are enforced on deserialise (after the H-2 fix) — non-canonical wire forms are rejected, not normalised.
 - `Delta` canonical form (sorted-unique-disjoint, no stale removals, no no-op upserts) is enforced in `apply_delta` (after the H-1 fix).
 - Every key held in the organisation is held in one place — refused with `DuplicateKey` on every path, `apply_delta` included (security check 11 says what this does not cover: a key no longer held).
 - `base_root` of the delta must match the current trie root; mismatched deltas are rejected with `DeltaBaseMismatch`.

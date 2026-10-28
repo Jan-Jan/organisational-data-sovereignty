@@ -7,11 +7,14 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use crate::definition::Person;
-use crate::device_hasher::PersonDeviceHasher;
-use crate::device_trie::compute_device_root;
+use crate::device_root::compute_device_root;
+use crate::device_root_hasher::PersonDeviceRootHasher;
 use crate::encoding::EncodingVersion;
 use crate::error::IdentityError;
-use crate::name::{MAX_NAME_LEN, MAX_SURNAME_LEN};
+use crate::keyed_hash::keyed_hash;
+use crate::name::{Name, Surname, MAX_NAME_LEN, MAX_SURNAME_LEN};
+use crate::person_key::PersonPublicKey;
+use sparse_merkle_tree::NodeHash;
 
 /// `person::definition::v1`, padded with `_` to 32 bytes. LLR-4ebtn4.
 pub const PERSON_DEFINITION_V1_KEY: &[u8; 32] = b"person::definition::v1__________";
@@ -47,34 +50,48 @@ impl fmt::Debug for PersonHash {
     }
 }
 
-/// The encoding of `person` under `version`. LLR-edn55h.
-pub fn encode(person: &Person, version: EncodingVersion) -> Vec<u8> {
-    match version {
-        EncodingVersion::V1 => encode_v1(person),
-    }
+/// The encoding of `person` under `version`; `DevicePositionTaken` only for
+/// devices two of which share a position, which a `Person`'s `DeviceSlots`
+/// never holds. LLR-qwp8d7.
+pub fn encode(person: &Person, version: EncodingVersion) -> Result<Vec<u8>, IdentityError> {
+    let device_root = compute_device_root::<PersonDeviceRootHasher>(person.devices().devices())?;
+    Ok(match version {
+        EncodingVersion::V1 => encode_v1(person.name(), person.surname(), person.person_key(), &device_root),
+    })
 }
 
 /// Name length (u32 LE) and NFC bytes; surname likewise; `0x00`, or `0x01`
-/// and the PersonPublicKey's 32 bytes; the 32-byte Person device root.
-/// LLR-edn55h.
-fn encode_v1(person: &Person) -> Vec<u8> {
-    let name = person.name().as_str().as_bytes();
-    let surname = person.surname().as_str().as_bytes();
+/// and the PersonPublicKey's 32 bytes; the 32-byte device root. LLR-qwp8d7.
+pub(crate) fn encode_v1(
+    name: &Name,
+    surname: &Surname,
+    person_key: Option<&PersonPublicKey>,
+    device_root: &NodeHash,
+) -> Vec<u8> {
+    let name = name.as_str().as_bytes();
+    let surname = surname.as_str().as_bytes();
     let mut encoding = Vec::with_capacity(4 + name.len() + 4 + surname.len() + 1 + 32 + 32);
     encoding.extend_from_slice(&(name.len() as u32).to_le_bytes());
     encoding.extend_from_slice(name);
     encoding.extend_from_slice(&(surname.len() as u32).to_le_bytes());
     encoding.extend_from_slice(surname);
-    match person.person_key() {
+    match person_key {
         None => encoding.push(0x00),
         Some(key) => {
             encoding.push(0x01);
             encoding.extend_from_slice(key.as_bytes());
         }
     }
-    let device_root = compute_device_root::<PersonDeviceHasher>(person.devices());
     encoding.extend_from_slice(device_root.as_bytes());
     encoding
+}
+
+/// The keyed hash of an encoding under `version`'s domain key. LLR-4ebtn4.
+pub(crate) fn hash_encoding(version: EncodingVersion, encoding: &[u8]) -> PersonHash {
+    let key = match version {
+        EncodingVersion::V1 => PERSON_DEFINITION_V1_KEY,
+    };
+    PersonHash(keyed_hash(key, &[encoding]))
 }
 
 /// The hash of `person` under the encoding version `version`, refused with
@@ -82,11 +99,7 @@ fn encode_v1(person: &Person) -> Vec<u8> {
 /// LLR-4ebtn4, LLR-rde6tk.
 pub fn person_hash(person: &Person, version: u16) -> Result<PersonHash, IdentityError> {
     let version = EncodingVersion::try_from(version)?;
-    let key = match version {
-        EncodingVersion::V1 => PERSON_DEFINITION_V1_KEY,
-    };
-    let encoding = encode(person, version);
-    Ok(PersonHash(blake3::keyed_hash(key, &encoding).into()))
+    Ok(hash_encoding(version, &encode(person, version)?))
 }
 
 /// `Ok(true)` exactly when `hash` is the hash of `person` under `version`,

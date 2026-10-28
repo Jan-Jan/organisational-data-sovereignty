@@ -198,6 +198,12 @@ DeviceSlots encodes in the strictly increasing order its decoder requires. The
 error for a non-sequence names only the expected form and the bound, no key.
 assesses: LLR-5za6mp
 
+LLR-cyx9a3 (LLR-5za6mp with the expected-form message naming
+DevicePublicKeys, the bound of 8 and distinct device positions): no hazard
+impact, for LLR-5za6mp's reasons; the message still names only the expected
+form and the bound, no key.
+assesses: LLR-cyx9a3
+
 LLR-z99qee (`NodeHash` wraps any 32 bytes, unvalidated): no hazard impact; a
 hash output has no invalid values, and `person` produces a `NodeHash` only
 from the implementor's hash functions and trusts none as proof of anything.

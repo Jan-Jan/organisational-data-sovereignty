@@ -46,6 +46,7 @@ satisfies: REQ-m8aexh
 **LLR-pys2ek**: a member holds at most `MAX_DEVICES` device keys, and
 `MAX_DEVICES` is 4 because the device sub-trie is a fixed depth-2 binary tree
 of four slots. satisfies: REQ-xdx2c2
+superseded-by: LLR-utk6uy
 
 (Amended 2026-10-04, corrected 2026-10-05 in review round 3: realised
 through `person`'s `DeviceSlots` and `MAX_DEVICES`, which org-members
@@ -123,9 +124,9 @@ refused it — can drive the formatter down a different path. The abnormal-input
 axis is empty by construction, which is a stronger statement than "no test was
 written for it".
 
-## SDD-d6x85b — Domain-separated hashing and the device sub-trie
+## SDD-d6x85b — Domain-separated hashing
 
-`org-members/src/hasher.rs`, `org-members/src/device_trie.rs`
+`org-members/src/hasher.rs`
 
 (Amended 2026-10-05: `org-members/src/device_trie.rs` no longer exists. The
 device sub-trie moved to `person::device_trie` (`person/src/device_trie.rs`,
@@ -136,13 +137,20 @@ calls `person::compute_device_root`. The item is now `hasher.rs` and its use of
 `person::device_trie`. Where this file names `device_trie.rs` below, read
 `person/src/device_trie.rs`.)
 
-**SDD-d6x85b**: the hash interface the membership record is committed
-through — four separated domains, and the fixed-shape device sub-trie whose
-root enters the member leaf hash. traces: REQ-xdx2c2
+**SDD-d6x85b**: the hash interface that provides the Membership record's
+eight separated hash domains, four member, four device, per LLR-4rdqyn (the
+device root those device domains build is `person`'s,
+`person/docs/architecture/2026-10-24-device-root-tree.md`). traces: REQ-xdx2c2
+
+(Amended 2026-10-24, `worktree-generic-smt`: the statement, heading and file
+above were restated on 2026-10-28, guideline review round 5, to the item's one
+current responsibility; the device sub-trie it once also held is `person`'s
+device root tree.)
 
 **LLR-72p8bz**: the hash interface provides four separated domains — member
 leaf, member node, device leaf, device node — such that the same input hashed
 in two domains yields two different values. satisfies: derived
+superseded-by: LLR-4rdqyn
 
 (Amended 2026-10-04, corrected 2026-10-05 in review round 3: the four
 domains are still `Blake3Hasher`'s, in `org-members/src/hasher.rs`. The two
@@ -156,6 +164,7 @@ different device root under a different domain.)
 slots whose unoccupied slots hash a device empty sentinel, and device keys are
 held sorted so that construction order does not change the record's hash.
 satisfies: REQ-xdx2c2
+superseded-by: LLR-uudst2
 
 (Amended 2026-10-04, corrected 2026-10-05 in review round 3: realised
 through `person`'s `compute_device_root` and `DeviceSlots`, under person's
@@ -188,13 +197,13 @@ comparison together. Annotating one would buy a name and no evidence. (Amended
 2026-10-05: the file is now `person/src/device_trie.rs`; see the note under
 the item's heading.)
 
-## SDD-d9svdj — Sparse Merkle trie store
+## SDD-d9svdj — Member leaf on the sparse Merkle tree
 
-`org-members/src/smt.rs`, `org-members/src/node.rs`
+`org-members/src/member_tree.rs`
 
-**SDD-d9svdj**: the immutable 256-level sparse Merkle store — addressing,
-path-copying, lazy hashing and the diff walk — which holds member records
-without interpreting them. traces: REQ-d3prca, REQ-avmu3j, REQ-crjxk8
+**SDD-d9svdj**: the Membership record's leaf on the `sparse-merkle-tree`
+unit's tree at depth 256 — a member record, held with its device root, that
+the tree places by its MemberId. traces: REQ-d3prca, REQ-avmu3j, REQ-crjxk8
 
 (Amended 2026-10-06 by `worktree-org-members-absence-proofs`: the store also
 returns a MemberId's path siblings and the node its path ends in, LLR-utp6x4,
@@ -202,6 +211,14 @@ for the absence proof SDD-57vaj4, which is the only code that interprets the
 leaf it ends in. LLR-7jkcba makes `MemberId::bit` and `DefaultHashes::at_level`
 return an error rather than panic, resolving PR-jq43gx. Both are in this
 change's `absence-proofs` architecture file.)
+
+(Amended 2026-10-24, `worktree-generic-smt`: the store is now the
+`sparse-merkle-tree` unit's tree at depth 256 over `MemberLeaf`, whose
+identity is the MemberId; this item is that use — the member leaf, its
+position and its hashing — and its LLRs other than LLR-utp6x4 and LLR-7jkcba,
+retired, are realised through it. `2026-10-24-on-sparse-merkle-tree.md`. The
+statement, heading and file above were restated to match on 2026-10-27,
+guideline review round 1.)
 
 **LLR-zbe553**: a member is addressed by the 256 bits of its identifier, index
 0 being the most significant bit of the first byte. satisfies: derived

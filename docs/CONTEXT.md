@@ -120,6 +120,191 @@ The single value that commits to a whole Membership record, and the value
 published so that others can verify a membership claim.
 _Avoid_: root hash, merkle root (both name the mechanism)
 
+**Device root**:
+The value committing to the set of DevicePublicKeys one Member or one Person
+holds, under one domain; a Person hash and a Member's leaf in the Membership
+record each commit to one.
+_Avoid_: device hash, device sub-trie hash, device trie
+
+**Device root tree**:
+The sparse Merkle tree of depth 4 whose root is the device root.
+_Avoid_: device trie, device sub-trie
+
+**Sparse Merkle tree**:
+A binary hash tree of fixed depth with one position for every possible value
+of that depth's width, almost all of them empty, committing to the leaf
+identities it holds, and their leaves, by a single root. The Membership record
+and each device root tree are one.
+_Avoid_: SMT (in prose), trie, merkle trie, sparse merkle trie
+
+**Depth**:
+The number of levels from the root to a leaf of a sparse Merkle tree; a tree
+of depth d has 2^d positions.
+_Avoid_: size, height, bit width
+
+**Position**:
+The one place in a sparse Merkle tree a leaf may be held: the first Depth bits
+of the leaf identity's position bytes.
+_Avoid_: slot, index
+
+**Position bytes**:
+The 32 bytes a leaf identity maps to; the first Depth bits of them are its
+Position.
+_Avoid_: position (for the bytes), path, key hash
+
+**Leaf**:
+What a sparse Merkle tree holds at a position, chosen by the tree's consumer:
+a leaf identity and the content its content hash covers, such as a Member's
+leaf or a device root tree's leaf.
+_Avoid_: entry, record, item (for the tree's side)
+
+**Leaf identity**:
+What tells one leaf of a sparse Merkle tree from another and fixes its
+position, chosen by the tree's consumer: a MemberId for a Member's leaf, a
+DevicePublicKey for a device root tree's leaf.
+_Avoid_: key (for the tree's side), leaf key, leaf id
+
+**Collision**:
+Two leaves of different identities that have the same position in a sparse
+Merkle tree.
+_Avoid_: clash, conflict
+
+**Identity hash**:
+The hash of a leaf identity, under a domain the tree's consumer chooses; it
+stands for the identity wherever the tree commits to a leaf.
+_Avoid_: key hash, id hash
+
+**Content hash**:
+The hash of everything a leaf holds besides its identity, under a domain the
+tree's consumer chooses.
+_Avoid_: value hash, data hash, payload hash
+
+**Tree hasher**:
+The set of hash domains a sparse Merkle tree is built under, chosen by its
+consumer: leaf, node and empty leaf, each separated from the others and from
+every other consumer's.
+_Avoid_: hash function, digest (for the set), hasher (alone, in prose)
+
+**Empty-leaf sentinel**:
+The bytes whose hash in a Tree hasher's leaf domain is that tree's Empty
+leaf, chosen so that they encode no leaf the tree can hold.
+_Avoid_: empty marker, null leaf, padding
+
+**Device root hasher**:
+The hash domains a device root tree is built under: a Tree hasher, the
+domains of a DevicePublicKey's identity hash and of a device leaf's content
+hash, and its Empty-leaf sentinel, each chosen by the device root tree's
+consumer.
+_Avoid_: device hasher, device trie hasher
+
+**Device leaf**:
+A leaf of a device root tree: a DevicePublicKey as its leaf identity, holding
+no content besides it.
+_Avoid_: device node, device entry
+
+**Device position**:
+A DevicePublicKey's Position in any device root tree: the first Depth bits of
+its position bytes, under the one domain Person and Member device root trees
+share.
+_Avoid_: device slot, device index
+
+**Empty-subtree hash**:
+The hash of a subtree of a given level that holds no leaf; one value per
+level for a given set of hash domains.
+_Avoid_: zero hash, empty node hash
+
+**Proof ending**:
+What a Tree absence proof shows at its Position: Empty, no leaf held there, or
+Occupied, a leaf of another identity held there, given by its identity hash
+and content hash.
+_Avoid_: terminal, end leaf, tail
+
+**Calculated**:
+A sparse Merkle tree none of whose node hashes is unset.
+_Avoid_: hashed, finalised, committed (for the tree)
+
+**Tree changes**:
+Between two sparse Merkle trees: the leaf identities the first holds and the
+second does not, and the upserted leaves.
+_Avoid_: diff, delta, patch (for the tree's side)
+
+**Upserted leaf**:
+A leaf the second of two sparse Merkle trees holds that the first does not
+hold as it is: one added or one replaced.
+_Avoid_: changed leaf, updated leaf, new leaf
+
+**Level**:
+The height of a node above the leaves of a sparse Merkle tree: a leaf's
+position is at level 0 and the root at level Depth.
+_Avoid_: layer, depth (for one node)
+
+**Node hash**:
+The 32-byte hash of a leaf, of a node over two subtrees, or of the root of a
+sparse Merkle tree.
+_Avoid_: digest, node value
+
+**Empty leaf**:
+The hash a sparse Merkle tree gives a position that holds no leaf: the
+empty-subtree hash of level 0.
+_Avoid_: zero leaf, null leaf, empty slot
+
+**Sibling**:
+The node hash beside a proof's node at one level on the way from a position
+to the root, with which that node is hashed to give the node a level up.
+_Avoid_: neighbour, proof node, audit node
+
+**Proof map**:
+The Depth bits of a proof marking the levels whose sibling is not that
+level's empty-subtree hash; a proof carries only the marked siblings.
+_Avoid_: bitmap, mask, bitfield
+
+**Absence proof**:
+A value showing, against one root, that something is not held under that
+root; it does not show that it was never held. A Tree absence proof, a Device
+absence proof and a Person absence proof are its kinds.
+_Avoid_: exclusion proof, non-inclusion proof, non-membership proof,
+revocation proof (for the value itself)
+
+**Tree absence proof**:
+An absence proof that a leaf identity is not held under the root of a sparse
+Merkle tree.
+_Avoid_: leaf absence proof, absence proof (alone, where another kind could
+be meant)
+
+**Inclusion proof**:
+A value showing, against one root, that a leaf identity and its leaf are
+held under that root.
+_Avoid_: membership proof, existence proof, audit path
+
+**Proven member**:
+A Member's leaf without its DevicePublicKeys, as a Held proof carries it: its
+MemberId, handle, Member-as-a-group key, name, surname and device root.
+_Avoid_: member summary, member header, partial member
+
+**Device absence proof**:
+An absence proof that a DevicePublicKey is not held, under a Membership root,
+by the Member a MemberId names there: a Vacant proof or a Held proof.
+_Avoid_: device proof, device exclusion proof
+
+**Vacant proof**:
+A Device absence proof in which the MemberId holds no Member under the
+Membership root: a Tree absence proof of that MemberId under the Membership
+root, its vacancy.
+_Avoid_: empty proof, non-member proof
+
+**Held proof**:
+A Device absence proof in which the MemberId holds a Member under the
+Membership root and that Member lacks the DevicePublicKey: the Proven member,
+its inclusion proof, and a Tree absence proof under the Member's device root,
+its device-root absence.
+_Avoid_: member proof
+
+**Person absence proof**:
+A value showing, against one Person hash, that a DevicePublicKey is not held
+in the Person definition it commits to: that definition's fields but its
+DevicePublicKeys, its device root, and a Tree absence proof under that root.
+_Avoid_: person proof, person exclusion proof, person-hash proof
+
 **Change set**:
 A set of membership changes anchored to the Membership record it was computed
 against, exchanged between administrators. Rejected if applied to a record

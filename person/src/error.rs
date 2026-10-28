@@ -12,7 +12,7 @@ pub enum IdentityError {
     #[error("invalid person public key")]
     InvalidPersonKey,
 
-    #[error("device slots full (max 4)")]
+    #[error("device slots full (max 8)")]
     DeviceSlotsFull,
 
     #[error("duplicate device")]
@@ -20,6 +20,29 @@ pub enum IdentityError {
 
     #[error("device not found")]
     DeviceNotFound,
+
+    /// Two DevicePublicKeys of one set at one device position. LLR-xsx6gg.
+    #[error("device position taken by another device public key")]
+    DevicePositionTaken,
+
+    /// A proof of absence asked for a DevicePublicKey the Person holds.
+    /// LLR-cve3d6, LLR-z8h2w8.
+    #[error("device public key still held")]
+    DeviceStillHeld,
+
+    /// A Person absence proof whose fields do not hash to the given Person hash.
+    /// LLR-z8h2w8.
+    #[error("proof does not resolve to the person hash")]
+    PersonHashMismatch,
+
+    /// A Person absence proof whose absence proof does not resolve to its
+    /// device root. LLR-z8h2w8.
+    #[error("proof does not resolve to the device root")]
+    DeviceRootMismatch,
+
+    /// A Person absence proof that does not decode. LLR-985v9t, LLR-3dvfjb.
+    #[error("malformed proof")]
+    ProofMalformed,
 
     #[error("person public key held with no device public key")]
     KeyWithoutDevice,

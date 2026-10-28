@@ -10,16 +10,10 @@
 
 mod common;
 
-use common::{device, device_and_its_bytes_as_a_person_key, person_key};
+use common::{device_and_its_bytes_as_a_person_key, person_key, sorted_device_bytes};
 use person::definition::Person;
 use person::{DeviceSlots, IdentityError, Name, Surname};
 use serde_json::{json, Value};
-
-fn sorted_device_bytes(seeds: &[u8]) -> Vec<[u8; 32]> {
-    let mut keys: Vec<[u8; 32]> = seeds.iter().map(|seed| *device(*seed).as_bytes()).collect();
-    keys.sort();
-    keys
-}
 
 /// A JSON Person with these fields, keys as arrays of 32 numbers.
 fn person_json(name: &str, key: Option<[u8; 32]>, devices: &[[u8; 32]]) -> Value {
@@ -133,7 +127,7 @@ fn a_field_breaking_its_own_rule_is_refused_with_its_message() {
         decode_error(person_json(
             "Alice",
             key,
-            &sorted_device_bytes(&[1, 2, 3, 4, 5])
+            &sorted_device_bytes(&[1, 2, 3, 4, 5, 6, 7, 8, 9])
         )),
         "device slots exceed MAX_DEVICES"
     );
