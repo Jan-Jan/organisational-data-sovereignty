@@ -1,9 +1,30 @@
-//! The calls a pure proxy is created, mapped and acted through (LLR-59kxsr).
+//! The calls a pure proxy is created, mapped and acted through (LLR-59kxsr),
+//! and the decoding of its free balance (LLR-htp5tk).
 
 use subxt::dynamic::Value;
 use subxt::ext::scale_value::{Composite, ValueDef};
 
-use super::AccountId;
+use super::{AccountId, WriteError};
+
+/// `System.Account`'s value, `AccountInfo`: four `u32` counters (nonce,
+/// consumers, providers, sufficients), then `free`, `reserved`, `frozen` and
+/// `flags` as `u128` (LLR-htp5tk).
+const ACCOUNT_INFO_BYTES: usize = 4 * 4 + 4 * 16;
+
+/// An account's free balance from its `System.Account` value (LLR-htp5tk):
+/// zero when the chain holds none; for an eighty-byte `AccountInfo`, `free`,
+/// the little-endian integer at bytes sixteen to thirty-one; any other length
+/// is `MalformedStorage("System.Account")`.
+pub fn free_balance_of(account_storage: Option<&[u8]>) -> Result<u128, WriteError> {
+    let Some(bytes) = account_storage else {
+        return Ok(0);
+    };
+    let account_info: &[u8; ACCOUNT_INFO_BYTES] =
+        bytes.try_into().map_err(|_| WriteError::MalformedStorage("System.Account"))?;
+    let mut free = [0u8; 16];
+    free.copy_from_slice(&account_info[16..32]);
+    Ok(u128::from_le_bytes(free))
+}
 
 /// `Proxy.create_pure { proxy_type: Any, delay: 0, index: 0 }`.
 pub fn create_pure_call() -> Value {

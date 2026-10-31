@@ -3,331 +3,45 @@
 //! The Organisation public and private key. A created Organisation publishes
 //! the X25519 public key of a secret generated for it alone, distinct from every key of its
 //! genesis record, and that secret is kept in the creator's encrypted store
-//! (REQ-ech45n), and every Member's record holds it once admitted (LLR-3fwykc).
+//! (REQ-ech45n), and every Member's record holds it once admitted
+//! (LLR-qw8tyu).
 //!
 //! The gate: `cargo test -p org-node --features app,test-support --test organisation_key`
+//!
+//! The key pair is drawn by `propose_founding`; the custody tests run the
+//! founding through the operations (LLR-qw8tyu).
 
-use org_members::OrgMembersError;
 use org_node::chain::OrgState;
 use org_node::error::OrgNodeError;
-use org_node::ids::OrgId;
-use org_node::store::{OrgRecord, PersonaStatus, PersonaStore};
-use org_node::test_fixtures::{device_key, device_keypair, device_secret, ChainSlots};
-use org_node::{Epoch, MemberSeed, OrgPrivateKey, OrgPublicKey, PersonPublicKey};
+use org_node::test_fixtures::{device_keypair, ChainSlots};
+use org_node::{Epoch, MemberSeed, OrgPrivateKey, OrgPublicKey};
 use rand::rngs::OsRng;
-use rand::{CryptoRng, RngCore};
 
 mod support;
-use support::{found, h, nm, private_key_of, reopen_store, sn, store_bytes, test_proxy, Node, Party};
+use support::{found_on_chain, handle, parsed_name, parsed_surname, ConstRng, Node};
 
-/// A fresh storage, unique per test and party, and the tag and party that
-/// name it. *Adapted 2026-10-08 (S4, task T3):* the store is sealed bytes
-/// org-io keeps, not a file under a passphrase; "the file" in the tests
-/// below is those bytes (`store_bytes`).
-fn open_store(tag: &str, party: &str) -> (Party, (String, String)) {
-    (support::open_store(tag, party), (tag.to_string(), party.to_string()))
-}
-
-/// The Organisation public key the chain holds for `org_id`, as bytes.
-fn published_key(chain: &ChainSlots, org_id: &OrgId) -> [u8; 32] {
-    *chain.get(org_id).unwrap().org_pub_key.as_bytes()
-}
-
-/// The Organisation public key a record holds, as bytes.
-fn record_key(rec: &OrgRecord) -> [u8; 32] {
-    *rec.org_pub_key.as_bytes()
-}
-
-fn contains(hay: &[u8], needle: &[u8]) -> bool {
-    hay.windows(needle.len()).any(|w| w == needle)
-}
-
-/// A random source that returns the same byte every time: makes every
-/// secret a node draws identical, so the Organisation private key equals the
-/// persona's member seed.
-struct ConstRng(u8);
-
-impl RngCore for ConstRng {
-    fn next_u32(&mut self) -> u32 {
-        u32::from_le_bytes([self.0; 4])
-    }
-    fn next_u64(&mut self) -> u64 {
-        u64::from_le_bytes([self.0; 8])
-    }
-    fn fill_bytes(&mut self, dest: &mut [u8]) {
-        dest.fill(self.0);
-    }
-    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand::Error> {
-        dest.fill(self.0);
-        Ok(())
-    }
-}
-
-impl CryptoRng for ConstRng {}
-
-/// A random source that returns `first` for its first 32 bytes and `then`
-/// after: a member id of `first` bytes, then an Organisation key pair drawn
-/// from `then` bytes.
-struct TwoRng {
-    first: u8,
-    then: u8,
-    served: usize,
-}
-
-impl TwoRng {
-    fn new(first: u8, then: u8) -> Self {
-        Self { first, then, served: 0 }
-    }
-}
-
-impl RngCore for TwoRng {
-    fn next_u32(&mut self) -> u32 {
-        let mut b = [0u8; 4];
-        self.fill_bytes(&mut b);
-        u32::from_le_bytes(b)
-    }
-    fn next_u64(&mut self) -> u64 {
-        let mut b = [0u8; 8];
-        self.fill_bytes(&mut b);
-        u64::from_le_bytes(b)
-    }
-    fn fill_bytes(&mut self, dest: &mut [u8]) {
-        for byte in dest {
-            *byte = if self.served < 32 { self.first } else { self.then };
-            self.served += 1;
-        }
-    }
-    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand::Error> {
-        self.fill_bytes(dest);
-        Ok(())
-    }
-}
-
-impl CryptoRng for TwoRng {}
-
-// Normal case: the published key is the X25519 public key of the secret the
-// creator holds, and no member or device of the genesis record holds it.
-// verifies: REQ-ech45n, LLR-sj7cd5, LLR-3fwykc
-#[test]
-fn a_created_organisation_publishes_a_fresh_key_no_genesis_key_equals() {
-    let chain = ChainSlots::new();
-    let (store, _) = open_store("fresh", "a");
-    let mut svc = Node::new(store, chain.clone());
-    let pid = svc.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    let update = svc.create_organisation(&mut OsRng, &pid).unwrap();
-    let published = *update.org_pub_key.as_bytes();
-    assert!(PersonPublicKey::parse(&published).is_ok(), "a valid X25519 public key");
-    assert_eq!(
-        private_key_of(&update).x25519_keypair().public_bytes(),
-        published,
-        "the update's key is the public key of the private key it holds"
-    );
-
-    let org_id = chain.apply_genesis(update.resulting_root, update.org_pub_key);
-    svc.commit_genesis(&mut OsRng, &pid, org_id, test_proxy()).unwrap();
-    assert_eq!(published_key(&chain, &org_id), published, "the chain carries the update's key");
-    let rec = svc.list_orgs()[0].clone();
-    assert_eq!(record_key(&rec), published, "the record holds the key it published");
-
-    let secret = rec.org_private_key_for_test().clone();
-    assert_eq!(
-        secret.x25519_keypair().public_bytes(),
-        published,
-        "the published key is the public key of the secret held"
-    );
-    for m in &rec.trie_members {
-        assert_ne!(&published, m.member_key.as_bytes(), "a Member-as-a-group key of the genesis record");
-        for d in &m.device_keys {
-            assert_ne!(&published, d.as_bytes(), "a DevicePublicKey of the genesis record");
-        }
-    }
-    let persona = &svc.list_personas()[0];
-    assert_ne!(secret.expose_secret(), persona.member_seed_for_test().expose_secret(), "the Organisation private key is the member seed");
-    assert_ne!(secret.expose_secret(), &svc.keychain.seed(&persona.device_key), "the Organisation private key is the device seed");
-}
-
-// Freshness: one persona founding two Organisations publishes two keys. A
-// key derived from the persona's own secrets would be the same twice.
-// verifies: REQ-ech45n
-#[test]
-fn two_organisations_of_one_persona_publish_two_keys() {
-    let (store, _) = open_store("two-orgs", "a");
-    let mut svc = Node::new(store, ChainSlots::new());
-    let pid = svc.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    let first = svc.create_organisation(&mut OsRng, &pid).unwrap();
-    let second = svc.create_organisation(&mut OsRng, &pid).unwrap();
-    assert_ne!(first.org_pub_key, second.org_pub_key);
-}
-
-// The Organisation private key is in the store, under the passphrase, and
-// never in the store file in clear. (Renamed 2026-10-05 by review round 1:
-// "Organisation secret" was org-node's term for another value, removed since.)
-// verifies: REQ-ech45n, LLR-3fwykc, LLR-qjz3q4
-#[test]
-fn the_organisation_private_key_is_kept_only_in_the_encrypted_store() {
-    let chain = ChainSlots::new();
-    let (store, (tag, party)) = open_store("at-rest", "a");
-    let mut svc = Node::new(store, chain.clone());
-    let pid = svc.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    let update = svc.create_organisation(&mut OsRng, &pid).unwrap();
-    let secret = private_key_of(&update);
-
-    let reopened = reopen_store(&tag, &party);
-    assert_eq!(reopened.data().provisional_updates, vec![update.clone()], "the update holds the key");
-    let bytes = store_bytes(&tag, &party);
-    assert!(!contains(&bytes, secret.expose_secret()), "the key waiting in the update is in the file in clear");
-
-    let org_id = chain.apply_genesis(update.resulting_root, update.org_pub_key);
-    svc.commit_genesis(&mut OsRng, &pid, org_id, test_proxy()).unwrap();
-    assert_eq!(svc.list_orgs()[0].org_private_key_for_test().clone(), secret.clone());
-
-    let reopened = reopen_store(&tag, &party);
-    let rec = reopened.data().orgs.iter().find(|o| o.org_id == org_id).unwrap();
-    assert_eq!(rec.org_private_key_for_test().clone(), secret.clone(), "the store holds the Organisation private key");
-    for (device, sealed) in svc.disk.sealed() {
-        assert!(
-            PersonaStore::unseal(&sealed, device, device_secret([0x99; 32])).is_err(),
-            "only under the Persona's own device secret"
-        );
-    }
-
-    let bytes = store_bytes(&tag, &party);
-    assert!(!contains(&bytes, secret.expose_secret()), "the Organisation private key is in the file in clear");
-}
+use support::sweep;
 
 // The Organisation private key never reaches a log: the record's Debug output
-// names the field and does not print the key. (Renamed 2026-10-05 by review
-// round 1, as above. Since the merge of master `1feb608` the key is held in a
-// redacted secret type, as the Organisation secret is (PR-hqwpg9, resolved
-// there), so the assertion reads the key's bytes, not its `Debug`.)
-// *Re-traced 2026-10-05 by review round 4 (finding-3).* It verified
-// REQ-ech45n too. LLR-2dvhz8 is derived since review round 3, and REQ-ech45n
-// says nothing of how a record renders.
+// names the field and does not print the key. The key is held in a redacted
+// secret type (PR-hqwpg9), so the assertion reads the key's bytes, not its
+// `Debug`. REQ-ech45n says nothing of how a record renders, so the test
+// verifies the derived LLR only.
 // verifies: LLR-2dvhz8
 #[test]
 fn the_organisation_private_key_is_not_in_the_record_debug_output() {
     let chain = ChainSlots::new();
-    let (store, _) = open_store("debug", "a");
-    let mut svc = Node::new(store, chain.clone());
-    let pid = svc.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    found(&mut svc, &chain, &pid);
-    let rec = &svc.list_orgs()[0];
-    let secret = rec.org_private_key_for_test().clone();
+    let mut node = Node::new(support::open_store("debug", "a"));
+    let persona_id = node.propose_and_keep_founding(&mut OsRng, handle("admin"), parsed_name("Admin"), parsed_surname("User")).unwrap();
+    found_on_chain(&mut node, &chain, &persona_id);
+    let record = &node.list_orgs()[0];
+    let secret = record.org_private_key_for_test().clone();
 
-    let printed = format!("{rec:?}");
+    let printed = format!("{record:?}");
     assert!(printed.contains("org_private_key"), "the field is named in the output");
     let bytes = secret.expose_secret();
     assert!(!printed.contains(&format!("{bytes:?}")), "the Organisation private key is printed");
-    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-    assert!(!printed.contains(&hex), "the Organisation private key is printed in hex");
-}
-
-// Abnormal case: a random source that repeats itself makes the Organisation
-// private key equal to the member seed, so the published key would be the
-// founder's Member-as-a-group key. Creation is refused before any genesis
-// update is kept (review round 2, finding-5): nothing is kept, recorded or
-// written. The same Persona's creation that is not refused keeps one update.
-// It is also LLR-s6qnht's abnormal case: create_organisation refuses the pair.
-// verifies: REQ-ech45n, LLR-sj7cd5, LLR-s6qnht
-#[test]
-fn an_organisation_key_equal_to_a_genesis_key_is_refused() {
-    let (store, (tag, party)) = open_store("collision", "a");
-    let mut svc = Node::new(store, ChainSlots::new());
-    let mut rng = ConstRng(0x5c);
-    let pid = svc.create_persona(&mut rng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    let before = store_bytes(&tag, &party);
-    let err = svc.create_organisation(&mut rng, &pid).unwrap_err();
-    assert_eq!(err, OrgNodeError::Trie(OrgMembersError::DuplicateKey));
-    assert!(svc.genesis_provisional_updates(&pid).is_empty(), "no genesis update kept");
-    assert_eq!(store_bytes(&tag, &party), before, "nothing written");
-    assert!(svc.list_orgs().is_empty(), "no Organisation recorded");
-    assert_eq!(svc.list_personas()[0].status, PersonaStatus::Proposed);
-
-    svc.create_organisation(&mut OsRng, &pid).expect("a fresh key is accepted");
-    assert_eq!(svc.genesis_provisional_updates(&pid).len(), 1, "the accepted creation is kept");
-}
-
-// LLR-e2b7gv, LLR-sj7cd5 as amended: a key pair drawn for an admission whose
-// public key is the record's current Organisation public key, or a
-// Member-as-a-group key of the resulting record (the joiner's), is refused
-// with DuplicateKey — no update kept, the record's keys unchanged, nothing
-// written. A fresh draw is then accepted.
-// It is also LLR-ghja3x's abnormal case: never the record's current key.
-// verifies: LLR-e2b7gv, LLR-sj7cd5, REQ-stx9v3, LLR-ghja3x
-#[test]
-fn an_update_key_equal_to_the_records_or_to_a_key_of_the_resulting_record_is_refused() {
-    let chain = ChainSlots::new();
-    let (store, (tag, party)) = open_store("update-collision", "a");
-    let mut svc = Node::new(store, chain.clone());
-    let pid = svc.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    // A genesis whose founder id is 0x11…11 and whose Organisation private key is 0x3d…3d.
-    let update = svc.create_organisation(&mut TwoRng::new(0x11, 0x3d), &pid).unwrap();
-    let org_id = chain.apply_genesis(update.resulting_root, update.org_pub_key);
-    svc.commit_genesis(&mut OsRng, &pid, org_id, test_proxy()).unwrap();
-    let rec = svc.list_orgs()[0].clone();
-    let carol = org_node::Joiner {
-        handle: h("carol"),
-        name: nm("Carol"),
-        surname: sn("Coder"),
-        member_key: MemberSeed::from([0x4e; 32]).x25519_keypair().member_key().unwrap(),
-        device_key: device_key(0x4f),
-    };
-    let before = store_bytes(&tag, &party);
-    // 0x3d: the record's current key; 0x4e: the joiner's Member key.
-    for then in [0x3d, 0x4e] {
-        let err = svc.admit_member(&mut TwoRng::new(0x22, then), org_id, &carol).unwrap_err();
-        assert_eq!(err, OrgNodeError::Trie(OrgMembersError::DuplicateKey), "draw {then:#x}");
-        assert!(svc.provisional_updates(org_id).is_empty(), "no update kept");
-        let now = svc.list_orgs()[0].clone();
-        assert_eq!((now.org_pub_key, now.org_private_key_for_test().clone()), (rec.org_pub_key, rec.org_private_key_for_test().clone()));
-        assert_eq!(store_bytes(&tag, &party), before, "nothing written");
-    }
-    svc.admit_member(&mut OsRng, org_id, &carol).expect("a fresh draw is accepted");
-}
-
-// Abnormal (LLR-tax3pm): a revocation draws a fresh key pair like every
-// update, never the record's current Organisation public key. A draw equal to
-// the record's current key (removing Carol), or to a Member-as-a-group key of
-// the resulting record (Carol's, removing the founder), is refused with
-// DuplicateKey — no update kept, the record's keys unchanged, nothing
-// written. A fresh draw is then accepted.
-// verifies: LLR-tax3pm
-#[test]
-fn a_revocation_key_equal_to_the_records_or_to_a_key_of_the_resulting_record_is_refused() {
-    let chain = ChainSlots::new();
-    let (store, (tag, party)) = open_store("revoke-collision", "a");
-    let mut svc = Node::new(store, chain.clone());
-    let pid = svc.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    let org_id = found(&mut svc, &chain, &pid);
-    let carol = org_node::Joiner {
-        handle: h("carol"),
-        name: nm("Carol"),
-        surname: sn("Coder"),
-        member_key: MemberSeed::from([0x4e; 32]).x25519_keypair().member_key().unwrap(),
-        device_key: device_key(0x4f),
-    };
-    // Carol's admission, whose Organisation private key is 0x3e…3e.
-    let update = svc.admit_member(&mut TwoRng::new(0x22, 0x3e), org_id, &carol).unwrap();
-    chain.apply_update(org_id, update.resulting_root, update.org_pub_key, Epoch::new(1)).unwrap();
-    svc.commit_update(&mut OsRng, org_id).unwrap();
-    let rec = svc.list_orgs()[0].clone();
-    assert_eq!(rec.org_private_key_for_test().clone(), OrgPrivateKey::from([0x3e; 32]), "the record holds the admission's key");
-    let carol_id = rec.trie_members.iter().find(|m| m.member_key == carol.member_key).unwrap().id;
-    let founder_id = rec.trie_members.iter().find(|m| m.member_key != carol.member_key).unwrap().id;
-    let before = store_bytes(&tag, &party);
-    // 0x3e: the record's current key; 0x4e: Carol's Member key, left in the
-    // record that removing the founder produces.
-    for (removed, draw) in [(carol_id, 0x3e), (founder_id, 0x4e)] {
-        let err = svc.revoke_member(&mut ConstRng(draw), org_id, removed).unwrap_err();
-        assert_eq!(err, OrgNodeError::Trie(OrgMembersError::DuplicateKey), "draw {draw:#x}");
-        assert!(svc.provisional_updates(org_id).is_empty(), "no update kept");
-        let now = svc.list_orgs()[0].clone();
-        assert_eq!((now.org_pub_key, now.org_private_key_for_test().clone()), (rec.org_pub_key, rec.org_private_key_for_test().clone()));
-        assert_eq!(now.trie_members, rec.trie_members, "the record unchanged");
-        assert_eq!(store_bytes(&tag, &party), before, "nothing written");
-    }
-    let accepted = svc.revoke_member(&mut OsRng, org_id, carol_id).expect("a fresh draw is accepted");
-    assert_ne!(accepted.org_pub_key, rec.org_pub_key);
+    assert!(!printed.contains(&support::hex(bytes)), "the Organisation private key is printed in hex");
 }
 
 // The parse: canonical, non-small-order X25519 keys only, by person's rule.
@@ -339,12 +53,12 @@ fn an_organisation_public_key_that_is_not_a_valid_x25519_key_is_refused() {
 
     let mut top_bit = valid;
     top_bit[31] |= 0x80; // at least 2^255: not canonical
-    let mut one = [0u8; 32];
-    one[0] = 1; // small order
+    let mut small_order = [0u8; 32];
+    small_order[0] = 1; // u = 1 has order 4: every clamped private key gives it the same shared secret
     let mut prime = [0xffu8; 32]; // 2^255 - 19: not canonical
     prime[0] = 0xed;
     prime[31] = 0x7f;
-    for bad in [[0u8; 32], one, top_bit, prime] {
+    for bad in [[0u8; 32], small_order, top_bit, prime] {
         assert_eq!(
             OrgPublicKey::parse(&bad),
             Err(OrgNodeError::InvalidOrgPublicKey),
@@ -370,24 +84,26 @@ fn an_organisation_state_read_with_an_invalid_key_is_refused() {
     assert_eq!(state.epoch, Epoch::new(3));
 }
 
-// (2026-10-08, change worktree-org-io-create, ruling B: the receive against
-// a chain answer with an invalid Organisation public key left with the read.
-// The refused parse is org-io's now, and org-io's receive tests show that it
-// applies nothing; the two tests above keep the parse's evidence here.)
+// A receive against a chain answer with an invalid Organisation public key is
+// org-io's, with the chain read; the two tests above are the parse's
+// evidence.
 
-// LLR-sj7cd5's device-key clause, which no service-level test can reach: an
-// X25519 key drawn at creation equals an ed25519 DevicePublicKey only by a 2^-128
-// accident. So the check is tested at its own interface. A DevicePublicKey whose
-// bytes happen to be a valid X25519 key stands in for that accident. Review
-// round 1 (finding-9) found the device half of the check removable with the
-// gate green (M7).
-// verifies: REQ-ech45n, LLR-sj7cd5
+// The distinctness check at its own interface, `OrgPublicKey::
+// ensure_distinct_from` (SDD-swtd3w; TEST_GUIDELINES Seams 2, criterion 4):
+// a key equal to a genesis Member-as-a-group key or DevicePublicKey is
+// refused, a fresh key accepted. Through `propose_founding` an X25519 key
+// drawn at creation equals an ed25519 DevicePublicKey only by a 2^-128
+// accident, which no boundary fake can arrange (it would need the discrete
+// log of a Device key); a DevicePublicKey whose bytes happen to be a valid
+// X25519 key stands in for the accident. `propose_founding`'s Member-key
+// clause is verified through the operation below.
+// verifies: LLR-c759yd
 #[test]
 fn an_organisation_key_equal_to_any_genesis_member_or_device_key_is_refused() {
     use org_members::{Handle, MemberId, MemberLeaf, Name, Surname};
     let device = (0u8..=255)
-        .map(|b| device_keypair([b; 32]))
-        .find(|d| OrgPublicKey::parse(d.verifying_key().as_bytes()).is_ok())
+        .map(|seed_byte| device_keypair([seed_byte; 32]))
+        .find(|keypair| OrgPublicKey::parse(keypair.verifying_key().as_bytes()).is_ok())
         .expect("some DevicePublicKey is also a valid X25519 key");
     let member = MemberSeed::from([0x71u8; 32]).x25519_keypair();
     let leaf = MemberLeaf::new(
@@ -404,15 +120,83 @@ fn an_organisation_key_equal_to_any_genesis_member_or_device_key_is_refused() {
     let as_device = OrgPublicKey::parse(device.verifying_key().as_bytes()).unwrap();
     assert_eq!(
         as_device.ensure_distinct_from(&members),
-        Err(OrgNodeError::Trie(OrgMembersError::DuplicateKey)),
+        Err(OrgNodeError::DuplicateOrgPublicKey),
         "equal to a DevicePublicKey"
     );
     let as_member = member.org_public_key().unwrap();
     assert_eq!(
         as_member.ensure_distinct_from(&members),
-        Err(OrgNodeError::Trie(OrgMembersError::DuplicateKey)),
+        Err(OrgNodeError::DuplicateOrgPublicKey),
         "equal to a Member-as-a-group key"
     );
     let fresh = OrgPrivateKey::from([0x72u8; 32]).x25519_keypair().org_public_key().unwrap();
     assert_eq!(fresh.ensure_distinct_from(&members), Ok(()), "a fresh key is accepted");
+}
+
+// Abnormal: through `propose_founding`, with randomness faked at its boundary
+// (`ConstRng`: every seed drawn is the same) so that the Organisation key pair
+// drawn is the founder's member key pair, the founding is refused with
+// `DuplicateOrgPublicKey`, adding no store and returning no secret.
+// verifies: LLR-9qavm7
+#[test]
+fn propose_founding_refuses_an_organisation_key_equal_to_the_founders_member_key() {
+    let mut svc = org_node::OrgService::new(vec![]).unwrap();
+    let refused = svc.propose_founding(&mut ConstRng(0x42), "Ada", "Lovelace", "ada", "Acme".into()).map(|(device, _, _)| device);
+    assert_eq!(refused.unwrap_err(), OrgNodeError::DuplicateOrgPublicKey);
+    assert!(svc.list_personas().is_empty(), "no store is added");
+    let (_, _, _) = svc.propose_founding(&mut OsRng, "Ada", "Lovelace", "ada", "Acme".into()).expect("a fresh draw is accepted");
+}
+
+// Normal case: the founding's public key is the
+// X25519 public key of the private key drawn for it, which the record
+// takes at the founding's adoption; no member or device key of the founding
+// record equals it, and it is neither the member seed nor the Device seed.
+// verifies: REQ-ech45n, LLR-9qavm7, LLR-qw8tyu
+#[test]
+fn a_created_organisation_publishes_a_fresh_key_no_genesis_key_equals() {
+    let mut founder = sweep::found();
+    let chain = sweep::founding_state(&founder);
+    let device_seed = support::seed_bytes(&founder.secret());
+    sweep::adopt(&mut founder, chain);
+    let record = sweep::record_of(&founder);
+    let published = *chain.org_pub_key.as_bytes();
+    assert_eq!(*record.org_pub_key.as_bytes(), published, "the record holds the key the founding proposed");
+    let key = record.org_private_key_for_test().clone();
+    assert_eq!(key.x25519_keypair().public_bytes(), published, "the public key of the private key held");
+    for member in &record.trie_members {
+        assert_ne!(&published, member.member_key.as_bytes(), "a Member-as-a-group key of the founding record");
+        for device_key in &member.device_keys {
+            assert_ne!(&published, device_key.as_bytes(), "a DevicePublicKey of the founding record");
+        }
+    }
+    let persona = &support::held_store(&founder.svc, &founder.device).persona;
+    assert_ne!(key.expose_secret(), persona.member_seed_for_test().expose_secret(), "the private key is the member seed");
+    assert_ne!(key.expose_secret().as_slice(), device_seed.as_slice(), "the private key is the device seed");
+}
+
+// The Organisation private key: in the provisional
+// founding and then in the record, it reaches the disk only inside the
+// sealed store, never in clear, and only the Persona's own Device secret
+// opens it.
+// verifies: REQ-ech45n, LLR-qw8tyu
+#[test]
+fn the_organisation_private_key_is_kept_only_in_the_encrypted_store() {
+    use org_node::store::PersonaStore;
+    use org_node::test_fixtures::device_secret;
+
+    let mut founder = sweep::found();
+    let before_adoption = founder.last_write().sealed.as_bytes().to_vec();
+    let chain = sweep::founding_state(&founder);
+    sweep::adopt(&mut founder, chain);
+    let key = sweep::record_of(&founder).org_private_key_for_test().clone();
+    assert!(!support::contains(&before_adoption, key.expose_secret()), "the founding's key is in the file in clear");
+    let write = founder.last_write();
+    assert!(!support::contains(write.sealed.as_bytes(), key.expose_secret()), "the record's key is in the file in clear");
+    assert!(
+        PersonaStore::unseal(&write.sealed, write.device_key, device_secret([0x99; 32])).is_err(),
+        "only under the Persona's own device secret"
+    );
+    let reopened = founder.reopened_service();
+    let on_disk = support::held_store(&reopened, &founder.device).record.as_ref().unwrap();
+    assert_eq!(on_disk.org_private_key_for_test().clone(), key, "the sealed store holds the key");
 }

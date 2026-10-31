@@ -43,7 +43,7 @@ fn a_co_signer_equal_to_the_own_account_is_not_counted_twice() {
     assert_eq!(controller_of(OWN, &[OWN]), OWN, "only the own account remains: no multisig");
 }
 
-// verifies: LLR-c9fyun
+// verifies: LLR-7qdjqn
 #[tokio::test]
 async fn a_node_holding_no_signatory_key_is_refused_with_not_configured() {
     let chain = FakeChain::new();
@@ -54,7 +54,7 @@ async fn a_node_holding_no_signatory_key_is_refused_with_not_configured() {
     assert_eq!(chain.signatory_reads(), 0, "nothing is read without a key");
 }
 
-// verifies: LLR-c9fyun
+// verifies: LLR-7qdjqn
 #[tokio::test]
 async fn a_failed_signatory_read_is_an_error_never_not_admin() {
     let chain = FakeChain::new();
@@ -72,7 +72,7 @@ async fn a_failed_signatory_read_is_an_error_never_not_admin() {
     assert!(matches!(answer, Err(OwnAdminError::Read(ref reason)) if reason.contains("node unreachable")), "{answer:?}");
 }
 
-// verifies: LLR-c9fyun
+// verifies: LLR-7qdjqn
 #[tokio::test]
 async fn a_configured_account_listed_as_delegate_is_admin_and_delegates_are_read_only_for_a_mapped_h160() {
     let chain = FakeChain::new();
@@ -204,4 +204,24 @@ async fn a_failed_signatory_set_read_is_an_error_never_not_admin() {
         switch.store(false, Ordering::SeqCst);
     }
     assert_eq!(io.is_own_admin(org()).await, Ok(AdminStatus::Admin));
+}
+
+// One call is one pinned signatory-set read: for a mapped H160 the mapped
+// account and its proxy definitions (two storage values, one block), for an
+// unmapped one the account alone; with no key, nothing is read.
+// verifies: LLR-7qdjqn
+#[tokio::test]
+async fn is_own_admin_makes_one_pinned_signatory_set_read() {
+    let chain = FakeChain::new();
+    let bare = handle("own-admin-one-read-bare", "a", &chain);
+    assert_eq!(bare.is_own_admin(org()).await, Err(OwnAdminError::NotConfigured));
+    assert_eq!(chain.signatory_reads(), 0, "nothing read without a key");
+
+    let io = configured("own-admin-one-read", &chain, vec![CO_SIGNER]);
+    assert_eq!(io.is_own_admin(org()).await, Ok(AdminStatus::NotAdmin));
+    assert_eq!(chain.signatory_reads(), 1, "unmapped: the account alone");
+    chain.map_original_account(org(), PROXY);
+    chain.set_delegates(PROXY, vec![controller_of(OWN, &[CO_SIGNER])]);
+    assert_eq!(io.is_own_admin(org()).await, Ok(AdminStatus::Admin));
+    assert_eq!(chain.signatory_reads(), 3, "mapped: the account and its definitions, in the one read");
 }

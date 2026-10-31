@@ -31,16 +31,14 @@
 //! being pinned, so a decoder reading the right number of bytes from the
 //! wrong offset cannot produce the expected answer by accident.
 //!
-//! Relocated out of the `#[cfg(test)]` module in
+//! These cases live here, not in a `#[cfg(test)]` module in
 //! `on-chain-client/src/decode/v_paseo_ah.rs`, which no gate reads
-//! (`test_paths` for this unit is `on-chain-client/tests`), and joined by the
-//! abnormal-input cases class C asks for. The relocated assertions are kept
-//! verbatim where they stand alone and are absorbed, position for position,
-//! where a sweep now covers them — noted at each such test. Relocating them
-//! emptied that module, so it is deleted in this task's commit.
+//! (`test_paths` for this unit is `on-chain-client/tests`), with the
+//! abnormal-input cases class C asks for. Where a sweep covers a single
+//! case, it covers it position for position, as noted at each such test.
 //!
 //! No `test-support` import is needed: `for_runtime` and the `Decoder` trait
-//! are unconditionally public. The target is still named in T10's
+//! are unconditionally public. The target is still named in `Cargo.toml`'s
 //! `required-features = ["test-support"]` list, in common with every other
 //! target the gate runs, so that a target named in `verify_commands` can
 //! never silently not run.
@@ -111,8 +109,7 @@ fn assert_error_names(err: &DecodeError, expected: usize, actual: usize) {
 //
 // The normal case, and the one that pins every offset: 96 bytes decode, and
 // each of the three fields comes back from the slot it was written to.
-// Relocated from `src`'s `decode_org_state_round_trip`, whose `0xaa`/`0xbb`
-// fills are replaced by ascending runs — a uniform fill cannot tell a decoder
+// The fills are ascending runs — a uniform fill cannot tell a decoder
 // that read slot 0 twice from one that read slots 0 and 1.
 #[test]
 fn exactly_ninety_six_bytes_decodes_every_field() {
@@ -134,9 +131,8 @@ fn exactly_ninety_six_bytes_decodes_every_field() {
 // One byte short. This is the near neighbour below the bound, where a `<`
 // written in place of a `!=` hides, and it is the direction that matters
 // most: with the guard weakened this way the blob reaches
-// `copy_from_slice(&bytes[64..96])` and panics. Relocated verbatim from
-// `src`'s `decode_org_state_wrong_length_rejected`, extended to assert the
-// error names both lengths.
+// `copy_from_slice(&bytes[64..96])` and panics. The error names both
+// lengths.
 #[test]
 fn ninety_five_bytes_is_rejected() {
     let err = decode(&[0u8; 95]).expect_err("95 bytes is not three slots");
@@ -221,8 +217,7 @@ fn a_whole_number_of_slots_other_than_three_is_rejected() {
 //
 // The sweep. A `uint256` that does not fit in a `u64` has a non-zero byte
 // somewhere in the slot's leading 24, and *every* one of those positions must
-// be refused — position 0 alone (which is what the relocated `src` test
-// asserted, and which is absorbed here at `i == 0`) would leave the guard
+// be refused — position 0 alone would leave the guard
 // free to check a narrower window than the layout requires. The two edges are
 // the ones that matter: position 0 is the most significant byte, and position
 // 23 is the byte immediately above the `u64`, where an off-by-one in the
@@ -243,8 +238,7 @@ fn a_non_zero_byte_anywhere_in_the_epoch_slots_leading_twenty_four_bytes_is_refu
 
 // verifies: REQ-9wwenn, LLR-emp3g9
 //
-// The largest epoch that does fit, accepted whole. Relocated from `src`'s
-// `decode_org_state_max_u64_epoch_ok`. This is the case that keeps the
+// The largest epoch that does fit, accepted whole. This is the case that keeps the
 // overflow guard from being written as "the epoch must be small": every one
 // of the low eight bytes is `0xff` here, and the answer is `u64::MAX`, not a
 // refusal.

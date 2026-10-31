@@ -28,11 +28,29 @@ record unchanged, when the Membership root recomputed by applying the Change
 set to its own record differs from the Membership root of the Organisation
 state it read from the chain. (implements: RC-6a2dke)
 satisfies: derived
+superseded-by: REQ-dwb9bq
+
+*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
+MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
+code that did what this item states, had no product caller and is deleted.
+REQ-dwb9bq states the behaviour now: a received Change set is no longer
+committed or rejected on receipt: it is kept, and verification adopts a
+provisional organisation only when the chain holds its Membership root and
+Organisation public key, else reports behind (REQ-dwb9bq). The text above is
+kept as it stood.
 
 **REQ-bvh8v6**: The software shall reject a received Change set, leaving its
 record unchanged, when the chain holds no Organisation state for the
 Organisation the Envelope names. (implements: RC-6a2dke)
 satisfies: derived
+superseded-by: LLR-rr558z
+
+*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
+MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
+code that did what this item states, had no product caller and is deleted.
+LLR-rr558z states the behaviour now: `verify` given no chain state refuses
+with `OrgNotOnChain` and changes nothing (LLR-rr558z, LLR-qvp7mq). The text
+above is kept as it stood.
 
 **REQ-gju89b**: The software shall reject an Envelope that names an
 Organisation other than the one it expected, before decoding the Change set
@@ -44,6 +62,16 @@ Envelope from the Organisation it names, its Sequence number, its Change set
 and the Organisation state on the chain alone, and shall check no signature
 and no Member's or device's key in doing so. (implements: RC-pm9kmx)
 satisfies: derived
+superseded-by: LLR-8528ud
+
+*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
+MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
+code that did what this item states, had no product caller and is deleted.
+LLR-8528ud states the behaviour now: which record is adopted is decided by the
+chain state and the held provisional organisations alone, never by the Device
+that delivered one (LLR-8528ud); the Envelope still carries no signature
+(LLR-pzde8b). A sender is now judged on receipt (LLR-283x6f). The text above
+is kept as it stood.
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 This item first required the Envelope's signature to verify under the
@@ -58,6 +86,15 @@ record unchanged, when the epoch of the Organisation state it verified against
 is not greater than the epoch of its last commit for that Organisation.
 (implements: RC-e5atck)
 satisfies: derived
+superseded-by: REQ-dwb9bq
+
+*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
+MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
+code that did what this item states, had no product caller and is deleted.
+REQ-dwb9bq states the behaviour now: a chain state at an epoch lower than the
+record's is reported inconsistent, an equal one in step or inconsistent, and
+only a greater one can adopt (REQ-dwb9bq); nothing is refused with
+`StaleEpoch`. The text above is kept as it stood.
 
 **REQ-nhe2zu**: The software shall, when an Envelope names the expected
 Organisation, carries a Sequence number greater than the highest committed,
@@ -67,6 +104,15 @@ the applied Change set as its record together with that epoch and that
 Sequence number as the new high-water mark.
 (implements: RC-6a2dke, RC-e5atck, RC-m4r75s)
 satisfies: derived
+superseded-by: REQ-dwb9bq
+
+*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
+MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
+code that did what this item states, had no product caller and is deleted.
+REQ-dwb9bq states the behaviour now: the commit rule is the adoption
+REQ-dwb9bq states: a provisional organisation kept from a received Change set
+becomes the record only when the chain holds its root and key at a greater
+epoch. The text above is kept as it stood.
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`):*
 the clause "carries a valid signature under the published signing key" is
@@ -85,6 +131,14 @@ rejection at any step, and never to a value lower than the mark it holds.
 (implements: RC-m4r75s)
 satisfies: derived
 
+*Note 2026-10-30 (change `worktree-org-io-domain-api`, merge review MR1-N1,
+owner ruling 2026-10-29):* the item stays in force. The mark is the current
+record's Sequence number. The receive path asks it through
+`SeqGuard::check`, which never moves it (LLR-f5kq88), and only an adoption,
+at an epoch greater than the record's, sets it (LLR-34c5y3), so "committed"
+reads "adopted". `SeqGuard::advance` is deleted with
+`verify_envelope_against_chain`, its last caller.
+
 ## Hostile input
 
 **REQ-9g6as6**: The software shall, for any sequence of bytes offered as an
@@ -97,6 +151,22 @@ Envelope to verification against a record and an Organisation state, either
 return a typed error or return a verified update, and shall not panic.
 (implements: RC-e2uvje)
 satisfies: derived
+superseded-by: REQ-rv4dwb
+
+*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
+round 2, MR2-N1).* The retirement below missed that the hazardous step, applying
+a received Change set to a record, did not go away with
+`verify_envelope_against_chain`: it moved to receipt, where `check_received`
+applies the Change set of Organisation information from a listed Device to
+the current record, and, in a store with no record, to the snapshot the body
+carries. REQ-rv4dwb states this item's bound over that path: any body, no
+panic, a typed error for a refusal and the store unchanged. The `retired:`
+line is replaced by `superseded-by:`; the text above is kept as it stood.
+
+*Retired 2026-10-30 (change `worktree-org-io-domain-api`, merge review MR1-N1,
+owner ruling 2026-10-29), replaced by the note above the same day.* No
+successor states it: no operation now verifies an Envelope against a record
+and a chain state.
 
 **REQ-eg5j8u**: The software shall reject with a typed error, before decoding
 any of its bytes, a wire frame whose body exceeds 1 MiB, on send and on
@@ -117,6 +187,7 @@ that verifies against the chain whichever Device key the connection
 authenticated, and shall require no Invite to have been imported for it.
 (implements: RC-b6mydy)
 satisfies: derived
+superseded-by: REQ-eqt23j
 
 **REQ-ztdza4**: The software shall commit an update to an Organisation it holds
 a record of only when the Device key the connection authenticated is listed
@@ -197,6 +268,14 @@ admission for it — and every Persona bound to that Organisation with its keys,
 leaving the data of every other Organisation and Persona unchanged.
 (implements: RC-wqgm2p, RC-44vvjp)
 satisfies: derived
+superseded-by: REQ-48zc3e
+
+*Superseded 2026-10-16 (owner ruling Q4', change
+`worktree-org-io-domain-api`):* the Device no longer deletes everything; it
+keeps, in the sealed store, the acknowledgements of its removal with their
+recipients' keys and addresses until each is accepted or 7 days pass
+(REQ-48zc3e and the items beside it in
+`org-node/docs/requirements/2026-10-14-batched-epoch.md`).
 
 *Amended 2026-10-06 (owner rulings 3 and 4 on the sweep of `fdf4e77`,
 `docs/plans/2026-10-06-org-io-roadmap.md`; change

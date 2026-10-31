@@ -11,9 +11,8 @@
 //!
 //! Storage and event input shapes:
 //!
-//! - **Storage:** the caller (`OrgRegistryClient::get_org_state` in
-//!   Task 5) issues three `chainHead_v1_storage` reads against the
-//!   contract's slots `S`, `S+1`, `S+2` where
+//! - **Storage:** the caller (`OrgRegistryClient::get_org_state`)
+//!   reads the contract's slots `S`, `S+1`, `S+2` where
 //!   `S = keccak256(abi.encode(uint256(admin), uint256(0)))`. The three
 //!   32-byte slot values are concatenated and handed to
 //!   `Decoder::decode_org_state` as one 96-byte blob.

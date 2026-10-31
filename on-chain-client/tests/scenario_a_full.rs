@@ -1,10 +1,9 @@
 //! Scenario-A-full: single-org end-to-end over the legacy backend.
-//! Extends the old A-lite (event observation at a pinned block) with:
+//! Event observation at a pinned block, and:
 //!
 //! - `subscribe()` driving the event observation (verifies subxt's
 //!   block stream actually works over the explicit LegacyBackend —
-//!   the old CombinedBackend silently yielded zero items against
-//!   chopsticks).
+//!   subxt's CombinedBackend yields zero items against chopsticks).
 //! - `get_org_state` returning the genesis state via the
 //!   `ReviveApi::get_storage` runtime API (per the 2026-06-04
 //!   amendment; pallet-revive keeps contract slots in a per-contract

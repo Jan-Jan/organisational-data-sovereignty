@@ -6,9 +6,7 @@
 //! Tested from `on-chain-client/tests/type_widths.rs`, not from a
 //! `#[cfg(test)]` module here: this unit's gate reads its evidence from
 //! `test_paths` (`on-chain-client/tests`), so an annotated test written in
-//! `src` would be read by no gate. The two cases that lived here until
-//! 2026-09-10 were the last such tests in this crate's `src` (review round 1,
-//! finding 1).
+//! `src` would be read by no gate.
 
 use core::fmt;
 

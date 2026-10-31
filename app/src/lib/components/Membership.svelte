@@ -7,9 +7,9 @@
 	 * THE KEY PoC RESULT: epoch + verified-root match ✓/✗ is displayed prominently.
 	 *
 	 * REQ-a83vqr, REQ-akt4p7: the ✓/✗ verdict is NOT decided here. Every row is
-	 * built by `verifyResultFrom`, which is gated by tests. This component
-	 * previously wrote `verified: true` at both of its assignment sites, so the ✗
-	 * state was unreachable by any input (HAZ-9fmhm4).
+	 * built by `verifyResultFrom`, which is gated by tests: a row this component
+	 * marked `verified: true` itself would make the ✗ state unreachable by any
+	 * input (HAZ-9fmhm4).
 	 */
 	import {
 		startReceiver,
@@ -22,6 +22,8 @@
 		onVerificationFailed,
 		onRecordUnreadable,
 		onReceiverStopped,
+		proposeAdmission,
+		proposeRevocation,
 		type MembershipUpdatedPayload,
 		type VerificationFailedPayload,
 		type RecordUnreadablePayload,
@@ -36,6 +38,15 @@
 		type VerifyRow
 	} from '$lib/verify';
 	import { subscribeAll, type Unlisten } from '$lib/receiver';
+	import {
+		admissionGate,
+		reproposalStep,
+		type AdmissionConfirmation,
+		type AdmissionReproposal,
+		type DiscardedNotice,
+		type SendReport
+	} from '$lib/notices';
+	import type { ProposedUpdate } from '$lib/epoch';
 
 	let receiverStarted = $state(false);
 	let receiverErr = $state('');
@@ -48,15 +59,107 @@
 	/** REQ-2k7ys4 / REQ-dp95pv: verified updates whose record could not be read back. */
 	let unreadableRecords = $state<string[]>([]);
 	let orgs = $state<OrgDto[]>([]);
-	let revokedOrgs = $state<string[]>([]);
+	let revokedOrgs = $state<(string | null)[]>([]);
 
 	interface Props {
 		notifyReload?: () => void;
+		/** LLR-md6hhz: the kept admission requests the page lists, for the re-proposal's confirmation. */
+		requests?: AdmissionConfirmation[];
+		/** LLR-k5rf3r, LLR-cgtav9: the notices for discarded changes the page holds. */
+		notices?: DiscardedNotice[];
+		/** LLR-9r6y7p, LLR-cgtav9: the send and request reports the page holds. */
+		sendReports?: SendReport[];
+		onDismissNotice?: (id: string) => void;
+		onDismissReport?: (id: string) => void;
+		/** LLR-tbtrb3: the proposed updates the page holds. */
+		proposedUpdates?: ProposedUpdate[];
+		/** LLR-5vgpkd, LLR-tbtrb3: what the page last told of a proposal or a write, and the Organisation in flight. */
+		epochMessage?: string;
+		epochBusy?: string | null;
+		/** LLR-5vgpkd, LLR-tbtrb3: the page's proposal and write, whose outcomes outlive this panel. */
+		onProposeNextEpoch?: (orgId: string) => Promise<void>;
+		onWriteUpdate?: (orgId: string) => Promise<void>;
 	}
-	let { notifyReload }: Props = $props();
+	let {
+		notifyReload,
+		requests = [],
+		notices = [],
+		sendReports = [],
+		onDismissNotice,
+		onDismissReport,
+		proposedUpdates = [],
+		epochMessage = '',
+		epochBusy = null,
+		onProposeNextEpoch,
+		onWriteUpdate
+	}: Props = $props();
 
 	async function loadOrgs() {
 		try { orgs = await listOrgs(); } catch { /* ignore */ }
+	}
+
+	let reproposeErr = $state('');
+	/** LLR-md6hhz, LLR-e63yrs: the admission being proposed again, awaiting the Admin's confirmation. */
+	let confirming = $state<{ confirmation: AdmissionConfirmation; again: AdmissionReproposal } | null>(
+		null
+	);
+	let confirmedAgain = $state(false);
+	let gateAgain = $derived(admissionGate({ request: confirming?.confirmation ?? null, confirmed: confirmedAgain }));
+
+	/** LLR-tbtrb3: "Write to chain" through the page; the Organisations are listed again once it is done. */
+	async function writeUpdate(orgId: string) {
+		await onWriteUpdate?.(orgId);
+		loadOrgs();
+	}
+
+	/**
+	 * LLR-md6hhz: "Propose again". An admission opens the REQ-88npkt
+	 * confirmation (LLR-e63yrs) and proposes nothing yet; a revocation is
+	 * proposed again at once. The notice stays until dismissed.
+	 */
+	async function proposeAgain(notice: DiscardedNotice) {
+		reproposeErr = '';
+		const step = reproposalStep(notice, requests);
+		if (step.step === 'unavailable') {
+			reproposeErr = step.message;
+			return;
+		}
+		if (step.step === 'confirm') {
+			confirming = { confirmation: step.confirmation, again: step.reproposal };
+			confirmedAgain = false;
+			return;
+		}
+		try {
+			await proposeRevocation(step.reproposal.org_id, step.reproposal.member_id);
+			notifyReload?.();
+		} catch (refusal) {
+			reproposeErr = String(refusal);
+		}
+	}
+
+	/** LLR-e63yrs: the admission is proposed again, with confirmed true, only once the Admin confirmed. */
+	async function confirmProposeAgain() {
+		if (confirming === null) return;
+		if (!gateAgain.ok) {
+			reproposeErr = gateAgain.message;
+			return;
+		}
+		const again = confirming.again;
+		try {
+			await proposeAdmission(again.org_id, again.invite_id, again.handle, true);
+			confirming = null;
+			confirmedAgain = false;
+			reproposeErr = '';
+			notifyReload?.();
+		} catch (refusal) {
+			reproposeErr = String(refusal);
+		}
+	}
+
+	/** Closing the confirmation proposes nothing; the notice stays. */
+	function cancelProposeAgain() {
+		confirming = null;
+		confirmedAgain = false;
 	}
 
 	function now(): string {
@@ -118,8 +221,7 @@
 			],
 			[
 				// REQ-affyf5, REQ-a83vqr: a failure produces a row that says so. This
-				// is the only producer of a ✗ row, and before this change there was
-				// none (HAZ-9fmhm4).
+				// is the only producer of a ✗ row (HAZ-9fmhm4).
 				onVerificationFailed,
 				(p: VerificationFailedPayload) => {
 					announce({ kind: 'failed', org_id: p.org_id, message: p.message });
@@ -132,7 +234,7 @@
 				onRecordUnreadable,
 				(p: RecordUnreadablePayload) => {
 					unreadableRecords = [
-						`[${now()}] org …${p.org_id.slice(-12)} — update verified, but its record could not be read back (no epoch or root known)`,
+						`[${now()}] ${p.org_id === null ? 'a provisional founding' : `org …${p.org_id.slice(-12)}`} — update verified, but its record could not be read back (no epoch or root known)`,
 						...unreadableRecords.slice(0, 19)
 					];
 				}
@@ -200,6 +302,28 @@
 		{/if}
 	</div>
 
+	<!-- LLR-5vgpkd, LLR-tbtrb3: the next epoch proposed from the provisional changes, then written -->
+	<div class="epochs-section">
+		<h3>Epochs</h3>
+		{#if orgs.length === 0}
+			<p class="muted">No Organisation is held, so there is no epoch to propose.</p>
+		{:else}
+			{#each orgs as o (o.org_id)}
+				<p class="epoch-row">
+					<span class="mono small">…{o.org_id.slice(-12)} (epoch {o.epoch})</span>
+					<button onclick={() => onProposeNextEpoch?.(o.org_id)} disabled={epochBusy !== null}>Propose next epoch</button>
+				</p>
+			{/each}
+		{/if}
+		{#each proposedUpdates as update (update.org_id)}
+			<p class="epoch-row">
+				<span class="mono small">epoch {update.epoch} proposed for …{update.org_id.slice(-12)}</span>
+				<button onclick={() => writeUpdate(update.org_id)} disabled={epochBusy !== null}>Write to chain</button>
+			</p>
+		{/each}
+		{#if epochMessage}<p class="epoch-message">{epochMessage}</p>{/if}
+	</div>
+
 	<!-- THE KEY PoC OUTPUT: verified root log -->
 	<div class="verify-section">
 		<h3>Verified Updates (chain root match)</h3>
@@ -230,12 +354,74 @@
 		{/if}
 	</div>
 
+	<!-- LLR-k5rf3r, LLR-md6hhz: discarded changes, kept until dismissed -->
+	{#if notices.length > 0}
+		<div class="notices-section">
+			<h3>Changes left out of an adopted epoch</h3>
+			{#each notices as notice (notice.id)}
+				<div class="notice">
+					<p>{notice.text}</p>
+					<button onclick={() => proposeAgain(notice)}>Propose again</button>
+					<button onclick={() => onDismissNotice?.(notice.id)}>Dismiss</button>
+				</div>
+			{/each}
+			{#if confirming}
+				<!-- LLR-e63yrs: the confirmation of REQ-88npkt, as for the first admission -->
+				<div class="confirmation">
+					<dl>
+						<dt>Invited as</dt><dd>{confirming.confirmation.invitee_name}</dd>
+						<dt>Request</dt><dd>{confirming.confirmation.name} {confirming.confirmation.surname}</dd>
+						<dt>DevicePublicKey</dt><dd class="mono">{confirming.confirmation.device_public_key}</dd>
+						<dt>Handle</dt><dd>{confirming.again.handle}</dd>
+					</dl>
+					{#if confirming.confirmation.mismatch}
+						<p class="warn" role="alert">The name in the request is not the name you typed for this Invite.</p>
+					{/if}
+					<label class="confirm">
+						<input type="checkbox" bind:checked={confirmedAgain} />
+						This request is from the person I invited
+					</label>
+					<button onclick={confirmProposeAgain} disabled={!gateAgain.ok}>Propose admission again</button>
+					<button onclick={cancelProposeAgain}>Cancel</button>
+					{#if !gateAgain.ok}<p class="muted">{gateAgain.message}</p>{/if}
+				</div>
+			{/if}
+			{#if reproposeErr}<p class="err">{reproposeErr}</p>{/if}
+		</div>
+	{/if}
+
+	<!-- LLR-fsk4g2, LLR-9r6y7p: each Device's outcome of a send, or a refusal of the whole; no action but Dismiss -->
+	{#if sendReports.length > 0}
+		<div class="sends-section">
+			<h3>Sends and requests</h3>
+			{#each sendReports as report (report.id)}
+				<div class="send-report">
+					<p>{report.title}</p>
+					{#if report.kind === 'sends'}
+						{#if report.outcomes.length === 0}
+							<p class="muted">No other Device to send to.</p>
+						{:else}
+							<ul class="mono small">
+								{#each report.outcomes as outcome, position (position)}
+									<li>…{outcome.device.slice(-16)}: {outcome.result === 'sent' ? 'sent' : `failed: ${outcome.reason}`}</li>
+								{/each}
+							</ul>
+						{/if}
+					{/if}
+					<button onclick={() => onDismissReport?.(report.id)}>Dismiss</button>
+				</div>
+			{/each}
+		</div>
+	{/if}
+
 	<!-- Revoked orgs -->
 	{#if revokedOrgs.length > 0}
 		<div class="revoked-section">
 			<h3>Revoked &amp; Self-Deleted</h3>
 			{#each revokedOrgs as orgId, i (i)}
-				<p class="revoked-entry">Removed from org …{orgId.slice(-12)}</p>
+				<p class="revoked-entry">
+					{orgId === null ? 'Removed from a provisional founding' : `Removed from org …${orgId.slice(-12)}`}
+				</p>
 			{/each}
 		</div>
 	{/if}
@@ -292,4 +478,7 @@
 	.err { color: #f44336; }
 	.ok { color: #4caf50; }
 	.muted { color: #555; font-size: 0.82rem; }
+	.notice { border-left: 3px solid #ff9800; padding-left: 0.5rem; }
+	.confirmation { background: #0d0d1a; border: 1px solid #222; border-radius: 4px; padding: 0.75rem; margin-top: 0.5rem; }
+	.warn { color: #ff9800; font-size: 0.85rem; }
 </style>

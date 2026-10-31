@@ -10,6 +10,17 @@ Sequence number equals the epoch of the Organisation state on the chain it is
 verified against, and shall otherwise refuse it, leaving its record unchanged.
 (implements: RC-95dgg8)
 satisfies: derived
+superseded-by: REQ-dwb9bq
+
+*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
+MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
+code that did what this item states, had no product caller and is deleted.
+REQ-dwb9bq states the behaviour now: a provisional organisation is adopted
+only at the chain state's epoch (REQ-dwb9bq), and the adopted record's
+Sequence number is that epoch (LLR-34c5y3), so the mark is never a value the
+chain has not reached; a received Change set whose number is not the record's
+epoch plus one is refused on receipt (LLR-76bhw9). The text above is kept as
+it stood.
 
 *Amended 2026-10-05 (docs/plans/2026-10-05-switch-trim.md).* This item first
 restated REQ-nhe2zu's commit conditions with a sender clause and the epoch

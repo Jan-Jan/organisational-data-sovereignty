@@ -150,6 +150,12 @@ supplies no chain state, a discarded provisional update — shall delete any of
 it.
 (implements: RC-ub82my)
 satisfies: derived
+superseded-by: REQ-y9p27b
+
+*Superseded 2026-10-16 (owner ruling Q4', change
+`worktree-org-io-domain-api`):* after its own removal the node also deletes
+a kept acknowledgement when its recipient answers it accepted, an input
+this item excluded (REQ-y9p27b).
 
 *Clarified 2026-10-13 (S4, task T9 of docs/plans/2026-10-06-org-io-transport.md;
 owner ruling of that day, option A):* "data it holds" is the Persona's
@@ -172,6 +178,12 @@ caller and keep none of them, nor any Device secret key it was given, in the
 store or anywhere else once the operation returns.
 (implements: RC-44vvjp)
 satisfies: derived
+superseded-by: REQ-h29c8e
+
+*Superseded 2026-10-16 (owner ruling Q4', change
+`worktree-org-io-domain-api`):* the node now keeps the acknowledgements it
+signs in the sealed store, one per recipient, as many as REQ-6tepxq counts;
+the signing itself is restated, unchanged, by REQ-h29c8e.
 
 *Amended 2026-10-07 (owner rulings of 2026-10-06 recorded by stage S4,
 `docs/plans/2026-10-06-org-io-transport.md` §13 point 4 and §14, on branch
@@ -229,6 +241,7 @@ refuse with a typed error, leaving the store unchanged, a state whose epoch is
 lower than its record's or equal to it with a different Membership root.
 (implements: RC-ub82my)
 satisfies: derived
+superseded-by: REQ-dwb9bq
 
 REQ-tb4f8p is the IO-free half of PR-vt244s's fix: a node that crashed after
 the chain write and before its commit finds the written update among its kept

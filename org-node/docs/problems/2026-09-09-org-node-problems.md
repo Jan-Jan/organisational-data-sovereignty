@@ -127,7 +127,51 @@ later publish refused by the contract's epoch check, and — for a revocation �
 a removal on the chain that no device is ever told about.
 affects: RC-wqgm2p, LLR-t4znbk, LLR-qg9utu
 opened: 2026-09-09
-status: open
+status: resolved
+resolution: fixed 2026-10-29 (change `worktree-org-io-domain-api`, plan
+`docs/plans/2026-10-21-org-io-domain-api.md` tasks T14, T17, T38, T39, T51,
+T55; owner ruling Q6 of 2026-10-16): root cause, the record was replaced by
+the step that wrote the chain, so any failure between the write and the
+record's update, or between the update and the send, left the two apart and
+the removal untold. Now org-node writes no chain and replaces its record
+only when verification against a finalised chain state adopts a held
+provisional organisation (REQ-dwb9bq, REQ-x2dnee; LLR-rr558z, LLR-8528ud,
+LLR-34c5y3, LLR-x8drb8, LLR-zk7fx2), so a crash between the write and the
+adoption leaves the provisional organisation for the next verification to
+adopt, and a node behind the chain refuses new proposals until it is in
+step; a removal no Device was told about is closed by the pull: org-node
+answers an Organisation request from a listed Device with the full record
+and from a Device it holds as revoked with that Device's revocation notice
+alone (REQ-p4hwuv; LLR-7kdhst, LLR-j338wq, LLR-bgj2ff), and org-io's
+verification, send and request requirements with the app's single send of
+an own adoption and its periodic verification and request when behind
+(`org-io/docs/requirements/2026-10-14-domain-api.md`,
+`app/docs/requirements/2026-10-14-domain-api.md`) deliver it with no user
+step. Verified by `org-node/tests/verification.rs`
+`verify_adopts_the_provisional_organisation_the_chain_holds_after_a_restart`
+and `adoption_replaces_the_record_and_reports_own_in_one_sealed_change`
+(verifies: LLR-34c5y3), `the_record_takes_a_recorded_revocation_only_through_adoption`
+(verifies: REQ-tqap3r, LLR-34c5y3, LLR-x5asbx, LLR-g2jeqd),
+`a_greater_epoch_with_no_match_is_behind` (verifies: LLR-rr558z),
+`behind_sets_the_marker_in_step_clears_it_and_unseal_leaves_it_none`
+(verifies: LLR-zk7fx2); `org-node/tests/proposals.rs`
+`record_admission_and_record_revocation_refuse_while_behind` (verifies:
+LLR-mq7n6u, LLR-f3hru6, LLR-zk7fx2); `org-node/tests/organisation_request.rs`
+`a_listed_requester_is_answered_with_the_full_record_and_its_key` (verifies:
+LLR-7kdhst) and `a_revoked_requester_is_answered_with_its_notice_and_nothing_else`
+(verifies: LLR-j338wq); `org-node/tests/absences.rs`
+`verification_revocation_and_removal_do_no_io_and_read_no_clock` (verifies:
+LLR-g2jeqd); and across the units by `org-io/tests/verification.rs`
+`a_write_that_executed_before_a_restart_is_adopted_by_the_next_verification`,
+`org-io/tests/receive_step.rs`
+`a_revoked_requester_gets_its_notice_through_the_send_path`,
+`org-io/tests/requests.rs`
+`request_organisation_asks_every_listed_device_or_the_invites_issuer`,
+`app/src-tauri/tests/verification.rs`
+`an_own_adoption_is_sent_once_and_nothing_else_is` and
+`app/src-tauri/tests/periodic.rs`
+`a_behind_organisation_is_requested_at_each_run_until_in_step`; all pass in
+the change's verify lines.
 
 *Annotated 2026-10-05 by change `worktree-org-node-chain-authority`.* That
 change moves the chain write out of org-node: `admit_member` and
@@ -161,6 +205,22 @@ The lock-out after a lost commit is gone. The item stays `open` by owner
 ruling D1 of 2026-10-08 (`docs/plans/2026-10-08-org-io-publish.md` §6): the
 delivery of a reconciled commit and the durable resend of a revocation are
 S3b-io part 2's (task T16d), and resolve it.
+
+*Note 2026-10-16 (change `worktree-org-io-domain-api`, owner ruling Q6 of
+that day).* To be resolved by change `worktree-org-io-domain-api` (owner
+2026-10-16): the chain is no longer written before the record — an epoch
+becomes current only when verification against the chain adopts it, so a
+crash between the write and the adoption leaves the provisional organisation
+in the store for the next verification to adopt — and a removal no Device is
+told about is closed by the pull: the app sends an adopted epoch once, every
+Device verifies its Organisations periodically and requests a behind one
+from its Members with no user step, and a revoked Device that asks is
+answered with its revocation notice; by org-node's REQ-x2dnee, REQ-dwb9bq
+and REQ-p4hwuv and org-io's verification, send and request requirements.
+The status stays `open` until the merging change writes the resolution
+(`resolve-problem`). This item reaches org-node's `problem_age_days` of 60
+on 2026-11-08: if `worktree-org-io-domain-api` cannot merge by about
+2026-11-05, the owner is to be asked whether to raise it.
 
 Where: `org-node/src/service.rs` — in `admit_member`, the chain write
 (`submit_update`) and the record update at the end of the function, with the

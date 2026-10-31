@@ -1,26 +1,25 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! One endpoint per Persona (SDD-xwft92; S4, task T10 of
-//! docs/plans/2026-10-06-org-io-transport.md): each endpoint is bound from
+//! One endpoint per Persona (SDD-xwft92): each endpoint is bound from
 //! its Persona's keychain item (LLR-d5y7ks), at most once per Device key
 //! (LLR-d2pzzk), and every Persona's endpoint accepts into the one receive
-//! channel (LLR-z35vbh). Also the endpoint lifecycle tests moved from
-//! org-node's `service_lifecycle.rs` (LLR-6zjzn2, LLR-cns6q6, LLR-ecz9a6),
-//! rewritten onto org-io's endpoints, annotations unchanged.
+//! channel (LLR-z35vbh); and the endpoint's lifecycle (LLR-6zjzn2,
+//! LLR-cns6q6, LLR-ecz9a6).
 //!
 //! The tests run one at a time under `LOCK`: one of them installs a keychain
 //! of its own that refuses, and keyring's default credential builder is
 //! process-global. Every other test installs the shared in-memory keychain
 //! the handles' helpers use.
 
-use org_node::{DevicePublicKey, Joiner, OrgId, PersonaId};
+use org_node::{DevicePublicKey, OrgId, PersonaId};
+use org_io::send::{Delivery, SendError, SendReport};
 use org_io::test_support::{FakeChain, MemoryKeychain, Refusal};
 use org_io::transport::{BindPlan, OrgEndpoint, TransportError};
-use org_io::{KeychainError, OrgIo, ReceiveError, SendError, TerminalCause};
-use rand::rngs::OsRng;
+use org_io::{HeldTarget, KeychainError, OrgIo, ReceiveError, Received, TerminalCause, Verified, WriteReport};
 use std::time::Duration;
 
 mod common;
-use common::handles::{at, bind_seed, dead_addr, handle, joiner, keep_device_seed, persona, spawn_recv_one, NET};
+use common::handles::{bind_seed, device_key_of, handle, keep_device_seed, persona, NET};
+use common::journey;
 
 static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -76,7 +75,7 @@ async fn a_keychain_item_for_another_key_is_refused_and_the_endpoint_closed() {
 }
 
 // Abnormal: binding is one of the operations that needs the keychain
-// (REQ-6d9xv6, as narrowed 2026-10-07); a locked keychain refuses it, and a
+// (REQ-6d9xv6, as narrowed); a locked keychain refuses it, and a
 // missing item does too, each naming the Device key.
 // verifies: LLR-d5y7ks, REQ-6d9xv6
 #[tokio::test(flavor = "multi_thread")]
@@ -101,50 +100,177 @@ async fn a_locked_keychain_refuses_the_bind() {
     MemoryKeychain::shared().install();
 }
 
-/// A node, over `chain`, with two Personas, each the founder of an
-/// Organisation of its own.
-async fn two_founders(tag: &str, chain: &FakeChain) -> (OrgIo, [(PersonaId, OrgId); 2]) {
-    let io = handle(tag, "a", chain);
-    let first = persona(&io, "first").await;
-    let second = persona(&io, "second").await;
-    let org_1 = io.found_organisation(&mut OsRng, &first).await.unwrap();
-    let org_2 = io.found_organisation(&mut OsRng, &second).await.unwrap();
-    (io, [(first, org_1), (second, org_2)])
+// The tests below send through `send_organisation`, the Organisations
+// founded, admitted and adopted through the handle's own operations. A
+// proposal's binding of its new Persona while the node receives is
+// LLR-jvx6j9's, tested in `persona_creation.rs`.
+
+// ---- A send goes out from its own Persona's endpoint (PR-8qsnhx, PR-tcd2ta, PR-47aycj)
+
+/// Party `party` of test `tag`, over `chain`'s slots, admitted to `org` by
+/// `io`, which must be receiving: it proposes its Member from an Invite `io`
+/// issues and asks over the transport; `io` keeps the request, proposes,
+/// writes and adopts the admitting epoch. The joiner's handle, receiving.
+async fn admitted(io: &OrgIo, chain: &FakeChain, org: OrgId, tag: &str, party: &str) -> OrgIo {
+    let joiner = handle(tag, party, &FakeChain::sharing_slots_with(chain));
+    common::handles::proposed(io, org, &joiner).await;
+    let written = io.write_organisation_to_chain(HeldTarget::Organisation(org)).await.unwrap();
+    assert!(matches!(written, WriteReport::Included { .. }), "{written:?}");
+    let verified = io.verify_organisation(HeldTarget::Organisation(org)).await;
+    assert!(matches!(verified, Verified::Adopted { .. }), "{verified:?}");
+    joiner
 }
 
-/// Admit `joiner` into `org_id` and send the admission to a sink; the
-/// Device key the sink saw it come from.
-async fn sender_of_the_admission(io: &OrgIo, org_id: OrgId, joiner: &Joiner, sink_seed: [u8; 32]) -> DevicePublicKey {
-    let update = io.admit_member(&mut OsRng, org_id, joiner).await.unwrap();
-    let (sink, sink_task) = spawn_recv_one(sink_seed).await;
-    io.submit_commit_send(&mut OsRng, &update, at(sink)).await.unwrap();
-    let (_sink_endpoint, sender, _message) = sink_task.await.unwrap();
-    sender
+/// `io` sends `org`'s adopted epoch while `to` receives it: the Device the
+/// message came from, as `to`'s receive step reports it, and the report.
+async fn sent_from(io: &OrgIo, org: OrgId, to: &OrgIo) -> (DevicePublicKey, SendReport) {
+    let (received, sent) = tokio::join!(journey::next(to), io.send_organisation(org));
+    match received {
+        Ok(Received::ProvisionalOrganisationReceived { from, .. }) => (from, sent.unwrap()),
+        other => panic!("the epoch was not received: {other:?}"),
+    }
 }
 
-// The inversion of org-node's pin of the endpoint bound once per service:
-// a node administering two Organisations through two Personas sends each
-// Organisation's update from its own Persona's endpoint, under that
-// Persona's Device key, whichever was bound first.
+// The inversion of org-node's pin of the endpoint bound once per service: a
+// node administering two Organisations through two Personas sends each
+// Organisation's epoch from its own Persona's endpoint, under that Persona's
+// Device key, whichever was bound first.
 // verifies: LLR-d2pzzk, PR-8qsnhx
 #[tokio::test(flavor = "multi_thread")]
 async fn a_second_organisations_message_goes_out_under_its_own_personas_key() {
     let _guard = LOCK.lock().await;
     MemoryKeychain::shared().install();
+    let tag = "endpoints-two-orgs";
     let chain = FakeChain::new();
-    let (io, [(first, org_1), (second, org_2)]) = two_founders("endpoints-two-orgs", &chain).await;
-    let first_key = io.node_for_test().persona_public_keys(&first).unwrap().1;
-    let second_key = io.node_for_test().persona_public_keys(&second).unwrap().1;
+    let io = handle(tag, "a", &chain);
+    let (org_1, first) = common::handles::founded(&io, "first").await;
+    let (org_2, second) = common::handles::founded(&io, "second").await;
+    io.start_receiving().await.unwrap();
+    let bob = admitted(&io, &chain, org_1, tag, "b").await;
+    let bea = admitted(&io, &chain, org_2, tag, "c").await;
 
-    // *S4 task T12, 2026-10-13:* each sink is the joiner's own Device
-    // (`joiner(seed, ..)`'s is the seed `[seed + 1; 32]`'s): a Loopback send
-    // goes only to a recipient's address.
-    let sent_1 = sender_of_the_admission(&io, org_1, &joiner(0x41, "bob"), [0x42; 32]).await;
-    assert_eq!(sent_1, first_key, "the first Organisation's update goes out under its Persona's key");
-    let sent_2 = sender_of_the_admission(&io, org_2, &joiner(0x43, "bea"), [0x44; 32]).await;
-    assert_eq!(sent_2, second_key, "the second Organisation's update goes out under its own Persona's key");
-    assert_ne!(sent_2, first_key, "and never under the first Persona's");
+    let (from_1, _) = sent_from(&io, org_1, &bob).await;
+    assert_eq!(from_1, first, "the first Organisation's epoch goes out under its Persona's key");
+    let (from_2, _) = sent_from(&io, org_2, &bea).await;
+    assert_eq!(from_2, second, "the second Organisation's epoch goes out under its own Persona's key");
+    assert_ne!(from_2, first, "and never under the first Persona's");
     assert_eq!(io.bound_endpoints_for_test().await, 2, "one endpoint per Persona");
+}
+
+// After a Persona's endpoint has closed, a send from that Persona binds the
+// endpoint again and goes out under the Persona's Device key.
+// verifies: LLR-d2pzzk, PR-tcd2ta
+#[tokio::test(flavor = "multi_thread")]
+async fn after_its_endpoint_closes_a_send_binds_it_again() {
+    let _guard = LOCK.lock().await;
+    MemoryKeychain::shared().install();
+    let tag = "endpoints-resend";
+    let chain = FakeChain::new();
+    let io = handle(tag, "a", &chain);
+    let (org, founder) = common::handles::founded(&io, "resend").await;
+    io.start_receiving().await.unwrap();
+    let bob = admitted(&io, &chain, org, tag, "b").await;
+    let pid = io.personas().await[0].persona_id.clone();
+    let closed = io.endpoint_for_test(&pid).await.unwrap();
+    let closed_sockets = closed.bound_sockets();
+    closed.inner().close().await;
+
+    let (from, report) = sent_from(&io, org, &bob).await;
+    assert!(report.per_device.iter().all(|(_, sent)| matches!(sent, Delivery::Delivered)), "{report:?}");
+    assert_eq!(from, founder, "under the sending Persona's Device key");
+    let rebound = io.bound_endpoint_for_test(&pid).await.expect("the send bound the endpoint again");
+    assert!(!rebound.inner().is_closed(), "the send bound the endpoint again");
+    assert_ne!(rebound.bound_sockets(), closed_sockets, "a new endpoint, not the closed one");
+    assert_eq!(io.bound_endpoints_for_test().await, 1, "the closed endpoint is not kept beside the new one");
+}
+
+// One Persona's endpoint closes while the other's keeps accepting, so the
+// receive loop does not end and nothing calls `start_receiving` again. A
+// send from the first Persona binds its endpoint again; that endpoint
+// accepts too: a message to its Device reaches the receive channel, and the
+// other Persona's endpoint still delivers.
+// verifies: LLR-z35vbh, LLR-d2pzzk, PR-47aycj
+#[tokio::test(flavor = "multi_thread")]
+async fn a_send_that_rebinds_a_closed_endpoint_while_the_receiver_runs_accepts_on_it() {
+    let _guard = LOCK.lock().await;
+    MemoryKeychain::shared().install();
+    let tag = "endpoints-rebind-receiving";
+    let chain = FakeChain::new();
+    let io = handle(tag, "a", &chain);
+    let (org, closing_key) = common::handles::founded(&io, "closing").await;
+    let open_key = journey::propose_founding(&io, "open").await;
+    io.start_receiving().await.unwrap();
+    let bob = admitted(&io, &chain, org, tag, "b").await;
+    let personas = io.personas().await;
+    let pid_of = |key| personas.iter().find(|persona| persona.device_key == key).unwrap().persona_id.clone();
+    let (closing, open) = (pid_of(closing_key), pid_of(open_key));
+    let closed_sockets = io.endpoint_for_test(&closing).await.unwrap().bound_sockets();
+    io.endpoint_for_test(&closing).await.unwrap().inner().close().await;
+
+    let (from, report) = sent_from(&io, org, &bob).await;
+    assert!(report.per_device.iter().all(|(_, sent)| matches!(sent, Delivery::Delivered)), "{report:?}");
+    assert_eq!(from, closing_key);
+    let rebound = io.bound_endpoint_for_test(&closing).await.expect("the send bound the endpoint again");
+    assert_ne!(rebound.bound_sockets(), closed_sockets, "the send bound the endpoint again");
+
+    let received = delivered_to_bound(&io, &closing, [0x79; 32], b"to the rebound").await;
+    assert_eq!(received, b"to the rebound".to_vec(), "the rebound endpoint accepts");
+    let received = delivered_to_bound(&io, &open, [0x7a; 32], b"to the open one").await;
+    assert_eq!(received, b"to the open one".to_vec(), "the other Persona's endpoint still delivers");
+    assert_eq!(io.bound_endpoints_for_test().await, 2, "one endpoint per Persona");
+}
+
+// Abnormal: while the receiver runs, the keychain refuses the rebind a send
+// asks for. The refusal is the send's, for every recipient, nothing closed
+// is kept, and the next send, once the keychain answers, binds the endpoint
+// again and it accepts. The count of accept tasks stays exact: once both
+// endpoints close, the receive channel ends.
+// verifies: LLR-z35vbh, LLR-d2pzzk, PR-47aycj
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_rebind_while_the_receiver_runs_binds_and_accepts_on_the_next_send() {
+    let _guard = LOCK.lock().await;
+    let keychain = MemoryKeychain::shared();
+    keychain.install();
+    let tag = "endpoints-refused-rebind-receiving";
+    let chain = FakeChain::new();
+    let io = handle(tag, "a", &chain);
+    let (org, closing_key) = common::handles::founded(&io, "closing").await;
+    let open_key = journey::propose_founding(&io, "open").await;
+    io.start_receiving().await.unwrap();
+    let bob = admitted(&io, &chain, org, tag, "b").await;
+    let personas = io.personas().await;
+    let pid_of = |key| personas.iter().find(|persona| persona.device_key == key).unwrap().persona_id.clone();
+    let (closing, open) = (pid_of(closing_key), pid_of(open_key));
+    io.endpoint_for_test(&closing).await.unwrap().inner().close().await;
+
+    keychain.refuse_as(Some(Refusal::Locked));
+    let refused = io.send_organisation(org).await;
+    keychain.refuse_as(None);
+    let locked = TransportError::Keychain(Box::new(KeychainError::Locked { device_key: closing_key })).to_string();
+    match refused.unwrap().per_device.as_slice() {
+        [(recipient, Delivery::NotDelivered { reason: SendError::SenderEndpoint(reason) })] => {
+            assert_eq!(*recipient, bob.personas().await[0].device_key, "the one recipient");
+            assert_eq!(*reason, locked, "the keychain's refusal is the send's");
+        }
+        other => panic!("the send was not refused at the sender's endpoint: {other:?}"),
+    }
+    assert_eq!(io.bound_endpoints_for_test().await, 1, "the closed endpoint is not kept");
+
+    let (from, report) = sent_from(&io, org, &bob).await;
+    assert!(report.per_device.iter().all(|(_, sent)| matches!(sent, Delivery::Delivered)), "{report:?}");
+    assert_eq!(from, closing_key, "from the rebound endpoint");
+    assert_eq!(io.bound_endpoints_for_test().await, 2, "the send bound the endpoint again");
+    let received = delivered_to_bound(&io, &closing, [0x7b; 32], b"after the refusal").await;
+    assert_eq!(received, b"after the refusal".to_vec(), "the rebound endpoint accepts");
+
+    io.bound_endpoint_for_test(&closing).await.unwrap().inner().close().await;
+    io.bound_endpoint_for_test(&open).await.unwrap().inner().close().await;
+    match tokio::time::timeout(NET, io.next_inbound_for_test()).await {
+        Ok(Err(TransportError::EndpointClosed)) => {}
+        Ok(Err(other)) => panic!("the channel ended for another reason: {other}"),
+        Ok(Ok((from, _))) => panic!("a body from {from:?} arrived after every endpoint closed"),
+        Err(_) => panic!("every endpoint closed, yet the receive channel waits: the accept-task count is off"),
+    }
 }
 
 // Each endpoint is bound lazily and once: asking for a Persona's endpoint
@@ -169,7 +295,7 @@ async fn each_persona_has_one_endpoint_bound_lazily() {
 
 // A node with two Personas receives on both: a body sent to either
 // Persona's Device reaches the one receive channel with the sender the
-// handshake authenticated (S3a's member-sender rule needs it).
+// handshake authenticated (the member-sender rule needs it).
 // verifies: LLR-z35vbh
 #[tokio::test(flavor = "multi_thread")]
 async fn a_message_to_either_personas_device_reaches_the_receive_channel() {
@@ -192,7 +318,7 @@ async fn a_message_to_either_personas_device_reaches_the_receive_channel() {
     }
 }
 
-// ---- A closed endpoint is not reused (S4, task T20; PR-tcd2ta) -------------
+// ---- A closed endpoint is not reused (PR-tcd2ta) ----------------------------
 
 /// Close `persona_id`'s endpoint, as a permanent transport failure would,
 /// and wait until the receive channel reports every accept task ended.
@@ -228,7 +354,7 @@ async fn after_its_endpoint_closes_start_receiving_binds_it_again_and_receives()
     let chain = FakeChain::new();
     let io = handle("endpoints-restart", "b", &chain);
     let pid = persona(&io, "restart").await;
-    let device_key = io.node_for_test().persona_public_keys(&pid).unwrap().1;
+    let device_key = device_key_of(&io, &pid).await;
     io.start_receiving().await.unwrap();
     let first_sockets = io.endpoint_for_test(&pid).await.unwrap().bound_sockets();
     close_and_drain(&io, &pid).await;
@@ -244,32 +370,6 @@ async fn after_its_endpoint_closes_start_receiving_binds_it_again_and_receives()
     assert_eq!(received, b"after the restart".to_vec(), "the body reaches the receive channel");
 }
 
-// After a Persona's endpoint has closed, a send from that Persona binds the
-// endpoint again and goes out under the Persona's Device key.
-// verifies: LLR-d2pzzk, PR-tcd2ta
-#[tokio::test(flavor = "multi_thread")]
-async fn after_its_endpoint_closes_a_send_binds_it_again() {
-    let _guard = LOCK.lock().await;
-    MemoryKeychain::shared().install();
-    let chain = FakeChain::new();
-    let io = handle("endpoints-resend", "a", &chain);
-    let pid = persona(&io, "resend").await;
-    let device_key = io.node_for_test().persona_public_keys(&pid).unwrap().1;
-    let org_id = io.found_organisation(&mut OsRng, &pid).await.unwrap();
-    io.endpoint_for_test(&pid).await.unwrap().inner().close().await;
-
-    let update = io.admit_member(&mut OsRng, org_id, &joiner(0x73, "cy")).await.unwrap();
-    let (sink, sink_task) = spawn_recv_one([0x74; 32]).await;
-    let submitted = io.submit_commit_send(&mut OsRng, &update, at(sink)).await.unwrap();
-    for (recipient, sent) in &submitted.sends.per_device {
-        assert!(sent.is_ok(), "the send to {recipient:?} went out from a live endpoint: {sent:?}");
-    }
-    let (_sink_endpoint, sender, _message) = tokio::time::timeout(NET, sink_task).await.unwrap().unwrap();
-    assert_eq!(sender, device_key, "under the sending Persona's Device key");
-    assert!(!io.endpoint_for_test(&pid).await.unwrap().inner().is_closed(), "the send bound the endpoint again");
-    assert_eq!(io.bound_endpoints_for_test().await, 1);
-}
-
 // Abnormal: the keychain refuses the rebind of a closed endpoint.
 // `start_receiving` reports the failed bind, keeps nothing closed in its
 // place, and binds once the keychain answers again.
@@ -282,7 +382,7 @@ async fn a_refused_rebind_is_a_failed_bind_and_the_next_start_binds() {
     let chain = FakeChain::new();
     let io = handle("endpoints-refused-rebind", "b", &chain);
     let pid = persona(&io, "refused").await;
-    let device_key = io.node_for_test().persona_public_keys(&pid).unwrap().1;
+    let device_key = device_key_of(&io, &pid).await;
     io.start_receiving().await.unwrap();
     close_and_drain(&io, &pid).await;
 
@@ -302,137 +402,7 @@ async fn a_refused_rebind_is_a_failed_bind_and_the_next_start_binds() {
     assert_eq!(received, b"after the refusal".to_vec());
 }
 
-// ---- A rebound endpoint accepts while the receiver runs (S4, task T21) -----
-
-// One Persona's endpoint closes while the other's keeps accepting, so the
-// receive loop does not end and nothing calls `start_receiving` again. A
-// send from the first Persona binds its endpoint again; that endpoint
-// accepts too: a message to its Device reaches the receive channel, and the
-// other Persona's endpoint still delivers.
-// verifies: LLR-z35vbh, LLR-d2pzzk, PR-47aycj
-#[tokio::test(flavor = "multi_thread")]
-async fn a_send_that_rebinds_a_closed_endpoint_while_the_receiver_runs_accepts_on_it() {
-    let _guard = LOCK.lock().await;
-    MemoryKeychain::shared().install();
-    let chain = FakeChain::new();
-    let (io, [(closing, org_id), (open, _)]) = two_founders("endpoints-rebind-receiving", &chain).await;
-    io.start_receiving().await.unwrap();
-    let closed_sockets = io.endpoint_for_test(&closing).await.unwrap().bound_sockets();
-    io.endpoint_for_test(&closing).await.unwrap().inner().close().await;
-
-    let update = io.admit_member(&mut OsRng, org_id, &joiner(0x77, "dee")).await.unwrap();
-    let (sink, sink_task) = spawn_recv_one([0x78; 32]).await;
-    let submitted = io.submit_commit_send(&mut OsRng, &update, at(sink)).await.unwrap();
-    for (recipient, sent) in &submitted.sends.per_device {
-        assert!(sent.is_ok(), "the send to {recipient:?} went out from a live endpoint: {sent:?}");
-    }
-    tokio::time::timeout(NET, sink_task).await.unwrap().unwrap();
-    let rebound = io.endpoint_for_test(&closing).await.unwrap();
-    assert_ne!(rebound.bound_sockets(), closed_sockets, "the send bound the endpoint again");
-
-    let sender = bind_seed([0x79; 32]).await;
-    let delivered = tokio::time::timeout(Duration::from_secs(5), async {
-        sender.send_body(rebound.node_addr_for_dial(), b"to the rebound").await.unwrap();
-        io.next_inbound_for_test().await
-    })
-    .await;
-    match delivered {
-        Ok(Ok((from, body))) => {
-            assert_eq!(from, sender.device_key(), "the handshake's sender");
-            assert_eq!(body, b"to the rebound".to_vec(), "the body, unchanged");
-        }
-        Ok(Err(error)) => panic!("the receive channel ended instead: {error}"),
-        Err(_) => panic!("the rebound endpoint has no accept task: nothing reached the receive channel"),
-    }
-    let received = delivered_to(&io, &open, [0x7a; 32], b"to the open one").await;
-    assert_eq!(received, b"to the open one".to_vec(), "the other Persona's endpoint still delivers");
-    assert_eq!(io.bound_endpoints_for_test().await, 2, "one endpoint per Persona");
-}
-
-// Abnormal: while the receiver runs, the keychain refuses the rebind a send
-// asks for. The refusal is the send's, nothing closed is kept, and the next
-// bind, once the keychain answers, accepts. The count of accept tasks stays
-// exact: once both endpoints close, the receive channel ends.
-// verifies: LLR-z35vbh, LLR-d2pzzk, PR-47aycj
-#[tokio::test(flavor = "multi_thread")]
-async fn a_refused_rebind_while_the_receiver_runs_binds_and_accepts_on_the_next_send() {
-    let _guard = LOCK.lock().await;
-    let keychain = MemoryKeychain::shared();
-    keychain.install();
-    let chain = FakeChain::new();
-    let io = handle("endpoints-refused-rebind-receiving", "b", &chain);
-    let closing = persona(&io, "closing").await;
-    let open = persona(&io, "open").await;
-    let device_key = io.node_for_test().persona_public_keys(&closing).unwrap().1;
-    let org = io.found_organisation(&mut OsRng, &closing).await.unwrap();
-    let joining = joiner(0x60, "joining");
-    let update = io.admit_member(&mut OsRng, org, &joining).await.unwrap();
-    io.start_receiving().await.unwrap();
-    io.endpoint_for_test(&closing).await.unwrap().inner().close().await;
-
-    // The send path's bind, driven through the submission whose commit it
-    // sends. *Moved 2026-10-15 (S4 TEST review round 1, finding-6; Seams 2):*
-    // it called `endpoint_for_test`, the bind `send.rs` makes, directly.
-    // Mutation check, that day: `send_committed` reporting a fixed reason in
-    // place of the bind's refusal failed the reason assertion.
-    keychain.refuse_as(Some(Refusal::Locked));
-    let submitted = io.submit_commit_send(&mut OsRng, &update, at(dead_addr([0x61; 32]))).await;
-    keychain.refuse_as(None);
-    let submitted = submitted.expect("the chain write and the commit stand; only the send is refused");
-    let locked = TransportError::Keychain(Box::new(KeychainError::Locked { device_key })).to_string();
-    match submitted.sends.per_device.as_slice() {
-        [(recipient, Err(SendError::SenderEndpoint(reason)))] => {
-            assert_eq!(*recipient, joining.device_key, "the one recipient");
-            assert_eq!(*reason, locked, "the keychain's refusal is the send's");
-        }
-        other => panic!("the send was not refused at the sender's endpoint: {other:?}"),
-    }
-    assert_eq!(io.bound_endpoints_for_test().await, 1, "the closed endpoint is not kept");
-
-    // The next send, once the keychain answers, binds the endpoint again.
-    // *Driven through a send 2026-10-15 (S4 TEST review round 2, finding-3):*
-    // it rebound through `endpoint_for_test` directly; now the next
-    // submission's send binds, and the endpoint is only looked up after.
-    let second = joiner(0x62, "second");
-    let update = io.admit_member(&mut OsRng, org, &second).await.unwrap();
-    let submitted = io.submit_commit_send(&mut OsRng, &update, at(dead_addr([0x63; 32]))).await.unwrap();
-    for (recipient, sent) in &submitted.sends.per_device {
-        assert!(!matches!(sent, Err(SendError::SenderEndpoint(_))), "the send to {recipient:?} found no endpoint: {sent:?}");
-    }
-    assert!(
-        submitted.sends.per_device.iter().any(|(recipient, sent)| *recipient == second.device_key
-            && matches!(sent, Err(SendError::Transport(_)))),
-        "the send dialled the addressed recipient from the rebound endpoint: {:?}",
-        submitted.sends.per_device
-    );
-    assert_eq!(io.bound_endpoints_for_test().await, 2, "the send bound the endpoint again");
-    let rebound = io.bound_endpoint_for_test(&closing).await.expect("the send bound the closing Persona's endpoint");
-    let sender = bind_seed([0x7b; 32]).await;
-    let delivered = tokio::time::timeout(Duration::from_secs(5), async {
-        sender.send_body(rebound.node_addr_for_dial(), b"after the refusal").await.unwrap();
-        io.next_inbound_for_test().await
-    })
-    .await;
-    match delivered {
-        Ok(Ok((from, body))) => {
-            assert_eq!(from, sender.device_key(), "the handshake's sender");
-            assert_eq!(body, b"after the refusal".to_vec());
-        }
-        Ok(Err(error)) => panic!("the receive channel ended instead: {error}"),
-        Err(_) => panic!("the rebound endpoint has no accept task: nothing reached the receive channel"),
-    }
-
-    rebound.inner().close().await;
-    io.endpoint_for_test(&open).await.unwrap().inner().close().await;
-    match tokio::time::timeout(NET, io.next_inbound_for_test()).await {
-        Ok(Err(TransportError::EndpointClosed)) => {}
-        Ok(Err(other)) => panic!("the channel ended for another reason: {other}"),
-        Ok(Ok((from, _))) => panic!("a body from {from:?} arrived after every endpoint closed"),
-        Err(_) => panic!("every endpoint closed, yet the receive channel waits: the accept-task count is off"),
-    }
-}
-
-// ---- A Persona created while the node receives (S4 review round 1, finding 2)
+// ---- A bound endpoint's delivery ---------------------------------------------
 
 /// Send `body` from a fresh sender to the endpoint the node has already
 /// bound for `persona_id`, binding nothing (so the test starts no accept
@@ -455,72 +425,7 @@ async fn delivered_to_bound(io: &OrgIo, persona_id: &PersonaId, sender_seed: [u8
     }
 }
 
-// The receiver runs for the first Persona; a second Persona is created
-// meanwhile. Its endpoint is bound and accepts at once: a message to its
-// Device reaches the receive channel with no new `start_receiving`, and the
-// first Persona's endpoint still delivers.
-// verifies: LLR-z35vbh, PR-y6t5kt
-#[tokio::test(flavor = "multi_thread")]
-async fn a_persona_created_while_the_receiver_runs_is_received_on() {
-    let _guard = LOCK.lock().await;
-    MemoryKeychain::shared().install();
-    let chain = FakeChain::new();
-    let io = handle("endpoints-created-receiving", "b", &chain);
-    let first = persona(&io, "first").await;
-    io.start_receiving().await.unwrap();
-
-    let created = persona(&io, "created").await;
-    assert_eq!(io.bound_endpoints_for_test().await, 2, "the new Persona's endpoint is bound at its creation");
-    let received = delivered_to_bound(&io, &created, [0x7c; 32], b"to the new Persona").await;
-    assert_eq!(received, b"to the new Persona".to_vec(), "the body reaches the receive channel");
-    let received = delivered_to_bound(&io, &first, [0x7d; 32], b"to the first").await;
-    assert_eq!(received, b"to the first".to_vec(), "the first Persona's endpoint still delivers");
-}
-
-// Abnormal: while the node receives, the replying Persona's endpoint cannot
-// be bound (the keychain refuses its item). `produce_reply` hands out no
-// reply and writes nothing, so no admission is invited that this node would
-// not receive; once the keychain answers, the reply is produced and the
-// Persona's endpoint accepts.
-// verifies: LLR-z35vbh, PR-y6t5kt
-#[tokio::test(flavor = "multi_thread")]
-async fn no_reply_is_produced_while_receiving_for_a_persona_whose_endpoint_cannot_be_bound() {
-    let _guard = LOCK.lock().await;
-    let keychain = MemoryKeychain::shared();
-    keychain.install();
-    let chain = FakeChain::new();
-    let inviter = handle("endpoints-reply-receiving", "a", &chain);
-    let alice = persona(&inviter, "alice").await;
-    let org_id = inviter.found_organisation(&mut OsRng, &alice).await.unwrap();
-    let invite = inviter.issue_invite(&mut OsRng, org_id, "Acme", "Bob").await.unwrap();
-
-    let io = handle("endpoints-reply-receiving", "b", &FakeChain::sharing_slots_with(&chain));
-    io.start_receiving().await.unwrap();
-    let bob = persona(&io, "bob").await;
-    if let Some(endpoint) = io.bound_endpoint_for_test(&bob).await {
-        endpoint.inner().close().await;
-    }
-    let before = common::handles::store_bytes("endpoints-reply-receiving", "b");
-
-    keychain.refuse_as(Some(Refusal::Locked));
-    let refused = io.produce_reply(&mut OsRng, &invite, &bob, true).await;
-    keychain.refuse_as(None);
-    let device_key = io.node_for_test().persona_public_keys(&bob).unwrap().1;
-    match refused {
-        Err(org_io::ExchangeError::Bind(TransportError::Keychain(refused))) => {
-            assert_eq!(*refused, KeychainError::Locked { device_key });
-        }
-        Err(other) => panic!("refused for another reason: {other}"),
-        Ok(_) => panic!("a reply was handed out for a Persona this node cannot receive on"),
-    }
-    assert_eq!(common::handles::store_bytes("endpoints-reply-receiving", "b"), before, "nothing written");
-
-    io.produce_reply(&mut OsRng, &invite, &bob, true).await.unwrap();
-    let received = delivered_to_bound(&io, &bob, [0x7f; 32], b"the admission").await;
-    assert_eq!(received, b"the admission".to_vec(), "the replying Persona's endpoint accepts");
-}
-
-// ---- A closing endpoint (S4 review round 2, A7) ----------------------------
+// ---- A closing endpoint -----------------------------------------------------
 
 // Abnormal: a Persona's endpoint has started closing but not finished (its
 // close future polled once, still pending). The next call binds a new
@@ -546,7 +451,7 @@ async fn a_closing_endpoint_is_not_handed_out_again() {
     close.await;
 }
 
-// ---- A stalled connection (S4 review round 2, finding 1; PR-d2p5y2) --------
+// ---- A stalled connection (PR-d2p5y2) --------------------------------------
 
 /// A peer that completes the handshake with `persona_id`'s endpoint and
 /// then opens no stream: the connection, held open by the caller.
@@ -635,10 +540,9 @@ async fn a_seventeenth_connection_waits_for_a_slot_while_sixteen_stall() {
     assert!(stalled_since.elapsed() >= limit * 9 / 10, "the body was taken before a slot freed: {:?}", stalled_since.elapsed());
 }
 
-// ---- Moved from org-node's `service_lifecycle.rs` (S4, task T10) -----------
+// ---- The endpoint's lifecycle ----------------------------------------------
 
-// *Moved 2026-10-13 (S4, task T10) from org-node's `service_lifecycle.rs`
-// and rewritten onto org-io's endpoints:* the endpoint is bound once per
+// The endpoint is bound once per
 // Persona and the same one is returned after. The bound sockets tell one
 // endpoint from two: a second bind takes a fresh ephemeral port.
 // verifies: LLR-6zjzn2
@@ -649,7 +553,7 @@ async fn the_endpoint_is_bound_once_and_the_same_one_is_returned_after() {
     let chain = FakeChain::new();
     let io = handle("endpoints-once", "a", &chain);
     let pid = persona(&io, "ep").await;
-    let expected = io.node_for_test().persona_public_keys(&pid).unwrap().1;
+    let expected = device_key_of(&io, &pid).await;
 
     let first = io.endpoint_for_test(&pid).await.unwrap();
     let first_sockets = first.bound_sockets();
@@ -661,8 +565,7 @@ async fn the_endpoint_is_bound_once_and_the_same_one_is_returned_after() {
     assert_eq!(second.device_key(), expected);
 }
 
-// *Moved 2026-10-13 (S4, task T10) from org-node's `service_lifecycle.rs`
-// and rewritten onto org-io's endpoints:* a node holding more than one
+// A node holding more than one
 // Persona binds the endpoint of the Persona asked for, from that Persona's
 // keychain item, not the first Persona's.
 // verifies: LLR-cns6q6
@@ -674,8 +577,8 @@ async fn the_endpoint_binds_the_named_personas_device_not_the_first_personas() {
     let io = handle("endpoints-named", "a", &chain);
     let first = persona(&io, "one").await;
     let second = persona(&io, "two").await;
-    let first_key = io.node_for_test().persona_public_keys(&first).unwrap().1;
-    let second_key = io.node_for_test().persona_public_keys(&second).unwrap().1;
+    let first_key = device_key_of(&io, &first).await;
+    let second_key = device_key_of(&io, &second).await;
     assert_ne!(first_key, second_key);
 
     let bound = io.endpoint_for_test(&second).await.unwrap().device_key();
@@ -683,8 +586,7 @@ async fn the_endpoint_binds_the_named_personas_device_not_the_first_personas() {
     assert_ne!(bound, first_key, "the endpoint bound the first persona's device key, not the named one");
 }
 
-// *Moved 2026-10-13 (S4, task T10) from org-node's `service_lifecycle.rs`
-// and rewritten onto org-io's endpoints:* a node in Loopback mode binds
+// A node in Loopback mode binds
 // loopback sockets and nothing else.
 // verifies: REQ-db6s7q, LLR-ecz9a6
 #[tokio::test(flavor = "multi_thread")]

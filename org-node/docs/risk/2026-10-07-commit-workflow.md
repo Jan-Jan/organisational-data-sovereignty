@@ -346,6 +346,16 @@ key the store holds for it in the same sealed store image as the rest; and
 returns the acknowledgements to its caller holding no key and no other
 Organisation data, leaving in the store no tombstone, marker or copy of an
 acknowledgement for that Organisation. mitigates: HAZ-h6b34a
+superseded-by: RC-45k3zg
+
+*Superseded 2026-10-20 (owner ruling Q4' of 2026-10-16, change
+`worktree-org-io-domain-api`):* the node still signs each acknowledgement
+before the deletion with a Device secret key it keeps nowhere, but now keeps
+the signed acknowledgements in the store — three, two, one or none by the
+Devices it knows — each with its recipient's key and addresses, deletes each
+once its recipient accepts it, and leaves the rest to be deleted 7 days after
+the verification (RC-45k3zg, with HAZ-h6b34a's residual re-estimated, in
+`org-node/docs/risk/2026-10-15-domain-api.md`).
 
 *Revised 2026-10-07 (owner rulings of 2026-10-06 recorded by stage S4,
 `docs/plans/2026-10-06-org-io-transport.md` §13–§15 on branch

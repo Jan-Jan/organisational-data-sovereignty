@@ -3,9 +3,8 @@
 //! org-node's value types at their own interface: the secret types
 //! (LLR-sz4xhc) and the tag types (LLR-s7whrn), both SDD-swtd3w's; seed to key
 //! pair (LLR-56hc77, SDD-sxp8hb); and the Organisation public key's parse
-//! (LLR-mmdu38, SDD-swtd3w). Named `value_types.rs` until the 2026-10-05 merge
-//! of master, which brought a `value_types.rs` of its own (SDD-swtd3w's
-//! identifier and rejection vocabulary).
+//! (LLR-mmdu38, SDD-swtd3w). SDD-swtd3w's identifier and rejection
+//! vocabulary are tested in `value_types.rs`.
 
 use ed25519_dalek::SigningKey;
 use org_node::keys::X25519Keypair;
@@ -31,19 +30,19 @@ fn weak_key() -> [u8; 32] {
 /// p + 1: a non-canonical encoding. Decompresses as Edwards; refused by the
 /// X25519 rule.
 fn non_canonical_key() -> [u8; 32] {
-    let mut b = [0xffu8; 32];
-    b[0] = 0xee;
-    b[31] = 0x7f;
-    b
+    let mut bytes = [0xffu8; 32];
+    bytes[0] = 0xee;
+    bytes[31] = 0x7f;
+    bytes
 }
 
-fn plain<T: serde::Serialize>(v: &T) -> Vec<u8> {
-    postcard::to_allocvec(v).unwrap()
+/// `encodable`'s postcard encoding.
+fn plain<Encodable: serde::Serialize>(encodable: &Encodable) -> Vec<u8> {
+    postcard::to_allocvec(encodable).unwrap()
 }
 
-// *Adapted 2026-10-08 (S4, task T3):* `DeviceSeed` is gone; the device
-// seed is held only as the move-only `DeviceSecret` (LLR-37k2s3, tested in
-// key_custody.rs), so its cases here are removed and the Member seed's kept.
+// The device seed is held only as the move-only `DeviceSecret` (LLR-37k2s3,
+// tested in key_custody.rs); the secret type here is the Member seed.
 /// verifies: LLR-sz4xhc
 #[test]
 fn secret_types_redact_debug_and_give_bytes_only_through_the_accessor() {
@@ -57,9 +56,6 @@ fn secret_types_redact_debug_and_give_bytes_only_through_the_accessor() {
     assert!(!implements_display!(MemberSeed) && !implements_copy!(MemberSeed));
 }
 
-// *Adapted 2026-10-08 (S4, task T3):* `DeviceSeed` is gone; the device
-// seed is held only as the move-only `DeviceSecret` (LLR-37k2s3, tested in
-// key_custody.rs), so its cases here are removed and the Member seed's kept.
 /// verifies: LLR-sz4xhc
 #[test]
 fn secret_debug_is_the_same_whatever_the_bytes() {
@@ -71,9 +67,6 @@ fn secret_debug_is_the_same_whatever_the_bytes() {
     }
 }
 
-// *Adapted 2026-10-08 (S4, task T3):* `DeviceSeed` is gone; the device
-// seed is held only as the move-only `DeviceSecret` (LLR-37k2s3, tested in
-// key_custody.rs), so its cases here are removed and the Member seed's kept.
 /// verifies: LLR-sz4xhc
 #[test]
 fn secret_types_serialise_as_the_plain_bytes() {
@@ -85,29 +78,26 @@ fn secret_types_serialise_as_the_plain_bytes() {
     assert!(postcard::from_bytes::<MemberSeed>(&plain(&bytes)[..31]).is_err());
 }
 
-// Adapted at the merge of master `1feb608` into worktree-person-shared-types:
-// on this branch the Member-as-a-group key is X25519, so a member seed yields
-// an `X25519Keypair` (`MemberSeed::x25519_keypair`, LLR-98ufry) and hands its
-// seed back as a `MemberSeed`; a device seed yields a `SigningKeypair` as on
-// master. LLR-56hc77's `MemberSeed::signing_keypair()` clause does not hold
-// here; its rule — no seed passes through a plain byte array — does.
+// The Member-as-a-group key is X25519, so a member seed yields an
+// `X25519Keypair` (`MemberSeed::x25519_keypair`, LLR-98ufry) and hands its
+// seed back as a `MemberSeed`; a device seed yields a `SigningKeypair`.
+// LLR-56hc77's `MemberSeed::signing_keypair()` clause does not hold; its
+// rule — no seed passes through a plain byte array — does.
 /// verifies: LLR-56hc77
 #[test]
 fn a_seed_yields_its_key_pair_and_a_key_pair_its_seed() {
     let member_kp = X25519Keypair::generate(&mut OsRng);
     assert_eq!(member_kp.member_seed().x25519_keypair().public_bytes(), member_kp.public_bytes());
     // The device seed is the RFC 8032 secret key: any ed25519 implementation
-    // derives the same key pair from it. *Adapted 2026-10-08 (S4, task T3):*
-    // the seed is held as a `DeviceSecret`, which hands out its public key
-    // only; `SigningKeypair::device_seed` is gone (LLR-37k2s3).
+    // derives the same key pair from it. The seed is held as a
+    // `DeviceSecret`, which hands out its public key only (LLR-37k2s3).
     assert_eq!(
         device_secret([0x11; 32]).device_key().as_bytes(),
         SigningKey::from_bytes(&[0x11; 32]).verifying_key().as_bytes()
     );
 }
 
-// Adapted at the same merge: master signed and verified with both seed types'
-// key pairs; nothing signs on this branch (REQ-ag6kqm). Each seed at the byte
+// Nothing signs with these key pairs (REQ-ag6kqm). Each seed at the byte
 // bounds yields a key pair whose public key is valid in its role.
 /// verifies: LLR-56hc77
 #[test]
@@ -115,15 +105,14 @@ fn seeds_at_the_byte_bounds_yield_working_key_pairs() {
     for bytes in [[0u8; 32], [0xffu8; 32]] {
         let member = MemberSeed::from(bytes).x25519_keypair();
         assert!(member.member_key().is_ok(), "a valid Member-as-a-group key");
-        // A `DeviceSecret` parses its DevicePublicKey when it is built (S4, task T3).
+        // A `DeviceSecret` parses its DevicePublicKey when it is built.
         let device = device_secret(bytes);
         assert_eq!(device.device_key().as_bytes(), SigningKey::from_bytes(&bytes).verifying_key().as_bytes());
     }
 }
 
 // The Organisation private key is a secret type like the three above, and the
-// only way to its key pair and back. No requirement stated it until the
-// merge of master `1feb608`. Normal case: a fresh key, its key pair, its
+// only way to its key pair and back. Normal case: a fresh key, its key pair, its
 // public key and the round trip; boundary bytes still yield a valid
 // Organisation public key.
 /// verifies: LLR-322xfu, LLR-56hc77
@@ -155,11 +144,10 @@ fn the_organisation_private_key_is_a_secret_type_and_the_only_way_to_its_key_pai
     }
 }
 
-// Was master's `org_public_key_accepts_every_curve_point_unchanged`
-// (LLR-mmdu38's Edwards-point clause, which does not hold on this branch):
-// the parse accepts what `person`'s X25519 rule accepts — here a key pair's
-// public key and the canonical twist point u = 2, which master refused as off
-// the Edwards curve — and keeps the bytes unchanged.
+// The parse accepts what `person`'s X25519 rule accepts — here a key pair's
+// public key and the canonical twist point u = 2, which is off the Edwards
+// curve (LLR-mmdu38's Edwards-point clause does not hold) — and keeps the
+// bytes unchanged.
 /// verifies: LLR-3jjgtw, LLR-mmdu38
 #[test]
 fn org_public_key_accepts_valid_x25519_keys_unchanged() {
@@ -174,9 +162,9 @@ fn org_public_key_accepts_valid_x25519_keys_unchanged() {
     }
 }
 
-// Was master's `org_public_key_refuses_bytes_off_the_curve` (`InvalidKey`):
-// the X25519 rule refuses the small-order u = 0 and the non-canonical p + 1,
-// both of which master accepted, with `InvalidOrgPublicKey`, on decode too.
+// The X25519 rule refuses the small-order u = 0 and the non-canonical p + 1,
+// both of which decompress as Edwards points, with `InvalidOrgPublicKey`, on
+// decode too.
 /// verifies: LLR-3jjgtw, LLR-mmdu38
 #[test]
 fn org_public_key_refuses_what_the_x25519_rule_refuses() {
@@ -200,14 +188,14 @@ fn org_public_key_debug_is_its_name_and_first_four_bytes() {
     let rendered = format!("{key:?}");
     assert_eq!(rendered, "OrgPublicKey(d75a9801..)");
     assert_eq!(format!("{key:#?}"), "OrgPublicKey(d75a9801..)");
-    let full: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let full: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
     assert!(!rendered.contains(&full), "the full key is not rendered");
 }
 
 /// verifies: LLR-s7whrn
 #[test]
 fn tag_types_debug_renders_their_value() {
-    let account: [u8; 32] = core::array::from_fn(|i| i as u8);
+    let account: [u8; 32] = core::array::from_fn(|index| index as u8);
     assert_eq!(
         format!("{:?}", ChainAccount::new(account)),
         "ChainAccount(0x000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f)"
@@ -244,10 +232,10 @@ fn tag_types_accept_every_boundary_value_and_serialise_as_it() {
         assert_eq!(PersonaId::new(id.clone()).as_str(), id);
         assert_eq!(plain(&PersonaId::new(id.clone())), plain(&id));
     }
-    for n in [0u64, 1, u64::MAX] {
-        assert_eq!(Epoch::new(n).get(), n);
-        assert_eq!(SequenceNumber::new(n).get(), n);
-        assert_eq!(plain(&Epoch::new(n)), plain(&n));
-        assert_eq!(plain(&SequenceNumber::new(n)), plain(&n));
+    for number in [0u64, 1, u64::MAX] {
+        assert_eq!(Epoch::new(number).get(), number);
+        assert_eq!(SequenceNumber::new(number).get(), number);
+        assert_eq!(plain(&Epoch::new(number)), plain(&number));
+        assert_eq!(plain(&SequenceNumber::new(number)), plain(&number));
     }
 }

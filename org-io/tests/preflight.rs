@@ -1,9 +1,12 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 //! Hermetic exercise of the preflight's chain.live check against chopsticks
-//! (negative: stalled; positive: timer-miner). Moved from org-node's
-//! tests/preflight.rs 2026-10-07; its two transport cases stay with org-node's
-//! transport check, which needs a device key org-io does not hold (LLR-3zdw8v).
+//! (negative: stalled; positive: timer-miner). The transport cases are
+//! org-node's transport check's, which needs a device key org-io does not
+//! hold (LLR-3zdw8v).
 //! Not in verify_commands: it spawns a chopsticks fork.
+//! Its test cites no requirement: SDD-z85ux9 carries none, by the deviation in
+//! org-io/docs/architecture/2026-10-08-org-io.md ("The item with no low-level
+//! requirements").
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -43,6 +46,7 @@ async fn chain_live_check_passes_with_miner_and_fails_when_stalled() {
     let miner_fork = fork.clone();
     let miner = tokio::spawn(async move {
         while !miner_stop.load(Ordering::Relaxed) {
+            // A block mined only moves the fork on; a failed one fails the next read.
             let _ = mine_block(&miner_fork).await;
         }
     });

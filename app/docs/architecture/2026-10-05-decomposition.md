@@ -45,7 +45,16 @@ amends.
 passphrase the persona store is opened under, the data directory it lives in,
 the transport mode, and the refusal, with its message, when a required value
 is missing. Every function is total and none reads the process environment.
-traces: REQ-7g3k9a, REQ-rxc8sp, REQ-bmk2z2, REQ-645jq9
+traces: REQ-7g3k9a, REQ-rxc8sp, REQ-bmk2z2, REQ-645jq9, REQ-ergn9z
+
+*Amended 2026-10-20 (change `worktree-org-io-domain-api`; owner ruling Q2
+and answer A1 of 2026-10-16; an extension, the ID is kept):* the startup
+decisions also include the verification interval: `resolve_verification_interval`
+and `StartupError::InvalidVerificationInterval` join the file list, and
+`traces:` gains REQ-ergn9z. Its two low-level requirements (LLR-2dpn52,
+LLR-rvrc25) are in `2026-10-16-domain-api.md`, under
+"Under SDD-k95rmp — The verification interval". The functions stay total and
+read no environment; `init` (SDD-6g3wnh) reads the variable and hands it in.
 
 *Amended 2026-10-08 (change `worktree-org-io-create`, task T9).* The app's
 rule that `AppState::init` is the only reader of the process environment
@@ -285,7 +294,11 @@ Abnormal: `unknown_command_is_rejected` (ipc): the near-miss name
 
 **SDD-2pa6h6**: refusal of malformed operator-supplied identifiers and values
 at the IPC edge, before they address a service call.
-traces: REQ-sjkp8z, REQ-vgr7s2
+traces: REQ-sjkp8z
+
+*Traces amended 2026-10-20 (change worktree-org-io-domain-api): REQ-vgr7s2 →
+none (retired 2026-10-20, owner answer A2; no peer address reaches the IPC
+edge any more).*
 
 *Amended 2026-10-06 (change `worktree-org-node-chain-authority`).* The
 invitation exchange left org-node for this unit, so the Invite and the Invite
@@ -335,6 +348,11 @@ the organisation identifier with `parse_org_id` before they call the service.
 On a refusal each returns the parser's message, and none refuses a well-formed
 identifier.
 satisfies: REQ-sjkp8z
+superseded-by: LLR-97hujy
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-97hujy:*
+the three commands are gone; the rule holds for every command of the new
+surface that takes an Organisation identifier.
 
 Normal: `export_invite_does_not_refuse_a_well_formed_org_id`,
 `admit_member_does_not_refuse_a_well_formed_org_id`,
@@ -389,6 +407,11 @@ identifier. It refuses a remainder that is not hexadecimal with a message
 beginning `member_id hex`, and one that does not decode to exactly
 thirty-two bytes with `member_id must be 32 bytes (64 hex chars)`.
 satisfies: derived
+superseded-by: LLR-7n4hgr
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-7n4hgr:*
+the same parse on `propose_revocation`, which records a provisional change
+and sends nothing.
 
 Normal: `revoke_member_accepts_a_zero_x_prefixed_member_id`,
 `revoke_member_is_not_refused_for_an_empty_peer_addr` (ipc).
@@ -426,6 +449,16 @@ stays org-io's (its own low-level requirement and fuzz target).
 **LLR-ty85xv**: `revoke_member` treats a peer address that is empty or only
 whitespace as absent. It does not decode it and does not refuse the request.
 satisfies: REQ-vgr7s2
+superseded-by: LLR-ss4zmh
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-ss4zmh:*
+proposing a revocation sends nothing; the Loopback address goes with
+`send_organisation`, the step that sends.
+
+*Note 2026-10-20 (change `worktree-org-io-domain-api`; owner answer A2 of
+2026-10-16):* LLR-ss4zmh is retired: admission and organisation requests
+carry the sender's own addresses, so no Loopback address is pasted anywhere
+and `send_organisation` takes none. This item stays out of force.
 
 Normal: `revoke_member_treats_a_blank_or_whitespace_only_peer_addr_as_absent`
 (ipc; the empty address).
@@ -444,6 +477,14 @@ message beginning `peer_addr_blob hex:`. Bytes that are not an `EndpointAddr`
 are refused with a message beginning `peer_addr decode:`; they are not
 dropped.
 satisfies: derived
+superseded-by: LLR-4jggyx
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-4jggyx:*
+the same decode on `send_organisation`'s address.
+
+*Note 2026-10-20 (change `worktree-org-io-domain-api`; owner answer A2 of
+2026-10-16):* LLR-4jggyx is retired with the pasted address it decoded
+(requests carry the sender's own addresses). This item stays out of force.
 
 Normal: `revoke_member_does_not_refuse_an_encoded_endpoint_addr` (ipc).
 Abnormal: `revoke_member_refuses_a_peer_addr_that_is_not_hex`,
@@ -461,6 +502,11 @@ Organisation key or an invite identifier for the Wire message. The webview's
 `admitMember(orgId, replyBlob, peerAddrBlob)` (`app/src/lib/api.ts`) invokes
 it with those three values alone, and `Admit.svelte` passes no fourth.
 satisfies: derived
+superseded-by: LLR-gmb4p8
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-gmb4p8:*
+the admission is proposed from a kept admission request by its invite id,
+with no reply Blob and no peer address; it still takes no secret or key.
 
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 This said `admit_member` accepts an optional `org_secret_hex`, refused unless
@@ -518,6 +564,18 @@ a non-blank one from hexadecimal and then as a postcard-encoded
 hexadecimal is refused with a message beginning `peer_addr_blob hex:`, and
 bytes that are not an `EndpointAddr` with one beginning `peer_addr decode:`.
 satisfies: derived
+superseded-by: LLR-ss4zmh, LLR-4jggyx
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-ss4zmh
+and LLR-4jggyx:* the admission takes no address (the invitee reaches the
+inviter at the Invite's addresses); the Loopback address the admitted
+Device is sent to goes with `send_organisation`, whose two items keep this
+one's blank and decode rules.
+
+*Note 2026-10-20 (change `worktree-org-io-domain-api`; owner answer A2 of
+2026-10-16):* both successors are retired: the admitted Device's admission
+request carries its own addresses, which org-io keeps for its key, so no
+address is pasted for it. This item stays out of force.
 
 Normal: `admit_member_does_not_refuse_a_blank_or_decodable_peer_addr` (ipc).
 Abnormal: `admit_member_refuses_a_peer_addr_that_is_not_hex`,
@@ -538,6 +596,11 @@ exchange runs in org-io from task T13).
 stores the parsed (NFC) form. A refusal names the field it is about (`handle:`,
 `name:`, `surname:`) without org-node's `persona.` prefix, and creates nothing.
 satisfies: derived
+superseded-by: LLR-k57uqv
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-k57uqv:*
+`create_persona` becomes `propose_person`, which takes no Handle (a Person
+has none; a Handle belongs to a Persona in an Organisation).
 
 Normal: `create_persona_stores_the_parsed_details` (ipc).
 Abnormal: `create_persona_refuses_an_invalid_field_naming_it_and_creates_nothing`
@@ -556,6 +619,15 @@ service, calls `OrgService`, maps its error to a string and returns a DTO
 that carries no secret key material. The commands named in SDD-6g3wnh carry
 no low-level requirement.
 traces: REQ-vgr7s2, REQ-sjkp8z, REQ-645jq9, REQ-prjja8, REQ-tcutr6, REQ-65xqp8, REQ-ab2mfz, REQ-m8sgjk, REQ-363366
+superseded-by: SDD-6pjvhc
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by
+SDD-6pjvhc* (`2026-10-16-domain-api.md`). The surface
+is now the eighteen commands that carry org-io's domain-surface names; the
+reply, reconcile and submit-commit-send commands are gone, and most of the
+requirements traced above are out of force. LLR-5wb4vd, LLR-yrb6th and
+LLR-pguhw5 are unchanged and sit under the successor. The amendments below
+are this item's history.
 
 *Amended 2026-10-06 (change `worktree-org-node-chain-authority`).* The
 invitation exchange and the chain write moved into this unit, behind the
@@ -708,6 +780,11 @@ rather than answered. The `generate_handler!` list in
 and `lib.rs` has exactly one `generate_handler!` list in exactly one
 `invoke_handler` call.
 satisfies: derived
+superseded-by: LLR-kk8gc7
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-kk8gc7:*
+the same rule over the eighteen renamed commands, with the five old names
+refused.
 
 Normal: `list_personas_returns_an_empty_list_on_a_fresh_store`,
 `connection_status_is_registered_under_its_name`,
@@ -753,6 +830,15 @@ satisfies: derived
 Normal: `list_personas_reports_exactly_the_persona_fields` (ipc).
 Abnormal: `a_persona_in_no_organisation_reports_a_null_org_id` (ipc).
 
+*Clarified 2026-10-28 (change `worktree-org-io-domain-api`, round 3 review,
+CODE app note 1; the ID is kept):* `handle` is present and null for a
+Persona that holds no Handle yet, such as a provisional Member, as
+`org_id` is for a Persona in no Organisation; the webview shows it as
+LLR-q735zx states. The rule is unchanged. The fixture of the faked IPC
+boundary (`app/tests/contract/backend.json`) holds a provisional Member's
+entry with `handle` null and a founder's with its Handle, each checked
+against the real `list_personas` in ipc.rs.
+
 **LLR-pmus9f**: `import_invite_reply` parses an Invite reply Blob (org-node's parse since S4 task T6)
 and stores nothing. It returns the Organisation identifier, the handle, name
 and surname, and the member and device keys as hexadecimal. A Blob that does
@@ -761,6 +847,11 @@ reply whose invite identifier this device does not hold as outstanding for the
 Organisation the reply names (the reply check's `check_reply`, org-io's since
 2026-10-14, S4 task T13) is refused with a message saying so.
 satisfies: derived
+superseded-by: LLR-dp45mm
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-dp45mm:*
+the Invite reply Blob is gone; the joiner's details reach the Admin as the
+`admission-requested` event of an admission request org-io kept.
 
 Normal: `import_invite_reply_reports_the_reply_it_parses` (ipc).
 Abnormal: `import_invite_reply_refuses_a_malformed_blob_or_an_unknown_invite`
@@ -825,7 +916,14 @@ Abnormal: `guard_releases_when_dropped_by_panic`,
 error, and the mapping from an outcome to the named events and payloads the
 frontend receives. It is the only place the event names and payload shapes
 are written down.
-traces: REQ-kn5rtx, REQ-affyf5, REQ-jfxah3, REQ-2k7ys4, REQ-dp95pv, REQ-tw4cb5
+traces: REQ-kn5rtx, REQ-affyf5, REQ-jfxah3, REQ-2k7ys4, REQ-dp95pv, REQ-tw4cb5, REQ-k7ay5b, REQ-88npkt
+
+*Amended 2026-10-15 (change `worktree-org-io-domain-api`; an extension, the
+ID is kept):* `traces:` gains REQ-k7ay5b and REQ-88npkt. The item also maps
+a verification result to outcomes and names the follow-up verification a
+received provisional organisation asks for (`outcomes_for_verification`,
+`follow_up_for`); its new items are in
+`2026-10-16-domain-api.md`.
 
 It depends on REQ-x3c8n2, the expectation that org-node will type the
 terminal condition. Until then, `is_terminal_error` matches substrings of
@@ -853,6 +951,13 @@ the error's message and no organisation. It classifies every other variant
 `OrgKeyMismatch`, `RevocationNotHeld`, `RevocationNotForThisDevice`) as
 `ReceiveError`, carrying the error's message.
 satisfies: REQ-kn5rtx
+superseded-by: LLR-wgr46u
+
+*Superseded 2026-10-21 (change `worktree-org-io-domain-api`; owner decision
+of 2026-10-20) by LLR-wgr46u:* the variant lists below name variants
+org-io's re-exported `OrgNodeError` no longer has and omit those it gained
+with the chain-free receive step; LLR-wgr46u classifies the current set
+with the class rule unchanged.
 
 *Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3, task
 T12a; owner rulings at the S3a close-out residual review).* org-node gains
@@ -986,6 +1091,13 @@ or `RecordUnreadable` when none could be read; an acknowledgement is
 `Arrival` from org-io's `Received` and reads the record through the shared
 handle after the message.
 satisfies: REQ-tw4cb5, REQ-2k7ys4, REQ-dp95pv
+superseded-by: LLR-4bvdn7, LLR-ygr6gd, LLR-dp45mm, LLR-t9rdf8
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-4bvdn7,
+LLR-ygr6gd, LLR-dp45mm and LLR-t9rdf8:* received Organisation information is
+kept as a provisional organisation and adopted only by verification (owner
+ruling R2), so a received message no longer gives `Updated` or
+`RecordUnreadable`; those now follow a verification (LLR-acb5g4).
 
 Normal and abnormal: `the_outcome_kind_comes_from_receive_kind` (every kind,
 with and without a record; an acknowledgement), and
@@ -1166,6 +1278,12 @@ This requirement does not claim it.
 revocation may be submitted, from the transport mode and the operator's
 inputs.
 traces: REQ-vgr7s2, REQ-he8ejb, REQ-ab2mfz
+superseded-by: SDD-ckqyh3
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by
+SDD-ckqyh3:* the reply gate becomes the warning before the first admission
+request, and the Loopback address check moves from the revocation to a
+repeated send. LLR-csbs5v is unchanged and sits under the successor.
 
 *Amended 2026-10-06 (change `worktree-org-node-chain-authority`).* The item
 also makes the webview's other pre-command decision this change adds: whether
@@ -1193,6 +1311,16 @@ member id", "rejects a doubled 0x prefix" (revoke.validate).
 in Loopback transport, refusing with a message naming Loopback, and accepts
 any peer address, including none, in Networked transport.
 satisfies: REQ-vgr7s2
+superseded-by: LLR-zqy3tq
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-zqy3tq:*
+the revocation is proposed with no address; the same rule applies to the
+address of a repeated send.
+
+*Note 2026-10-20 (change `worktree-org-io-domain-api`; owner rulings Q1 and
+A2 of 2026-10-16):* there is no repeated send and no pasted address; LLR-zqy3tq
+is amended in place to state that no pre-command decision asks for a peer
+address, in either transport mode.
 
 Normal: "accepts an empty peer address in networked transport", "accepts a
 supplied peer address in networked transport", "accepts a supplied peer
@@ -1338,7 +1466,29 @@ entry point and the startup wiring that reads the environment, chain-connection
 setup, the receiver loop, the commands whose success needs a chain, the
 frontend IPC client, and every Svelte component and route. It carries **no
 low-level requirements**.
-traces: REQ-7g3k9a, REQ-rxc8sp, REQ-bmk2z2, REQ-645jq9, REQ-e4ah9h, REQ-bvx4nh, REQ-6hgm8r, REQ-3hfggn, REQ-jfxah3, REQ-2k7ys4, REQ-dp95pv, REQ-tw4cb5, REQ-a83vqr, REQ-wu6z9p, REQ-rq8g2v, REQ-vgr7s2, REQ-he8ejb, REQ-prjja8, REQ-tcutr6, REQ-ab2mfz, REQ-m8sgjk
+traces: REQ-7g3k9a, REQ-rxc8sp, REQ-bmk2z2, REQ-645jq9, REQ-e4ah9h, REQ-bvx4nh, REQ-6hgm8r, REQ-3hfggn, REQ-jfxah3, REQ-2k7ys4, REQ-dp95pv, REQ-tw4cb5, REQ-a83vqr, REQ-wu6z9p, REQ-rq8g2v, REQ-he8ejb, REQ-vb5pag, REQ-2yh3c8, REQ-akeah6, REQ-k7ay5b, REQ-5q7nyg, REQ-ergn9z, REQ-y53dqn
+
+*Traces amended 2026-10-20 (change worktree-org-io-domain-api): REQ-vgr7s2 →
+none (retired 2026-10-20, owner answer A2).*
+
+*Amended 2026-10-20 (change `worktree-org-io-domain-api`; owner rulings Q2,
+A1 and A3 of 2026-10-16; a clarification, the ID is kept):* `traces:` gains
+REQ-5q7nyg, REQ-ergn9z and REQ-y53dqn for three call sites no gated test
+reaches: `init`'s read of `ODS_VERIFICATION_INTERVAL_SECS` and its
+propagation of the refusal as the startup failure; `run`'s setup spawning
+the periodic verification loop (SDD-tgu7dp) with the interval `init`
+decided; and the `Admit.svelte` markup that renders the kept admission
+requests beside those announced on arrival. The list is in
+`2026-10-16-domain-api.md`.
+
+*Amended 2026-10-15 (change `worktree-org-io-domain-api`; a clarification,
+the ID is kept):* `traces:` drops REQ-prjja8, REQ-tcutr6, REQ-ab2mfz and
+REQ-m8sgjk, all out of force, and gains their successors as this unit's
+call sites realise them — REQ-vb5pag, REQ-2yh3c8, REQ-akeah6 and
+REQ-k7ay5b. The commands whose success needs a chain or a peer are now the
+renamed surface of SDD-6pjvhc; the receiver loop now also calls
+`verify_and_send`; the panels are those listed in
+`2026-10-16-domain-api.md`.
 
 *Amended 2026-10-08 (change `worktree-org-io-create`, task T9).* The chain
 connection leaves this unit for org-io's chain-connection item

@@ -212,6 +212,7 @@ derived from the connection, and shall read the chain for a message only
 after org-node's chain-free checks have accepted it, at most once per
 message, then hand org-node the state it read.
 satisfies: derived
+superseded-by: REQ-cj9u3y
 
 Ruled 2026-10-06 (one receive path). Fixes the app's problem report that an
 invitee never commits its own first admission, because the app's loop called
@@ -243,6 +244,7 @@ accepted or refused, serving no Organisation information, record, key,
 address or other Organisation data to the connecting Device.
 (implements: RC-b4m5sj)
 satisfies: derived
+superseded-by: REQ-xd5a2d
 
 Owner ruling of 2026-10-07 (plan §header, ruling 8): "members accept
 INBOUND connections from devices they hold as revoked, for acknowledgements
@@ -426,6 +428,7 @@ has committed whether or not any send succeeded, shall stop before the chain
 write if building the admission fails, and shall write the sealed store
 after each step that changes it.
 satisfies: derived
+superseded-by: REQ-3pjmub REQ-36gxmg REQ-nactq6
 
 Ruled 2026-10-06 (the invitation exchange moves in S4: org-node builds and
 serialises, org-io holds the store and runs the exchange, the app keeps the
@@ -461,6 +464,7 @@ inviter's DevicePublicKeys, and an invite identifier of 32 bytes drawn from its
 cryptographic random source, and shall keep that identifier as outstanding.
 satisfies: derived
 exported: yes
+superseded-by: REQ-ek652a
 
 The Organisation's name is free text for display. It is stored nowhere and
 verified by nothing; the Organisation identifier is what the invitee's node
@@ -478,6 +482,7 @@ invite identifier the Invite named; and shall declare to org-node that it
 expects a first admission to that Organisation.
 satisfies: derived
 exported: yes
+superseded-by: REQ-sjqxg2
 
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 The declaration named the invite identifier as well, which the admission's
@@ -493,6 +498,7 @@ Organisation the Invite was issued for; and shall stop holding an invite
 identifier as outstanding once a reply naming it has been acted on.
 satisfies: derived
 exported: yes
+superseded-by: REQ-xd5a2d
 
 *Amended 2026-10-06 (independent review round 2, finding-1).* An invite
 identifier is outstanding for the Organisation it was issued for, not for any
@@ -508,6 +514,7 @@ revocation to every Device the update removed, dialling each by the
 endpoint identity equal to its Device key; it shall attempt every recipient
 whatever happened to the others, report the outcome per Device, and leave
 the committed record in place when any send fails. (implements: RC-wbs9ch)
+superseded-by: REQ-nactq6
 
 Ruled 2026-10-06 (the fan-out lands in S4, Networked mode). Before S4 a
 committed update reached one Device only (the app's problem report on the
@@ -523,6 +530,7 @@ total function: it shall accept exactly the hexadecimal encoding of a
 serialised endpoint address, refuse any other input with a typed error that
 names the field, and panic on no input.
 satisfies: derived
+retired: 2026-10-20 — addresses now come with the Invite, the admission request and the organisation request and are kept per Device key (owner answer A2, change worktree-org-io-domain-api)
 
 The app passes the address as text and no longer names iroh. The parse
 moves from the app with its items (§3.5 of the plan); this item adds the
@@ -573,6 +581,7 @@ store; covering a first admission, an update and the node's own revocation.
 expects: org-node
 opened: 2026-10-06
 satisfies: derived
+superseded-by: REQ-2yw5y3
 
 *Amended 2026-10-07 before first merge (reconciled with S3a, `60c7d58`):*
 the check takes the connection's authenticated DevicePublicKey with the body
@@ -581,12 +590,25 @@ itself with no chain state, and the path also covers a revocation notice
 accepted against the state org-io read, signing with the transient device
 secret org-io supplies from the keychain (org-node's acknowledgement-signing requirement).
 
+*Note, 2026-10-30 (merge review round 1, finding-5):* REQ-tzr3dk is
+superseded, not an open expectation. Its successor REQ-2yw5y3 carries the
+in-force `expects: org-node`, which org-node answers. The
+UNMET-EXPECTATION advisory that check-trace still prints for REQ-tzr3dk
+comes from this out-of-force item's own `expects:` line, kept as history.
+
 **REQ-jxyh9c**: The software shall rely on org-node to return, for a
 committed update, every recipient Device and the encoded message for each,
 writing nothing, so that org-io decides nothing about who receives what.
 expects: org-node
 opened: 2026-10-06
 satisfies: derived
+superseded-by: REQ-u894ty
+
+*Note, 2026-10-30 (merge review round 1, finding-5):* REQ-jxyh9c is
+superseded, not an open expectation. Its successor REQ-u894ty carries the
+in-force `expects: org-node`, which org-node answers. The
+UNMET-EXPECTATION advisory that check-trace still prints for REQ-jxyh9c
+comes from this out-of-force item's own `expects:` line, kept as history.
 
 **REQ-txkm94**: The software shall rely on org-node to build and parse the
 Invite and Invite reply Blobs, to record and settle outstanding invite
@@ -595,6 +617,13 @@ sealed store from each of those operations.
 expects: org-node
 opened: 2026-10-06
 satisfies: derived
+superseded-by: REQ-2xgsbn
+
+*Note, 2026-10-30 (merge review round 1, finding-5):* REQ-txkm94 is
+superseded, not an open expectation. Its successor REQ-2xgsbn carries the
+in-force `expects: org-node`, which org-node answers. The
+UNMET-EXPECTATION advisory that check-trace still prints for REQ-txkm94
+comes from this out-of-force item's own `expects:` line, kept as history.
 
 **REQ-v6r2gd**: The software shall rely on org-node to accept a Persona's
 device secret only as an opaque value that cannot be cloned, renders no

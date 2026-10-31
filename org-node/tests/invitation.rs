@@ -1,395 +1,380 @@
 #![cfg(all(feature = "app", feature = "test-support"))]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! The Invite and the Invite reply (SDD-xshv5b; S4, task T6 of
-//! docs/plans/2026-10-06-org-io-transport.md): the Blobs, built and parsed
-//! here, and their bookkeeping in the sealed store — the outstanding
-//! (Organisation, invite identifier) pairs and the expectation a reply
-//! records. org-io runs the exchange; these tests play org-io, holding each
-//! returned write as "the disk" (`support::Node`).
-//!
-//! The three LLR-b7wgpf tests moved here from the app
-//! (`app/src-tauri/tests/invitation.rs`) with REQ-yazum3 and LLR-b7wgpf
-//! (ruling A). *Adapted 2026-10-13 (S4, task T6):* a refusal is
-//! `OrgNodeError::InvalidField` naming the field (LLR-8bum44), so the field is
-//! read from the error, not from the start of a message string; and the
-//! third test, which drove the app's `admit_reply`, shows the same thing on
-//! org-node's side — a Blob that does not parse yields no reply to act on,
-//! and nothing is settled or written.
+//! The Invite (SDD-n2x3gb): the Blob, built and parsed here, naming the
+//! field that fails (LLR-9jxwq4), and its bookkeeping in the sealed store — the
+//! outstanding invite `build_invite` records with the invitee name the
+//! inviter typed (LLR-h9f5c9). org-io runs the exchange; these tests play
+//! org-io, holding each returned change as "the disk" (`support::Node`).
+//! The Invite names its one issuing Device and its endpoint addresses.
 
 mod support;
 
 use org_node::error::OrgNodeError;
 use org_node::ids::OrgId;
-use org_node::invitation::{Invite, InviteId, InviteReply};
-use org_node::store::ExpectedAdmission;
-use org_node::test_fixtures::{device_key, member_key, ChainSlots};
-use org_node::PersonaId;
+use org_node::invitation::{EndpointAddresses, Invite, InviteId};
+use org_node::store::OutstandingInvite;
+use org_node::test_fixtures::{device_key, ChainSlots};
+use org_node::{DevicePublicKey, PersonaId};
 use rand::rngs::OsRng;
 use support::*;
 
-/// The `field` of an `InvalidField` refusal.
-fn refused_field(error: OrgNodeError) -> &'static str {
-    match error {
-        OrgNodeError::InvalidField { field, .. } => field,
-        other => panic!("expected InvalidField, got {other:?}"),
-    }
-}
-
-/// Each Persona store's plaintext, in store order: what "byte-identical"
-/// compares.
-fn plaintexts(node: &Node) -> Vec<Vec<u8>> {
-    node.list_personas()
-        .iter()
-        .map(|persona| postcard::to_allocvec(node.store_data(&persona.persona_id).unwrap()).unwrap())
-        .collect()
-}
-
 /// A node over a fresh storage whose one Persona, alice, founded an
-/// Organisation on `chain`.
-fn founder(tag: &str, chain: &ChainSlots) -> (Node, PersonaId, OrgId) {
-    let mut node = Node::new(open_store(tag, "a"), chain.clone());
-    let pid = node.create_persona(&mut OsRng, h("alice"), nm("Alice"), sn("Smith")).unwrap();
-    let org_id = found(&mut node, chain, &pid);
-    (node, pid, org_id)
+/// Organisation on `chain`; its Device key.
+fn founder(tag: &str, chain: &ChainSlots) -> (Node, PersonaId, OrgId, DevicePublicKey) {
+    let mut node = Node::new(open_store(tag, "a"));
+    let persona_id = node.propose_and_keep_founding(&mut OsRng, handle("alice"), parsed_name("Alice"), parsed_surname("Smith")).unwrap();
+    let org_id = found_on_chain(&mut node, chain, &persona_id);
+    let device = persona_of(&node, &persona_id).device_key;
+    (node, persona_id, org_id, device)
 }
 
-/// A node over a fresh storage with one unbound Persona, bob.
-fn joiner(tag: &str, chain: &ChainSlots) -> (Node, PersonaId) {
-    let mut node = Node::new(open_store(tag, "b"), chain.clone());
-    let pid = node.create_persona(&mut OsRng, h("bob"), nm("Bob"), sn("Builder")).unwrap();
-    (node, pid)
-}
-
-/// An Invite for `org_id`, as another node would have built it.
-fn invite_for(org_id: OrgId) -> Invite {
-    Invite {
-        org_name: "Acme".into(),
-        org_id,
-        invitee_name: "Bob Builder".into(),
-        inviter_device_keys: vec![device_key(5)],
-        invite_id: InviteId::new([3; 32]),
-    }
-}
-
-/// `node`'s Invite for `org_id`, its write kept on the disk.
-fn build_invite(node: &mut Node, org_id: OrgId) -> Invite {
-    let (invite, write) = node.svc.build_invite(&mut OsRng, org_id, "Acme Co-op", "Bob Builder").unwrap();
-    node.disk.write(write);
+/// `node`'s Invite from `device`'s store, its change kept on the disk.
+fn build_invite(node: &mut Node, device: &DevicePublicKey, invitee_name: &str) -> Invite {
+    let (invite, change) =
+        node.svc.build_invite(&mut OsRng, device, invitee_name.into(), vec!["192.0.2.1:7000".into()]).unwrap();
+    node.disk.apply(change);
     invite
 }
 
-/// `node`'s reply to `invite` as `persona_id`, its write kept on the disk.
-fn build_reply(node: &mut Node, invite: &Invite, persona_id: &PersonaId) -> Result<InviteReply, OrgNodeError> {
-    let (reply, write) = node.svc.build_reply(&mut OsRng, invite, persona_id)?;
-    node.disk.write(write);
-    Ok(reply)
+/// A Blob of these raw fields, valid or not.
+fn blob(
+    org_name: &[u8],
+    org_id: &[u8],
+    invitee_name: &[u8],
+    issuer: &[u8],
+    addresses: &[&str],
+    invite_id: &[u8],
+) -> String {
+    Invite::wire_for_test(org_name, org_id, invitee_name, issuer, addresses, invite_id).expect("a WireInvite encodes")
 }
 
 // ---------------------------------------------------------------------
-// The Blobs (moved from the app).
+// The Blob (LLR-9jxwq4).
 // ---------------------------------------------------------------------
 
-// verifies: LLR-b7wgpf
+// Normal: a Blob `Invite::encode` wrote parses back to an equal Invite, and
+// a Blob of valid fields parses and encodes back to the same Blob.
+// verifies: LLR-9jxwq4
 #[test]
-fn an_invite_and_a_reply_that_parse_encode_back_to_the_same_blob() {
-    let (mk, dk) = (*member_key(8).as_bytes(), *device_key(7).as_bytes());
-    let invite = Invite::wire_for_test("Acme", &[1; 20], "Bob", &[dk], &[3; 32]);
-    assert_eq!(Invite::parse(&invite).unwrap().encode().unwrap(), invite);
-    let reply = InviteReply::wire_for_test(&[1; 20], &[3; 32], &mk, &dk, "bob", "Bob", "Builder");
-    assert_eq!(InviteReply::parse(&reply).unwrap().encode().unwrap(), reply);
-}
-
-// verifies: LLR-b7wgpf
-#[test]
-fn an_invite_or_reply_that_does_not_parse_is_refused_naming_the_field() {
-    let (mk, dk) = (*member_key(8).as_bytes(), *device_key(7).as_bytes());
-    for (blob, field) in [
-        (Invite::wire_for_test("O", &[1; 19], "N", &[dk], &[3; 32]), "invite.org_id"),
-        (Invite::wire_for_test("O", &[1; 20], "N", &[[0xff; 32]], &[3; 32]), "invite.inviter_device_keys"),
-        (Invite::wire_for_test("O", &[1; 20], "N", &[dk], &[3; 31]), "invite.invite_id"),
-        ("not base64 !".to_string(), "invite"),
-    ] {
-        assert_eq!(refused_field(Invite::parse(&blob).unwrap_err()), field);
-    }
-    let reply = |org: &[u8], id: &[u8], mk: [u8; 32], dk: [u8; 32], handle: &str, name: &str, surname: &str| {
-        InviteReply::wire_for_test(org, id, &mk, &dk, handle, name, surname)
+fn an_invite_that_parses_encodes_back_to_the_same_blob() {
+    let issuer_bytes = *device_key(7).as_bytes();
+    let text = blob(b"Acme", &[1; 20], b"Bob", &issuer_bytes, &["192.0.2.1:7000", "[2001:db8::1]:7000"], &[3; 32]);
+    let invite = Invite::parse(&text).unwrap();
+    assert_eq!(invite.encode().unwrap(), text);
+    let built = Invite {
+        org_name: "Acme Co-op".into(),
+        org_id: OrgId::new([2; 20]),
+        invitee_name: "Bob Builder".into(),
+        issuer: device_key(8),
+        issuer_addresses: EndpointAddresses::parse(vec!["198.51.100.7:7000".into()]).unwrap(),
+        invite_id: InviteId::new([4; 32]),
     };
-    let long = "a".repeat(129);
-    for (blob, field) in [
-        (reply(&[1; 21], &[3; 32], mk, dk, "bob", "Bob", "Builder"), "reply.org_id"),
-        (reply(&[1; 20], &[3; 31], mk, dk, "bob", "Bob", "Builder"), "reply.invite_id"),
-        (reply(&[1; 20], &[3; 32], [0xff; 32], dk, "bob", "Bob", "Builder"), "reply.member_key"),
-        (reply(&[1; 20], &[3; 32], mk, [0xff; 32], "bob", "Bob", "Builder"), "reply.device_key"),
-        (reply(&[1; 20], &[3; 32], mk, dk, "Bob", "Bob", "Builder"), "reply.handle"),
-        (reply(&[1; 20], &[3; 32], mk, dk, "bob", &long, "Builder"), "reply.name"),
-        (reply(&[1; 20], &[3; 32], mk, dk, "bob", "Bob", &long), "reply.surname"),
-        ("not base64 !".to_string(), "reply"),
+    assert_eq!(Invite::parse(&built.encode().unwrap()).unwrap(), built);
+}
+
+// Abnormal: a Blob with one field its type refuses is refused naming that
+// field.
+// verifies: LLR-9jxwq4
+#[test]
+fn an_invite_that_does_not_parse_is_refused_naming_the_field() {
+    let issuer_bytes = *device_key(7).as_bytes();
+    let too_long = "a".repeat(257);
+    let many = ["x"; 17];
+    for (text, field) in [
+        (blob(&[0xff, 0xfe], &[1; 20], b"N", &issuer_bytes, &[], &[3; 32]), "invite.org_name"),
+        (blob(b"O", &[1; 19], b"N", &issuer_bytes, &[], &[3; 32]), "invite.org_id"),
+        (blob(b"O", &[1; 20], &[0xc3], &issuer_bytes, &[], &[3; 32]), "invite.invitee_name"),
+        (blob(b"O", &[1; 20], b"N", &[0xff; 32], &[], &[3; 32]), "invite.issuer"),
+        (blob(b"O", &[1; 20], b"N", &issuer_bytes[..31], &[], &[3; 32]), "invite.issuer"),
+        (blob(b"O", &[1; 20], b"N", &issuer_bytes, &[too_long.as_str()], &[3; 32]), "invite.issuer_addresses"),
+        (blob(b"O", &[1; 20], b"N", &issuer_bytes, &many, &[3; 32]), "invite.issuer_addresses"),
+        (blob(b"O", &[1; 20], b"N", &issuer_bytes, &[], &[3; 31]), "invite.invite_id"),
     ] {
-        assert_eq!(refused_field(InviteReply::parse(&blob).unwrap_err()), field);
+        assert_eq!(refused_field(Invite::parse(&text).unwrap_err()), field);
     }
 }
 
-// *Deleted 2026-10-15 (S4 TEST review round 2, notes):*
-// `a_reply_that_does_not_parse_acts_on_nothing`. After round 1 (finding-8)
-// it asserted only that `InviteReply::parse("not base64 !")` is refused
-// naming `reply`, the last case of the field-refusal test above, so it was a
-// pure duplicate. "Acts on nothing" holds by type at org-node's seam:
-// `build_reply`, `check_reply` and `settle` take a parsed `Invite`, a parsed
-// `InviteReply` or its fields, never Blob text.
-
-// ---------------------------------------------------------------------
-// build_invite (LLR-nr8df3).
-// ---------------------------------------------------------------------
-
-// verifies: LLR-nr8df3
+// Abnormal: with every field invalid at once, the first in order is named;
+// then, field by field made valid, the next.
+// verifies: LLR-9jxwq4
 #[test]
-fn build_invite_records_the_pair_and_carries_the_bound_personas_device_key() {
+fn invite_parse_refuses_the_first_failing_field_naming_it() {
+    let issuer_bytes = *device_key(7).as_bytes();
+    let too_long = "a".repeat(257);
+    let bad = (vec![0xffu8], vec![1u8; 19], vec![0xffu8], vec![0xffu8; 32], vec![too_long.as_str()], vec![3u8; 31]);
+    let good = (b"O".to_vec(), vec![1u8; 20], b"N".to_vec(), issuer_bytes.to_vec(), Vec::<&str>::new(), vec![3u8; 32]);
+    let order = ["invite.org_name", "invite.org_id", "invite.invitee_name", "invite.issuer", "invite.issuer_addresses", "invite.invite_id"];
+    for (valid_so_far, expected) in order.iter().enumerate() {
+        let is_valid = |field_index: usize| field_index < valid_so_far;
+        let text = blob(
+            if is_valid(0) { &good.0 } else { &bad.0 },
+            if is_valid(1) { &good.1 } else { &bad.1 },
+            if is_valid(2) { &good.2 } else { &bad.2 },
+            if is_valid(3) { &good.3 } else { &bad.3 },
+            if is_valid(4) { &good.4 } else { &bad.4 },
+            if is_valid(5) { &good.5 } else { &bad.5 },
+        );
+        assert_eq!(refused_field(Invite::parse(&text).unwrap_err()), *expected, "{valid_so_far} fields valid");
+    }
+}
+
+// Normal (boundary): an Invite whose issuer gave no endpoint address — a
+// Networked endpoint discovered by its key — parses, with no address.
+// verifies: LLR-9jxwq4
+#[test]
+fn an_invite_with_zero_issuer_addresses_parses() {
+    let text = blob(b"Acme", &[1; 20], b"Bob", device_key(7).as_bytes(), &[], &[3; 32]);
+    let invite = Invite::parse(&text).unwrap();
+    assert!(invite.issuer_addresses.as_slice().is_empty());
+    assert_eq!(invite.encode().unwrap(), text);
+}
+
+// Abnormal: text that is not a Blob — not Base64, or Base64 of bytes that
+// are no Invite — is refused naming `invite`.
+// verifies: LLR-9jxwq4
+#[test]
+fn text_that_is_not_a_blob_is_refused_as_invite() {
+    for text in ["not base64 !".to_string(), String::new(), org_node::invitation::armour_for_test(&[0xff; 3])] {
+        assert_eq!(refused_field(Invite::parse(&text).unwrap_err()), "invite", "{text:?}");
+    }
+}
+
+// ---------------------------------------------------------------------
+// build_invite (LLR-h9f5c9).
+// ---------------------------------------------------------------------
+
+// Normal: each Invite draws a fresh identifier and carries the store's
+// Organisation name, the Organisation, the invitee name it was given, the
+// issuing Persona's Device and the addresses given.
+// verifies: LLR-h9f5c9
+#[test]
+fn build_invite_draws_a_fresh_id_and_carries_the_stored_name_and_the_issuer_device() {
     let chain = ChainSlots::new();
-    let (mut a, pid, org) = founder("issue", &chain);
-    let (invite, write) = a.svc.build_invite(&mut OsRng, org, "Acme Co-op", "Bob Builder").unwrap();
-    let device = a.persona_public_keys(&pid).unwrap().1;
-    assert_eq!((invite.org_name.as_str(), invite.org_id, invite.invitee_name.as_str()), ("Acme Co-op", org, "Bob Builder"));
-    assert_eq!(invite.inviter_device_keys, vec![device], "the bound Persona's Device");
-    assert_eq!(write.device_key, device, "the write is that Persona's store");
-    a.disk.write(write);
-    assert_eq!(a.store_data(&pid).unwrap().outstanding_invites, vec![(org, invite.invite_id)]);
+    let (mut alice, _, org_id, device) = founder("issue-fresh", &chain);
+    let first = build_invite(&mut alice, &device, "Bob Builder");
+    let second = build_invite(&mut alice, &device, "Bob Builder");
+    assert_ne!(first.invite_id, second.invite_id, "drawn at random");
+    for invite in [&first, &second] {
+        assert_eq!((invite.org_name.as_str(), invite.org_id), ("Acme", org_id), "the stored Organisation name");
+        assert_eq!(invite.invitee_name, "Bob Builder");
+        assert_eq!(invite.issuer, device, "the issuing Persona's Device");
+        assert_eq!(invite.issuer_addresses.as_slice(), ["192.0.2.1:7000".to_string()].as_slice());
+    }
+}
+
+// Normal: the outstanding invite is recorded with the invitee name and
+// reaches the sealed store; the one change is the issuing store's.
+// verifies: LLR-h9f5c9
+#[test]
+fn build_invite_records_the_outstanding_invite_with_its_invitee_name_and_carries_the_issuer() {
+    let chain = ChainSlots::new();
+    let (mut alice, _, org_id, device) = founder("issue", &chain);
+    let (invite, change) =
+        alice.svc.build_invite(&mut OsRng, &device, "Bob Builder".into(), vec!["192.0.2.1:7000".into()]).unwrap();
+    assert_eq!(invite.issuer, device);
+    let org_node::service::StoreChange::Sealed(write) = change;
+    assert_eq!(write.device_key, device, "the change is that Persona's store");
+    alice.disk.write(write);
+    let outstanding = OutstandingInvite { org_id, invite_id: invite.invite_id, invitee_name: "Bob Builder".into() };
+    assert_eq!(alice.store_data(&device).unwrap().outstanding_invites, vec![outstanding.clone()]);
     assert_eq!(
-        party("issue", "a").disk.unseal(&a.keychain)[0].data().outstanding_invites,
-        vec![(org, invite.invite_id)],
-        "the pair is in the sealed store"
+        party("issue", "a").disk.unseal(&alice.keychain)[0].data().unwrap().outstanding_invites,
+        vec![outstanding],
+        "the outstanding invite is in the sealed store"
     );
-    let other = build_invite(&mut a, org);
-    assert_ne!(other.invite_id, invite.invite_id, "drawn at random");
-    assert_eq!(a.store_data(&pid).unwrap().outstanding_invites, vec![(org, invite.invite_id), (org, other.invite_id)]);
 }
 
-// verifies: LLR-nr8df3
+// Abnormal: a store with no current record — a Persona that expects an
+// admission — is refused with `OrgNotHeld`, nothing changed or written; so
+// is an unknown store (`PersonaNotHeld`) and an issuer address list the
+// parse refuses (`invite.issuer_addresses`).
+// verifies: LLR-h9f5c9
 #[test]
-fn build_invite_refuses_an_organisation_no_persona_is_bound_to() {
+fn build_invite_refuses_a_store_with_no_current_record() {
     let chain = ChainSlots::new();
-    let (mut a, _pid, _org) = founder("issue-none", &chain);
-    a.create_persona(&mut OsRng, h("carol"), nm("Carol"), sn("Jones")).unwrap();
-    let (before, on_disk) = (plaintexts(&a), a.disk.bytes());
-    let elsewhere = OrgId::new([9; 20]);
-    assert_eq!(a.svc.build_invite(&mut OsRng, elsewhere, "X", "Y").unwrap_err(), OrgNodeError::OrgNotOnChain);
-    assert_eq!(plaintexts(&a), before, "nothing changed");
-    assert_eq!(a.disk.bytes(), on_disk, "nothing written");
-}
-
-// ---------------------------------------------------------------------
-// build_reply (LLR-7q9g9z).
-// ---------------------------------------------------------------------
-
-// verifies: LLR-7q9g9z
-#[test]
-fn build_reply_records_the_expectation_once_and_carries_the_personas_keys() {
-    let chain = ChainSlots::new();
-    let (mut a, _, org) = founder("reply", &chain);
-    let invite = build_invite(&mut a, org);
-    let (mut b, pid) = joiner("reply", &chain);
-    let (reply, write) = b.svc.build_reply(&mut OsRng, &invite, &pid).unwrap();
-    let (mk, dk) = b.persona_public_keys(&pid).unwrap();
-    assert_eq!((reply.member_key, reply.device_key, reply.handle.as_str()), (mk, dk, "bob"));
-    assert_eq!((reply.name.to_string(), reply.surname.to_string()), ("Bob".to_string(), "Builder".to_string()));
-    assert_eq!((reply.org_id, reply.invite_id), (org, invite.invite_id));
-    assert_eq!(write.device_key, dk, "the write is the replying Persona's store");
-    b.disk.write(write);
-    assert_eq!(b.expected_admissions(), vec![ExpectedAdmission { org_id: org }]);
-    assert_eq!(reopen_store("reply", "b").data().expected_admissions, vec![ExpectedAdmission { org_id: org }]);
-    build_reply(&mut b, &invite, &pid).unwrap();
-    assert_eq!(b.expected_admissions(), vec![ExpectedAdmission { org_id: org }], "at most once");
-}
-
-// verifies: LLR-7q9g9z
-#[test]
-fn build_reply_refuses_a_bound_persona() {
-    let chain = ChainSlots::new();
-    let (mut a, own, org) = founder("bound-reply", &chain);
-    let invite = build_invite(&mut a, org);
-    // B's Persona founded B's own Organisation, so it is bound.
-    let (mut b, pid) = joiner("bound-reply", &chain);
-    found(&mut b, &chain, &pid);
-    let (before, on_disk) = (plaintexts(&b), b.disk.bytes());
-    assert_eq!(build_reply(&mut b, &invite, &pid).unwrap_err(), OrgNodeError::PersonaAlreadyBound { persona_id: pid });
-    assert_eq!((plaintexts(&b), b.disk.bytes()), (before, on_disk), "nothing written");
-    // The inviter's own Persona is bound to the very Organisation invited to.
-    let (before, on_disk) = (plaintexts(&a), a.disk.bytes());
+    let (mut alice, _, _, device) = founder("issue-none", &chain);
+    // Carol proposes to join an Organisation no store holds (`propose_member`).
+    let elsewhere = Invite {
+        org_name: "Elsewhere".into(),
+        org_id: OrgId::new([9; 20]),
+        invitee_name: "Carol".into(),
+        issuer: device_key(0x7d),
+        issuer_addresses: org_node::invitation::EndpointAddresses::parse(vec![]).unwrap(),
+        invite_id: org_node::invitation::InviteId::new([0x39; 32]),
+    };
+    let carol = alice.propose_member(&mut OsRng, &elsewhere, "Carol", "Jones", &["carol"]).unwrap();
+    let carol_device = persona_of(&alice, &carol).device_key;
+    let (before, on_disk) = (encoded_stores(&alice), alice.disk.bytes());
     assert_eq!(
-        build_reply(&mut a, &invite, &own).unwrap_err(),
-        OrgNodeError::PersonaAlreadyBound { persona_id: own.clone() }
+        alice.svc.build_invite(&mut OsRng, &carol_device, "Y".into(), vec![]).err(),
+        Some(OrgNodeError::OrgNotHeld { org_id: OrgId::new([9; 20]) })
     );
-    assert_eq!((plaintexts(&a), a.disk.bytes()), (before, on_disk), "nothing written");
-}
-
-// verifies: LLR-7q9g9z
-#[test]
-fn build_reply_refuses_an_unknown_persona() {
-    let chain = ChainSlots::new();
-    let (mut b, _) = joiner("unknown-reply", &chain);
-    let (before, on_disk) = (plaintexts(&b), b.disk.bytes());
-    assert!(build_reply(&mut b, &invite_for(OrgId::new([0x42; 20])), &PersonaId::new("nobody".into())).is_err());
-    assert!(b.expected_admissions().is_empty(), "an unknown Persona declares nothing");
-    assert_eq!((plaintexts(&b), b.disk.bytes()), (before, on_disk), "nothing written");
-}
-
-// ---------------------------------------------------------------------
-// check_reply and settle (LLR-d55brn).
-// ---------------------------------------------------------------------
-
-// verifies: LLR-d55brn
-#[test]
-fn check_reply_refuses_another_organisation_and_an_id_not_outstanding() {
-    let chain = ChainSlots::new();
-    let (mut a, _, org) = founder("check", &chain);
-    // A second Organisation A holds, through a second Persona, with its own
-    // outstanding Invite.
-    let carol = a.create_persona(&mut OsRng, h("carol"), nm("Carol"), sn("Jones")).unwrap();
-    let elsewhere = found(&mut a, &chain, &carol);
-    let invite = build_invite(&mut a, org);
-    let invite_elsewhere = build_invite(&mut a, elsewhere);
-    let (mut b, pid) = joiner("check", &chain);
-    let reply = build_reply(&mut b, &invite, &pid).unwrap();
-    assert_eq!(a.check_reply(&reply, org), Ok(()), "outstanding for the Organisation it names");
-    // Selected another Organisation: refused, whatever is outstanding.
-    assert_eq!(a.check_reply(&reply, elsewhere), Err(OrgNodeError::ReplyForAnotherOrganisation));
-    // An id never issued.
-    let stranger = InviteReply { invite_id: InviteId::new([0x77; 32]), ..reply.clone() };
-    assert_eq!(a.check_reply(&stranger, org), Err(OrgNodeError::InviteNotOutstanding));
-    // An id outstanding, but for another Organisation than the reply names.
-    let crossed = InviteReply { org_id: elsewhere, ..reply.clone() };
-    assert_eq!(a.check_reply(&crossed, elsewhere), Err(OrgNodeError::InviteNotOutstanding));
-    let crossed_back = InviteReply { invite_id: invite_elsewhere.invite_id, ..reply };
-    assert_eq!(a.check_reply(&crossed_back, org), Err(OrgNodeError::InviteNotOutstanding));
-}
-
-// verifies: LLR-d55brn
-#[test]
-fn settle_removes_exactly_the_pair_and_refuses_one_not_held() {
-    let chain = ChainSlots::new();
-    let (mut a, pid, org) = founder("settle", &chain);
-    let carol = a.create_persona(&mut OsRng, h("carol"), nm("Carol"), sn("Jones")).unwrap();
-    let elsewhere = found(&mut a, &chain, &carol);
-    let first = build_invite(&mut a, org).invite_id;
-    let second = build_invite(&mut a, org).invite_id;
-    let third = build_invite(&mut a, elsewhere).invite_id;
-    // Under another Organisation the pair is not held: refused, nothing written.
-    let (before, on_disk) = (plaintexts(&a), a.disk.bytes());
-    assert_eq!(a.svc.settle(&mut OsRng, elsewhere, first).unwrap_err(), OrgNodeError::InviteNotOutstanding);
-    assert_eq!((plaintexts(&a), a.disk.bytes()), (before, on_disk), "nothing written");
-    let write = a.svc.settle(&mut OsRng, org, first).unwrap();
-    assert_eq!(write.device_key, a.persona_public_keys(&pid).unwrap().1, "the store that held the pair");
-    a.disk.write(write);
-    assert_eq!(a.store_data(&pid).unwrap().outstanding_invites, vec![(org, second)], "removes one, keeps the others");
-    assert_eq!(a.store_data(&carol).unwrap().outstanding_invites, vec![(elsewhere, third)]);
-    // The disk holds the stores in Device-key order.
-    let mut reopened = reopen_store("settle", "a").outstanding_invites;
-    reopened.sort();
-    let mut expected = vec![(org, second), (elsewhere, third)];
-    expected.sort();
-    assert_eq!(reopened, expected, "as written");
-    assert_eq!(a.svc.settle(&mut OsRng, org, first).unwrap_err(), OrgNodeError::InviteNotOutstanding, "once only");
-}
-
-// verifies: LLR-pba7yu
-#[test]
-fn forgetting_an_organisation_drops_its_outstanding_invites() {
-    let chain = ChainSlots::new();
-    let (mut a, pid, org) = founder("forget", &chain);
-    let kept = build_invite(&mut a, org).invite_id;
-    let mut data = a.store_data(&pid).unwrap().clone();
-    let elsewhere = OrgId::new([0x42; 20]);
-    data.outstanding_invites.push((elsewhere, InviteId::new([0x77; 32])));
-    let rest = data.forget_organisation(elsewhere).expect("the Persona is not bound to it");
-    assert_eq!(rest.outstanding_invites, vec![(org, kept)], "only that Organisation's pairs go");
-    assert!(data.forget_organisation(org).is_none(), "the bound Organisation takes the store, pairs included");
-}
-
-// ---------------------------------------------------------------------
-// One membership per Organisation per node (LLR-yexf5m, REQ-uy7kfq).
-// ---------------------------------------------------------------------
-
-// verifies: LLR-yexf5m
-#[test]
-fn build_reply_refuses_an_organisation_another_persona_holds() {
-    let chain = ChainSlots::new();
-    // A founds the Organisation; B, a second Persona of the same node, is
-    // unbound.
-    let (mut node, _a, org) = founder("held", &chain);
-    let b = node.create_persona(&mut OsRng, h("bea"), nm("Bea"), sn("Second")).unwrap();
-    let invite = build_invite(&mut node, org);
-    let (before, on_disk) = (plaintexts(&node), node.disk.bytes());
-    assert_eq!(build_reply(&mut node, &invite, &b).unwrap_err(), OrgNodeError::OrganisationHeldByAnotherPersona { org_id: org });
-    assert_eq!(plaintexts(&node), before, "both stores unchanged");
-    assert_eq!(node.disk.bytes(), on_disk, "nothing written");
-    // The contrast: an Invite for an Organisation no Persona here holds.
-    build_reply(&mut node, &invite_for(OrgId::new([0x42; 20])), &b).unwrap();
-}
-
-// verifies: LLR-yexf5m
-#[test]
-fn build_reply_refuses_an_organisation_another_persona_expects() {
-    let chain = ChainSlots::new();
-    let (mut node, a) = joiner("expects", &chain);
-    let b = node.create_persona(&mut OsRng, h("bea"), nm("Bea"), sn("Second")).unwrap();
-    let org = OrgId::new([0x42; 20]);
-    let invite = invite_for(org);
-    build_reply(&mut node, &invite, &a).unwrap();
-    let (before, on_disk) = (plaintexts(&node), node.disk.bytes());
-    assert_eq!(build_reply(&mut node, &invite, &b).unwrap_err(), OrgNodeError::OrganisationHeldByAnotherPersona { org_id: org });
-    assert_eq!((plaintexts(&node), node.disk.bytes()), (before, on_disk), "nothing written");
-    assert_eq!(node.expected_admissions(), vec![ExpectedAdmission { org_id: org }], "A's expectation alone");
-}
-
-// verifies: LLR-yexf5m
-#[test]
-fn the_same_persona_replying_twice_is_not_refused_by_the_one_membership_rule() {
-    let chain = ChainSlots::new();
-    let (mut node, a) = joiner("twice", &chain);
-    node.create_persona(&mut OsRng, h("bea"), nm("Bea"), sn("Second")).unwrap();
-    let invite = invite_for(OrgId::new([0x42; 20]));
-    build_reply(&mut node, &invite, &a).unwrap();
-    build_reply(&mut node, &invite, &a).expect("the same Persona again is not another Persona");
-    assert_eq!(node.store_data(&a).unwrap().expected_admissions.len(), 1, "recorded once");
-}
-
-// verifies: LLR-yexf5m
-#[test]
-fn expect_admission_refuses_the_same_two_cases() {
-    let chain = ChainSlots::new();
-    // Held: A founded the Organisation.
-    let (mut node, a, org) = founder("expect-held", &chain);
-    let b = node.create_persona(&mut OsRng, h("bea"), nm("Bea"), sn("Second")).unwrap();
-    let (before, on_disk) = (plaintexts(&node), node.disk.bytes());
     assert_eq!(
-        node.expect_admission_for(&mut OsRng, &b, org).unwrap_err(),
-        OrgNodeError::OrganisationHeldByAnotherPersona { org_id: org }
+        alice.svc.build_invite(&mut OsRng, &device_key(0x7e), "Y".into(), vec![]).err(),
+        Some(OrgNodeError::PersonaNotHeld { device_key: Box::new(device_key(0x7e)) })
     );
-    assert_eq!((plaintexts(&node), node.disk.bytes()), (before, on_disk), "nothing written");
-    // Expected: A expects another Organisation; B may not expect it too.
-    let elsewhere = OrgId::new([0x42; 20]);
-    let c = node.create_persona(&mut OsRng, h("cal"), nm("Cal"), sn("Third")).unwrap();
-    node.expect_admission_for(&mut OsRng, &b, elsewhere).unwrap();
-    let (before, on_disk) = (plaintexts(&node), node.disk.bytes());
-    assert_eq!(
-        node.expect_admission_for(&mut OsRng, &c, elsewhere).unwrap_err(),
-        OrgNodeError::OrganisationHeldByAnotherPersona { org_id: elsewhere }
-    );
-    assert_eq!((plaintexts(&node), node.disk.bytes()), (before, on_disk), "nothing written");
-    // The same Persona again is not refused, and A is not bound by B's rule.
-    node.expect_admission_for(&mut OsRng, &b, elsewhere).unwrap();
-    assert_eq!(node.store_data(&b).unwrap().expected_admissions.len(), 1);
-    assert!(node.store_data(&a).unwrap().expected_admissions.is_empty());
+    let refused = alice.svc.build_invite(&mut OsRng, &device, "Y".into(), vec![String::new(); 17]).err().unwrap();
+    assert_eq!(refused_field(refused), "invite.issuer_addresses");
+    assert_eq!(encoded_stores(&alice), before, "nothing changed");
+    assert_eq!(alice.disk.bytes(), on_disk, "nothing written");
+    assert!(alice.store_data(&device).unwrap().outstanding_invites.is_empty());
 }
 
-// verifies: LLR-yexf5m
-#[test]
-fn the_refusal_names_the_organisation_and_no_persona() {
-    let chain = ChainSlots::new();
-    let (mut node, a, org) = founder("display", &chain);
-    let b = node.create_persona(&mut OsRng, h("bea"), nm("Bea"), sn("Second")).unwrap();
-    let text = build_reply(&mut node, &invite_for(org), &b).unwrap_err().to_string();
-    assert!(text.contains(&format!("{org:?}")), "names the Organisation: {text}");
-    for persona in [&a, &b] {
-        assert!(!text.contains(persona.as_str()), "names no Persona: {text}");
+mod admission_request_and_cancel {
+    use org_members::{MemberId, Name, PersonPublicKey, Surname};
+    use org_node::error::OrgNodeError;
+    use org_node::invitation::InviteId;
+    use org_node::service::{OrgService, StoreChange};
+    use org_node::store::{OutstandingInvite, ProvisionalChange};
+    use org_node::test_fixtures::{device_key, member_key};
+    use org_node::wire::{decode_message, encode_message, WireMessage};
+    use rand::rngs::OsRng;
+
+    use super::support::fixtures::{
+        acme_store, address_strings, alice, alice_persona, invite_to_bob, kept_request, own, own_encoded, own_service, record, snapshot,
+    };
+    use super::support::{encoded_store, handle, the_org};
+
+    /// An Admin's store: a record listing this Device (seed 4) and Bob (0x21); two outstanding invites,
+    /// each with a kept request; an Admit for each and a Revoke between them.
+    fn admin_with_two_requests() -> (OrgService, InviteId, InviteId) {
+        let (first, second) = (InviteId::new([0x31; 32]), InviteId::new([0x32; 32]));
+        let mut store_data = acme_store(alice_persona(), record(3, &[alice(), snapshot(2, "bob", 0x11, &[0x21])]));
+        store_data.outstanding_invites = vec![
+            OutstandingInvite { org_id: the_org(), invite_id: first, invitee_name: "Carol".into() },
+            OutstandingInvite { org_id: the_org(), invite_id: second, invitee_name: "Dave".into() },
+        ];
+        store_data.kept_admission_requests = vec![kept_request(first, 0x12, 0x22, "carol"), kept_request(second, 0x13, 0x23, "dave")];
+        store_data.provisional_changes = vec![
+            ProvisionalChange::Admit { invite_id: first, handle: handle("carol") },
+            ProvisionalChange::Revoke { member_id: MemberId::new([2; 32]) },
+            ProvisionalChange::Admit { invite_id: second, handle: handle("dave") },
+        ];
+        let svc = own_service(store_data);
+        (svc, first, second)
+    }
+
+    /// The admission request Device `device` would send for `invite_id`.
+    fn request_body(invite_id: InviteId, member: u8, device: u8) -> Vec<u8> {
+        let member_key: PersonPublicKey = member_key(member);
+        encode_message(&WireMessage::AdmissionRequest {
+            org_id: the_org(),
+            invite_id,
+            name: Name::parse("Carol").unwrap(),
+            surname: Surname::parse("King").unwrap(),
+            preferred_handles: vec![handle("carol")],
+            member_key,
+            device_key: device_key(device),
+            addresses: address_strings(&["192.0.2.9:4433"]),
+        })
+        .unwrap()
+    }
+
+    // verifies: LLR-g32hjn
+    #[test]
+    fn build_admission_request_encodes_the_provisional_member_for_the_issuer_with_the_given_addresses() {
+        let mut svc = OrgService::new(vec![]).unwrap();
+        let (device, _secret, _sealed) =
+            svc.propose_member(&mut OsRng, &invite_to_bob(), "Bob", "Builder", &["bob", "bobby"]).unwrap();
+        let before = encoded_store(&svc, &device);
+        let given = address_strings(&["198.51.100.1:7000", "[2001:db8::1]:7000"]);
+
+        let message = svc.build_admission_request(&device, given.clone()).unwrap();
+        assert_eq!(message.recipient, device_key(5), "the request goes to the Invite's issuer");
+        let member = svc.store_data(&device).unwrap().member.clone().expect("a provisional Member");
+        let WireMessage::AdmissionRequest { org_id, invite_id, name, surname, preferred_handles, member_key, device_key: sent_device, addresses: sent } =
+            decode_message(&message.body).unwrap()
+        else {
+            panic!("an admission request")
+        };
+        assert_eq!((org_id, invite_id), (the_org(), InviteId::new([3; 32])));
+        assert_eq!((name, surname), (member.name.clone(), member.surname.clone()));
+        assert_eq!(preferred_handles, vec![handle("bob"), handle("bobby")]);
+        assert_eq!((member_key, sent_device), (member.member_key, member.device_key));
+        assert_eq!(sent_device, device, "the request names this Device");
+        assert_eq!(sent, given, "the addresses the caller gave, last");
+
+        let again = svc.build_admission_request(&device, given).unwrap();
+        assert_eq!(again.body, message.body, "a retry sends the same bytes");
+        assert_eq!(encoded_store(&svc, &device), before, "building changes nothing");
+    }
+
+    // verifies: LLR-g32hjn, LLR-h4gwns
+    #[test]
+    fn build_admission_request_refuses_no_provisional_member_and_bad_addresses() {
+        let mut svc = OrgService::new(vec![]).unwrap();
+        assert!(matches!(
+            svc.build_admission_request(&device_key(0x40), vec![]),
+            Err(OrgNodeError::PersonaNotHeld { .. })
+        ));
+        let (founder, _secret, _sealed) =
+            svc.propose_founding(&mut OsRng, "Alice", "Smith", "alice", "Acme".into()).unwrap();
+        assert!(matches!(
+            svc.build_admission_request(&founder, vec![]),
+            Err(OrgNodeError::NoProvisionalMember)
+        ));
+        let (device, _secret, _sealed) = svc.propose_member(&mut OsRng, &invite_to_bob(), "Bob", "Builder", &["bob"]).unwrap();
+        let before = encoded_store(&svc, &device);
+        let seventeen: Vec<String> = (0..17).map(|port| format!("192.0.2.1:{port}")).collect();
+        let too_long = vec!["a".repeat(257)];
+        for bad in [seventeen, too_long] {
+            assert!(matches!(
+                svc.build_admission_request(&device, bad),
+                Err(OrgNodeError::InvalidField { field: "request.addresses", .. })
+            ));
+        }
+        assert!(svc.build_admission_request(&device, vec![]).is_ok(), "zero addresses are a list it accepts");
+        assert_eq!(encoded_store(&svc, &device), before);
+    }
+
+    // verifies: LLR-ag8hjd
+    #[test]
+    fn cancel_invite_removes_the_request_its_pair_and_its_admit_change() {
+        let (mut svc, first, second) = admin_with_two_requests();
+        let own = own();
+        let record_before = postcard::to_allocvec(&svc.store_data(&own).unwrap().record).unwrap();
+
+        let StoreChange::Sealed(write) = svc.cancel_invite(&mut OsRng, &own, first).unwrap();
+        assert_eq!(write.device_key, own);
+        let store_data = svc.store_data(&own).unwrap();
+        assert_eq!(
+            store_data.kept_admission_requests.iter().map(|request| request.invite_id).collect::<Vec<_>>(),
+            vec![second]
+        );
+        assert_eq!(store_data.outstanding_invites.iter().map(|invite| invite.invite_id).collect::<Vec<_>>(), vec![second]);
+        assert_eq!(
+            store_data.provisional_changes,
+            vec![
+                ProvisionalChange::Revoke { member_id: MemberId::new([2; 32]) },
+                ProvisionalChange::Admit { invite_id: second, handle: handle("dave") },
+            ]
+        );
+        assert_eq!(postcard::to_allocvec(&store_data.record).unwrap(), record_before, "the record is untouched");
+
+        // The cancelled invite is no longer outstanding: a later request carrying it is refused.
+        assert!(matches!(
+            svc.check_received(&mut OsRng, &own, device_key(0x22), &request_body(first, 0x12, 0x22)),
+            Err(OrgNodeError::InviteNotOutstanding { invite_id, .. }) if invite_id == first
+        ));
+    }
+
+    // verifies: LLR-ag8hjd
+    #[test]
+    fn cancel_invite_refuses_an_invite_with_no_kept_request() {
+        let (mut svc, first, _) = admin_with_two_requests();
+        let own = own();
+        crate::support::unread(svc.cancel_invite(&mut OsRng, &own, first).unwrap());
+        let before = own_encoded(&svc);
+        for invite_id in [first, InviteId::new([0x39; 32])] {
+            assert!(matches!(
+                svc.cancel_invite(&mut OsRng, &own, invite_id),
+                Err(OrgNodeError::NoAdmissionRequestKept { invite_id: refused }) if refused == invite_id
+            ));
+        }
+        assert!(matches!(
+            svc.cancel_invite(&mut OsRng, &device_key(0x40), first),
+            Err(OrgNodeError::PersonaNotHeld { .. })
+        ));
+        assert_eq!(own_encoded(&svc), before, "a refusal changes nothing");
     }
 }

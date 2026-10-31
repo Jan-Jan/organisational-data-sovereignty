@@ -110,7 +110,7 @@ SDD-swtd3w, and LLR-8bum44 from SDD-vee2fq to SDD-af5vnt.)*
 | **Values and custody** | SDD-swtd3w, SDD-sxp8hb | What an identifier is, what a value org-node holds is typed as (secrets, keys, tags), what a refusal is called, and which key plays which role |
 | **The commit rule** | SDD-kk2y3e, SDD-d8ktxa, SDD-na9nc3, SDD-pa6p7w | What a change must prove before it is believed |
 | **Carriage and rest** | SDD-kwncn7, SDD-af5vnt, SDD-vee2fq (the authenticated endpoint moved to org-io 2026-10-13, S4 task T10) | How bytes reach the node, and where secrets sit when they are not moving |
-| **The five stories** | SDD-ueh4tm, SDD-89es4z, SDD-rx2yvy, SDD-8cpyfa, SDD-72ddm6 (the endpoint lifecycle moved to org-io 2026-10-13, S4 task T10) | How the parts compose into what a Persona does |
+| **The five stories** | SDD-ueh4tm, SDD-89es4z, SDD-rx2yvy and two stories out of force since 2026-10-20, named under the in-force table below (the endpoint lifecycle moved to org-io 2026-10-13, S4 task T10; *IDs dropped from this row 2026-10-25, T61*) | How the parts compose into what a Persona does |
 | **The supplier edge** | SDD-msb6xh, SDD-rq6nv4, org-io's chain-connection item (moved 2026-10-07) | What is said to the chain |
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
@@ -125,6 +125,30 @@ chain-connection item moved to org-io (2026-10-07), so org-node holds
 eighteen items and the supplier edge reads nothing: SDD-msb6xh and
 SDD-rq6nv4 state absences, and LLR-mn5c2q states that org-node names no
 chain library and reads no chain.
+
+*Amended 2026-10-20 (change `worktree-org-io-domain-api`, consistency
+pass):* the table above is history. The in-force items, by layer (the dated
+files and `2026-10-16-domain-api.md` define them):
+
+| Layer | Items | What it decides |
+|---|---|---|
+| **Values and custody** | SDD-swtd3w, SDD-sxp8hb, SDD-fysk96 | What an identifier and a value are typed as, what a refusal is called, which key plays which role, and the transient Device secret |
+| **The chain rule** | SDD-kk2y3e, SDD-d8ktxa, SDD-na9nc3, SDD-pa6p7w | What a change must prove before it is believed, against a chain state given as a value |
+| **Carriage and rest** | SDD-kwncn7, SDD-af5vnt, SDD-asxwp8, SDD-undd7q, SDD-vee2fq | The Wire message's framing; where secrets rest; the sealed Persona store and the epoch state it holds; that org-node holds no out-of-band blob |
+| **Proposing and verifying** | SDD-hwax8v, SDD-kegag2 | The proposal operations (founding, Member, provisional changes, the updated Organisation), and verification, which alone adopts an epoch |
+| **Receiving and sending** | SDD-busuj3, SDD-qzv5mn, SDD-pkqc2j, SDD-n2x3gb, SDD-42cjqk, SDD-gatf4h, SDD-8zzmav | The one chain-free receive path; the messages of the adopted epoch; the organisation request exchange; the invitation of a joining Device; the address book; revocation notices; the removal acknowledgement's signature |
+| **The node's own removal** | SDD-z4m57w | The removed store, from the node's own removal until its last acknowledgement is accepted |
+| **Identity and admission** | SDD-89es4z, SDD-rx2yvy, SDD-ueh4tm | How a Persona and an Organisation come into existence and a Member is let in (their operations now SDD-hwax8v's and SDD-kegag2's), and the boundary between the stories and the chain |
+| **The Person** | SDD-27p679 | The user's own Person store, apart from every Persona |
+| **The supplier edge** | SDD-msb6xh, SDD-rq6nv4 | Absences: no calldata, no multisig, no chain read |
+
+Out of force since that change: SDD-8cpyfa (by SDD-kegag2 and SDD-busuj3),
+SDD-72ddm6 (by SDD-z4m57w), SDD-uck4tz (by SDD-73emgx), SDD-esg2kc (by
+SDD-busuj3), SDD-bm27xt (by SDD-qzv5mn), SDD-xshv5b (by SDD-xexu3k), and,
+split on 2026-10-28 (round 2 review), SDD-73emgx (by SDD-gatf4h and
+SDD-8zzmav) and SDD-xexu3k (by SDD-n2x3gb and SDD-42cjqk).
+org-node now consumes `org-members` and `person` alone and is consumed by
+org-io; the app names no org-node item.
 
 **The decisive property is one function.** `verify_envelope_against_chain`
 performs seven checks in a security-critical order, and eleven low-level

@@ -19,6 +19,7 @@ founded and when a provisional update is submitted, and which Device
 receives the committed update, and shall hand each to org-io and report
 the outcome org-io returns.
 satisfies: derived
+superseded-by: REQ-vb5pag
 
 The app decides when from the operator's commands (create an Organisation,
 admit a reply, revoke a Member); org-io writes the chain, reads back the

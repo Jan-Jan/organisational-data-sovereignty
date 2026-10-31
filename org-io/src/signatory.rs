@@ -30,7 +30,7 @@ pub enum AdminStatus {
 }
 
 /// Why the own-admin check gave no answer. A failed read is never
-/// `NotAdmin` (LLR-c9fyun).
+/// `NotAdmin` (LLR-7qdjqn).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OwnAdminError {
     /// This node holds no signatory key.
@@ -44,7 +44,7 @@ impl std::fmt::Display for OwnAdminError {
         match self {
             // Built without `dev-seed`, says the seed is read only by
             // development builds (REQ-8zuka3).
-            Self::NotConfigured => write!(formatter, "this node holds no signatory key; {}", crate::submit::NOT_CONFIGURED),
+            Self::NotConfigured => write!(formatter, "this node holds no signatory key; {}", crate::write::NOT_CONFIGURED),
             Self::Read(reason) => write!(formatter, "the signatory-set read failed: {reason}"),
         }
     }
@@ -99,8 +99,8 @@ pub trait SignatorySetReader: Send + Sync {
     async fn signatory_set(&self, org_id: OrgId) -> Result<SignatorySetView, String>;
 }
 
-/// The check over a reader (LLR-c9fyun, LLR-2hkqv2): one signatory-set read,
-/// and a failed read is an error.
+/// The check over a reader: one signatory-set read, and a failed read is an
+/// error (LLR-7qdjqn, LLR-2hkqv2).
 pub(crate) async fn own_admin_status(
     reader: &dyn SignatorySetReader,
     own: Option<AccountId>,
@@ -138,6 +138,6 @@ pub struct SignatorySetNotConfigured;
 #[async_trait]
 impl SignatorySetReader for SignatorySetNotConfigured {
     async fn signatory_set(&self, _org_id: OrgId) -> Result<SignatorySetView, String> {
-        Err(crate::submit::NOT_CONFIGURED.into())
+        Err(crate::write::NOT_CONFIGURED.into())
     }
 }

@@ -1,6 +1,9 @@
 #![cfg(all(feature = "app", feature = "test-support"))]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! Stage S3 (`docs/plans/2026-10-06-org-io-commit-workflow.md`).
+//! Revocation notices and removal acknowledgements: the notices a removal
+//! produces, the decision on a received notice, and the check of a received
+//! acknowledgement. A store holds one current record (LLR-d925uu), and
+//! `accept` decides but deletes nothing (the removal is `verify`'s).
 
 mod support;
 
@@ -11,12 +14,11 @@ use org_node::keys::X25519Keypair;
 use org_node::revocation::{
     accept, check_acknowledgement, check_notice, notices_for, Acknowledgement, RevocationNotice, Signature64, ACK_DOMAIN,
 };
-use org_node::store::{MemberSnapshot, OrgRecord, PersonaRecord, PersonaStatus, StoreData};
+use org_node::store::{OrgRecord, OrgRecordParts, PersonaRecord, PersonaRecordParts, PersonaStatus, StoreData};
 use org_node::test_fixtures::{admin_device, device_key, genesis_trie, member, Trie, BOB_DEVICE_SEED};
-use org_node::{
-    DeviceSecret, Epoch, Handle, MemberSeed, Name, OrgNodeError, OrgPrivateKey, OrgState, PersonaId, RootHash,
-    SequenceNumber, Surname,
-};
+use org_node::{DeviceSecret, Epoch, MemberSeed, OrgNodeError, OrgPrivateKey, OrgState, PersonaId, RootHash};
+use support::fixtures::{persona_parts, record_parts};
+use support::{handle, parsed_name, parsed_surname};
 
 fn org() -> OrgId {
     OrgId::new([7; 20])
@@ -30,30 +32,14 @@ fn admin_member_keypair() -> X25519Keypair {
     MemberSeed::from([1; 32]).x25519_keypair()
 }
 
-/// The persisted snapshot of a trie member, built field by field.
-fn snapshot_of(leaf: &MemberLeaf) -> MemberSnapshot {
-    MemberSnapshot {
-        id: *leaf.id(),
-        handle: leaf.handle().clone(),
-        name: leaf.name().clone(),
-        surname: leaf.surname().clone(),
-        member_key: *leaf.p2p_key(),
-        device_keys: leaf.p2p_devices().to_vec(),
-    }
-}
-
 /// The record of the calculated `trie` at `epoch`.
-fn record_of(trie: &Trie, epoch: u64) -> OrgRecord {
-    OrgRecord::from(org_node::store::OrgRecordParts {
+fn record_at(trie: &Trie, epoch: u64) -> OrgRecord {
+    OrgRecord::from(OrgRecordParts {
         org_id: org(),
         root_hash: trie.root_hash().unwrap(),
         org_pub_key: org_node::test_fixtures::org_public_key(),
-        epoch: Epoch::from(epoch),
-        last_seq: SequenceNumber::from(epoch),
-        trie_members: trie.members().iter().map(snapshot_of).collect(),
-        proxy_account: None,
         org_private_key: OrgPrivateKey::from([9; 32]),
-        kept_change_set: None,
+        ..record_parts(epoch, &support::snapshots_of(trie))
     })
 }
 
@@ -86,7 +72,7 @@ fn records_deleting_bob(
     let previous_trie = trie_with_bob(bob_devices);
     let slot_order = previous_trie.get(&bob_id()).unwrap().p2p_devices().to_vec();
     let committed_trie = previous_trie.delete_member(&bob_id()).unwrap().recalculate().unwrap().0;
-    (record_of(&previous_trie, 1), record_of(&committed_trie, 2), committed_trie, slot_order)
+    (record_at(&previous_trie, 1), record_at(&committed_trie, 2), committed_trie, slot_order)
 }
 
 fn record_pair_removing_one_device() -> (OrgRecord, OrgRecord, Trie, (MemberId, DevicePublicKey)) {
@@ -155,7 +141,7 @@ fn notices_for_refuses_an_uncalculated_trie() {
     ));
 }
 
-/// verifies: LLR-gbe9bt
+/// verifies: LLR-bs6yxf
 ///
 /// The signed bytes are the domain then the postcard tuple; the signature
 /// is not part of them.
@@ -170,15 +156,15 @@ fn acknowledgement_signed_bytes_are_the_domain_then_the_postcard_tuple() {
     assert_eq!(ACK_DOMAIN, b"ods/org-node/revocation-acknowledgement/v1");
 }
 
-// --- T5: deciding a notice and signing the acknowledgements ---
+// --- Deciding a notice ---
 
-fn encoded<T: serde::Serialize>(value: &T) -> Vec<u8> {
-    postcard::to_allocvec(value).unwrap()
+/// `encodable`'s postcard encoding.
+fn postcard_of<T: serde::Serialize>(encodable: &T) -> Vec<u8> {
+    postcard::to_allocvec(encodable).unwrap()
 }
 
-/// A device seed as these tests hold it: its bytes. *S4, task T3:* org-node's
-/// `DeviceSeed` is gone; a secret is made from the bytes as org-io's
-/// keychain hands one back.
+/// A device seed as these tests hold it: its bytes. A secret is made from
+/// the bytes as org-io's keychain hands one back.
 #[derive(Clone, Copy)]
 struct DeviceSeed([u8; 32]);
 
@@ -209,24 +195,16 @@ fn bound_device() -> DevicePublicKey {
 /// A store with one Persona bound to the Organisation as bob (M) with
 /// Device D, and the record at epoch 4 listing M with D.
 fn bound_store() -> StoreData {
-    let persona = PersonaRecord::from(org_node::store::PersonaRecordParts {
-        persona_id: PersonaId::new("bob".into()),
+    let persona = PersonaRecord::from(PersonaRecordParts {
         org_id: Some(org()),
-        handle: Handle::parse("bob").unwrap(),
-        name: Name::parse("Bob").unwrap(),
-        surname: Surname::parse("B").unwrap(),
-        member_seed: MemberSeed::from([2; 32]),
-        device_key: bound_device(),
+        name: parsed_name("Bob"),
+        surname: parsed_surname("B"),
+        handle: Some(handle("bob")),
         member_id: Some(bob_id()),
         status: PersonaStatus::Active,
+        ..persona_parts("bob", [2; 32], bound_device())
     });
-    StoreData {
-        persona,
-        orgs: vec![record_of(&trie_with_bob(vec![bound_device()]), 4)],
-        provisional_updates: vec![],
-        expected_admissions: vec![],
-        outstanding_invites: vec![],
-    }
+    StoreData { record: Some(record_at(&trie_with_bob(vec![bound_device()]), 4)), ..StoreData::new(persona) }
 }
 
 /// The calculated trie of the record with D removed (bob deleted).
@@ -239,7 +217,7 @@ fn removed_root() -> RootHash {
 }
 
 fn still_listing_root() -> RootHash {
-    bound_store().orgs[0].root_hash
+    bound_store().record.unwrap().root_hash
 }
 
 fn genuine_notice() -> RevocationNotice {
@@ -271,128 +249,91 @@ fn check_notice_refuses_an_unheld_organisation_then_another_device() {
     assert_eq!(check_notice(&store, &genuine_notice()).unwrap().member_id, Some(bob_id()));
 }
 
-/// verifies: LLR-tx8ruv, LLR-uw7nmv
+/// verifies: LLR-rhsfw9
 ///
 /// Abnormal, in order: an unheld notice; no chain state; a state older than
 /// the record; a proof against another root; a Device the chain's record
-/// still lists. Each returns the error alone; the store is unchanged.
+/// still lists. Each returns the error alone. (`accept` borrows the store
+/// immutably, so it cannot change it; that a refused notice stays kept in an
+/// `OrgService` store is LLR-f9mcsq's, tested in own_removal.rs.)
 #[test]
-fn accept_refuses_in_order_and_changes_nothing() {
+fn accept_refuses_in_order() {
     let store = bound_store();
-    let before = encoded(&store);
-    let seeds = |_: &[DevicePublicKey]| vec![bound_device_seed().secret()];
     let unheld = RevocationNotice { org_id: OrgId::new([9; 20]), ..genuine_notice() };
-    assert!(matches!(accept(&store, &unheld, None, seeds), Err(OrgNodeError::RevocationNotHeld { .. })));
-    assert!(matches!(accept(&store, &genuine_notice(), None, seeds), Err(OrgNodeError::OrgNotOnChain)));
+    assert!(matches!(accept(&store, &unheld, None), Err(OrgNodeError::RevocationNotHeld { .. })));
+    assert!(matches!(accept(&store, &genuine_notice(), None), Err(OrgNodeError::OrgNotOnChain)));
     assert!(matches!(
-        accept(&store, &genuine_notice(), Some(chain_at(3, removed_root())), seeds),
+        accept(&store, &genuine_notice(), Some(chain_at(3, removed_root()))),
         Err(OrgNodeError::StaleChainState { .. })
     ));
     assert!(matches!(
-        accept(&store, &genuine_notice(), Some(chain_at(5, RootHash::new([5; 32]))), seeds),
+        accept(&store, &genuine_notice(), Some(chain_at(5, RootHash::new([5; 32])))),
         Err(OrgNodeError::RevocationProofRefused { .. })
     ));
     assert!(matches!(
-        accept(&store, &genuine_notice(), Some(chain_at(5, still_listing_root())), seeds),
+        accept(&store, &genuine_notice(), Some(chain_at(5, still_listing_root()))),
         Err(OrgNodeError::RevocationProofRefused { .. })
     ));
-    assert_eq!(encoded(&store), before);
 }
 
-/// verifies: LLR-tx8ruv
+/// verifies: LLR-rhsfw9
 ///
-/// Abnormal, each refusal in order, given a seed source that panics if
-/// called: the refusal is returned and the seed source is never called —
-/// a refused notice reads no device seed.
+/// Abnormal, each refusal in order: the refusal is returned, and `accept`
+/// has no secret source to ask — a refused notice reads no Device secret.
 #[test]
-fn a_refused_notice_never_calls_the_seed_source() {
+fn a_refused_notice_is_refused_in_order_with_no_secret_asked_for() {
     let store = bound_store();
-    let no_seeds = |_: &[DevicePublicKey]| -> Vec<DeviceSecret> { panic!("the seed source was called for a refused notice") };
     let unheld = RevocationNotice { org_id: OrgId::new([9; 20]), ..genuine_notice() };
-    assert!(matches!(accept(&store, &unheld, None, no_seeds), Err(OrgNodeError::RevocationNotHeld { .. })));
+    assert!(matches!(accept(&store, &unheld, None), Err(OrgNodeError::RevocationNotHeld { .. })));
     let other = RevocationNotice { device: device_key(77), ..genuine_notice() };
-    assert!(matches!(accept(&store, &other, None, no_seeds), Err(OrgNodeError::RevocationNotForThisDevice { .. })));
-    assert!(matches!(accept(&store, &genuine_notice(), None, no_seeds), Err(OrgNodeError::OrgNotOnChain)));
+    assert!(matches!(accept(&store, &other, None), Err(OrgNodeError::RevocationNotForThisDevice { .. })));
+    assert!(matches!(accept(&store, &genuine_notice(), None), Err(OrgNodeError::OrgNotOnChain)));
     assert!(matches!(
-        accept(&store, &genuine_notice(), Some(chain_at(3, removed_root())), no_seeds),
+        accept(&store, &genuine_notice(), Some(chain_at(3, removed_root()))),
         Err(OrgNodeError::StaleChainState { .. })
     ));
     assert!(matches!(
-        accept(&store, &genuine_notice(), Some(chain_at(5, RootHash::new([5; 32]))), no_seeds),
+        accept(&store, &genuine_notice(), Some(chain_at(5, RootHash::new([5; 32])))),
         Err(OrgNodeError::RevocationProofRefused { .. })
     ));
     assert!(matches!(
-        accept(&store, &genuine_notice(), Some(chain_at(5, still_listing_root())), no_seeds),
+        accept(&store, &genuine_notice(), Some(chain_at(5, still_listing_root()))),
         Err(OrgNodeError::RevocationProofRefused { .. })
     ));
 }
 
-/// verifies: LLR-tx8ruv, LLR-r8qhky, LLR-hby4jr
-///
-/// Normal: at the next epoch and a much later one, each carrying the root
-/// without D, the notice is accepted; the successor is
-/// `forget_organisation`'s, and one acknowledgement per bound Persona names
-/// the chain's epoch and root and verifies under D. (The record is at epoch
-/// 4: a state at epoch 4 with the removal root is a conflict, LLR-tx8ruv as
-/// amended 2026-10-07.)
-#[test]
-fn accept_signs_then_forgets() {
-    let store = bound_store();
-    for epoch in [5, 9] {
-        let accepted =
-            accept(&store, &genuine_notice(), Some(chain_at(epoch, removed_root())), |_: &[DevicePublicKey]| {
-                vec![bound_device_seed().secret()]
-            })
-            .unwrap();
-        assert_eq!(encoded(&accepted.store), encoded(&store.forget_organisation(org())));
-        assert_eq!(accepted.acknowledgements.len(), 1);
-        let ack = &accepted.acknowledgements[0];
-        assert_eq!(
-            (ack.org_id, ack.member_id, ack.device, ack.epoch, ack.root),
-            (org(), bob_id(), bound_device(), Epoch::new(epoch), removed_root())
-        );
-        let key = ed25519_dalek::VerifyingKey::from_bytes(bound_device().as_bytes()).unwrap();
-        key.verify_strict(&ack.signed_bytes(), &ed25519_dalek::Signature::from_bytes(&ack.signature.0)).unwrap();
-    }
-}
-
-/// verifies: LLR-tx8ruv
+/// verifies: LLR-rhsfw9
 ///
 /// Abnormal: a chain state at the record's own epoch whose root is not the
 /// record's (here the root the notice's proof verifies against, and another)
-/// → `ChainStateConflict`, before the proof is checked; the seed source is
-/// never called and the store is unchanged.
+/// → `ChainStateConflict`, before the proof is checked; the store is
+/// unchanged.
 #[test]
 fn a_chain_state_at_the_records_epoch_with_another_root_is_a_conflict() {
     let store = bound_store();
-    let before = encoded(&store);
+    let before = postcard_of(&store);
     let record_epoch = 4;
-    assert_eq!(store.orgs[0].epoch, Epoch::new(record_epoch), "fixture: the record is at epoch 4");
+    assert_eq!(store.record.as_ref().unwrap().epoch, Epoch::new(record_epoch), "fixture: the record is at epoch 4");
     for root in [removed_root(), RootHash::new([5; 32])] {
-        let no_seeds =
-            |_: &[DevicePublicKey]| -> Vec<DeviceSecret> { panic!("the seed source was called for a conflicting chain state") };
         assert_eq!(
-            accept(&store, &genuine_notice(), Some(chain_at(record_epoch, root)), no_seeds).map(|accepted| accepted.acknowledgements),
+            accept(&store, &genuine_notice(), Some(chain_at(record_epoch, root))),
             Err(OrgNodeError::ChainStateConflict { org_id: org() })
         );
     }
-    assert_eq!(encoded(&store), before);
+    assert_eq!(postcard_of(&store), before);
 }
 
 /// A Persona named `id`, bound to `org_id` as `member_id`, with the Device
 /// of `device_seed`.
 fn persona(id: &str, org_id: Option<OrgId>, member_id: Option<MemberId>, device_seed: DeviceSeed) -> PersonaRecord {
-    let device_key = device_seed.device_key();
-    PersonaRecord::from(org_node::store::PersonaRecordParts {
-        persona_id: PersonaId::new(id.into()),
+    PersonaRecord::from(PersonaRecordParts {
         org_id,
-        handle: Handle::parse(id).unwrap(),
-        name: Name::parse("Some").unwrap(),
-        surname: Surname::parse("One").unwrap(),
-        member_seed: MemberSeed::from([0x31; 32]),
-        device_key,
+        name: parsed_name("Some"),
+        surname: parsed_surname("One"),
+        handle: Some(handle(id)),
         member_id,
         status: PersonaStatus::Active,
+        ..persona_parts(id, [0x31; 32], device_seed.device_key())
     })
 }
 
@@ -401,10 +342,8 @@ fn persona(id: &str, org_id: Option<OrgId>, member_id: Option<MemberId>, device_
 /// Normal: among Personas that are unbound, bound to another Organisation,
 /// or bound to this one as another Member — each listed before it — the
 /// Persona bound to the notice's Organisation as its Member on its Device is
-/// the one returned.
-// *Adapted 2026-10-08 (S4, task T3):* a store holds one Persona, so each
-// decoy is the Persona of a store of its own, which `check_notice` refuses;
-// the bound one is returned.
+/// the one returned. A store holds one Persona, so each decoy is the Persona
+/// of a store of its own, which `check_notice` refuses.
 #[test]
 fn check_notice_returns_the_persona_the_notice_is_for() {
     let store = bound_store();
@@ -424,85 +363,14 @@ fn check_notice_returns_the_persona_the_notice_is_for() {
     assert_eq!((found.org_id, found.member_id), (Some(org()), Some(bob_id())));
 }
 
-/// verifies: LLR-uw7nmv
-///
-/// Normal: when no check refuses, `accept` produces a successor without the
-/// Organisation and one acknowledgement, and the store passed in is the same
-/// value as before the call.
-#[test]
-fn an_accepted_notice_produces_a_successor_and_leaves_the_store_passed_in_unchanged() {
-    let store = bound_store();
-    let before = encoded(&store);
-    let accepted =
-        accept(&store, &genuine_notice(), Some(chain_at(5, removed_root())), |_: &[DevicePublicKey]| {
-            vec![bound_device_seed().secret()]
-        })
-        .unwrap();
-    // *Adapted 2026-10-08 (S4, task T3):* the store's one Persona goes with
-    // the Organisation, so no successor store is left.
-    assert!(accepted.store.is_none());
-    assert_eq!(accepted.acknowledgements.len(), 1);
-    assert_eq!(encoded(&store), before);
-    assert_eq!(store.orgs.len(), 1);
-}
-
-/// verifies: LLR-r8qhky
-///
-/// Abnormal: the bound Persona's secret not supplied — another Device's, or
-/// none — so signing fails. `accept` returns exactly the refusal
-/// `sign_acknowledgements` gives for those secrets, no acknowledgement and no
-/// successor; the store is unchanged. *Adapted 2026-10-08 (S4, task T3):* a
-/// store holds one Persona, so the two bound Personas of this case's first
-/// form are one Persona and another Device's secret.
-#[test]
-fn a_signing_refusal_is_returned_unchanged_with_nothing_forgotten() {
-    let store = bound_store();
-    let before = encoded(&store);
-    let chain = chain_at(5, removed_root());
-    for supplied in [vec![DeviceSeed([0x41; 32])], vec![]] {
-        let secrets = || supplied.iter().map(DeviceSeed::secret).collect::<Vec<_>>();
-        let direct = org_node::revocation::sign_acknowledgements(&store, org(), &chain, secrets()).unwrap_err();
-        assert_eq!(direct, OrgNodeError::DeviceSecretNotSupplied { org_id: org() });
-        let refused =
-            accept(&store, &genuine_notice(), Some(chain), |_: &[DevicePublicKey]| secrets()).map(|accepted| accepted.acknowledgements);
-        assert_eq!(refused, Err(direct));
-    }
-    assert_eq!(encoded(&store), before);
-}
-
-/// verifies: LLR-hby4jr, LLR-uw7nmv
-///
-/// Abnormal: no seed for the bound Persona (none, or only another Device's)
-/// → `DeviceSecretNotSupplied`, nothing produced, the store unchanged.
-#[test]
-fn a_missing_device_seed_is_refused_before_anything_is_deleted() {
-    let store = bound_store();
-    let before = encoded(&store);
-    for seeds in [vec![], vec![DeviceSeed([99; 32])]] {
-        assert!(matches!(
-            accept(&store, &genuine_notice(), Some(chain_at(5, removed_root())), |_: &[DevicePublicKey]| {
-                seeds.iter().map(DeviceSeed::secret).collect()
-            }),
-            Err(OrgNodeError::DeviceSecretNotSupplied { .. })
-        ));
-    }
-    assert_eq!(encoded(&store), before);
-}
-
-// --- T6: checking a received acknowledgement ---
+// --- Checking a received acknowledgement ---
 
 /// An admin's store: the record of the Organisation at epoch 5, listing D
 /// (bob still holds it) or not (bob deleted). No Persona is bound.
 fn admin_store(listing_d: bool) -> StoreData {
     let trie = if listing_d { trie_with_bob(vec![bound_device()]) } else { removed_trie() };
     let admin = persona("admin", None, None, DeviceSeed([0x51; 32]));
-    StoreData {
-        persona: admin,
-        orgs: vec![record_of(&trie, 5)],
-        provisional_updates: vec![],
-        expected_admissions: vec![],
-        outstanding_invites: vec![],
-    }
+    StoreData { record: Some(record_at(&trie, 5)), ..StoreData::new(admin) }
 }
 
 /// The acknowledgement of (the Organisation, bob, `seed`'s public key,
@@ -535,7 +403,7 @@ fn genuine_acknowledgement_fixture() -> (StoreData, Acknowledgement) {
 #[test]
 fn an_acknowledgement_from_another_device_is_refused_before_its_signature() {
     let (store, ack) = genuine_acknowledgement_fixture();
-    let before = encoded(&store);
+    let before = postcard_of(&store);
     let other = device_key(0x61);
     assert_ne!(other, ack.device);
     let mut forged = ack.clone();
@@ -547,7 +415,7 @@ fn an_acknowledgement_from_another_device_is_refused_before_its_signature() {
         );
     }
     assert!(check_acknowledgement(&store, ack.device, ack.clone()).is_ok());
-    assert_eq!(encoded(&store), before);
+    assert_eq!(postcard_of(&store), before);
 }
 
 /// verifies: LLR-5azhry
@@ -580,12 +448,12 @@ fn the_sender_check_comes_after_the_held_lookup_and_before_the_rest() {
 #[test]
 fn a_genuine_acknowledgement_verifies() {
     let store = admin_store(false);
-    let before = encoded(&store);
+    let before = postcard_of(&store);
     for epoch in [5, 4] {
         let ack = signed_ack(&bound_device_seed(), Epoch::new(epoch));
         assert_eq!(check_acknowledgement(&store, ack.device, ack.clone()).unwrap().into_inner(), ack);
     }
-    assert_eq!(encoded(&store), before);
+    assert_eq!(postcard_of(&store), before);
 }
 
 /// verifies: LLR-5azhry
@@ -628,7 +496,7 @@ fn acknowledgements_are_refused_in_order() {
     ));
 }
 
-/// verifies: LLR-gbe9bt
+/// verifies: LLR-bs6yxf
 ///
 /// Abnormal: a signature by the named Device over the tuple without
 /// `ACK_DOMAIN`, or over the tuple behind another domain, is not a signature
@@ -639,7 +507,7 @@ fn a_signature_without_the_acknowledgement_domain_is_refused() {
     let store = admin_store(false);
     let genuine = signed_ack(&bound_device_seed(), Epoch::new(5));
     assert!(check_acknowledgement(&store, genuine.device, genuine.clone()).is_ok());
-    let tuple = encoded(&(genuine.org_id, genuine.member_id, genuine.device, genuine.epoch, genuine.root));
+    let tuple = postcard_of(&(genuine.org_id, genuine.member_id, genuine.device, genuine.epoch, genuine.root));
     let mut other_domain = b"ods/org-node/some-other-message/v1".to_vec();
     other_domain.extend(&tuple);
     let signing_key = ed25519_dalek::SigningKey::from_bytes(bound_device_seed().expose_secret());
@@ -690,13 +558,80 @@ fn an_acknowledgement_whose_device_is_no_curve_point_does_not_decode() {
     assert!(DevicePublicKey::try_from(no_point).is_err());
 
     let store = admin_store(false);
-    let before = encoded(&store);
+    let before = postcard_of(&store);
     let ack = signed_ack(&bound_device_seed(), Epoch::new(5));
     assert!(check_acknowledgement(&store, ack.device, ack.clone()).is_ok());
-    let mut bytes = encoded(&ack);
+    let mut bytes = postcard_of(&ack);
     let device = *ack.device.as_bytes();
     let at = bytes.windows(32).position(|window| window == device).unwrap();
     bytes[at..at + 32].copy_from_slice(&no_point);
     assert!(postcard::from_bytes::<Acknowledgement>(&bytes).is_err());
-    assert_eq!(encoded(&store), before);
+    assert_eq!(postcard_of(&store), before);
+}
+
+mod acknowledgement_domain {
+    use org_members::{MemberId, RootHash};
+    use org_node::ids::OrgId;
+    use org_node::revocation::{Acknowledgement, Signature64, ACK_DOMAIN};
+    use org_node::test_fixtures::device_key;
+    use org_node::Epoch;
+
+    // verifies: LLR-bs6yxf
+    #[test]
+    fn acknowledgement_signed_bytes_are_the_domain_then_the_tuple() {
+        let ack = Acknowledgement {
+            org_id: OrgId::new([0xaa; 20]),
+            member_id: MemberId::new([1; 32]),
+            device: device_key(4),
+            epoch: Epoch::new(4),
+            root: RootHash::new([0x66; 32]),
+            signature: Signature64([0x5a; 64]),
+        };
+        let mut expected = b"ods/org-node/revocation-acknowledgement/v1".to_vec();
+        expected.extend(postcard::to_allocvec(&(ack.org_id, ack.member_id, ack.device, ack.epoch, ack.root)).unwrap());
+        assert_eq!(ack.signed_bytes(), expected);
+        assert_eq!(ACK_DOMAIN, b"ods/org-node/revocation-acknowledgement/v1");
+        // No other message org-node signs or verifies begins with ACK_DOMAIN: every signature org-node
+        // makes or checks is over an acknowledgement's `signed_bytes()` (the key wrapper in keys.rs
+        // signs what it is handed), and the domain's bytes are written in the source once.
+        let mut domain_literals = 0;
+        for (path, text) in crate::support::src_rust_files() {
+            let file = path.file_name().unwrap().to_string_lossy().to_string();
+            let code: String =
+                text.lines().map(|line| line.split("//").next().unwrap_or("")).collect::<Vec<_>>().join("\n");
+            domain_literals += code.matches("revocation-acknowledgement").count();
+            for call in [".sign(", ".verify_strict(", ".verify("] {
+                for (offset, _) in code.match_indices(call) {
+                    let argument = &code[offset + call.len()..];
+                    let argument = &argument[..argument.find(['\n', ';']).unwrap_or(argument.len())];
+                    let wrapper = file == "keys.rs" && call == ".sign(" && argument.starts_with("message)");
+                    assert!(
+                        wrapper || argument.contains("signed_bytes()"),
+                        "{file}: `{call}{argument}` signs or verifies a message other than an acknowledgement"
+                    );
+                }
+            }
+        }
+        assert_eq!(domain_literals, 1, "the acknowledgement domain's bytes are written once, as ACK_DOMAIN");
+    }
+}
+
+mod accept_decides_only {
+    use super::{bound_store, chain_at, genuine_notice, postcard_of, removed_root};
+    use org_node::revocation::accept;
+
+    // A notice passing `check_notice`, against a chain state of a later epoch than the record's (4) whose
+    // root no longer holds the Device, is accepted as `Ok(())`: nothing is returned but the decision, the
+    // store passed in is unchanged, and `accept` takes no seed or secret source (LLR-rhsfw9): the call
+    // below names its three arguments and compares its result with `Ok(())`, so the compiler pins both.
+    // verifies: LLR-rhsfw9
+    #[test]
+    fn accept_returns_ok_for_a_later_epoch_without_the_device_and_takes_no_secret_source() {
+        let store = bound_store();
+        let before = postcard_of(&store);
+        for epoch in [5, 9] {
+            assert_eq!(accept(&store, &genuine_notice(), Some(chain_at(epoch, removed_root()))), Ok(()));
+            assert_eq!(postcard_of(&store), before, "the store is unchanged");
+        }
+    }
 }

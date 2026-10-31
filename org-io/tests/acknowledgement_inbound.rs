@@ -3,277 +3,186 @@
     clippy::await_holding_lock,
     reason = "`fresh_keychain`'s lock serialises the tests over keyring's process-global credential builder for their whole run; each test has its own runtime"
 )]
-//! A revoked Device may connect, for its acknowledgement only (REQ-ur7z4a;
-//! S4, task T11a of docs/plans/2026-10-06-org-io-transport.md). The accept
-//! path takes every inbound connection whose handshake completes and hands
-//! org-node the body with its authenticated sender, so only a revoked
-//! Device's acknowledgement is acted on (LLR-wvgec4); every inbound stream
-//! is answered with one verdict byte, accepted or refused, and nothing else
-//! (LLR-unqfj5).
-//!
-//! The revoked Device is driven by `dial_direct_as`, a relay-free test
-//! dialler bound from that Device's keychain item: the sending side is
-//! S3b-io's, not merged yet. Every test runs over fresh directories and a
-//! fresh in-memory keychain, one test at a time under `fresh_keychain`'s
-//! lock.
+//! A revoked Device may connect, for its acknowledgement only (REQ-ur7z4a),
+//! over the receive step (SDD-2fc2cq): every completed handshake is
+//! accepted and the body judged by org-node's check with its authenticated
+//! sender, so only a revoked Device's acknowledgement is acted on
+//! (LLR-j467e9); every inbound stream is answered with one verdict byte,
+//! accepted or refused, and nothing else (LLR-hhgdk7). The tests run one at a
+//! time under `fresh_keychain`'s lock: keyring's default credential builder
+//! is process-global.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
-use org_node::revocation::{Acknowledgement, RevocationNotice};
-use org_node::wire::{decode_message, encode_message, WireMessage};
-use org_node::{DevicePublicKey, MemberId, OrgId, OrgNodeError, PersonaId};
-use org_io::store_file::store_path;
-use org_io::test_support::{dial_direct_as, FakeChain};
-use org_io::transport::Verdict;
-use org_io::{OrgIo, ReceiveError, Received};
-use rand::rngs::OsRng;
+use org_io::test_support::dial_direct_as;
+use org_io::{ReceiveError, Received, Verified};
+use org_node::wire::{decode_message, WireMessage};
+use org_node::OrgNodeError;
 
 mod common;
-use common::handles::{at, create, fresh_keychain, handle, joiner_of, receiving_addr, refusal, store_dir, NET};
+use common::handles::{fresh_keychain, keep_device_seed, store_bytes, NET};
+use common::journey;
 
-/// A founded an Organisation and admitted Bob (B) and then Carol (C); A
-/// then removed Bob, and B accepted the notice and signed its
-/// acknowledgement. A holds Bob's Device as revoked; C, which never saw the
-/// removal, still lists it. Bob's Device secret stays in the keychain.
-struct Trio {
-    a: OrgIo,
-    chain: FakeChain,
-    c: OrgIo,
-    org: OrgId,
-    device_bob: DevicePublicKey,
-    device_carol: DevicePublicKey,
-    /// A's direct (bound-socket) loopback address.
-    direct_a: iroh::EndpointAddr,
-    /// C's direct (bound-socket) loopback address.
-    direct_c: iroh::EndpointAddr,
-    a_dir: PathBuf,
-    acknowledgement: Acknowledgement,
-    /// A's admission of Carol, as A's Device sent it.
-    admission_of_carol: WireMessage,
-    /// A revocation notice naming Alice's Member and Device, which B built
-    /// from the notice A sent it.
-    forged_notice_to_alice: WireMessage,
+// ---- a revoked Device's connection --------------------------------------------
+
+/// Admin `a` receiving, Member `b` admitted over the transport and then
+/// removed; `b`'s one kept acknowledgement's body. Before its removal `b`
+/// keeps dead addresses for the Admin (an organisation request from the
+/// Admin's Device carrying them, taken by `b`'s receive step), so its own
+/// delivery task cannot reach the Admin's receiving endpoint and the hand
+/// dial is the only sender (a first adoption keeps the Invite issuer's live
+/// addresses). The caller holds `fresh_keychain`'s lock.
+async fn ack_removed(tag: &str) -> (journey::Admin, journey::Joining, Vec<u8>) {
+    let admin = journey::admin(tag).await;
+    admin.io.start_receiving().await.unwrap();
+    let bob = journey::invited(&admin, tag, "b", "bob").await;
+    journey::admit_over_transport(&admin, &bob).await;
+    let (dead, listening) = journey::soon_dead(admin.device_key).await;
+    journey::keep_addresses(&bob.io, admin.org, &admin.io, admin.device_key, dead).await;
+    listening.close().await;
+    let mut kept = journey::removed_over_transport(&admin, &bob).await;
+    assert_eq!(kept.len(), 1, "one recipient for one other Device");
+    let (recipient, body) = kept.remove(0);
+    assert_eq!(recipient, admin.device_key);
+    (admin, bob, body)
 }
 
-/// What A's `submit_commit_send` of `update` sends to `recipient`, captured
-/// before org-node sees it. *S4 task T12, 2026-10-13:* a Loopback send goes
-/// only to a recipient's address and `submit_commit_send` names no
-/// recipient, so the body is sent to the recipient's own node at `addr` and
-/// taken from its receive channel there, unanswered (`next_inbound_for_test`),
-/// in place of a sink bound with another key: a second endpoint of the
-/// recipient's key would share its identity, and A's endpoint reaches an
-/// identity at any address it learnt for it.
-async fn captured(a: &OrgIo, update: &org_io::BuiltUpdate, recipient: &OrgIo, addr: &iroh::EndpointAddr) -> WireMessage {
-    let mut rng = OsRng;
-    let (sent, inbound) = tokio::join!(a.submit_commit_send(&mut rng, update, at(addr.clone())), async {
-        tokio::time::timeout(NET, recipient.next_inbound_for_test()).await.unwrap().unwrap()
-    });
-    assert!(sent.unwrap().sends.per_device.iter().any(|(_, outcome)| outcome.is_ok()), "sent");
-    decode_message(&inbound.1).unwrap()
+/// Wait, within `NET`, until `member`'s store keeps no acknowledgement.
+async fn none_kept(member: &journey::Joining) {
+    tokio::time::timeout(NET, async {
+        while !journey::kept_acknowledgement_bodies(member).is_empty() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("org-node deleted the acknowledgement in time");
 }
 
-/// `receiver`'s next result while A's Device sends it `message` at `addr`.
-async fn forwarded_from_a(a: &OrgIo, alice: &PersonaId, receiver: &OrgIo, addr: iroh::EndpointAddr, message: &WireMessage) -> Received {
-    let endpoint_a = a.endpoint_for_test(alice).await.unwrap();
-    let (received, ()) = tokio::join!(async { tokio::time::timeout(NET, receiver.next_received(&mut OsRng)).await.unwrap() }, async {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        tokio::time::timeout(NET, endpoint_a.send(addr, message)).await.unwrap().unwrap();
-    });
-    received.unwrap()
-}
-
-async fn trio(tag: &str) -> Trio {
-    let chain = FakeChain::new();
-    let a = handle(tag, "a", &chain);
-    let alice = create(&a, "alice").await;
-    let org = a.found_organisation(&mut OsRng, &alice).await.unwrap();
-    let b = handle(tag, "b", &FakeChain::sharing_slots_with(&chain));
-    let bob = create(&b, "bob").await;
-    b.expect_admission(&mut OsRng, &bob, org).await.unwrap();
-    let c = handle(tag, "c", &FakeChain::sharing_slots_with(&chain));
-    let carol = create(&c, "carol").await;
-    c.expect_admission(&mut OsRng, &carol, org).await.unwrap();
-    let addr_b = receiving_addr(&b).await;
-    let addr_c = receiving_addr(&c).await;
-    let (joiner_bob, joiner_carol) = (joiner_of(&b, &bob), joiner_of(&c, &carol));
-    let (device_bob, device_carol) = (joiner_bob.device_key, joiner_carol.device_key);
-
-    let update = a.admit_member(&mut OsRng, org, &joiner_bob).await.unwrap();
-    let admission_of_bob = captured(&a, &update, &b, &addr_b).await;
-    forwarded_from_a(&a, &alice, &b, addr_b.clone(), &admission_of_bob).await;
-    let update = a.admit_member(&mut OsRng, org, &joiner_carol).await.unwrap();
-    let admission_of_carol = captured(&a, &update, &c, &addr_c).await;
-    forwarded_from_a(&a, &alice, &c, addr_c, &admission_of_carol).await;
-
-    let device_alice = a.persona_public_keys(&alice).await.unwrap().1;
-    let member_id_of = |device: &DevicePublicKey| -> MemberId {
-        let node = a.node_for_test();
-        let record = node.list_orgs().into_iter().find(|record| record.org_id == org).unwrap();
-        record.trie_members.iter().find(|member| member.device_keys.contains(device)).unwrap().id
-    };
-    let (member_id_of_alice, member_id_of_bob) = (member_id_of(&device_alice), member_id_of(&device_bob));
-    let update = a.revoke_member(&mut OsRng, org, member_id_of_bob).await.unwrap();
-    let notice_to_bob = captured(&a, &update, &b, &addr_b).await;
-    let acknowledgement = match forwarded_from_a(&a, &alice, &b, addr_b, &notice_to_bob).await {
-        Received::Committed(outcome) => outcome.acknowledgements.into_iter().next().expect("B signed its acknowledgement"),
-        other => panic!("B did not commit its removal: {other:?}"),
-    };
-    // A notice carries no signature: B, revoked, can name Alice in one, with
-    // the proof of its own notice.
-    let WireMessage::Revocation(notice) = notice_to_bob else { panic!("not a notice: {notice_to_bob:?}") };
-    let forged_notice_to_alice =
-        WireMessage::Revocation(RevocationNotice { member_id: member_id_of_alice, device: device_alice, ..notice });
-
-    a.start_receiving().await.unwrap();
-    let direct_a = a.endpoint_for_test(&alice).await.unwrap().node_addr_for_dial();
-    let direct_c = c.endpoint_for_test(&carol).await.unwrap().node_addr_for_dial();
-    Trio {
-        a,
-        chain,
-        c,
-        org,
-        device_bob,
-        device_carol,
-        direct_a,
-        direct_c,
-        a_dir: store_dir(tag, "a"),
-        acknowledgement,
-        admission_of_carol,
-        forged_notice_to_alice,
-    }
-}
-
-/// `receiver`'s next result, and every byte the dialler read back, while
-/// `dialler`'s Device dials `addr` directly and sends `body`.
-async fn dialled(receiver: &OrgIo, dialler: &DevicePublicKey, addr: iroh::EndpointAddr, body: &[u8]) -> (Result<Received, ReceiveError>, Vec<u8>) {
-    let (received, read_back) = tokio::join!(async { tokio::time::timeout(NET, receiver.next_received(&mut OsRng)).await.unwrap() }, async {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        tokio::time::timeout(NET, dial_direct_as(dialler, addr, body)).await.unwrap().unwrap()
-    });
-    (received, read_back)
-}
-
-fn store_bytes(dir: &Path, device_key: &DevicePublicKey) -> Vec<u8> {
-    std::fs::read(store_path(dir, device_key)).unwrap()
-}
-
-fn body_of(message: &WireMessage) -> Vec<u8> {
-    encode_message(message).unwrap()
-}
-
-// ---- LLR-wvgec4, LLR-unqfj5: the revoked Device's acknowledgement --------------
-
-// B, revoked, dials A's direct loopback address with no relay and sends its
-// acknowledgement: A settles it (no store write), and B reads exactly one
-// byte, the accepted verdict, then the end of the stream.
-// verifies: LLR-wvgec4, LLR-unqfj5
+// The removed Member's own delivery task, which holds the Admin's addresses
+// from the Invite, connects directly from the revoked Device's identity; the
+// Admin's receive step accepts the acknowledgement, and the task reads the
+// verdict `0x00` back: only `Accepted` has org-node delete the
+// acknowledgement (LLR-6ux6yw), so its deletion shows that byte was read.
+// The delivery's normal path to a real recipient: started by the
+// verification that removes the Device (LLR-zzsqj4), and the
+// acknowledgement deleted once accepted (LLR-6ux6yw).
+// verifies: LLR-j467e9, LLR-hhgdk7, LLR-zzsqj4, LLR-6ux6yw
 #[tokio::test(flavor = "multi_thread")]
 async fn a_revoked_devices_acknowledgement_over_a_direct_connection_is_accepted_and_answered_accepted() {
     let (_guard, _keychain) = fresh_keychain();
-    let trio = trio("ack-inbound-accepted").await;
-    let device_alice = trio.a.persona_public_keys(&trio.a.personas().await[0].persona_id).await.unwrap().1;
-    let (reads_before, bytes_before) = (trio.chain.reads(), store_bytes(&trio.a_dir, &device_alice));
-    let body = body_of(&WireMessage::Acknowledgement(trio.acknowledgement.clone()));
-    let (received, read_back) = dialled(&trio.a, &trio.device_bob, trio.direct_a.clone(), &body).await;
-    match received {
-        Ok(Received::Acknowledged(verified)) => {
-            let acknowledgement = verified.into_inner();
-            assert_eq!((acknowledgement.device, acknowledgement.org_id), (trio.device_bob, trio.org), "B's Device, for the Organisation");
-        }
-        other => panic!("not settled as an acknowledgement: {other:?}"),
-    }
-    assert_eq!(read_back, vec![Verdict::Accepted.as_byte()], "one byte, accepted, then end of stream");
-    assert_eq!(Verdict::Accepted.as_byte(), 0x00);
-    assert_eq!(trio.chain.reads(), reads_before, "no chain read");
-    assert_eq!(store_bytes(&trio.a_dir, &device_alice), bytes_before, "nothing written to A's store file");
+    let tag = "ack-in-accepted";
+    let admin = journey::admin(tag).await;
+    admin.io.start_receiving().await.unwrap();
+    let bob = journey::invited(&admin, tag, "b", "bob").await;
+    journey::admit_over_transport(&admin, &bob).await;
+    journey::revoke(&admin, bob.device_key).await;
+    let (notice, _) = journey::deliver_epoch(&admin.io, admin.org, &bob.io).await;
+    assert!(matches!(notice, Ok(Received::RevocationNoticeKept { .. })), "{notice:?}");
+    let (received, verified) = tokio::join!(journey::next(&admin.io), bob.io.verify_all());
+    assert!(matches!(verified.as_slice(), [(_, Verified::Removed { .. })]), "{verified:?}");
+    assert!(matches!(received, Ok(Received::Acknowledged(_))), "{received:?}");
+    none_kept(&bob).await;
 }
 
-// From B's identity, an update for the Organisation, a revocation notice and
-// bytes that do not decode are each refused before any chain read or store
-// write, and B reads the refused verdict and nothing else.
-// verifies: LLR-wvgec4, LLR-unqfj5
+// Abnormal: from a Device no record lists any more, Organisation
+// information is refused by the sender gate (`SenderNotListed`), and an
+// admission request carrying another Device's key (Carol's, for her own
+// outstanding invite) because its key is not the sender's
+// (`AdmissionKeyNotSender`); each is answered with one `0x01`, and nothing is
+// kept.
+// verifies: LLR-j467e9, LLR-hhgdk7
 #[tokio::test(flavor = "multi_thread")]
-async fn a_revoked_device_sending_anything_but_an_acknowledgement_is_refused_and_served_nothing() {
+async fn a_revoked_device_sending_anything_but_an_acknowledgement_or_an_organisation_request_is_refused() {
     let (_guard, _keychain) = fresh_keychain();
-    let trio = trio("ack-inbound-other-kinds").await;
-    let device_alice = trio.a.persona_public_keys(&trio.a.personas().await[0].persona_id).await.unwrap().1;
-    let (reads_before, bytes_before) = (trio.chain.reads(), store_bytes(&trio.a_dir, &device_alice));
-    let cases: [(&str, Vec<u8>); 3] = [
-        ("an update (OrgInformation)", body_of(&trio.admission_of_carol)),
-        ("a revocation notice naming A's Device", body_of(&trio.forged_notice_to_alice)),
-        ("bytes that do not decode", vec![0xff; 7]),
-    ];
-    for (case, body) in cases {
-        let (received, read_back) = dialled(&trio.a, &trio.device_bob, trio.direct_a.clone(), &body).await;
-        let refused = refusal(received);
-        match case {
-            "bytes that do not decode" => assert!(matches!(refused, OrgNodeError::MalformedMessage), "{case}: {refused:?}"),
-            _ => assert!(matches!(refused, OrgNodeError::SenderNotListed { org_id } if org_id == trio.org), "{case}: {refused:?}"),
-        }
-        assert_eq!(read_back, vec![Verdict::Refused.as_byte()], "{case}: one byte, refused, and nothing else");
-        assert_eq!(trio.chain.reads(), reads_before, "{case}: no chain read");
-        assert_eq!(store_bytes(&trio.a_dir, &device_alice), bytes_before, "{case}: A's store file unchanged");
-    }
-    assert_eq!(Verdict::Refused.as_byte(), 0x01);
+    let tag = "ack-in-anything-else";
+    let (admin, bob, _) = ack_removed(tag).await;
+    let information = journey::current_messages(&admin).into_iter().next().map(|(_, body)| body);
+    let carol = journey::invited(&admin, tag, "c", "carol").await;
+    let stale_request = common::handles::reopened_from(&carol.dir, &carol.io).build_admission_request(&carol.device_key, vec![]).unwrap().body;
+    let files = store_bytes(tag, "a");
+    let (received, read_back) = journey::dialled(&admin.io, &bob.device_key, &information.expect("the epoch's information")).await;
+    assert!(matches!(received, Err(ReceiveError::Refused(OrgNodeError::SenderNotListed { org_id })) if org_id == admin.org), "{received:?}");
+    assert_eq!(read_back, vec![0x01]);
+    let (received, read_back) = journey::dialled(&admin.io, &bob.device_key, &stale_request).await;
+    assert!(matches!(received, Err(ReceiveError::Refused(OrgNodeError::AdmissionKeyNotSender { .. }))), "{received:?}");
+    assert_eq!(read_back, vec![0x01]);
+    assert_eq!(store_bytes(tag, "a"), files, "nothing kept");
 }
 
-// C never committed Bob's removal, so it still lists Bob's Device: it
-// refuses the acknowledgement, and the refused verdict tells B's sender to
-// try its next kept address. org-node judges the epoch before the listing,
-// so a Member behind the removal refuses the acknowledgement as naming an
-// epoch after its record's (the plan named the listing refusal; S4, task
-// T11a, 2026-10-13).
-// verifies: LLR-wvgec4, LLR-unqfj5
+// Abnormal: a Member that has not adopted the
+// removing epoch still lists the Device, and refuses its acknowledgement.
+// verifies: LLR-j467e9, LLR-hhgdk7
 #[tokio::test(flavor = "multi_thread")]
 async fn an_acknowledgement_a_member_still_listing_the_device_refuses_is_answered_refused() {
     let (_guard, _keychain) = fresh_keychain();
-    let trio = trio("ack-inbound-still-listed").await;
-    let still_listed = {
-        let node = trio.c.node_for_test();
-        let record = node.list_orgs().into_iter().find(|record| record.org_id == trio.org).unwrap();
-        record.trie_members.iter().any(|member| member.device_keys.contains(&trio.device_bob))
-    };
-    assert!(still_listed, "C still lists Bob's Device");
-    let body = body_of(&WireMessage::Acknowledgement(trio.acknowledgement.clone()));
-    let (received, read_back) = dialled(&trio.c, &trio.device_bob, trio.direct_c.clone(), &body).await;
-    let refused = refusal(received);
-    assert!(matches!(refused, OrgNodeError::AcknowledgementFromFuture { org_id } if org_id == trio.org), "{refused:?}");
-    assert_eq!(read_back, vec![Verdict::Refused.as_byte()]);
+    let tag = "ack-in-still-listed";
+    let admin = journey::admin(tag).await;
+    admin.io.start_receiving().await.unwrap();
+    let bob = journey::invited(&admin, tag, "b", "bob").await;
+    journey::admit_over_transport(&admin, &bob).await;
+    // Dead addresses for the Admin: Bob's own delivery task reaches no one (the first adoption keeps the Invite issuer's live addresses).
+    let (dead, listening) = journey::soon_dead(admin.device_key).await;
+    journey::keep_addresses(&bob.io, admin.org, &admin.io, admin.device_key, dead).await;
+    listening.close().await;
+    let carol = journey::invited(&admin, tag, "c", "carol").await;
+    carol.io.start_receiving().await.unwrap();
+    let (kept, _) = journey::request_over_transport(&admin, &carol).await;
+    assert!(matches!(kept, Ok(Received::AdmissionRequestKept { .. })), "{kept:?}");
+    journey::propose_admission(&admin, &carol).await;
+    journey::write_and_adopt(&admin).await;
+    let (to_bob, to_carol, _) = tokio::join!(journey::next(&bob.io), journey::next(&carol.io), admin.io.send_organisation(admin.org));
+    assert!(
+        matches!(
+            (&to_bob, &to_carol),
+            (Ok(Received::ProvisionalOrganisationReceived { .. }), Ok(Received::ProvisionalOrganisationReceived { .. }))
+        ),
+        "{to_bob:?} {to_carol:?}"
+    );
+    assert!(matches!(bob.io.verify_all().await.as_slice(), [(_, Verified::Adopted { .. })]));
+    assert!(matches!(carol.io.verify_all().await.as_slice(), [(_, Verified::Adopted { .. })]));
+    journey::revoke(&admin, bob.device_key).await;
+    let (notice, information, _) = tokio::join!(journey::next(&bob.io), journey::next(&carol.io), admin.io.send_organisation(admin.org));
+    assert!(matches!(notice, Ok(Received::RevocationNoticeKept { .. })), "{notice:?}");
+    assert!(matches!(information, Ok(Received::ProvisionalOrganisationReceived { .. })), "kept by Carol, not adopted: {information:?}");
+    assert!(matches!(bob.io.verify_all().await.as_slice(), [(_, Verified::Removed { .. })]));
+    // One acknowledgement, signed once, goes to each recipient org-node chose
+    // (here one of the two, by key order): its body names no recipient.
+    let (_, body) = journey::kept_acknowledgement_bodies(&bob).into_iter().next().unwrap();
+    let (received, read_back) = journey::dialled(&carol.io, &bob.device_key, &body).await;
+    assert!(matches!(received, Err(ReceiveError::Refused(_))), "Carol's record still lists Bob: {received:?}");
+    assert_eq!(read_back, vec![0x01]);
 }
 
-// C's Device relays Bob's acknowledgement to A: refused, as an
-// acknowledgement not from its own Device.
-// verifies: LLR-wvgec4
+// Abnormal: an acknowledgement relayed by another Device is refused.
+// verifies: LLR-j467e9
 #[tokio::test(flavor = "multi_thread")]
 async fn an_acknowledgement_relayed_by_another_device_is_refused() {
     let (_guard, _keychain) = fresh_keychain();
-    let trio = trio("ack-inbound-relayed").await;
-    let body = body_of(&WireMessage::Acknowledgement(trio.acknowledgement.clone()));
-    let (received, read_back) = dialled(&trio.a, &trio.device_carol, trio.direct_a.clone(), &body).await;
-    let refused = refusal(received);
-    assert!(matches!(refused, OrgNodeError::AcknowledgementNotFromItsDevice { org_id } if org_id == trio.org), "{refused:?}");
-    assert_eq!(read_back, vec![Verdict::Refused.as_byte()]);
+    let (admin, _bob, body) = ack_removed("ack-in-relayed").await;
+    let (received, read_back) = journey::dialled(&admin.io, &keep_device_seed([0x63; 32]), &body).await;
+    assert!(matches!(received, Err(ReceiveError::Refused(_))), "{received:?}");
+    assert_eq!(read_back, vec![0x01]);
 }
 
-// A body whose responder is dropped unanswered (here: taken off the receive
-// channel before the receive step) is answered with nothing: the dialler
-// reads no byte, which its sender treats as a refusal.
-// verifies: LLR-unqfj5
+// Abnormal: a body taken off the channel and never
+// answered (its responder dropped) gets no byte back.
+// verifies: LLR-hhgdk7
 #[tokio::test(flavor = "multi_thread")]
 async fn a_dropped_responder_writes_nothing() {
     let (_guard, _keychain) = fresh_keychain();
-    let trio = trio("ack-inbound-dropped").await;
-    let body = body_of(&WireMessage::Acknowledgement(trio.acknowledgement.clone()));
-    let (taken, read_back) = tokio::join!(async { tokio::time::timeout(NET, trio.a.next_inbound_for_test()).await.unwrap() }, async {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        tokio::time::timeout(NET, dial_direct_as(&trio.device_bob, trio.direct_a.clone(), &body)).await.unwrap()
-    });
-    assert_eq!(taken.unwrap(), (trio.device_bob, body), "the body reached the receive channel");
-    // An error is the stream or the connection ending with nothing written.
-    if let Ok(bytes) = read_back {
-        assert!(bytes.is_empty(), "no byte written, read {bytes:?}");
-    }
+    let (admin, bob, body) = ack_removed("ack-in-dropped").await;
+    let addr = journey::address_of(&admin.io).await;
+    let (taken, read_back) = tokio::join!(
+        tokio::time::timeout(NET, admin.io.next_inbound_for_test()),
+        tokio::time::timeout(NET, dial_direct_as(&bob.device_key, addr, &body))
+    );
+    let read_back = read_back.expect("the dial ended in time");
+    assert_eq!(taken.expect("a body taken in time").unwrap().0, bob.device_key);
+    // The dropped responder drops the connection: the dialler reads no byte,
+    // seeing either the stream's end or the connection lost.
+    assert!(read_back.as_ref().map_or(true, Vec::is_empty), "nothing written: {read_back:?}");
+    assert!(matches!(decode_message(&body).unwrap(), WireMessage::Acknowledgement(_)));
 }
 
 // ---- source scans ----------------------------------------------------------------
@@ -312,7 +221,7 @@ fn without_fn(text: &str, name: &str) -> String {
 // No accept-time check of the remote id against a record: the gate is
 // org-node's `check_received`; and the accept is not filtered by whether
 // the path is direct or relayed.
-// verifies: LLR-wvgec4
+// verifies: LLR-j467e9
 #[test]
 fn the_accept_path_has_no_allow_list() {
     let forbidden = [
@@ -356,16 +265,17 @@ fn the_accept_path_has_no_allow_list() {
 }
 
 // The receive side's only write to an inbound stream is the one-byte
-// verdict, followed by `finish`; the sending path (`send_framed`) is the
-// only other write in these files.
-// verifies: LLR-unqfj5
+// verdict, followed by `finish`; the sending paths (`send_framed`, and
+// `send_for_verdict`, the dial that reads the verdict back) are the only
+// other writes in these files.
+// verifies: LLR-hhgdk7
 #[test]
 fn nothing_but_the_verdict_is_written_on_an_inbound_stream() {
     let writes = [".write(", ".write_all(", ".write_chunk", ".write_all_chunks(", "open_uni", "open_bi"];
     let mut verdict_writes = vec![];
     let mut other_writes = vec![];
     for (path, text) in receive_side_sources() {
-        let text = without_fn(&code(&text), "send_framed");
+        let text = without_fn(&without_fn(&code(&text), "send_framed"), "send_for_verdict");
         let lines: Vec<&str> = text.lines().collect();
         for (index, line) in lines.iter().enumerate() {
             let verdict_write = "write_all(&[verdict.as_byte()])";

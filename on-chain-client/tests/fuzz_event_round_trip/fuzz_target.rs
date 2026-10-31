@@ -8,19 +8,14 @@
 //! padding, mis-decoded epoch, a discarded emitting address), not malformed
 //! input.
 //!
-//! **Which requirement this is evidence for, and which it is not** (review
-//! round 1, finding 7b). It was annotated `REQ-sx5b6g` until 2026-09-10, whose
-//! property is that ANY ARBITRARY byte sequence yields `Ok` or a typed `Err`
-//! and never a panic. This target never feeds arbitrary bytes — the paragraph
-//! above says so in its own words — so it could not fail on that property and
-//! the annotation contradicted the file's own header. It now carries
-//! REQ-n6v896, the inversion property it actually asserts, which implements
-//! RC-6gfh8d. `fuzz_parse_revive_event` and `fuzz_decode_org_state` do feed
-//! arbitrary bytes and keep REQ-sx5b6g under RC-8w9wtp. All three already ran
-//! in this unit's `verify_commands` before any of these annotations existed
-//! and carried no `verifies:` reference at all, so `check-trace.sh` credited
-//! them with nothing — evidence that ran at every merge and counted for
-//! nothing.
+//! **Which requirement this is evidence for, and which it is not.** Not
+//! `REQ-sx5b6g`, whose property is that ANY ARBITRARY byte sequence yields
+//! `Ok` or a typed `Err` and never a panic: this target never feeds arbitrary
+//! bytes — the paragraph above says so — so it could not fail on that
+//! property. It carries REQ-n6v896, the inversion property it actually
+//! asserts, which implements RC-6gfh8d. `fuzz_parse_revive_event` and
+//! `fuzz_decode_org_state` do feed arbitrary bytes and carry REQ-sx5b6g under
+//! RC-8w9wtp.
 //!
 //! **What a green run of this target does and does not say.** It is a
 //! `harness = false` binary, so it reports no pass count and no test names.

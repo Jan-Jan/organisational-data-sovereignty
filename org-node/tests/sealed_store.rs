@@ -1,104 +1,66 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! The sealed per-Persona store (SDD-asxwp8; S4, task T3 of
-//! docs/plans/2026-10-06-org-io-transport.md): one store per Persona, sealed
+//! The sealed per-Persona store (SDD-asxwp8): one store per Persona, sealed
 //! under a key derived from that Persona's device secret, given out as
 //! `StoreWrite` bytes and taken back in by `PersonaStore::unseal`. org-node
 //! touches no file: these tests play org-io, holding each returned write as
 //! "the disk" and each secret's bytes as "the keychain".
+//!
+//! A Persona's store is the one `propose_founding` creates, and a founder's
+//! the one its founding's adoption by `verify` leaves; each write tested is
+//! an operation's own. The stores are named by their Device key
+//! (LLR-f9x3vf).
+
+mod support;
 
 use std::path::Path;
 
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use hkdf::Hkdf;
-use org_members::{DevicePublicKey, Handle, MemberId, Name, Surname};
+use org_members::{DevicePublicKey, Handle, MemberId};
+use org_node::invitation::InviteId;
 use org_node::keys::DeviceSecret;
-use org_node::reconcile::Reconciled;
 use org_node::service::{OrgService, StoreChange};
 use org_node::store::{PersonaStore, SealedStore, StoreData, StoreRefusal, StoreWrite};
 use org_node::test_fixtures::{self, ChainSlots};
-use org_node::{ChainAccount, Joiner, OrgNodeError, PersonaId, ProvisionalTarget};
+use org_node::verify_org::{VerificationTime, Verified};
+use org_node::wire::{encode_message, WireMessage};
+use org_node::{ChainAccount, OrgNodeError, PersonaId};
 use rand::rngs::OsRng;
 use sha2::Sha256;
 use zeroize::Zeroizing;
-
-fn h(text: &str) -> Handle {
-    Handle::parse(text).unwrap()
-}
-fn nm(text: &str) -> Name {
-    Name::parse(text).unwrap()
-}
-fn sn(text: &str) -> Surname {
-    Surname::parse(text).unwrap()
-}
-
-/// The seed bytes of `secret`, as org-io's keychain would hold them.
-fn keychain_bytes(secret: &DeviceSecret) -> Vec<u8> {
-    let mut kept = vec![];
-    secret
-        .lend_to_keychain(|bytes| {
-            kept.extend_from_slice(bytes);
-            Ok::<(), std::convert::Infallible>(())
-        })
-        .unwrap();
-    kept
-}
 
 /// A `DeviceSecret` re-made from keychain bytes: what org-io reads back.
 fn from_keychain(bytes: &[u8]) -> DeviceSecret {
     DeviceSecret::from_keychain_bytes(Zeroizing::new(bytes.to_vec())).unwrap()
 }
 
-/// A new Persona on `svc`: its id, its seed bytes (the test's keychain) and
-/// the write that created its store.
+/// A new Persona on `svc`, proposing a founding (`propose_founding`): its
+/// id, its seed bytes (the test's keychain) and the write the operation
+/// returned: the operation's own write, not a store built here and sealed
+/// through the test hook `seal_for_test`.
 fn new_persona(svc: &mut OrgService, handle: &str) -> (PersonaId, Vec<u8>, StoreWrite) {
-    let (persona_id, secret, write) = svc.create_persona(&mut OsRng, h(handle), nm("Test"), sn("User")).unwrap();
-    (persona_id, keychain_bytes(&secret), write)
+    let (device, secret, change) = svc.propose_founding(&mut OsRng, "Test", "User", handle, "Acme".into()).unwrap();
+    let StoreChange::Sealed(write) = change;
+    let persona_id = svc.list_personas().iter().find(|persona| persona.device_key == device).unwrap().persona_id.clone();
+    (persona_id, support::seed_bytes(&secret), write)
 }
 
-/// The plaintext a write sealed: the store it unseals to, re-encoded as the
-/// store encodes it.
-fn plaintext_of(write: &StoreWrite, seed: &[u8]) -> Vec<u8> {
-    let store = PersonaStore::unseal(&write.sealed, write.device_key, from_keychain(seed)).unwrap();
-    postcard::to_allocvec(store.data()).unwrap()
-}
-
-fn nonce_of(write: &StoreWrite) -> Vec<u8> {
-    write.sealed.as_bytes()[..24].to_vec()
-}
-
-fn contains(haystack: &[u8], needle: &[u8]) -> bool {
-    haystack.windows(needle.len()).any(|window| window == needle)
-}
-
-fn joiner(seed: u8, handle: &str) -> Joiner {
-    Joiner {
-        handle: h(handle),
-        name: nm("Join"),
-        surname: sn("Er"),
-        member_key: test_fixtures::member_key(seed),
-        device_key: test_fixtures::device_key(seed + 1),
-    }
-}
-
-/// `pid` founds an Organisation on `svc` over `chain`; returns it and the
-/// two writes (the genesis update kept, the commit).
-fn found(svc: &mut OrgService, chain: &ChainSlots, pid: &PersonaId) -> (org_node::OrgId, Vec<StoreWrite>) {
-    let (update, kept) = svc.create_organisation(&mut OsRng, pid).unwrap();
-    let org_id = chain.apply_genesis(update.resulting_root, update.org_pub_key);
-    let (_, committed) =
-        svc.commit_genesis(&mut OsRng, pid, org_id, ChainAccount::new([0x5a; 32]), chain.get(&org_id)).unwrap();
-    (org_id, vec![kept, committed])
-}
-
-/// The MemberId under which `device` is listed in `svc`'s record of `org_id`.
-fn member_of(svc: &OrgService, org_id: org_node::OrgId, device: DevicePublicKey) -> MemberId {
-    let record = svc.list_orgs().into_iter().find(|record| record.org_id == org_id).unwrap();
-    record.trie_members.iter().find(|member| member.device_keys.contains(&device)).unwrap().id
-}
-
-fn no_secrets(_: &[DevicePublicKey]) -> Vec<DeviceSecret> {
-    panic!("a commit that keeps this node listed must not ask for a device secret")
+/// A new Persona on `svc` whose founding is written on `chain`, its proxy
+/// recorded and the founding adopted (`propose_founding`,
+/// `record_founding_proxy`, `verify`): its id, seed bytes, the adoption's
+/// write and the Organisation.
+fn new_founder(svc: &mut OrgService, chain: &ChainSlots, handle: &str) -> (PersonaId, Vec<u8>, StoreWrite, org_node::OrgId) {
+    let (persona_id, seed, proposed) = new_persona(svc, handle);
+    let device = proposed.device_key;
+    let founding = svc.persona_view(&device).unwrap().founding.expect("a provisional founding");
+    let org_id = chain.apply_genesis(founding.root, founding.org_pub_key);
+    crate::support::unread(svc.record_founding_proxy(&mut OsRng, &device, org_id, support::the_proxy()).unwrap());
+    let (verified, change) =
+        svc.verify(&mut OsRng, &device, chain.get(&org_id), VerificationTime(1), org_node::AheadLimit(1200), crate::support::none_held).unwrap();
+    assert!(matches!(verified, Verified::Adopted { .. }), "{verified:?}");
+    let StoreChange::Sealed(write) = change.expect("the adoption's write");
+    (persona_id, seed, write, org_id)
 }
 
 // ---- LLR-bg538c: unseal ------------------------------------------------------
@@ -110,8 +72,8 @@ fn a_sealed_store_unseals_with_its_secret_and_device_key() {
     let (_, seed, write) = new_persona(&mut svc, "alice");
     let store = PersonaStore::unseal(&write.sealed, write.device_key, from_keychain(&seed)).unwrap();
     assert_eq!(store.device_key(), write.device_key);
-    assert_eq!(store.data().persona.handle.as_str(), "alice");
-    assert_eq!(store.data().persona.device_key, write.device_key);
+    assert_eq!(store.data().unwrap().persona.handle.as_ref().map(Handle::as_str), Some("alice"));
+    assert_eq!(store.data().unwrap().persona.device_key, write.device_key);
 }
 
 // verifies: LLR-bg538c
@@ -153,23 +115,21 @@ fn unseal_refuses_each_malformed_input_with_its_own_error() {
         Err(OrgNodeError::DeviceSecretMismatch)
     ));
 
-    // Sealed under the right key, but bytes that do not decode.
-    let undecodable = test_fixtures::seal_plaintext_for_test(&from_keychain(&seed), device_key, &[0xff; 7], &mut OsRng);
+    // Sealed under the right key, but bytes that do not decode (after the Active form's index).
+    let undecodable =
+        test_fixtures::seal_plaintext_for_test(&from_keychain(&seed), device_key, &[0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff], &mut OsRng);
     assert!(matches!(
         PersonaStore::unseal(&undecodable, device_key, from_keychain(&seed)),
         Err(OrgNodeError::StoreRefused(StoreRefusal::Undecodable))
     ));
 
     // Sealed under the right key, decodes, but names another Device.
-    let mut data: StoreData =
-        PersonaStore::unseal(&write.sealed, device_key, from_keychain(&seed)).unwrap().data().clone();
-    data.persona.device_key = test_fixtures::device_key(0x61);
-    let foreign = test_fixtures::seal_plaintext_for_test(
-        &from_keychain(&seed),
-        device_key,
-        &postcard::to_allocvec(&data).unwrap(),
-        &mut OsRng,
-    );
+    let mut store_data: StoreData =
+        PersonaStore::unseal(&write.sealed, device_key, from_keychain(&seed)).unwrap().data().unwrap().clone();
+    store_data.persona.device_key = test_fixtures::device_key(0x61);
+    let mut foreign_plaintext = vec![0u8]; // the Active form's index (LLR-6zaeb6)
+    foreign_plaintext.extend(postcard::to_allocvec(&store_data).unwrap());
+    let foreign = test_fixtures::seal_plaintext_for_test(&from_keychain(&seed), device_key, &foreign_plaintext, &mut OsRng);
     assert!(matches!(
         PersonaStore::unseal(&foreign, device_key, from_keychain(&seed)),
         Err(OrgNodeError::DeviceSecretMismatch)
@@ -199,12 +159,14 @@ fn the_store_key_is_hkdf_sha256_of_the_seed_under_the_versioned_label() {
     let device_key = secret.device_key();
     let mut svc = OrgService::new(vec![]).unwrap();
     let (_, created_seed, created) = new_persona(&mut svc, "alice");
-    let mut data: StoreData = PersonaStore::unseal(&created.sealed, created.device_key, from_keychain(&created_seed))
+    let mut store_data: StoreData = PersonaStore::unseal(&created.sealed, created.device_key, from_keychain(&created_seed))
         .unwrap()
         .data()
+        .unwrap()
         .clone();
-    data.persona.device_key = device_key;
-    let bytes = postcard::to_allocvec(&data).unwrap();
+    store_data.persona.device_key = device_key;
+    let mut bytes = vec![0u8]; // the Active form's index (LLR-6zaeb6)
+    bytes.extend(postcard::to_allocvec(&store_data).unwrap());
     let sealed = test_fixtures::seal_plaintext_for_test(&secret, device_key, &bytes, &mut OsRng);
     let key = hkdf_key(&seed, &device_key);
     assert_eq!(open_directly(&sealed, &key), bytes);
@@ -222,8 +184,9 @@ fn a_created_store_opens_under_the_hkdf_key_of_its_secret() {
     let mut svc = OrgService::new(vec![]).unwrap();
     let (_, seed, write) = new_persona(&mut svc, "alice");
     let plaintext = open_directly(&write.sealed, &hkdf_key(&seed, &write.device_key));
-    let data: StoreData = postcard::from_bytes(&plaintext).unwrap();
-    assert_eq!(data.persona.handle.as_str(), "alice");
+    // After the Active form's index (LLR-6zaeb6), the store data.
+    let store_data: StoreData = postcard::from_bytes(&plaintext[1..]).unwrap();
+    assert_eq!(store_data.persona.handle.as_ref().map(Handle::as_str), Some("alice"));
 }
 
 /// `plaintext` sealed directly under `key`, with a fresh nonce: a store as a
@@ -234,7 +197,7 @@ fn seal_directly(plaintext: &[u8], key: &[u8; 32]) -> SealedStore {
     SealedStore::from_bytes([nonce.as_slice(), &ciphertext].concat())
 }
 
-// Abnormal (review round 1 of S4, finding-12): a store sealed under a key
+// Abnormal: a store sealed under a key
 // derived any other way than LLR-2qqqx6's — the seed itself, HKDF without
 // the Device-key salt, another salt, another label, the ed25519 secret
 // scalar — does not open (`NotAuthentic`); the same plaintext sealed under
@@ -272,295 +235,23 @@ fn org_node_dir() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
 }
 
-fn rust_sources(dir: &Path, out: &mut Vec<(String, String)>) {
-    for entry in std::fs::read_dir(dir).unwrap() {
-        let path = entry.unwrap().path();
-        if path.is_dir() {
-            rust_sources(&path, out);
-        } else if path.extension().is_some_and(|extension| extension == "rs") {
-            out.push((path.display().to_string(), std::fs::read_to_string(&path).unwrap()));
-        }
-    }
-}
-
 // verifies: LLR-2qqqx6
 #[test]
 fn no_argon2_and_no_passphrase_remain() {
-    let mut files = vec![];
-    rust_sources(&org_node_dir().join("src"), &mut files);
+    let mut files = support::src_rust_files();
     let manifest = org_node_dir().join("Cargo.toml");
-    files.push((manifest.display().to_string(), std::fs::read_to_string(&manifest).unwrap()));
+    let manifest_text = std::fs::read_to_string(&manifest).unwrap();
+    files.push((manifest, manifest_text));
     for (file, text) in files {
         for needle in ["argon2", "Argon2", "passphrase", "APP_SALT"] {
-            assert!(!text.contains(needle), "{file} names `{needle}`");
+            assert!(!text.contains(needle), "{} names `{needle}`", file.display());
         }
     }
 }
 
-// ---- LLR-bvt5up: every change returns its write --------------------------------
+// ---- LLR-f9x3vf: one store per Persona -------------------------------------------
 
-// verifies: LLR-bvt5up
-#[test]
-fn every_mutating_operation_returns_one_store_write_with_a_fresh_nonce() {
-    let chain = ChainSlots::new();
-    let mut svc = OrgService::new(vec![]).unwrap();
-    let (pid, seed, created) = new_persona(&mut svc, "alice");
-    let own = created.device_key;
-    let mut writes = vec![created];
-
-    let (org_id, founded) = found(&mut svc, &chain, &pid);
-    writes.extend(founded);
-
-    // An admission built, discarded, built again and committed.
-    let (update, built) = svc.admit_member(&mut OsRng, org_id, &joiner(0x21, "bob")).unwrap();
-    writes.push(built);
-    writes.push(
-        svc.discard_provisional(&mut OsRng, ProvisionalTarget::Org(org_id), update.resulting_root, update.org_pub_key)
-            .unwrap(),
-    );
-    let (update, built) = svc.admit_member(&mut OsRng, org_id, &joiner(0x21, "bob")).unwrap();
-    writes.push(built);
-    let epoch = svc.list_orgs()[0].epoch;
-    chain.apply_update(org_id, update.resulting_root, update.org_pub_key, epoch).unwrap();
-    let (_, change) = svc.commit_update(&mut OsRng, org_id, chain.get(&org_id), no_secrets).unwrap();
-    let StoreChange::Sealed(committed) = change else { panic!("the commit keeps this node listed") };
-    writes.push(committed);
-
-    // A revocation of the joiner, built.
-    let bob = member_of(&svc, org_id, test_fixtures::device_key(0x22));
-    let (_, built) = svc.revoke_member(&mut OsRng, org_id, bob).unwrap();
-    writes.push(built);
-
-    // An expectation, then a refused operation, then the same expectation.
-    let elsewhere = org_node::OrgId::new([0x77; 20]);
-    let expected = svc.expect_admission(&mut OsRng, &pid, elsewhere).unwrap();
-    let before_refusal = plaintext_of(&expected, &seed);
-    writes.push(expected);
-    assert!(matches!(
-        svc.create_organisation(&mut OsRng, &pid),
-        Err(OrgNodeError::PersonaAlreadyBound { .. })
-    ));
-    let again = svc.expect_admission(&mut OsRng, &pid, elsewhere).unwrap();
-    assert_eq!(plaintext_of(&again, &seed), before_refusal, "the refusal changed nothing");
-    writes.push(again);
-
-    assert_eq!(writes.len(), 10);
-    for write in &writes {
-        assert_eq!(write.device_key, own, "each write is the changed Persona's");
-    }
-    for pair in writes.windows(2) {
-        assert_ne!(nonce_of(&pair[0]), nonce_of(&pair[1]), "consecutive writes reuse no nonce");
-    }
-}
-
-// verifies: LLR-bvt5up
-#[test]
-fn no_sealed_store_holds_the_device_seed() {
-    let chain = ChainSlots::new();
-    let mut svc = OrgService::new(vec![]).unwrap();
-    let (pid, seed, created) = new_persona(&mut svc, "alice");
-    let mut writes = vec![created];
-    let (org_id, founded) = found(&mut svc, &chain, &pid);
-    writes.extend(founded);
-    let (_, built) = svc.admit_member(&mut OsRng, org_id, &joiner(0x21, "bob")).unwrap();
-    writes.push(built);
-    for write in &writes {
-        let plaintext = plaintext_of(write, &seed);
-        assert!(!contains(&plaintext, &seed), "the device seed is not in the store");
-        assert!(!contains(write.sealed.as_bytes(), &seed), "nor in the sealed bytes");
-    }
-}
-
-/// The text of every production `pub fn` in `file` (not gated on
-/// `test-support`) whose signature names `needle`, joined across lines up to
-/// its `{` or `;`.
-fn public_signatures_naming(file: &str, needle: &str) -> Vec<String> {
-    let text = std::fs::read_to_string(org_node_dir().join("src").join(file)).unwrap();
-    let lines: Vec<&str> = text.lines().collect();
-    let mut found = vec![];
-    for (index, line) in lines.iter().enumerate() {
-        let trimmed = line.trim_start();
-        if !(trimmed.starts_with("pub fn ") || trimmed.starts_with("pub async fn ")) {
-            continue;
-        }
-        let test_only = lines[..index]
-            .iter()
-            .rev()
-            .take_while(|above| above.trim_start().starts_with("#[") || above.trim_start().starts_with("///"))
-            .any(|above| above.contains("feature = \"test-support\""));
-        if test_only {
-            continue;
-        }
-        let mut signature = String::new();
-        for continuation in &lines[index..] {
-            let end = continuation.find(['{', ';']);
-            signature.push_str(continuation[..end.unwrap_or(continuation.len())].trim());
-            signature.push(' ');
-            if end.is_some() {
-                break;
-            }
-        }
-        if signature.contains(needle) {
-            found.push(signature);
-        }
-    }
-    found
-}
-
-/// The parameter list of `signature`: between its first `(` and the `)`
-/// that closes it.
-fn parameters(signature: &str) -> &str {
-    let open = signature.find('(').unwrap();
-    let mut depth = 0;
-    for (offset, character) in signature[open..].char_indices() {
-        match character {
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return &signature[open + 1..open + offset];
-                }
-            }
-            _ => {}
-        }
-    }
-    &signature[open + 1..]
-}
-
-fn function_name(signature: &str) -> &str {
-    let after = &signature[signature.find("fn ").unwrap() + 3..];
-    &after[..after.find(['(', '<']).unwrap()]
-}
-
-// verifies: LLR-bvt5up
-#[test]
-fn saving_needs_no_device_secret() {
-    // The operations that may sign S3a's acknowledgements: their secrets
-    // come from the caller's closure, on the signing path only. (*S4 T4,
-    // 2026-10-13:* `commit_checked` replaced the transitional receive pair.)
-    let signing = ["commit_update", "reconcile", "commit_checked"];
-    let mut takers = vec![];
-    for file in ["store.rs", "service.rs"] {
-        for signature in public_signatures_naming(file, "DeviceSecret") {
-            let name = function_name(&signature).to_string();
-            let params = parameters(&signature);
-            if !params.contains("DeviceSecret") {
-                continue;
-            }
-            if signing.contains(&name.as_str()) {
-                let closure_returns = params.matches("-> Vec<DeviceSecret>").count();
-                assert_eq!(
-                    params.matches("DeviceSecret").count(),
-                    closure_returns,
-                    "{file}: `{name}` names DeviceSecret outside its device_secrets closure: {signature}"
-                );
-                assert_eq!(closure_returns, 1, "{file}: `{name}` takes one device_secrets closure");
-            }
-            takers.push(name);
-        }
-    }
-    takers.sort();
-    // *2026-10-14 (S4, task T14):* the transitional `bind_endpoint` left the
-    // list with the endpoint.
-    let mut expected: Vec<String> =
-        ["unseal", "commit_update", "reconcile", "commit_checked"]
-            .iter()
-            .map(|name| name.to_string())
-            .collect();
-    expected.sort();
-    assert_eq!(takers, expected, "only these take a DeviceSecret; create_persona returns one and takes none");
-}
-
-// ---- S3a's signing, over DeviceSecret ------------------------------------------
-
-// verifies: LLR-hby4jr, LLR-uw7nmv
-#[test]
-fn a_commit_that_removes_this_node_signs_with_the_supplied_secret_and_reads_none_otherwise() {
-    let chain = ChainSlots::new();
-    let mut svc = OrgService::new(vec![]).unwrap();
-    let (pid, seed, created) = new_persona(&mut svc, "alice");
-    let own = created.device_key;
-    let (org_id, _) = found(&mut svc, &chain, &pid);
-
-    // An admission keeps this node listed: the closure is never called.
-    let (update, _) = svc.admit_member(&mut OsRng, org_id, &joiner(0x21, "bob")).unwrap();
-    chain.apply_update(org_id, update.resulting_root, update.org_pub_key, svc.list_orgs()[0].epoch).unwrap();
-    let (_, change) = svc.commit_update(&mut OsRng, org_id, chain.get(&org_id), no_secrets).unwrap();
-    assert!(matches!(change, StoreChange::Sealed(_)));
-
-    // Revoking this node's own Member removes it.
-    let alice = member_of(&svc, org_id, own);
-    let (update, _) = svc.revoke_member(&mut OsRng, org_id, alice).unwrap();
-    chain.apply_update(org_id, update.resulting_root, update.org_pub_key, svc.list_orgs()[0].epoch).unwrap();
-
-    // No secret supplied: refused, nothing changed, no store change.
-    let mut asked = vec![];
-    let refused = svc.commit_update(&mut OsRng, org_id, chain.get(&org_id), |keys: &[DevicePublicKey]| {
-        asked.push(keys.to_vec());
-        Vec::new()
-    });
-    assert!(matches!(refused, Err(OrgNodeError::DeviceSecretNotSupplied { .. })));
-    assert_eq!(asked, vec![vec![own]], "asked once, for the bound Persona's Device");
-    assert_eq!(svc.list_personas().len(), 1, "the refusal kept the Persona");
-    assert_eq!(svc.list_orgs().len(), 1, "and the record");
-
-    // The secret supplied: one acknowledgement, verifying under that key.
-    let mut asked = vec![];
-    let (outcome, change) = svc
-        .commit_update(&mut OsRng, org_id, chain.get(&org_id), |keys: &[DevicePublicKey]| {
-            asked.push(keys.to_vec());
-            vec![from_keychain(&seed)]
-        })
-        .unwrap();
-    assert_eq!(asked, vec![vec![own]]);
-    assert_eq!(outcome.acknowledgements.len(), 1);
-    for acknowledgement in &outcome.acknowledgements {
-        assert_eq!(acknowledgement.device, own);
-        let signature = ed25519_dalek::Signature::from_bytes(&acknowledgement.signature.0);
-        own.verifying_key().verify_strict(&acknowledgement.signed_bytes(), &signature).unwrap();
-    }
-    assert!(matches!(change, StoreChange::Forgotten { device_key } if device_key == own));
-}
-
-// verifies: LLR-pba7yu
-#[test]
-fn a_removal_returns_store_change_forgotten_for_that_personas_device_key() {
-    for by_reconcile in [false, true] {
-        let chain = ChainSlots::new();
-        let mut svc = OrgService::new(vec![]).unwrap();
-        let (pid, seed, created) = new_persona(&mut svc, "alice");
-        let own = created.device_key;
-        let (other, _, _) = new_persona(&mut svc, "carol");
-        let other_before = postcard::to_allocvec(svc.store_data(&other).unwrap()).unwrap();
-        let (org_id, _) = found(&mut svc, &chain, &pid);
-        let (update, _) = svc.admit_member(&mut OsRng, org_id, &joiner(0x21, "bob")).unwrap();
-        chain.apply_update(org_id, update.resulting_root, update.org_pub_key, svc.list_orgs()[0].epoch).unwrap();
-        let _kept = svc.commit_update(&mut OsRng, org_id, chain.get(&org_id), no_secrets).unwrap();
-        let alice = member_of(&svc, org_id, own);
-        let (update, _) = svc.revoke_member(&mut OsRng, org_id, alice).unwrap();
-        chain.apply_update(org_id, update.resulting_root, update.org_pub_key, svc.list_orgs()[0].epoch).unwrap();
-
-        let change = if by_reconcile {
-            let (reconciled, change) = svc
-                .reconcile(&mut OsRng, org_id, chain.get(&org_id), |_: &[DevicePublicKey]| vec![from_keychain(&seed)])
-                .unwrap();
-            assert!(matches!(reconciled, Reconciled::Removed { .. }));
-            change.expect("a removal changes the store")
-        } else {
-            svc.commit_update(&mut OsRng, org_id, chain.get(&org_id), |_: &[DevicePublicKey]| vec![from_keychain(&seed)])
-                .unwrap()
-                .1
-        };
-        assert!(matches!(change, StoreChange::Forgotten { device_key } if device_key == own), "by_reconcile {by_reconcile}");
-        assert!(svc.list_personas().iter().all(|persona| persona.persona_id != pid), "the Persona is gone");
-        assert!(svc.list_orgs().is_empty(), "with its Organisation");
-        assert_eq!(postcard::to_allocvec(svc.store_data(&other).unwrap()).unwrap(), other_before, "the other store is unchanged");
-    }
-}
-
-// ---- LLR-rdda86: one store per Persona -------------------------------------------
-
-// verifies: LLR-rdda86
+// verifies: LLR-f9x3vf
 #[test]
 fn two_stores_with_one_device_key_are_refused() {
     let mut svc = OrgService::new(vec![]).unwrap();
@@ -570,21 +261,24 @@ fn two_stores_with_one_device_key_are_refused() {
     assert!(matches!(OrgService::new(vec![first, second]), Err(OrgNodeError::DuplicatePersonaStore)));
 }
 
-// verifies: LLR-rdda86
+// Normal: `build_invite` in one Persona's store changes that store alone.
+// verifies: LLR-f9x3vf
 #[test]
 fn an_operation_changes_only_its_personas_store() {
+    let chain = ChainSlots::new();
     let mut svc = OrgService::new(vec![]).unwrap();
-    let (first, _, first_write) = new_persona(&mut svc, "alice");
-    let (second, _, _) = new_persona(&mut svc, "bob");
-    let second_before = postcard::to_allocvec(svc.store_data(&second).unwrap()).unwrap();
-    let (_, write) = svc.create_organisation(&mut OsRng, &first).unwrap();
+    let (_, _, first_write, _) = new_founder(&mut svc, &chain, "alice");
+    let (_, _, second_write) = new_persona(&mut svc, "bob");
+    let second_before = postcard::to_allocvec(svc.store_data(&second_write.device_key).unwrap()).unwrap();
+    let (_, change) = svc.build_invite(&mut OsRng, &first_write.device_key, "Carol".into(), vec![]).unwrap();
+    let org_node::service::StoreChange::Sealed(write) = change;
     assert_eq!(write.device_key, first_write.device_key, "the write is the first Persona's");
-    assert_eq!(postcard::to_allocvec(svc.store_data(&second).unwrap()).unwrap(), second_before);
-    assert!(svc.genesis_provisional_updates(&second).is_empty());
-    assert_eq!(svc.genesis_provisional_updates(&first).len(), 1);
+    assert_eq!(postcard::to_allocvec(svc.store_data(&second_write.device_key).unwrap()).unwrap(), second_before);
+    assert!(svc.store_data(&second_write.device_key).unwrap().outstanding_invites.is_empty());
+    assert_eq!(svc.store_data(&first_write.device_key).unwrap().outstanding_invites.len(), 1);
 }
 
-// verifies: LLR-rdda86
+// verifies: LLR-f9x3vf
 #[test]
 fn list_personas_returns_one_record_per_store() {
     let mut svc = OrgService::new(vec![]).unwrap();
@@ -593,7 +287,7 @@ fn list_personas_returns_one_record_per_store() {
         created.push(new_persona(&mut svc, handle));
     }
     let listed: Vec<PersonaId> = svc.list_personas().iter().map(|persona| persona.persona_id.clone()).collect();
-    assert_eq!(listed, created.iter().map(|(pid, _, _)| pid.clone()).collect::<Vec<_>>());
+    assert_eq!(listed, created.iter().map(|(persona_id, _, _)| persona_id.clone()).collect::<Vec<_>>());
 
     // Reopened from the writes: the same Personas, one store each.
     let stores = created
@@ -605,92 +299,328 @@ fn list_personas_returns_one_record_per_store() {
     assert_eq!(relisted, listed);
 }
 
-// Normal and abnormal (S4, task T9; LLR-rdda86's note of 2026-10-13): org-io
-// puts back a Persona's store as its file holds it after a failed write, and
-// takes one out when the keychain refused its new Persona; one store per
-// Device key either way, and the other stores untouched.
-// verifies: LLR-rdda86
+// Normal and abnormal: org-io puts back a Persona's store as its file holds
+// it after a failed write, and takes one out when the keychain refused its
+// new Persona; one store per Device key either way, and the other stores
+// untouched. The store runs ahead of its file by `build_invite`.
+// verifies: LLR-f9x3vf
 #[test]
 fn restore_store_replaces_or_adds_one_store_and_drop_store_removes_one() {
+    let chain = ChainSlots::new();
     let mut svc = OrgService::new(vec![]).unwrap();
-    let (alice, alice_seed, alice_created) = new_persona(&mut svc, "alice");
-    let (bob, bob_seed, bob_created) = new_persona(&mut svc, "bob");
-    let org_id = org_node::OrgId::new([0x07; 20]);
-    let _ahead = svc.expect_admission(&mut OsRng, &alice, org_id).unwrap();
-    let bob_before = format!("{:?}", svc.store_data(&bob).unwrap());
+    let (_, alice_seed, alice_created, _) = new_founder(&mut svc, &chain, "alice");
+    let (_, bob_seed, bob_created) = new_persona(&mut svc, "bob");
+    let (alice, bob) = (alice_created.device_key, bob_created.device_key);
+    let (_invite, ahead) = svc.build_invite(&mut OsRng, &alice, "Carol".into(), vec![]).unwrap();
+    support::unread(ahead);
+    // Compared as encoded bytes, which hold the secret fields `Debug` redacts.
+    let bob_before = support::encoded_store(&svc, &bob);
 
     // The store as its file held it replaces the one that ran ahead.
-    let alice_on_disk = PersonaStore::unseal(&alice_created.sealed, alice_created.device_key, from_keychain(&alice_seed)).unwrap();
+    let alice_on_disk = PersonaStore::unseal(&alice_created.sealed, alice, from_keychain(&alice_seed)).unwrap();
     svc.restore_store(alice_on_disk);
     assert_eq!(svc.list_personas().len(), 2, "replaced, not added");
-    assert!(svc.store_data(&alice).unwrap().expected_admissions.is_empty(), "the store is the file's again");
-    assert_eq!(format!("{:?}", svc.store_data(&bob).unwrap()), bob_before, "another Persona's store is untouched");
+    assert!(svc.store_data(&alice).unwrap().outstanding_invites.is_empty(), "the store is the file's again");
+    assert_eq!(support::encoded_store(&svc, &bob), bob_before, "another Persona's store is untouched");
 
     // Dropped, and dropped again: the second finds nothing.
-    assert!(svc.drop_store(&bob_created.device_key));
-    assert!(!svc.drop_store(&bob_created.device_key));
-    assert!(svc.store_data(&bob).is_none());
+    assert!(svc.drop_store(&bob));
+    assert!(!svc.drop_store(&bob));
+    assert_eq!(svc.store_data(&bob).err(), Some(OrgNodeError::PersonaNotHeld { device_key: Box::new(bob) }));
     assert_eq!(svc.list_personas().len(), 1);
 
     // A store the service does not hold is added back.
-    let bob_on_disk = PersonaStore::unseal(&bob_created.sealed, bob_created.device_key, from_keychain(&bob_seed)).unwrap();
+    let bob_on_disk = PersonaStore::unseal(&bob_created.sealed, bob, from_keychain(&bob_seed)).unwrap();
     svc.restore_store(bob_on_disk);
     assert_eq!(svc.list_personas().len(), 2);
-    assert_eq!(format!("{:?}", svc.store_data(&bob).unwrap()), bob_before);
+    assert_eq!(support::encoded_store(&svc, &bob), bob_before);
 }
 
-// ---- LLR-e5kqhg: create_persona --------------------------------------------------
-
-// verifies: LLR-e5kqhg
+// Abnormal: a Device key no held store's Persona has is refused with
+// `PersonaNotHeld` by every per-store operation, and so is a Persona no
+// store holds; the held stores are read and changed by none of them.
+// Normal: each held store is found by its own key. The refusals are the
+// operations' own, not the test-support accessor's, and "no store was
+// changed" compares encoded bytes.
+// verifies: LLR-f9x3vf
 #[test]
-fn create_persona_returns_the_secret_and_keeps_only_the_public_key() {
+fn an_unknown_device_key_is_refused_as_persona_not_held() {
+    let chain = ChainSlots::new();
     let mut svc = OrgService::new(vec![]).unwrap();
-    let (pid, secret, write) = svc.create_persona(&mut OsRng, h("alice"), nm("A"), sn("U")).unwrap();
-    let record = svc.list_personas().into_iter().find(|persona| persona.persona_id == pid).unwrap().clone();
-    assert_eq!(secret.device_key(), record.device_key);
-    assert_eq!(write.device_key, record.device_key);
-    let (_, device_key) = svc.persona_public_keys(&pid).unwrap();
-    assert_eq!(device_key, secret.device_key());
+    let (alice, _, alice_write, org_id) = new_founder(&mut svc, &chain, "alice");
+    let (_, _, bob_write) = new_persona(&mut svc, "bob");
+    let held = [alice_write.device_key, bob_write.device_key];
+    let before: Vec<Vec<u8>> = held.iter().map(|key| support::encoded_store(&svc, key)).collect();
+    let unknown = test_fixtures::device_key(0x7e);
+    let peer = test_fixtures::device_key(0x7d);
+    let body = encode_message(&WireMessage::OrganisationRequest { org_id, addresses: vec![] }).unwrap();
+    let refusals: Vec<(&str, Result<(), OrgNodeError>)> = vec![
+        ("record_founding_proxy", svc.record_founding_proxy(&mut OsRng, &unknown, org_id, ChainAccount::new([1; 32])).map(|_| ())),
+        ("check_received", svc.check_received(&mut OsRng, &unknown, peer, &body).map(|_| ())),
+        ("verify", svc.verify(&mut OsRng, &unknown, chain.get(&org_id), VerificationTime(2), org_node::AheadLimit(1200), crate::support::none_held).map(|_| ())),
+        ("build_invite", svc.build_invite(&mut OsRng, &unknown, "Y".into(), vec![]).map(|_| ())),
+        ("build_admission_request", svc.build_admission_request(&unknown, vec![]).map(|_| ())),
+        ("build_organisation_request", svc.build_organisation_request(&unknown, vec![]).map(|_| ())),
+        ("cancel_invite", svc.cancel_invite(&mut OsRng, &unknown, InviteId::new([1; 32])).map(|_| ())),
+        ("record_admission", svc.record_admission(&mut OsRng, &unknown, InviteId::new([1; 32]), None).map(|_| ())),
+        ("record_revocation", svc.record_revocation(&mut OsRng, &unknown, MemberId::new([1; 32])).map(|_| ())),
+        ("propose_updated_organisation", svc.propose_updated_organisation(&mut OsRng, &unknown).map(|_| ())),
+        ("messages_for_current_epoch", svc.messages_for_current_epoch(&unknown).map(|_| ())),
+        ("provisional_changes", svc.provisional_changes(&unknown).map(|_| ())),
+        ("provisional_organisations", svc.provisional_organisations(&unknown).map(|_| ())),
+        ("admission_requests", svc.admission_requests(&unknown).map(|_| ())),
+        ("persona_view", svc.persona_view(&unknown).map(|_| ())),
+        ("addresses_for", svc.addresses_for(&unknown, peer).map(|_| ())),
+        ("acknowledgement_accepted", svc.acknowledgement_accepted(&mut OsRng, &unknown, peer).map(|_| ())),
+        ("kept_acknowledgements", svc.kept_acknowledgements(&unknown).map(|_| ())),
+    ];
+    for (operation, refused) in refusals {
+        assert_eq!(refused, Err(OrgNodeError::PersonaNotHeld { device_key: Box::new(unknown) }), "{operation}");
+    }
+    let nobody = PersonaId::new("nobody".into());
+    assert_eq!(
+        svc.persona_public_keys(&nobody).map(|_| ()),
+        Err(OrgNodeError::PersonaIdNotHeld { persona_id: nobody.clone() }),
+        "persona_public_keys"
+    );
+    assert_eq!(svc.persona_view(&alice_write.device_key).unwrap().device_key, alice_write.device_key);
+    assert_eq!(svc.persona_public_keys(&alice).unwrap().1, alice_write.device_key, "each held store by its own key");
+    let after: Vec<Vec<u8>> = held.iter().map(|key| support::encoded_store(&svc, key)).collect();
+    assert_eq!(after, before, "no store was changed");
 }
 
-/// A random source that returns one byte for ever: two draws from two of
-/// them give the same seed.
-struct ConstRng(u8);
+// ---- LLR-ay8nvu: one store change per operation ----------------------------------
+//
+// The properties stated over every store-changing operation.
+mod store_change_properties {
+    use org_members::{DevicePublicKey, MemberId, Name, PersonPublicKey, Surname};
+    use org_node::ids::OrgId;
+    use org_node::invitation::{EndpointAddresses, Invite, InviteId};
+    use org_node::revocation::RevocationNotice;
+    use org_node::service::{Checked, OrgService};
+    use org_node::store::{MemberSnapshot, OrgRecord, OrgRecordParts, PersonaStore, StoreWrite};
+    use org_node::test_fixtures::{device_key, device_secret, member_key};
+    use org_node::verify_org::{VerificationTime, Verified};
+    use org_node::wire::{encode_message, WireMessage};
+    use org_node::{ChainAccount, OrgNodeError, OrgPrivateKey, OrgState};
+    use rand::rngs::OsRng;
 
-impl rand::RngCore for ConstRng {
-    fn next_u32(&mut self) -> u32 {
-        u32::from_le_bytes([self.0; 4])
-    }
-    fn next_u64(&mut self) -> u64 {
-        u64::from_le_bytes([self.0; 8])
-    }
-    fn fill_bytes(&mut self, dest: &mut [u8]) {
-        dest.fill(self.0);
-    }
-    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand::Error> {
-        dest.fill(self.0);
-        Ok(())
-    }
-}
+    use super::support::fixtures::{acme_store, alice, alice_persona, own, record_parts, sealed, service, snapshot, OWN};
+    use super::support::{contains, none_held, handle, secret_copy, seed_bytes, the_org, trie_of_members};
 
-impl rand::CryptoRng for ConstRng {}
+    /// An Admin's Active store: a record at epoch 3 listing this Device (Alice) and Bob, with a proxy.
+    fn admin() -> OrgService {
+        let record = OrgRecord::from(OrgRecordParts {
+            proxy_account: Some(ChainAccount::new([0x55; 32])),
+            ..record_parts(3, &[alice(), snapshot(2, "bob", 0x11, &[0x21])])
+        });
+        service(OWN, acme_store(alice_persona(), record))
+    }
+    fn request(invite: &Invite, member: u8, device: u8) -> Vec<u8> {
+        let member_key: PersonPublicKey = member_key(member);
+        encode_message(&WireMessage::AdmissionRequest {
+            org_id: invite.org_id,
+            invite_id: invite.invite_id,
+            name: Name::parse("Carol").unwrap(),
+            surname: Surname::parse("King").unwrap(),
+            preferred_handles: vec![handle("carol")],
+            member_key,
+            device_key: device_key(device),
+            addresses: vec![],
+        })
+        .unwrap()
+    }
+    fn nonce(write: &StoreWrite) -> [u8; 24] {
+        write.sealed.as_bytes()[..24].try_into().unwrap()
+    }
 
-// Abnormal: the random source repeats, so the second Persona's device seed
-// is one the service already holds a store for. Refused with
-// `DuplicatePersonaStore`, no write, and the service keeps one Persona, the
-// first (S4, task T23).
-// verifies: LLR-e5kqhg
-#[test]
-fn create_persona_refuses_a_seed_whose_store_is_already_held_and_keeps_nothing() {
-    let mut svc = OrgService::new(vec![]).unwrap();
-    let (first, secret, _) = svc.create_persona(&mut ConstRng(0x42), h("alice"), nm("A"), sn("U")).unwrap();
-    let refused = svc.create_persona(&mut ConstRng(0x42), h("bob"), nm("B"), sn("U"));
-    assert!(matches!(refused, Err(OrgNodeError::DuplicatePersonaStore)), "{:?}", refused.map(|(pid, _, _)| pid));
-    let personas = svc.list_personas();
-    assert_eq!(personas.len(), 1, "nothing kept for the refused Persona");
-    assert_eq!((&personas[0].persona_id, personas[0].device_key), (&first, secret.device_key()));
-    // The contrast: another seed is a second Persona.
-    let (_, other, _) = svc.create_persona(&mut ConstRng(0x43), h("bob"), nm("B"), sn("U")).unwrap();
-    assert_ne!(other.device_key(), secret.device_key());
-    assert_eq!(svc.list_personas().len(), 2);
+
+    // verifies: LLR-ay8nvu
+    #[test]
+    fn every_store_changing_operation_returns_one_sealed_change_with_a_fresh_nonce() {
+        let mut svc = admin();
+        let mut writes: Vec<(&str, StoreWrite)> = vec![];
+
+        let (invite, change) = svc.build_invite(&mut OsRng, &own(), "Carol".into(), vec![]).unwrap();
+        writes.push(("build_invite", sealed(change)));
+        let (checked, change) =
+            svc.check_received(&mut OsRng, &own(), device_key(0x22), &request(&invite, 0x12, 0x22)).unwrap();
+        assert!(matches!(checked, Checked::AdmissionRequest { .. }));
+        writes.push(("check_received", sealed(change.expect("an accepted request is kept"))));
+        writes.push(("record_admission", sealed(svc.record_admission(&mut OsRng, &own(), invite.invite_id, None).unwrap())));
+        writes.push(("record_revocation", sealed(svc.record_revocation(&mut OsRng, &own(), MemberId::new([2; 32])).unwrap())));
+        writes.push(("propose_updated_organisation", sealed(svc.propose_updated_organisation(&mut OsRng, &own()).unwrap())));
+        let (second, change) = svc.build_invite(&mut OsRng, &own(), "Dave".into(), vec![]).unwrap();
+        writes.push(("build_invite", sealed(change)));
+        let (_, change) = svc.check_received(&mut OsRng, &own(), device_key(0x23), &request(&second, 0x13, 0x23)).unwrap();
+        writes.push(("check_received", sealed(change.unwrap())));
+        writes.push(("cancel_invite", sealed(svc.cancel_invite(&mut OsRng, &own(), second.invite_id).unwrap())));
+        let proposal =
+            svc.provisional_organisations(&own()).unwrap().into_iter().find(|view| view.current_proposal).unwrap();
+        let state = OrgState::from_chain(*proposal.root.as_bytes(), *proposal.org_pub_key.as_bytes(), proposal.epoch.get()).unwrap();
+        let (verified, change) = svc.verify(&mut OsRng, &own(), Some(state), VerificationTime(1), org_node::AheadLimit(1200), none_held).unwrap();
+        assert!(matches!(verified, Verified::Adopted { .. }));
+        writes.push(("verify", sealed(change.unwrap())));
+        for (name, write) in &writes {
+            assert_eq!(write.device_key, own(), "{name}: the changed Persona's store");
+        }
+
+        // The founding, its proxy and a provisional Member: one sealed change each, for the new store.
+        let (founder, founder_secret, change) = svc.propose_founding(&mut OsRng, "Fay", "Fox", "fay", "Fox Co".into()).unwrap();
+        let founded = sealed(change);
+        assert_eq!(founded.device_key, founder);
+        writes.push(("propose_founding", founded));
+        let proxy = sealed(
+            svc.record_founding_proxy(&mut OsRng, &founder, OrgId::new([0xbb; 20]), ChainAccount::new([0x56; 32])).unwrap(),
+        );
+        assert_eq!(proxy.device_key, founder);
+        writes.push(("record_founding_proxy", proxy));
+        let other = Invite {
+            org_name: "Elsewhere".into(),
+            org_id: OrgId::new([0xcc; 20]),
+            invitee_name: "Gil".into(),
+            issuer: device_key(5),
+            issuer_addresses: EndpointAddresses::parse(vec![]).unwrap(),
+            invite_id: InviteId::new([7; 32]),
+        };
+        let (member, member_secret, change) = svc.propose_member(&mut OsRng, &other, "Gil", "Gray", &["gil"]).unwrap();
+        let joined = sealed(change);
+        assert_eq!(joined.device_key, member);
+        writes.push(("propose_member", joined));
+
+        // The removal and an accepted acknowledgement. Carol, now listed, sends a notice of this Device's removal, which is kept;
+        // `verify` accepts it against a later state whose root lists Carol alone, and seals the removed
+        // store with one acknowledgement, for Carol; Carol's acceptance of it seals the removed store again.
+        let record = svc.persona_view(&own()).unwrap().record.expect("the adopted record");
+        let others: Vec<MemberSnapshot> =
+            record.members.iter().filter(|member| !member.device_keys.contains(&own())).cloned().collect();
+        let without = trie_of_members(&others);
+        let proof = without.prove_absent(&MemberId::new([1; 32]), &own()).unwrap();
+        let notice = RevocationNotice { org_id: the_org(), member_id: MemberId::new([1; 32]), device: own(), proof };
+        let (checked, change) =
+            svc.check_received(&mut OsRng, &own(), device_key(0x22), &encode_message(&WireMessage::Revocation(notice)).unwrap()).unwrap();
+        assert!(matches!(checked, Checked::RevocationNoticeKept), "{checked:?}");
+        writes.push(("check_received", sealed(change.expect("the kept notice is sealed"))));
+        let later = OrgState::from_chain(
+            *without.root_hash().unwrap().as_bytes(),
+            *OrgPrivateKey::from([0x64; 32]).x25519_keypair().org_public_key().unwrap().as_bytes(),
+            record.epoch.get() + 1,
+        )
+        .unwrap();
+        let (verified, change) =
+            svc.verify(&mut OsRng, &own(), Some(later), VerificationTime(2), org_node::AheadLimit(1200), |_: &[DevicePublicKey]| vec![device_secret([OWN; 32])]).unwrap();
+        assert!(matches!(verified, Verified::Removed { acknowledgements_kept: 1, .. }), "{verified:?}");
+        let removal = sealed(change.expect("the removed store is sealed"));
+        assert_eq!(removal.device_key, own());
+        writes.push(("verify (removal)", removal));
+        let (left, change) = svc.acknowledgement_accepted(&mut OsRng, &own(), device_key(0x22)).unwrap();
+        assert_eq!(left, 0);
+        let accepted = sealed(change);
+        assert_eq!(accepted.device_key, own(), "acknowledgement_accepted: the removed Persona's store");
+        writes.push(("acknowledgement_accepted", accepted));
+
+        // Each write opens under the key of its own store's Device secret.
+        for (name, write) in &writes {
+            let secret = match write.device_key {
+                device if device == own() => device_secret([OWN; 32]),
+                device if device == founder => secret_copy(&founder_secret),
+                device if device == member => secret_copy(&member_secret),
+                device => panic!("{name}: a write for an unexpected store {device:?}"),
+            };
+            assert!(PersonaStore::unseal(&write.sealed, write.device_key, secret).is_ok(), "{name}: sealed under its store's key");
+        }
+        let mut nonces: Vec<[u8; 24]> = writes.iter().map(|(_, write)| nonce(write)).collect();
+        nonces.sort();
+        nonces.dedup();
+        assert_eq!(nonces.len(), writes.len(), "every write draws a fresh 24-byte nonce");
+    }
+
+    // verifies: LLR-ay8nvu
+    #[test]
+    fn store_change_has_no_forgotten_variant_and_a_refusal_returns_none() {
+        let service_rs =
+            std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/service.rs")).unwrap();
+        let start = service_rs.find("pub enum StoreChange").expect("StoreChange is defined in service.rs");
+        let body = &service_rs[start..start + service_rs[start..].find('}').unwrap()];
+        let variants: Vec<&str> =
+            body.lines().skip(1).map(str::trim).filter(|line| !line.is_empty() && !line.starts_with("//")).collect();
+        assert_eq!(variants, ["Sealed(StoreWrite),"], "one variant, Sealed; no Forgotten");
+        assert!(
+            service_rs[..start].trim_end().lines().rev().take(3).any(|line| line.contains("#[must_use")),
+            "StoreChange is #[must_use]"
+        );
+
+        let mut svc = admin();
+        let before = postcard::to_allocvec(svc.store_data(&own()).unwrap()).unwrap();
+        assert!(matches!(
+            svc.record_revocation(&mut OsRng, &own(), MemberId::new([0x77; 32])),
+            Err(OrgNodeError::MemberNotHeld { .. })
+        ));
+        assert!(svc.propose_updated_organisation(&mut OsRng, &own()).is_err(), "no provisional change");
+        assert!(svc.cancel_invite(&mut OsRng, &own(), InviteId::new([0x39; 32])).is_err());
+        let in_step = OrgState::from_chain(
+            *svc.store_data(&own()).unwrap().record.as_ref().unwrap().root_hash.as_bytes(),
+            *OrgPrivateKey::from([0x60; 32]).x25519_keypair().org_public_key().unwrap().as_bytes(),
+            3,
+        )
+        .unwrap();
+        let (verified, change) = svc.verify(&mut OsRng, &own(), Some(in_step), VerificationTime(2), org_node::AheadLimit(1200), none_held).unwrap();
+        assert!(matches!(verified, Verified::InStep));
+        assert!(change.is_none(), "an outcome that changes nothing returns no StoreChange");
+        assert_eq!(postcard::to_allocvec(svc.store_data(&own()).unwrap()).unwrap(), before);
+    }
+
+    // Normal: neither `build_invite`'s write nor `propose_founding`'s holds
+    // the Device seed, sealed or in plaintext.
+    // verifies: LLR-ay8nvu
+    #[test]
+    fn no_sealed_store_holds_the_device_seed() {
+        let mut svc = admin();
+        let seed = [OWN; 32];
+        let (_, change) = svc.build_invite(&mut OsRng, &own(), "Carol".into(), vec![]).unwrap();
+        let (founder, secret, founded) = svc.propose_founding(&mut OsRng, "Fay", "Fox", "fay", "Fox Co".into()).unwrap();
+        let founder_seed = seed_bytes(&secret);
+        for (write, write_seed, write_secret) in [
+            (sealed(change), seed.to_vec(), device_secret(seed)),
+            (sealed(founded), founder_seed, secret_copy(&secret)),
+        ] {
+            assert!(!contains(write.sealed.as_bytes(), &write_seed), "no seed in the sealed bytes");
+            let opened = PersonaStore::unseal(&write.sealed, write.device_key, write_secret).unwrap();
+            let plaintext = postcard::to_allocvec(opened.content()).unwrap();
+            assert!(!contains(&plaintext, &write_seed), "nor in the plaintext");
+        }
+        assert_eq!(svc.store_data(&founder).unwrap().persona.device_key, founder, "the store keeps the public key alone");
+    }
+
+    // Normal: the only takers of a DeviceSecret are `unseal`, the two
+    // proposals that return a new Device's secret, and `verify`, whose one
+    // mention is its device_secrets closure; sealing takes none.
+    // verifies: LLR-ay8nvu
+    #[test]
+    fn saving_needs_no_device_secret() {
+        let mut takers = vec![];
+        for file in ["store.rs", "service.rs"] {
+            for signature in super::support::public_signatures(file) {
+                if !signature.contains("DeviceSecret") {
+                    continue;
+                }
+                let name = &signature["pub fn ".len()..];
+                takers.push(name[..name.find(['(', '<']).unwrap()].to_string());
+                if name.starts_with("verify") {
+                    assert_eq!(
+                        signature.matches("DeviceSecret").count(),
+                        1,
+                        "verify names DeviceSecret only in its closure: {signature}"
+                    );
+                    assert!(signature.contains("-> Vec<DeviceSecret>"));
+                }
+            }
+        }
+        takers.sort();
+        assert_eq!(
+            takers,
+            ["propose_founding", "propose_member", "unseal", "verify"],
+            "only these take or return a DeviceSecret; sealing takes none"
+        );
+    }
 }

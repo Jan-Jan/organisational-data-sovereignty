@@ -189,6 +189,13 @@ deletes, with the check every other node runs on one it receives, under a
 signing domain of its own and using no chain state. Pure functions over
 values: no chain read, no transport, no file.
 traces: REQ-ps2gy2, REQ-qrtsc9, REQ-m2xh8q, REQ-em28bq, REQ-y99c9w, REQ-uxv2x2, REQ-b462sh
+superseded-by: SDD-73emgx
+
+*Superseded 2026-10-20 (change `worktree-org-io-domain-api`, owner ruling
+Q4' of 2026-10-16):* an accepted notice no longer leaves a store without the
+Organisation and acknowledgements held by no one; the acknowledgements are
+kept in the removed store (REQ-48zc3e). SDD-73emgx restates the module's
+responsibility.
 
 **LLR-kr5t6f**: `revocation::notices_for(previous: &OrgRecord, committed:
 &OrgRecord, committed_trie: &Trie) -> Result<Vec<RevocationNotice>,
@@ -246,6 +253,13 @@ when `notice.proof.verify(&chain.root_hash, &notice.member_id,
 or the Device still held. A `chain.epoch` equal to the record's is accepted
 (RC-ub82my: at its own epoch a listed Device has no valid proof).
 satisfies: REQ-m2xh8q
+superseded-by: LLR-rhsfw9
+
+*Superseded 2026-10-22 (change `worktree-org-io-domain-api`, plan detail
+pass, dispatcher decision):* `accept` now only decides, with no seed source,
+and returns `()`; `verify` signs (LLR-jhy6t6, LLR-5tvn7g). Every refusal
+above, `ChainStateConflict` included, is kept in the same order (LLR-
+rhsfw9).
 
 *Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
 Called from `commit_checked`, with the state org-io read for the checked
@@ -275,6 +289,7 @@ both as `Accepted { store, acknowledgements }`. The successor holds no
 acknowledgement and no key of a Persona bound to that Organisation, and no
 device seed passed in outlives the call.
 satisfies: REQ-y99c9w, REQ-uxv2x2
+superseded-by: LLR-5tvn7g
 
 *Amended 2026-10-08 (S4, task T3 of
 docs/plans/2026-10-06-org-io-transport.md):* the secret source takes the
@@ -286,6 +301,7 @@ the store's one Persona.
 successor and no acknowledgement is produced, and the `StoreData` passed in
 is borrowed immutably and so unchanged.
 satisfies: REQ-m2xh8q, REQ-em28bq
+superseded-by: LLR-f9mcsq
 
 *Amended 2026-10-08 (S4, task T3 of
 docs/plans/2026-10-06-org-io-transport.md):* the secret source is
@@ -303,6 +319,7 @@ transport, endpoint or file-system function; the `absences` test reads these
 files' source for those names. This LLR also constrains SDD-8cpyfa's
 reconcile.
 satisfies: REQ-qrtsc9, REQ-m2xh8q, REQ-em28bq, REQ-b462sh, REQ-tb4f8p
+superseded-by: LLR-g2jeqd
 
 ### The acknowledgement, in the same module
 
@@ -313,6 +330,7 @@ encoding of the tuple `(org_id, member_id, device, epoch, root)`;
 `signature` is the 64-byte Ed25519 signature over them. No other message
 org-node signs or verifies begins with `ACK_DOMAIN`.
 satisfies: REQ-y99c9w, REQ-b462sh
+superseded-by: LLR-bs6yxf
 
 **LLR-hby4jr**: `revocation::sign_acknowledgements(store: &StoreData, org_id: OrgId,
 verified: &OrgState, device_seeds: Vec<DeviceSeed>) ->
@@ -334,6 +352,7 @@ seed is cloned, returned or kept, and a seed matching no such Persona is
 unused. The returned values hold no secret key and no other Organisation
 data.
 satisfies: REQ-y99c9w
+superseded-by: LLR-5tvn7g
 
 *Revised 2026-10-07 (owner rulings recorded by stage S4: the device seed
 lives only in the OS keychain and org-node receives it transiently for
@@ -442,6 +461,7 @@ that names `org_id` (owner ruling of 2026-10-06 on retention). Every other
 record, Persona, provisional update and expected admission is in the copy
 unchanged and in its original order.
 satisfies: REQ-uxv2x2, REQ-em28bq
+superseded-by: LLR-2d5a7m
 
 *Note 2026-10-07.* It replaces the private `OrgService::forget_organisation`
 of the merged key-pair change, which marked the Personas Revoked. Under S4's
@@ -474,6 +494,7 @@ verified, replacing any earlier one. It is never larger than `MAX_FRAME`,
 because it is the Change set of a received frame or of a provisional update
 bounded by `MAX_PROVISIONAL_BYTES`; it is sent to nobody in this change.
 satisfies: REQ-uv3v5w
+superseded-by: LLR-p8vpgz
 
 *Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, review
 finding-1 of round 1).* This said `None` also "on a record … a first
@@ -501,6 +522,7 @@ root); `RevocationProofRefused { org_id, cause: OrgMembersError }`, whose
 `AcknowledgementFromFuture { org_id }`; `AcknowledgementForListedDevice {
 org_id }`; and `AcknowledgementSignatureInvalid { org_id }`.
 satisfies: REQ-m2xh8q, REQ-b462sh, REQ-tb4f8p, REQ-y99c9w, REQ-3dsweu
+superseded-by: LLR-3sddey
 
 *Revised 2026-10-07 (re-survey after the key-pair change merged).* This
 listed eight; `DeviceSecretNotSupplied` follows from the transient device
@@ -534,6 +556,7 @@ stored provisional update for `org_id` whose `resulting_root` and
 of LLR-fm38ww; greater epoch and no such update → `Behind { chain_epoch }`.
 `InStep`, `Behind` and every refusal carry no successor store.
 satisfies: REQ-tb4f8p
+superseded-by: LLR-rr558z
 
 *Amended 2026-10-08 (S4, task T3 of
 docs/plans/2026-10-06-org-io-transport.md):* the seed source is
@@ -552,6 +575,7 @@ Persona bound to that Organisation, `Removed { store, acknowledgements }`
 built as LLR-r8qhky builds `Accepted`, with `chain` as the verified state.
 A refusal of that step is returned as the error, with no successor.
 satisfies: REQ-tb4f8p, REQ-uxv2x2
+superseded-by: LLR-34c5y3
 
 **LLR-a8z7r5**: `CommitOutcome` gains `revocations: Vec<RevocationNotice>`,
 which `commit_update` and `reconcile` fill with `notices_for(previous record,
@@ -559,6 +583,7 @@ committed record, committed trie)` (LLR-kr5t6f), so the notices org-io sends
 are those of exactly the committed update; a received update's commit
 produces none, since only the node that built an update fans it out.
 satisfies: REQ-ps2gy2
+superseded-by: LLR-degg8t
 
 *Amended 2026-10-13 (S4, task T5 of `docs/plans/2026-10-06-org-io-transport.md`):*
 the notices become bodies and the `revocations` field goes. `commit_update`
@@ -598,6 +623,7 @@ it: it is accepted from any sender and verified against the chain
 and absent from the verified update's record (a Member relaying its own
 removal) passes.
 satisfies: REQ-uk9rw7
+superseded-by: LLR-283x6f
 
 *Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
 The sender now arrives as `check_received`'s `sender` argument, from org-io,
@@ -623,6 +649,7 @@ sender `receive_one` returned is in no member snapshot's `device_keys` of the
 record of `notice.org_id`; the refusal reads no chain, never calls the seed
 source, writes nothing and saves nothing.
 satisfies: REQ-ea4qs5
+superseded-by: LLR-283x6f
 
 *Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
 The sender now arrives as `check_received`'s `sender` argument, from org-io;
@@ -643,6 +670,7 @@ neither path applies LLR-2r2fha's or LLR-kzgjz8's check to an
 acknowledgement, whose sender is by design a Device the record no longer
 lists. No chain read, no write.
 satisfies: REQ-b462sh
+superseded-by: LLR-5wg8cu
 
 *Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
 The sender now arrives as `check_received`'s `sender` argument, from org-io;

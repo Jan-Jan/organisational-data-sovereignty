@@ -136,6 +136,13 @@ either alone leaves the other.
 address when the transport mode is not Loopback, and shall require a peer
 address only when it is Loopback. (implements: RC-jrkn7w)
 satisfies: derived
+retired: 2026-10-20 — addresses now come with the Invite, the admission request and the organisation request and are kept per Device key (owner answer A2, change worktree-org-io-domain-api)
+
+*Note 2026-10-20 (change `worktree-org-io-domain-api`):* with no peer
+address taken anywhere in the app, there is no precondition left to derive
+from the transport mode. RC-jrkn7w keeps its other in-force implementer,
+REQ-he8ejb (the member identifier is checked before any command); REQ-645jq9
+and REQ-sjkp8z, which the control's note also names, stay in force.
 
 The frontend's obligation, and the one that reopens the safety action. Today
 `Revoke.svelte` rejects an empty `peerAddrBlob` unconditionally

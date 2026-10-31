@@ -1,27 +1,29 @@
 //! Fuzz target: `decode_message` must never panic on arbitrary bytes, and a body
-//! that decodes is one of the three kinds and decodes again after
-//! re-encoding to the same bytes (LLR-js9dsu, LLR-dc45ur, LLR-378cj4): shape
-//! 1 reaches indices 1 and 2 (a revocation notice, an acknowledgement) as
-//! well as 0. Shape 2 puts the fuzz bytes after a well-formed
-//! Organisation-information prefix (variant index 0 and an Envelope), so every
-//! iteration reaches the record snapshot and the Organisation private key:
-//! a body that ends before the key's 32 bytes is refused as `MalformedMessage`
-//! (REQ-c29s93). *Re-targeted 2026-10-08 (S4, task T2):* from the transport's
-//! `decode_body` to `org_node::wire::decode_message`; the bytes fed are
-//! unchanged.
+//! that decodes is one of the six kinds and decodes again after
+//! re-encoding to the same bytes (LLR-xr88a8, LLR-dc45ur, LLR-378cj4): shape 1 reaches every index 0 to 5. Shape 2 puts the fuzz
+//! bytes after a well-formed Organisation-information prefix (variant index 0
+//! and an Envelope), so every iteration reaches the record snapshot and the
+//! Organisation private key: a body that ends before the key's 32 bytes is
+//! refused as `MalformedMessage` (REQ-zxgd46). Shape 3 feeds the bytes to
+//! `peek_admission_request`, which must never panic and must agree with the
+//! full decode on every admission request that decodes.
 //!
 //! `harness = false` binary: a panic (the bolero failure signal) exits
 //! non-zero and fails `cargo test`. Run alone with
 //! `cargo test -p org-node --test fuzz_wire_decode`;
 //! deep-fuzz with `cargo bolero test fuzz_wire_decode --engine libfuzzer`.
 //!
-//! verifies: REQ-9g6as6, LLR-js9dsu, REQ-c29s93, LLR-dc45ur, LLR-378cj4
+//! Shape 3 is not evidence for LLR-g9n9w9 and does not claim it: random
+//! bytes almost never decode as a whole admission request, so a
+//! `peek_admission_request` that always returned `None` would pass it.
+//!
+//! verifies: REQ-9g6as6, LLR-xr88a8, REQ-zxgd46, LLR-dc45ur, LLR-378cj4
 #![allow(clippy::expect_used, clippy::panic)]
 
 use bolero::check;
 use org_node::envelope::Envelope;
 use org_node::ids::OrgId;
-use org_node::wire::{decode_message, encode_message, WireMessage};
+use org_node::wire::{decode_message, encode_message, peek_admission_request, WireMessage};
 use org_node::{OrgNodeError, SequenceNumber};
 
 fn main() {
@@ -35,6 +37,12 @@ fn main() {
             let body = encode_message(&msg).expect("a decoded message re-encodes");
             assert_eq!(&body[..], bytes, "to the bytes it was decoded from");
             assert_eq!(decode_message(&body).expect("and decodes again"), msg);
+        }
+        // Shape 3 — the peek, on the same bytes, never panics and agrees with
+        // the full decode of an admission request.
+        let peeked = peek_admission_request(bytes);
+        if let Ok(WireMessage::AdmissionRequest { org_id, invite_id, .. }) = decode_message(bytes) {
+            assert_eq!(peeked, Some((org_id, invite_id)), "the peek agrees with the decode");
         }
         // Shape 2 — the bytes follow an Organisation-information prefix.
         let mut body = info_prefix.clone();

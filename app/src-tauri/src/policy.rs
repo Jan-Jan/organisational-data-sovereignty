@@ -7,6 +7,7 @@
 //! test in the binary.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 /// Which of the two ways this installation reaches other nodes. Mirrors
 /// org-io's `transport::TransportMode`, but is this unit's own type because it
@@ -27,12 +28,14 @@ pub struct ChainEndpoint {
     pub contract_h160: String,
 }
 
-/// A startup value that is missing and is not permitted to be defaulted.
-/// No passphrase is among them: org-io opens each store with its keychain
-/// item.
+/// A startup value that is missing and is not permitted to be defaulted,
+/// or one that is not of its form. No passphrase is among them: org-io
+/// opens each store with its keychain item.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StartupError {
     UnresolvableDataDir,
+    /// LLR-rvrc25: `ODS_VERIFICATION_INTERVAL_SECS` as given, refused.
+    InvalidVerificationInterval { given: String },
 }
 
 impl core::fmt::Display for StartupError {
@@ -40,7 +43,7 @@ impl core::fmt::Display for StartupError {
         // REQ-bmk2z2: the message names BOTH the variable that would supply the
         // value AND the variable that would waive the requirement, and names the
         // supplying variable FIRST — a refusal an operator reads as "set the
-        // waiver" is a refusal that recreates the hazard it was added for.
+        // waiver" is a refusal that recreates the hazard it exists to prevent.
         match self {
             StartupError::UnresolvableDataDir => write!(
                 f,
@@ -51,6 +54,61 @@ impl core::fmt::Display for StartupError {
                  ODS_ALLOW_DEV_DEFAULTS=1 — that directory is world-readable \
                  and is cleared by the operating system."
             ),
+            // LLR-rvrc25: the variable, the form, and the value quoted.
+            StartupError::InvalidVerificationInterval { given } => write!(
+                f,
+                "ODS_VERIFICATION_INTERVAL_SECS must be a whole number of seconds of at least 1 \
+                 (at most 4294967295), got {given:?}"
+            ),
+        }
+    }
+}
+
+/// LLR-2dpn52: the verification interval when none is configured.
+pub const DEFAULT_VERIFICATION_INTERVAL: Duration = Duration::from_secs(600);
+
+/// REQ-ergn9z. `raw` is `ODS_VERIFICATION_INTERVAL_SECS`. Absent or empty
+/// is the 10-minute default (LLR-2dpn52); a decimal integer from 1 to
+/// 4294967295, with no sign, space or other character, is that many
+/// seconds; anything else is refused quoting the value (LLR-rvrc25). What
+/// leaves here is never zero.
+pub fn resolve_verification_interval(raw: Option<&str>) -> Result<Duration, StartupError> {
+    let given = match raw {
+        None | Some("") => return Ok(DEFAULT_VERIFICATION_INTERVAL),
+        Some(given) => given,
+    };
+    let refused = || StartupError::InvalidVerificationInterval { given: given.to_string() };
+    if !given.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(refused());
+    }
+    let seconds: u32 = given.parse().map_err(|_| refused())?;
+    if seconds == 0 {
+        return Err(refused());
+    }
+    Ok(Duration::from_secs(u64::from(seconds)))
+}
+
+/// LLR-hgrez9: the ahead limit the app gives org-io for every verification
+/// (`ChainSettings::ahead_limit`): how long received Organisation
+/// information one epoch ahead of the chain is kept unadopted. Twice the
+/// verification interval, so at least two chain reads fall inside it
+/// whatever the interval; the default interval gives 1200 seconds. An
+/// interval `resolve_verification_interval` accepts (at most 4294967295
+/// seconds) never overflows when doubled; a greater one saturates.
+pub fn verification_ahead_limit(verification_interval: Duration) -> Duration {
+    verification_interval.saturating_mul(2)
+}
+
+/// REQ-ergn9z, LLR-rvrc25. `raw` is `ODS_VERIFICATION_INTERVAL_SECS` as the
+/// environment holds it. A value that is not UTF-8 does not parse, so it is
+/// refused, carrying its lossy form, and never read as absent; a UTF-8 value
+/// is decided by `resolve_verification_interval`.
+pub fn verification_interval_from(raw: Option<&std::ffi::OsStr>) -> Result<Duration, StartupError> {
+    match raw.map(|value| value.to_str().ok_or(value)) {
+        None => resolve_verification_interval(None),
+        Some(Ok(text)) => resolve_verification_interval(Some(text)),
+        Some(Err(value)) => {
+            Err(StartupError::InvalidVerificationInterval { given: value.to_string_lossy().into_owned() })
         }
     }
 }

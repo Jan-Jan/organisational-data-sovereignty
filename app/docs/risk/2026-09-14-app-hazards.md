@@ -1202,6 +1202,48 @@ noted.
    and gated. Needs `@testing-library/svelte` or `vitest-browser-svelte`, a DOM
    environment, and a decision about how much of SvelteKit to stand up.
    Referenced by the residual of HAZ-n97v5g, HAZ-5ha5vv and §5.
+
+   *Note 2026-10-27 (change `worktree-org-io-domain-api`, TEST review
+   round 1 T-A3; owner ruling of 2026-10-27).* This change adds the
+   environment: `@testing-library/svelte` 5.4.2 and `jsdom` 30.1.3 as dev
+   dependencies (`app/docs/architecture/soup.md`), and `vitest.config.ts`
+   gains the `sveltekit()` and `svelteTesting()` plugins. The default
+   environment stays `node`; a test file that renders declares jsdom. The
+   SvelteKit decision: the real `+page.svelte` and its child components
+   are rendered, and only the Tauri `invoke` / `listen` boundary is faked
+   (`app/tests/fake-tauri.ts`). The change rewrites, as rendered tests, the
+   webview tests that matched component source (TEST review round 1,
+   finding-3): in `tests/notices.admission.test.ts`,
+   `tests/notices.discarded.test.ts`, `tests/invite.confirm.test.ts`,
+   `tests/founding.propose.test.ts` and `tests/verification.view.test.ts`.
+   These cover the Admit panel's confirmation gate (REQ-88npkt), the
+   re-proposal confirmation, the invitee's warning and retry, the creation
+   form's founder, the founding write, the verifications at start and on
+   request, and the start-up error labels. Nothing here yet renders
+   `Revoke.svelte`, `StatusBar.svelte`, or the receiver half of
+   `Membership.svelte` (the verification table and the record-unreadable
+   list), which the residuals of HAZ-n97v5g and HAZ-5ha5vv and §5 name.
+   This note mints and closes nothing. Whether the control, or any residual
+   that cites it, is re-assessed is the owner's decision.
+
+   *Note 2026-10-28 (change `worktree-org-io-domain-api`, TEST review
+   round 2, findings T2-A1 and T2-A2; owner ruling of 2026-10-28).* The
+   rendered tests keep the faked Tauri boundary (`app/tests/fake-tauri.ts`)
+   on the normal path. The reason is the boundary: the webview and the Rust
+   half are two processes joined by Tauri's IPC, and the fake stands at that
+   process boundary as a double of it, not as a replacement of owned code
+   inside one process. The reason it can be trusted is the contract:
+   `app/tests/contract/backend.json`, one fixture both sides read, holds an
+   entry for every answer, refusal and event payload the fake produces; the
+   fake refuses to produce a value whose shape no entry has
+   (`app/tests/contract.ts`), and `app/src-tauri/tests/ipc.rs` drives the
+   real command, or the real event mapping, for every entry and requires the
+   same shape (keys, tags, booleans, id widths), with a test that fails when
+   an entry has no real producer. The drift it found is fixed: the fake
+   answered `propose_member` with `status` `provisional`, where the command
+   returns `provisional_member` (LLR-rg9vc7); an own adoption without
+   `sends`; and an included founding write whose verification was `in_step`
+   where the real one adopts. This note mints and closes nothing.
 2. **Prompt for the store passphrase at first run**, superseding RC-xt4qr3's
    refusal with the control ISO 14971 would prefer: make the safe state
    reachable rather than making the unsafe one fatal.

@@ -7,17 +7,18 @@
 //! generalises the app's former `FakeWriter`.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use async_trait::async_trait;
-use on_chain_client::write::{AccountId, WriteWindow};
+use on_chain_client::write::{AccountId, GenesisStep, WriteError, WriteWindow};
+use on_chain_client::ClientError;
 use org_node::test_fixtures::ChainSlots;
 use org_node::{ChainAccount, Epoch, OrgId, OrgNodeError, OrgPublicKey, OrgState, RootHash};
 
 use crate::chain_read::StateReader;
 use crate::signatory::{ProxyDefinition, SignatorySetReader, SignatorySetView};
-use crate::submit::ChainWriter;
+use crate::write::{ChainWriteError, ChainWriter};
 
 /// A substitute chain. Clones share everything. The switches:
 /// - `write_failing`: every write fails; `write_hanging`: every write never
@@ -30,8 +31,15 @@ use crate::submit::ChainWriter;
 ///   Every read is counted (`reads`), whatever it answers.
 /// - `write_lands_then_hangs`: an update write moves the slot, then never
 ///   returns (a write that executes after its bound); `write_window_failing`:
-///   the write window cannot be read. Every update write is counted
+///   the write window cannot be read; `write_window_hanging`: its read never
+///   returns (`write_hanging` leaves the window read alone). Every update write is counted
 ///   (`update_writes`), whatever it answers.
+/// - A founding's two steps: `create_proxy` makes proxy `[n; 20] ++ [0xEE; 12]`
+///   for its n-th call (from `0xc0`) with Organisation `h160_of(proxy)`, which
+///   is `[n; 20]`; `found_at` sets that
+///   slot at epoch 1, refusing a slot already set as the contract refuses a
+///   second genesis; `found_at_failing` fails `found_at` at its `Fund` step.
+///   Every step is logged (`founding_calls`), whatever it answers.
 /// - The finalised block (`advance_finalised`, shared with
 ///   `sharing_slots_with`): the write window is born at it and
 ///   `finalised_block` answers it, counted apart (`finalised_reads`);
@@ -55,13 +63,23 @@ pub struct FakeChain {
     pub delegates_failing: Arc<AtomicBool>,
     pub write_lands_then_hangs: Arc<AtomicBool>,
     pub write_window_failing: Arc<AtomicBool>,
+    pub write_window_hanging: Arc<AtomicBool>,
+    pub found_at_failing: Arc<AtomicBool>,
+    founding_log: Arc<Mutex<FoundingLog>>,
+    next_proxy: Arc<AtomicU8>,
     reads: Arc<AtomicUsize>,
     signatory_reads: Arc<AtomicUsize>,
     finalised: Arc<AtomicU64>,
     finalised_reads: Arc<AtomicUsize>,
     update_writes: Arc<AtomicUsize>,
+    write_windows: Arc<AtomicUsize>,
+    last_window: Arc<Mutex<Option<WriteWindow>>>,
     read_hold: Arc<Mutex<Option<ReadHold>>>,
 }
+
+/// The founding steps a `FakeChain` was asked for, in order: the step's name and the proxy
+/// `found_at` was given.
+pub type FoundingLog = Vec<(&'static str, Option<ChainAccount>)>;
 
 /// A state read held open: `hold_next_read` arms it; the next
 /// state read signals `arrived` and then waits for `release` before it
@@ -181,24 +199,53 @@ impl FakeChain {
         self.update_writes.load(Ordering::SeqCst)
     }
 
+    /// How many write windows this view has been asked for.
+    pub fn write_windows(&self) -> usize {
+        self.write_windows.load(Ordering::SeqCst)
+    }
+
+    /// The window the last update write was given.
+    pub fn last_update_window(&self) -> Option<WriteWindow> {
+        *self.last_window.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// How many Organisations have had a genesis written on this chain.
     pub fn geneses(&self) -> usize {
         self.proxies().len()
+    }
+
+    fn founding_log(&self) -> MutexGuard<'_, FoundingLog> {
+        self.founding_log.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Every founding step this view was asked for, in order, with the proxy `found_at` was given.
+    pub fn founding_calls(&self) -> FoundingLog {
+        self.founding_log().clone()
     }
 
     fn proxies(&self) -> MutexGuard<'_, HashMap<[u8; 32], OrgId>> {
         self.proxies.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    async fn gate(&self) -> Result<(), String> {
+    async fn gate(&self) -> Result<(), ChainWriteError> {
         if self.write_hanging.load(Ordering::SeqCst) {
             std::future::pending::<()>().await;
         }
         if self.write_failing.load(Ordering::SeqCst) {
-            return Err("node unreachable".into());
+            return Err(unreachable_node());
         }
         Ok(())
     }
+
+    /// The Organisation of `proxy`, as this chain's writer knows it.
+    fn org_of(&self, proxy: &ChainAccount) -> Result<OrgId, ChainWriteError> {
+        self.proxies().get(proxy.as_bytes()).copied().ok_or(ChainWriteError::Write(WriteError::Subxt("unknown proxy".into())))
+    }
+}
+
+/// A write failing as on-chain-client's does when the node cannot be reached.
+fn unreachable_node() -> ChainWriteError {
+    ChainWriteError::Write(WriteError::Subxt("node unreachable".into()))
 }
 
 #[async_trait]
@@ -262,18 +309,41 @@ impl SignatorySetReader for FakeChain {
 
 #[async_trait]
 impl ChainWriter for FakeChain {
-    async fn genesis(&self, root: RootHash, key: OrgPublicKey) -> Result<(OrgId, ChainAccount), String> {
+    async fn create_proxy(&self) -> Result<(OrgId, ChainAccount), ChainWriteError> {
+        self.founding_log().push(("create_proxy", None));
         self.gate().await?;
-        let org_id = self.slots.apply_genesis(root, key);
-        let mut proxy = [0u8; 32];
-        proxy[..20].copy_from_slice(org_id.as_bytes());
-        self.proxies().insert(proxy, org_id);
-        Ok((org_id, ChainAccount::new(proxy)))
+        let seed = 0xc0u8.wrapping_add(self.next_proxy.fetch_add(1, Ordering::SeqCst));
+        // A real-shaped proxy account: its Organisation is the H160 on-chain-client's `h160_of`
+        // gives for it, as the production writer's is (`tests/common/chain_writer_contract.rs`).
+        let mut account = [0xEEu8; 32];
+        account[..20].copy_from_slice(&[seed; 20]);
+        let (org_id, proxy) = (OrgId::new(on_chain_client::h160_of(account)), ChainAccount::new(account));
+        self.proxies().insert(*proxy.as_bytes(), org_id);
+        Ok((org_id, proxy))
     }
 
-    async fn write_window(&self) -> Result<WriteWindow, String> {
+    async fn found_at(&self, proxy: ChainAccount, root: RootHash, key: OrgPublicKey) -> Result<(), ChainWriteError> {
+        self.founding_log().push(("found_at", Some(proxy)));
+        if self.found_at_failing.load(Ordering::SeqCst) {
+            return Err(ChainWriteError::Write(WriteError::Step { step: GenesisStep::Fund, reason: "node unreachable".into() }));
+        }
+        self.gate().await?;
+        let org_id = self.org_of(&proxy)?;
+        if self.slots.get(&org_id).is_some() {
+            let reason = "the slot already holds a genesis".into();
+            return Err(ChainWriteError::Write(WriteError::Step { step: GenesisStep::RecordGenesis, reason }));
+        }
+        self.slots.set(org_id, OrgState { root_hash: root, org_pub_key: key, epoch: Epoch::new(1) });
+        Ok(())
+    }
+
+    async fn write_window(&self) -> Result<WriteWindow, ChainWriteError> {
+        self.write_windows.fetch_add(1, Ordering::SeqCst);
+        if self.write_window_hanging.load(Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
         if self.write_window_failing.load(Ordering::SeqCst) {
-            return Err("node unreachable".into());
+            return Err(ChainWriteError::Window(ClientError::Subxt("node unreachable".into())));
         }
         let birth_number = self.finalised.load(Ordering::SeqCst);
         let mut birth_hash = [0u8; 32];
@@ -287,16 +357,88 @@ impl ChainWriter for FakeChain {
         root: RootHash,
         key: OrgPublicKey,
         expected_epoch: Epoch,
-        _window: WriteWindow,
-    ) -> Result<(), String> {
+        window: WriteWindow,
+    ) -> Result<(), ChainWriteError> {
         self.update_writes.fetch_add(1, Ordering::SeqCst);
+        *self.last_window.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(window);
         self.gate().await?;
-        let org_id = *self.proxies().get(proxy.as_bytes()).ok_or("unknown proxy")?;
-        self.slots.apply_update(org_id, root, key, expected_epoch).map_err(|error| error.to_string())?;
+        let org_id = self.org_of(&proxy)?;
+        // The contract's refusal of a stale expected epoch, as the real chain returns it: the call
+        // made through the proxy failed (`tests/common/chain_writer_contract.rs`).
+        self.slots
+            .apply_update(org_id, root, key, expected_epoch)
+            .map_err(|error| ChainWriteError::Write(WriteError::InnerCallFailed(error.to_string())))?;
         if self.write_lands_then_hangs.load(Ordering::SeqCst) {
             std::future::pending::<()>().await;
         }
         Ok(())
+    }
+}
+
+/// The production halves of the chain `FakeChain` stands in for, built as `OrgIo::connect`
+/// builds them, with no co-signer: the real side of `FakeChain`'s contract tests
+/// (`tests/common/chain_contract.rs`; test builds with `dev-seed` only, under chopsticks).
+#[cfg(feature = "dev-seed")]
+pub struct ProductionChain {
+    pub reader: crate::chain_read::OnChainStateReader,
+    pub writer: crate::write::OnChainWriter,
+    pub signatory_set: crate::signatory::OnChainSignatorySetReader,
+    /// The account the writer dispatches from: the signatory key's own.
+    pub controller: AccountId,
+}
+
+/// `ProductionChain` over `settings`, signing with the seed `ODS_ADMIN_SEED` holds.
+#[cfg(feature = "dev-seed")]
+pub async fn production_chain(settings: &crate::ChainSettings) -> Result<ProductionChain, String> {
+    use on_chain_client::write::subxt_ops::{FinalitySink, SubxtWriteOps};
+    let signatory = crate::custody::signatory_from_environment()
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "ODS_ADMIN_SEED is not set".to_string())?;
+    let controller = signatory.account_id();
+    let (api, registry) =
+        crate::connect::connect(&settings.ws_url, settings.contract_h160).await.map_err(|error| error.to_string())?;
+    let ops = SubxtWriteOps::new(api, FinalitySink);
+    Ok(ProductionChain {
+        reader: crate::chain_read::OnChainStateReader::new(registry.clone()),
+        writer: crate::write::OnChainWriter::new(ops, registry.clone(), signatory, Vec::new(), settings.contract_h160),
+        signatory_set: crate::signatory::OnChainSignatorySetReader::new(registry),
+        controller,
+    })
+}
+
+/// A settable clock (LLR-6vtbn6): every reading counted; `set_before_epoch` makes it read before
+/// the Unix epoch.
+#[derive(Default)]
+pub struct TestClock {
+    seconds: AtomicU64,
+    before_epoch: AtomicBool,
+    readings: AtomicUsize,
+}
+
+impl TestClock {
+    /// A clock reading `seconds`.
+    pub fn at(seconds: u64) -> Arc<Self> {
+        Arc::new(Self { seconds: AtomicU64::new(seconds), ..Self::default() })
+    }
+
+    pub fn set(&self, seconds: u64) {
+        self.seconds.store(seconds, Ordering::SeqCst);
+    }
+
+    pub fn set_before_epoch(&self, before: bool) {
+        self.before_epoch.store(before, Ordering::SeqCst);
+    }
+
+    /// How many times the clock was read.
+    pub fn readings(&self) -> usize {
+        self.readings.load(Ordering::SeqCst)
+    }
+}
+
+impl crate::clock::Clock for TestClock {
+    fn now(&self) -> Option<u64> {
+        self.readings.fetch_add(1, Ordering::SeqCst);
+        (!self.before_epoch.load(Ordering::SeqCst)).then(|| self.seconds.load(Ordering::SeqCst))
     }
 }
 
@@ -339,12 +481,13 @@ pub fn fail_next_write_after_temporary() {
 }
 
 /// `store_file::write_store`, crate-visible in every build, for the store
-/// files' own tests (`tests/store_files.rs`; test builds only).
+/// files' own tests (`tests/store_files.rs`; test builds only), over an
+/// operating-system source of its own.
 pub fn write_store(
     data_dir: &std::path::Path,
     write: &org_node::StoreWrite,
 ) -> Result<(), crate::store_file::StoreFileError> {
-    crate::store_file::write_store(data_dir, write)
+    crate::store_file::write_store(data_dir, write, &crate::rng::HandleRng::os())
 }
 
 /// The sealed bytes of every store file write that landed for
@@ -379,6 +522,15 @@ pub enum Refusal {
 struct MemoryItems {
     items: Mutex<HashMap<(String, String), Vec<u8>>>,
     refuse_as: Mutex<Option<Refusal>>,
+    /// Reads alone refused as this says, writes and deletes still answering: a store locked
+    /// after a write (pinned in tests/keychain_contract.rs).
+    refuse_reads_as: Mutex<Option<Refusal>>,
+    /// Deletes alone refused as this says, reads and writes still answering: a keychain that
+    /// unseals a store and then will not give up its item. A fault injector (TEST_GUIDELINES
+    /// Doubles 5) only with `Refusal::Unavailable`, an uninterpreted OS failure; with
+    /// `Refusal::Locked` it would imitate a store locked for deletes alone, which no contract
+    /// test pins (LLR-36jer8), so its users pass `Unavailable`.
+    refuse_deletes_as: Mutex<Option<Refusal>>,
     /// Every read, write and delete asked of an item, refused ones included.
     calls: AtomicUsize,
 }
@@ -392,6 +544,22 @@ impl MemoryItems {
     fn refusal(&self) -> keyring::Result<()> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         let refuse_as = *self.refuse_as.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        Self::refused(refuse_as)
+    }
+
+    /// A read's refusal: `refusal`'s, or else the read switch's.
+    fn read_refusal(&self) -> keyring::Result<()> {
+        self.refusal()?;
+        Self::refused(*self.refuse_reads_as.lock().unwrap_or_else(|poisoned| poisoned.into_inner()))
+    }
+
+    /// A delete's refusal: `refusal`'s, or else the delete switch's.
+    fn delete_refusal(&self) -> keyring::Result<()> {
+        self.refusal()?;
+        Self::refused(*self.refuse_deletes_as.lock().unwrap_or_else(|poisoned| poisoned.into_inner()))
+    }
+
+    fn refused(refuse_as: Option<Refusal>) -> keyring::Result<()> {
         match refuse_as {
             None => Ok(()),
             Some(Refusal::Locked) => Err(keyring::Error::NoStorageAccess("refused by the test".into())),
@@ -429,6 +597,19 @@ impl MemoryKeychain {
     /// Refuse every call as `refusal` says, or, with `None`, none.
     pub fn refuse_as(&self, refusal: Option<Refusal>) {
         *self.shared.refuse_as.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = refusal;
+    }
+
+    /// Refuse every read as `refusal` says, writes and deletes still answering, or, with
+    /// `None`, no read: a keychain that takes a new item and then will not give it back.
+    pub fn refuse_reads_as(&self, refusal: Option<Refusal>) {
+        *self.shared.refuse_reads_as.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = refusal;
+    }
+
+    /// Refuse every delete as `refusal` says, reads and writes still answering, or, with
+    /// `None`, no delete. A fault injector with `Refusal::Unavailable` (an OS failure the code
+    /// does not interpret); `Refusal::Locked` here has no contract test, so pass `Unavailable`.
+    pub fn refuse_deletes_as(&self, refusal: Option<Refusal>) {
+        *self.shared.refuse_deletes_as.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = refusal;
     }
 
     /// Put `bytes` in the item of (`service`, `user`), bypassing keyring: an
@@ -492,12 +673,12 @@ impl keyring::credential::CredentialApi for MemoryCredential {
     }
 
     fn get_secret(&self) -> keyring::Result<Vec<u8>> {
-        self.shared.refusal()?;
+        self.shared.read_refusal()?;
         self.shared.items().get(&self.name()).cloned().ok_or(keyring::Error::NoEntry)
     }
 
     fn delete_credential(&self) -> keyring::Result<()> {
-        self.shared.refusal()?;
+        self.shared.delete_refusal()?;
         self.shared.items().remove(&self.name()).map(|_| ()).ok_or(keyring::Error::NoEntry)
     }
 
@@ -513,3 +694,56 @@ impl std::fmt::Debug for MemoryCredential {
         write!(formatter, "MemoryCredential {{ service: {:?}, user: {:?} }}", self.service, self.user)
     }
 }
+
+/// The handle's random source and store, as tests reach them (LLR-5acgfg): test builds only, and
+/// the one file the absence scans of LLR-ctm86b except. The gate repeats the module's, so the
+/// handle-surface scan of LLR-3zdw8v reads these methods as test-only.
+#[cfg(feature = "test-support")]
+impl crate::OrgIo {
+    /// This handle, drawing from `source` in place of the operating system's (a seeded generator,
+    /// to reproduce an invite identifier or a key pair; a failing one, LLR-94nn6q).
+    pub fn with_rng_for_test(mut self, source: Box<dyn rand_core::CryptoRngCore + Send>) -> Self {
+        self.local.rng = Arc::new(crate::rng::HandleRng::replaced_by(source));
+        self
+    }
+
+    /// This handle, reading `clock` in place of the system's (LLR-6vtbn6).
+    pub fn with_clock_for_test(mut self, clock: Arc<dyn crate::clock::Clock>) -> Self {
+        self.local.clock = clock;
+        self
+    }
+
+    /// `open`, with `clock` as the handle's from the start (LLR-6vtbn6).
+    #[allow(clippy::result_large_err, reason = "as open's")]
+    pub fn open_with_clock_for_test(
+        data_dir: &std::path::Path,
+        transport_mode: crate::transport::TransportMode,
+        clock: Arc<dyn crate::clock::Clock>,
+    ) -> Result<Self, crate::OpenError> {
+        Self::open_with(data_dir, transport_mode, clock)
+    }
+
+    /// One reading of the handle's clock.
+    pub fn clock_reading_for_test(&self) -> Option<u64> {
+        self.local.clock.now()
+    }
+
+    /// This handle, giving every verification `limit` as its ahead limit in place of the one it
+    /// holds (LLR-22se2q), through `connect`'s own conversion: whole seconds, a fraction dropped.
+    pub fn with_ahead_limit_for_test(mut self, limit: std::time::Duration) -> Self {
+        self.ahead_limit = Some(crate::ahead_limit_from(limit));
+        self
+    }
+
+    /// The ahead limit this handle gives every verification, `None` on a handle with no chain
+    /// (LLR-22se2q).
+    pub fn ahead_limit_for_test(&self) -> Option<std::time::Duration> {
+        self.ahead_limit.map(|limit| std::time::Duration::from_secs(limit.0))
+    }
+}
+
+/// The ahead limit of a handle over a substitute chain (`OrgIo::for_test`, `open_for_test`):
+/// 1200 s, twice the app's default verification interval. Test builds only; a connected handle's
+/// is the app's (`ChainSettings::ahead_limit`, LLR-22se2q).
+pub const TEST_AHEAD_LIMIT: std::time::Duration = std::time::Duration::from_secs(1_200);
+

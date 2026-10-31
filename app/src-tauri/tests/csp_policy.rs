@@ -377,8 +377,8 @@ fn dev_fixture_is_a_pure_addition_to_the_fixture() {
 // verifies: LLR-tc5aax
 #[test]
 fn dev_policy_that_differs_beyond_the_dev_origins_is_rejected() {
-    // The reviewer's round-1 probes: each is a development policy the old
-    // per-policy check accepted.
+    // Each is a development policy that a check of each policy on its own
+    // would accept.
     let dev = dev_fixture();
     let cases = [
         ("drops style-src", dev.replace("style-src 'self' 'unsafe-inline'; ", "")),

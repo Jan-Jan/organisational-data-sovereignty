@@ -5,15 +5,14 @@
  *              assigned no verification outcome.
  * RC-3rddh7  — the control both this and REQ-kn5rtx (the Rust half) implement.
  *
- * The defect this guards: the receiver loop used to route every receive-path
- * error into `verification-failed`, and the component rendered that as a
- * "✗ MISMATCH" row under "Verified Updates (chain root match)". A transport
- * hiccup was shown to the operator as a root mismatch — a fresh instance of
- * HAZ-9fmhm4. The Rust half now classifies; this half must not undo that by
- * putting a receiver error back into the log.
+ * The hazard this guards: a receive-path error rendered as a "✗ MISMATCH"
+ * row under "Verified Updates (chain root match)" shows a transport hiccup to
+ * the operator as a root mismatch — an instance of HAZ-9fmhm4. The Rust half
+ * classifies; this half must not undo that by putting a receiver error into
+ * the log.
  *
- * Every test here exercises the extracted decision, never a component: nothing
- * in this change renders `Membership.svelte` (not-minted control 1).
+ * Every test here exercises the extracted decision, not the component that
+ * calls it.
  */
 
 import { describe, it, expect } from 'vitest';

@@ -7,20 +7,18 @@
 //! receive. It does NOT (and cannot, on one machine) exercise real cross-NAT
 //! hole-punching — that is the only thing left to the manual two-laptop run.
 //!
-//! *Moved 2026-10-13 from org-node's `tests/transport_networked.rs` (S4,
-//! task T10):* both endpoints are bound from keychain items, org-io's
-//! in-memory one, under the test-only `BindPlan::Relay`; the assertions are
-//! unchanged. The trie fixtures are org-node's (`test_fixtures`).
+//! Both endpoints are bound from keychain items, org-io's in-memory one,
+//! under the test-only `BindPlan::Relay`. The trie fixtures are org-node's
+//! (`test_fixtures`).
 use std::time::Duration;
 
 use iroh::address_lookup::MemoryLookup;
-use org_node::chain::OrgState;
 use org_node::ids::OrgId;
 use org_node::sequence::SeqGuard;
 use org_node::test_fixtures::{admin_device, admit_member_delta, genesis_trie, ADMIN_DEVICE_SEED};
-use org_node::verify::{verify_envelope_against_chain, VerifyContext};
+use org_node::verify::{check_chain_free, VerifyContext};
 use org_node::wire::WireMessage;
-use org_node::{Envelope, Epoch, MemberSeed, OrgPrivateKey, SequenceNumber};
+use org_node::{Envelope, MemberSeed, OrgPrivateKey, SequenceNumber};
 use org_io::test_support::MemoryKeychain;
 use org_io::transport::{BindPlan, OrgEndpoint};
 
@@ -88,19 +86,14 @@ async fn delivers_and_verifies_admit_over_relay_by_id() {
     // 2. The WireMessage arrived intact over the relay.
     assert_eq!(got, msg, "received WireMessage must equal sent WireMessage");
 
-    // 3. B verifies the received envelope against the chain state holding
-    //    the new root at epoch 2 (independent on-chain read, passed as a value).
-    let chain_state = Some(OrgState {
-        root_hash: new_root,
-        org_pub_key: OrgPrivateKey::from([9u8; 32]).x25519_keypair().org_public_key().unwrap(),
-        epoch: Epoch::new(2),
-    });
-    let ctx = VerifyContext {
-        expected_org_id: org,
-        seq_guard: SeqGuard::from_last_seen(SequenceNumber::new(1)),
-        last_committed_epoch: Epoch::new(1),
-    };
-    let out = verify_envelope_against_chain(&genesis, &env, &ctx, chain_state).expect("verify_envelope_against_chain must succeed");
-    assert_eq!(out.trie.root_hash().unwrap(), new_root, "committed root mismatch");
-    assert_eq!(out.epoch, Epoch::new(2), "committed epoch must be 2");
+    // 3. B checks the received envelope as its receive path does, with no
+    //    chain state (the chain-free checks), and its Change set reaches the
+    //    new root. (`verify_envelope_against_chain`, which this step called,
+    //    was deleted by merge review MR1-N1 of change
+    //    worktree-org-io-domain-api; adoption against the chain is
+    //    org-node's `verify`, tested in org-node and org-io's verification.)
+    let ctx = VerifyContext { expected_org_id: org, seq_guard: SeqGuard::from_last_seen(SequenceNumber::new(1)) };
+    check_chain_free(&genesis, &env, &ctx).expect("the chain-free checks must pass");
+    let reached = genesis.apply_delta(&env.decode_delta().unwrap()).unwrap().root_hash();
+    assert_eq!(reached, new_root, "the Change set must reach the expected new root");
 }

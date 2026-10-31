@@ -6,10 +6,10 @@ export type Subscribe = (cb: (payload: unknown) => void) => Promise<Unlisten>;
  * cancels exactly those registered — including any whose `listen` call resolved
  * after teardown began.
  *
- * PR-u34uqm: the component previously returned its cleanup synchronously while
- * the `listen` calls it was meant to cancel were still pending, so the cleanup
- * emptied an array the pending subscriptions then refilled, leaving listeners
- * attached to a destroyed component and reachable by nothing.
+ * PR-u34uqm: a cleanup returned synchronously while the `listen` calls it is
+ * meant to cancel are still pending empties an array the pending
+ * subscriptions then refill, leaving listeners attached to a destroyed
+ * component and reachable by nothing.
  */
 export async function subscribeAll(
 	subscriptions: Array<[Subscribe, (payload: never) => void]>

@@ -4,7 +4,7 @@
 //! sees only A's. A second update from A arrives as Event::Update with
 //! epoch 2 and prev_root_hash = A's genesis root.
 //!
-//! Real-chain behaviour pinned here (Task 7 finding): a freshly-created
+//! Real-chain behaviour pinned here: a freshly-created
 //! pure proxy is NOT auto-mapped in pallet-revive, so its first
 //! `Revive.call` reverts (`Proxy.ProxyExecuted { result: Err(Module {
 //! index: 100, error: 43 }) }`, no `ContractEmitted`). Each org's pure

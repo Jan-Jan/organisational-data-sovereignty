@@ -11,16 +11,13 @@
 
 use super::{DecodeError, Decoder, v_paseo_ah};
 
-/// Paseo AH runtime spec_version pinned at Stage 2 implementation time.
-/// The exact value will be confirmed (and possibly extended to a range of
-/// known-good versions) in Task 10 once we've round-tripped the live
-/// endpoint. For now this is what the decoder is wired against; any other
-/// `spec_version` returns `DecodeError::UnsupportedRuntime`.
+/// The Paseo AH runtime spec_version the decoder is wired against; any
+/// other `spec_version` returns `DecodeError::UnsupportedRuntime`.
 pub const PASEO_AH_SPEC_VERSION: u32 = v_paseo_ah::SPEC_VERSION;
 
 /// Look up the decoder for a given runtime `spec_version`. Returns
 /// `DecodeError::UnsupportedRuntime` if no compiled-in decoder matches —
-/// callers (`OrgRegistryClient::get_org_state` in Task 5) should refuse
+/// callers (`OrgRegistryClient::get_org_state`) should refuse
 /// to read state in that case rather than fall back to a guess, since
 /// pallet-revive's storage layout can change across runtimes.
 pub fn for_runtime(spec_version: u32) -> Result<&'static dyn Decoder, DecodeError> {

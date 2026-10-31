@@ -1,5 +1,7 @@
-//! Genesis and update submission over the `WriteOps` seam
-//! (LLR-a2acvh, LLR-z9vugt, LLR-kv27gp, LLR-hun4wf).
+//! Genesis and update submission over the `WriteOps` seam: the genesis in
+//! two steps, `create_proxy` and `found_at` (LLR-tge9q8, LLR-q6buam,
+//! LLR-chy957), `genesis` their composition (LLR-hea6y2), and one update
+//! (LLR-kv27gp, LLR-hun4wf).
 
 use super::calldata::revive_update_runtime_call;
 use super::proxy::{map_account_call, proxied};
@@ -25,10 +27,65 @@ fn executed(step: GenesisStep, outcome: Result<DispatchOutcome, WriteError>) -> 
     }
 }
 
-/// Stand up an Organisation's slot: create the pure proxy under the
-/// controller, fund it from the signatory, map it in pallet-revive, record
-/// the genesis root and key at epoch zero — each step only after the previous
-/// one succeeded (LLR-a2acvh); a failure names its step (LLR-z9vugt).
+/// The genesis's first step: create the pure proxy an Organisation is
+/// founded at, under the controller (LLR-tge9q8) — one `create_pure` call,
+/// whose failure is the `CreatePure` step (LLR-chy957).
+pub async fn create_proxy<O: WriteOps>(
+    ops: &O,
+    signatory: &O::Signer,
+    co_signatories: &[AccountId],
+) -> Result<AccountId, WriteError> {
+    ops.create_pure(signatory, co_signatories).await.map_err(|error| failed(GenesisStep::CreatePure, error))
+}
+
+/// The genesis's second step, at a proxy `create_proxy` made (LLR-q6buam):
+/// read the account the proxy's H160 maps to, read the proxy's free balance,
+/// fund it from the signatory, map it in pallet-revive and record the
+/// genesis root and key at an expected epoch of zero — each only after the
+/// previous one succeeded; a failure names its step (LLR-chy957). It never
+/// creates a proxy.
+///
+/// What is done is decided from the two reads alone (REQ-6vh3ht): a proxy
+/// mapped to itself is neither funded, nor its balance read (LLR-jk76wf),
+/// nor mapped again (LLR-95puh9); an unmapped proxy holding at least
+/// `FUND_AMOUNT` is not funded again (LLR-jk76wf). The record is never
+/// skipped and no Organisation slot is read: on a slot that already holds a
+/// genesis the contract refuses it, and that is `RecordGenesis` (LLR-g8qevz).
+pub async fn found_at<O: WriteOps>(
+    ops: &O,
+    signatory: &O::Signer,
+    co_signatories: &[AccountId],
+    contract: [u8; 20],
+    proxy: AccountId,
+    root: OnChainRootHash,
+    key: OrgPubKey,
+) -> Result<Genesis, WriteError> {
+    let admin = OrgAdmin(h160_of(proxy.0));
+    let mapped = ops.mapped_account(admin).await.map_err(|error| failed(GenesisStep::MapAccount, error))?;
+    if mapped.is_some_and(|account| account != proxy) {
+        return Err(WriteError::Step {
+            step: GenesisStep::MapAccount,
+            reason: "the proxy's address is mapped to another account".into(),
+        });
+    }
+    if mapped.is_none() {
+        let balance = ops.free_balance(proxy).await.map_err(|error| failed(GenesisStep::Fund, error))?;
+        if balance < FUND_AMOUNT {
+            ops.fund(signatory, proxy, FUND_AMOUNT).await.map_err(|error| failed(GenesisStep::Fund, error))?;
+        }
+        executed(
+            GenesisStep::MapAccount,
+            ops.dispatch(signatory, co_signatories, proxied(proxy, map_account_call()), None).await,
+        )?;
+    }
+    let record = revive_update_runtime_call(contract, root, key, Epoch(0));
+    executed(GenesisStep::RecordGenesis, ops.dispatch(signatory, co_signatories, proxied(proxy, record), None).await)?;
+    Ok(Genesis { proxy, admin })
+}
+
+/// Stand up an Organisation's slot in one call (REQ-6jefu2): `create_proxy`,
+/// then, only when that succeeded, `found_at` at the proxy it returned, whose
+/// result this is (LLR-hea6y2).
 pub async fn genesis<O: WriteOps>(
     ops: &O,
     signatory: &O::Signer,
@@ -37,15 +94,8 @@ pub async fn genesis<O: WriteOps>(
     root: OnChainRootHash,
     key: OrgPubKey,
 ) -> Result<Genesis, WriteError> {
-    let proxy = ops.create_pure(signatory, co_signatories).await.map_err(|e| failed(GenesisStep::CreatePure, e))?;
-    ops.fund(signatory, proxy, FUND_AMOUNT).await.map_err(|e| failed(GenesisStep::Fund, e))?;
-    executed(
-        GenesisStep::MapAccount,
-        ops.dispatch(signatory, co_signatories, proxied(proxy, map_account_call()), None).await,
-    )?;
-    let record = revive_update_runtime_call(contract, root, key, Epoch(0));
-    executed(GenesisStep::RecordGenesis, ops.dispatch(signatory, co_signatories, proxied(proxy, record), None).await)?;
-    Ok(Genesis { proxy, admin: OrgAdmin(h160_of(proxy.0)) })
+    let proxy = create_proxy(ops, signatory, co_signatories).await?;
+    found_at(ops, signatory, co_signatories, contract, proxy, root, key).await
 }
 
 /// Submit one update to the Organisation's slot through its proxy, mortal

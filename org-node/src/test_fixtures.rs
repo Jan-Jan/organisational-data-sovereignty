@@ -74,7 +74,7 @@ pub fn device_keypair(seed: [u8; 32]) -> SigningKeypair {
 
 /// `plaintext` sealed under the store key `secret` derives for
 /// `device_key`, exactly as a store seals its data, so a test can present
-/// content this software never writes (LLR-8bum44, LLR-bg538c).
+/// content this software never writes (LLR-7yu2xy, LLR-bg538c).
 #[cfg(feature = "app")]
 pub fn seal_plaintext_for_test<R: rand_core::RngCore + rand_core::CryptoRng>(
     secret: &DeviceSecret,
@@ -86,17 +86,31 @@ pub fn seal_plaintext_for_test<R: rand_core::RngCore + rand_core::CryptoRng>(
     crate::store::seal_bytes(&key, plaintext, rng).unwrap()
 }
 
-/// An unbound, proposed Persona record named `persona_id`, whose Member seed
-/// is 32 bytes of `member` and whose Device is that of device seed 32 bytes
-/// of `device`.
+/// `plaintext` sealed under the Person store key `secret` derives for
+/// `device_key`, exactly as a Person store seals its content, so a test can
+/// present content this software never writes (LLR-73sgz2).
+#[cfg(feature = "app")]
+pub fn seal_person_plaintext_for_test<R: rand_core::RngCore + rand_core::CryptoRng>(
+    secret: &DeviceSecret,
+    device_key: DevicePublicKey,
+    plaintext: &[u8],
+    rng: &mut R,
+) -> crate::store::SealedStore {
+    let key = crate::person_store::cipher(secret, &device_key).unwrap();
+    crate::store::seal_bytes(&key, plaintext, rng).unwrap()
+}
+
+/// An unbound, proposed Persona record named `persona_id`, handle `alice`,
+/// whose Member seed is 32 bytes of `member` and whose Device is that of
+/// device seed 32 bytes of `device`.
 #[cfg(feature = "app")]
 pub fn persona_record(persona_id: &str, member: u8, device: u8) -> crate::store::PersonaRecord {
     crate::store::PersonaRecord::from(crate::store::PersonaRecordParts {
         persona_id: crate::types::PersonaId::new(persona_id.to_string()),
         org_id: None,
-        handle: Handle::parse("alice").unwrap(),
         name: Name::parse("Alice").unwrap(),
         surname: Surname::parse("Smith").unwrap(),
+        handle: Some(Handle::parse("alice").unwrap()),
         member_seed: MemberSeed::from([member; 32]),
         device_key: device_key(device),
         member_id: None,
@@ -107,13 +121,7 @@ pub fn persona_record(persona_id: &str, member: u8, device: u8) -> crate::store:
 /// A store holding `persona` and nothing else.
 #[cfg(feature = "app")]
 pub fn empty_store(persona: crate::store::PersonaRecord) -> crate::store::StoreData {
-    crate::store::StoreData {
-        persona,
-        orgs: Vec::new(),
-        provisional_updates: Vec::new(),
-        expected_admissions: Vec::new(),
-        outstanding_invites: Vec::new(),
-    }
+    crate::store::StoreData::new(persona)
 }
 
 /// An open store over `data`, keyed from `secret`, whose Device must be
@@ -121,9 +129,7 @@ pub fn empty_store(persona: crate::store::PersonaRecord) -> crate::store::StoreD
 /// without sealing it first.
 #[cfg(feature = "app")]
 pub fn store_for_test(secret: &DeviceSecret, data: crate::store::StoreData) -> crate::store::PersonaStore {
-    let mut store = crate::store::PersonaStore::create(secret, data.persona.clone()).unwrap();
-    *store.data_mut() = data;
-    store
+    crate::store::PersonaStore::create(secret, data).unwrap()
 }
 
 /// `store`, sealed as an operation that changed it would seal it.

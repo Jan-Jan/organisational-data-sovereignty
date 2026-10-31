@@ -57,9 +57,9 @@ const NOT_REEXPORTED: [&str; 12] = [
     "WireMessage",
 ];
 
-// S4, task T15: the transitional `pub use org_node as node` is narrowed to
-// an explicit list of the value types the app names, so org-node's service,
-// store, secret and Wire types are no longer reachable through org-io.
+// `org_io::node` re-exports an explicit list of the value types the app
+// names, so org-node's service, store, secret and Wire types are not
+// reachable through org-io.
 // verifies: LLR-3zdw8v
 #[test]
 fn org_io_reexports_no_service_store_secret_or_wire_type_of_org_node() {
@@ -214,44 +214,81 @@ fn no_ipc_facing_type_of_the_app_carries_key_material() {
         }
     }
     // The DTOs, the event payloads, the status and the commands are all found.
-    for expected in ["PersonaDto", "OrgDto", "InviteReplyDto", "ConnectionStatus", "MembershipUpdated", "fn list_personas"] {
+    for expected in ["PersonaDto", "OrgDto", "AdmissionRequestDto", "ConnectionStatus", "MembershipUpdated", "fn list_personas"] {
         assert!(ipc_types.iter().any(|found| found.contains(expected)), "{expected} was not read: {ipc_types:#?}");
     }
     assert!(carriers.is_empty(), "IPC-facing types carrying key material:\n{}", carriers.join("\n"));
 }
 
-// The app reaches org-node's chain-judging operations only through org-io's
-// sequences (review round 2, finding 2): its sources call no commit,
-// reconcile or apply phase, and build no `OrgService` of their own, from
-// which every one of them would be reachable. Prepare is chain-free and is
-// not listed.
-// verifies: LLR-7pj5af
+/// Every `.rs` file under `dir`, its subfolders included.
+fn rust_files_under(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut files = vec![];
+    let mut to_read = vec![dir.to_path_buf()];
+    while let Some(folder) = to_read.pop() {
+        for entry in std::fs::read_dir(&folder).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                to_read.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                files.push(path);
+            }
+        }
+    }
+    files
+}
+
+/// Whether `code` (comments removed, its lines joined) names org-node's
+/// `service` module: `org_node::service`, or `service` inside a
+/// `use org_node::{…}` group at any depth.
+fn names_org_node_service(code: &str) -> bool {
+    if code.contains("org_node::service") {
+        return true;
+    }
+    code.match_indices("org_node::{").any(|(at, opening)| {
+        let group = &code[at + opening.len()..];
+        let mut depth = 1;
+        let end = group
+            .char_indices()
+            .find(|(_, character)| {
+                match character {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+                depth == 0
+            })
+            .map_or(group.len(), |(index, _)| index);
+        group[..end].split(|character: char| !(character.is_alphanumeric() || character == '_')).any(|word| word == "service")
+    })
+}
+
+// The app reaches no operation of org-node's that keeps or adopts — no `check_received`, no
+// org-node `verify`, no service of its own — so every adoption goes
+// through org-io's verification and every receipt through its receive step. Every file under
+// `app/src-tauri/src` is read, its subfolders included, and a `use org_node::{…}` group naming
+// `service` counts as naming it.
+// verifies: LLR-ntag3g
 #[test]
-fn the_app_calls_no_chain_judging_operation_and_builds_no_service() {
+fn the_app_calls_no_adopting_operation_and_builds_no_service() {
     let app_src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../app/src-tauri/src");
     let mut calls = vec![];
-    for entry in std::fs::read_dir(&app_src).unwrap() {
-        let path = entry.unwrap().path();
-        if path.extension().is_none_or(|extension| extension != "rs") {
-            continue;
-        }
+    let files = rust_files_under(&app_src);
+    assert!(files.len() > 3, "the scan read the app's sources ({})", files.len());
+    for path in files {
         let text = std::fs::read_to_string(&path).unwrap();
+        let code: Vec<&str> = text.lines().map(|line| line.split("//").next().unwrap_or("")).collect();
+        if names_org_node_service(&code.join(" ")) {
+            calls.push(format!("{}: names org_node::service", path.display()));
+        }
         for (index, line) in text.lines().enumerate() {
-            if line.trim_start().starts_with("//") {
-                continue;
+            let code = line.split("//").next().unwrap_or("");
+            for operation in [".check_received(", "OrgService::new(", "org_node::service", ".messages_for_current_epoch(", ".acknowledgement_accepted("] {
+                if code.contains(operation) {
+                    calls.push(format!("{}:{}: {operation}", path.display(), index + 1));
+                }
             }
-            let operations = [
-                ".commit_genesis(",
-                ".commit_update(",
-                ".reconcile(",
-                // *S4 T4, 2026-10-13:* the one receive path's names, in
-                // place of `apply_receive` and `apply_self_delete`.
-                ".check_received(",
-                ".commit_checked(",
-                "OrgService::new(",
-            ];
-            for operation in operations.iter().filter(|operation| line.contains(*operation)) {
-                calls.push(format!("{}:{}: {operation}", path.display(), index + 1));
+            if code.contains(".verify(") && !code.contains("verify_organisation") {
+                calls.push(format!("{}:{}: org-node's verify", path.display(), index + 1));
             }
         }
     }

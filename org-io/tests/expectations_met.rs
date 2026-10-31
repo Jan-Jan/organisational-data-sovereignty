@@ -3,12 +3,11 @@
     clippy::await_holding_lock,
     reason = "`fresh_keychain`'s lock serialises the tests over keyring's process-global credential builder for their whole run; each test has its own runtime"
 )]
-//! The six expectations org-io declared on org-node, shown to hold through
-//! org-io (S4, task T19 of docs/plans/2026-10-06-org-io-transport.md; the
-//! owner's ruling 1 of 2026-10-14). Each REQ below was `expects: org-node`
-//! and is met by a requirement org-node exports; under guardrails 0.5.1 a
-//! met expectation is an ordinary REQ again and owes a test here, at org-io's
-//! interface (the `OrgIo` handle, its store files and its endpoints):
+//! The expectations org-io declared on org-node, shown to hold through
+//! org-io (owner's ruling 1 of 2026-10-14). Each REQ below was `expects:
+//! org-node` and is met by a requirement org-node exports; a met expectation
+//! is an ordinary REQ and owes a test here, at org-io's interface (the
+//! `OrgIo` handle, its store files and its endpoints):
 //!
 //! - REQ-x6kdse: a Persona's store opens from its sealed bytes and its
 //!   keychain secret, and every change reaches its file whole;
@@ -16,45 +15,39 @@
 //!   keeps the Device public key, never the seed;
 //! - REQ-v6r2gd: the device secret is persisted nowhere but the keychain,
 //!   and renders no bytes;
-//! - REQ-tzr3dk: one receive path commits a first admission, an update and
-//!   the node's own revocation, and a refused check reads and writes nothing;
-//! - REQ-jxyh9c: each recipient of a commit gets the body org-node built for
-//!   it, the removed Device included;
-//! - REQ-txkm94: the Invite and reply Blobs, the outstanding identifier and
-//!   the declared expectation reach the store files, and are settled there.
-//!
-//! The behaviour existed before these tests, so each carries a recorded
-//! mutation check of the org-io path it depends on in place of a red-first
-//! run (the plan's T19 report).
+//! - REQ-2xgsbn: the outstanding invites are kept in the store files and
+//!   settled by an adoption; an Invite that does not parse changes no file;
+//! - REQ-u894ty: each recipient of a sent epoch gets the body org-node built
+//!   for it, the removed Device included;
+//! - REQ-2yw5y3: one path keeps Organisation information, an admission
+//!   request and a revocation notice, adopting none; a refused body reads no
+//!   chain and writes nothing.
 //!
 //! Every test runs over fresh directories and a fresh in-memory keychain, one
 //! test at a time under `fresh_keychain`'s lock: keyring's default
 //! credential builder is process-global.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
-use iroh::address_lookup::MemoryLookup;
 use org_node::store::{PersonaStore, SealedStore};
-use org_node::wire::{decode_message, WireMessage};
-use org_node::{DevicePublicKey, Epoch, MemberId, OrgId, OrgNodeError, PersonaId, ReceiveKind};
-use org_io::test_support::{FakeChain, MemoryKeychain, Refusal};
-use org_io::transport::{BindPlan, OrgEndpoint, TransportMode};
-use org_io::{ExchangeError, KeychainError, OpenError, OrgIo, ReceiveError, Received};
-use rand::rngs::OsRng;
-use tokio::sync::mpsc;
+use org_node::{DevicePublicKey, OrgNodeError};
+use org_io::send::Delivery;
+use org_io::test_support::{dial_direct_as, FakeChain, MemoryKeychain, Refusal};
+use org_io::transport::TransportMode;
+use org_io::{HeldTarget, KeychainError, OpenError, OrgIo, ReceiveError, Received, Verified, WriteReport};
 
 mod common;
 use common::handles::{
-    at, bind_seed, committed, create, file_of, forwarding, fresh_keychain, handle, held_store, joiner, joiner_of,
-    keep_device_seed, receiving_addr, reopened_service, store_bytes, NET,
+    create, device_key_of, file_of, fresh_keychain, held_store, keep_device_seed, persona_of, reopened_from, store_bytes,
 };
+use common::journey;
 
 const SERVICE: &str = "ods-device-seed";
 
 /// A fresh, empty data directory for `party` of test `tag`.
 fn fresh_dir(tag: &str, party: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("org-io-expectations-{tag}-{party}-{}", std::process::id()));
+    // A directory an earlier run left is cleared; none there is fine.
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -72,20 +65,6 @@ fn open_refused(dir: &Path) -> OpenError {
     }
 }
 
-async fn device_key_of(io: &OrgIo, persona_id: &PersonaId) -> DevicePublicKey {
-    io.persona_public_keys(persona_id).await.unwrap().1
-}
-
-/// The 32-byte Device seed the keychain holds for `device_key`.
-fn seed_of(device_key: &DevicePublicKey) -> [u8; 32] {
-    org_io::test_support::keychain::with_endpoint_seed(device_key, |seed| *seed).unwrap()
-}
-
-/// Whether `haystack` contains `needle` anywhere.
-fn contains(haystack: &[u8], needle: &[u8]) -> bool {
-    haystack.windows(needle.len()).any(|window| window == needle)
-}
-
 /// Every file's bytes in `dir`, by name.
 fn files_in(dir: &Path) -> Vec<(String, Vec<u8>)> {
     let mut files: Vec<(String, Vec<u8>)> = std::fs::read_dir(dir)
@@ -99,12 +78,24 @@ fn files_in(dir: &Path) -> Vec<(String, Vec<u8>)> {
     files
 }
 
+/// The 32-byte Device seed the keychain holds for `device_key`.
+fn seed_of(device_key: &DevicePublicKey) -> [u8; 32] {
+    org_io::test_support::keychain::with_endpoint_seed(device_key, |seed| *seed).unwrap()
+}
+
 // ---- REQ-x6kdse: open from sealed bytes and the secret; every change whole ---
 
-// Each store-changing operation of the handle — creating the Persona,
-// founding, declaring an expectation, issuing an Invite — leaves a file that
-// a fresh `OrgIo::open` unseals with the keychain item into exactly the
-// store the handle holds: org-io wrote the complete sealed store each time.
+/// Whether `haystack` contains `needle` anywhere.
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.windows(needle.len()).any(|window| window == needle)
+}
+
+// Each store-changing operation of the handle — the founding's
+// proposal, its proxy recorded by the write, its adoption, an Invite issued,
+// an admission request kept by the receive step, the admission and the
+// updated Organisation proposed, and their adoption — leaves a file that a
+// fresh `OrgIo::open` unseals with the keychain item into exactly the store
+// the handle holds: org-io wrote the complete sealed store each time.
 // verifies: REQ-x6kdse
 #[tokio::test(flavor = "multi_thread")]
 async fn every_store_change_reaches_the_file_whole_and_reopens_as_held() {
@@ -112,22 +103,43 @@ async fn every_store_change_reaches_the_file_whole_and_reopens_as_held() {
     let dir = fresh_dir("whole", "a");
     let chain = FakeChain::new();
     let io = open(&dir, &chain);
-    let alice = create(&io, "alice").await;
-    let reopens_as_held = |step: &str| {
-        let reopened = open(&dir, &chain);
-        assert_eq!(held_store(&reopened, &alice), held_store(&io, &alice), "after {step}: the file holds the whole store");
+    let founder = journey::propose_founding(&io, "alice").await;
+    let alice = persona_of(&io, &founder).await;
+    // What the handle holds is seen through its own queries: a fresh `open`
+    // of the directory shows the same Persona, Organisation and kept
+    // requests.
+    let reopens_as_held = |step: &'static str| {
+        let (dir, chain, io, alice) = (&dir, &chain, &io, &alice);
+        async move {
+            let reopened = open(dir, chain);
+            assert_eq!(held_store(&reopened, alice).await, held_store(io, alice).await, "after {step}: the file holds the whole store");
+        }
     };
-    reopens_as_held("create_persona");
-    let org = io.found_organisation(&mut OsRng, &alice).await.unwrap();
-    reopens_as_held("found_organisation");
-    let carol = create(&io, "carol").await;
-    io.expect_admission(&mut OsRng, &carol, OrgId::new([0x07; 20])).await.unwrap();
-    assert_eq!(held_store(&open(&dir, &chain), &carol), held_store(&io, &carol), "after expect_admission");
-    io.issue_invite(&mut OsRng, org, "Acme", "Bob Builder").await.unwrap();
-    reopens_as_held("issue_invite");
-    io.admit_member(&mut OsRng, org, &joiner(0x61, "bob")).await.unwrap();
-    reopens_as_held("admit_member (a kept provisional update)");
-    assert_eq!(files_in(&dir).len(), 2, "one store per Persona, and nothing else");
+    reopens_as_held("propose_founding_organisation").await;
+    let written = io.write_organisation_to_chain(HeldTarget::Founding(founder)).await.unwrap();
+    assert!(matches!(written, WriteReport::Included { .. }), "{written:?}");
+    reopens_as_held("write_organisation_to_chain (the founding's proxy recorded)").await;
+    assert!(matches!(io.verify_organisation(HeldTarget::Founding(founder)).await, Verified::Adopted { .. }));
+    reopens_as_held("verify_organisation (the founding adopted)").await;
+    let org = io.organisations().await[0].org_id;
+    let invite = io.issue_invite(org, "Bob").await.unwrap();
+    reopens_as_held("issue_invite").await;
+
+    io.start_receiving().await.unwrap();
+    let joiner = open(&fresh_dir("whole", "b"), &FakeChain::sharing_slots_with(&chain));
+    let member = joiner.propose_member(&invite, "Bob", "Builder", &["bob"]).await.unwrap();
+    let (kept, _) = tokio::join!(journey::next(&io), joiner.request_admission(org));
+    assert!(matches!(kept, Ok(Received::AdmissionRequestKept { .. })), "{kept:?}");
+    reopens_as_held("next_received (the admission request kept)").await;
+    io.propose_admission(org, member.invite_id, None).await.unwrap();
+    reopens_as_held("propose_admission").await;
+    io.propose_updated_organisation(org).await.unwrap();
+    reopens_as_held("propose_updated_organisation").await;
+    let written = io.write_organisation_to_chain(HeldTarget::Organisation(org)).await.unwrap();
+    assert!(matches!(written, WriteReport::Included { .. }), "{written:?}");
+    assert!(matches!(io.verify_organisation(HeldTarget::Organisation(org)).await, Verified::Adopted { .. }));
+    reopens_as_held("verify_organisation (the admission adopted)").await;
+    assert_eq!(files_in(&dir).len(), 1, "one store for the one Persona, and nothing else");
 }
 
 // Abnormal: a store file whose bytes org-node cannot unseal — empty,
@@ -166,9 +178,9 @@ async fn a_store_file_org_node_cannot_unseal_is_refused_naming_it_and_left_untou
 
 // ---- REQ-qza96g: sealed under the Persona's own secret; no seed kept ---------
 
-// A store file opens under its own Persona's keychain item, keeps that
-// Persona's Device public key, and its unsealed contents hold the Device
-// seed in no form.
+// A founding proposed, written and adopted through the handle
+// leaves a store file that holds the Device seed in no form, opens under its
+// own Persona's keychain item, and keeps that Persona's Device public key.
 // verifies: REQ-qza96g
 #[tokio::test(flavor = "multi_thread")]
 async fn a_store_file_opens_under_its_own_item_and_keeps_the_device_key_not_the_seed() {
@@ -176,20 +188,19 @@ async fn a_store_file_opens_under_its_own_item_and_keeps_the_device_key_not_the_
     let dir = fresh_dir("own-item", "a");
     let chain = FakeChain::new();
     let io = open(&dir, &chain);
-    let alice = create(&io, "alice").await;
-    io.found_organisation(&mut OsRng, &alice).await.unwrap();
-    let device_key = device_key_of(&io, &alice).await;
+    let (_, device_key) = common::handles::founded(&io, "alice").await;
     let seed = seed_of(&device_key);
+    let sealed = SealedStore::from_bytes(std::fs::read(file_of(&dir, &device_key)).unwrap());
+    assert!(!contains(sealed.as_bytes(), &seed), "the sealed file holds no seed");
 
     let reopened = open(&dir, &chain);
-    assert_eq!(device_key_of(&reopened, &alice).await, device_key, "the store keeps the Device public key");
-    let sealed = SealedStore::from_bytes(std::fs::read(file_of(&dir, &device_key)).unwrap());
+    let persona = persona_of(&reopened, &device_key).await;
+    assert_eq!(device_key_of(&reopened, &persona).await, device_key, "the store keeps the Device public key");
     let store = PersonaStore::unseal(&sealed, device_key, io.device_secret_for_test(&device_key).unwrap()).unwrap();
     assert_eq!(store.device_key(), device_key);
     let contents = format!("{:?}", store.data());
     assert!(!contents.contains(&hex::encode(seed)), "the unsealed store holds no seed, as hex");
     assert!(!contents.contains(&format!("{:?}", seed)), "the unsealed store holds no seed, as bytes");
-    assert!(!contains(sealed.as_bytes(), &seed), "nor does the sealed file");
 }
 
 // Abnormal: another Persona's sealed store under this Persona's file name
@@ -226,23 +237,23 @@ async fn a_store_file_opens_under_no_other_personas_secret() {
 
 // ---- REQ-v6r2gd: the secret is opaque and persisted only in the keychain -----
 
-// After a Persona is created and its store changed several times, no file
-// the handle wrote holds the Device seed; the keychain holds exactly one
-// item per Persona; and the secret org-io reads back renders no bytes.
+// After a Persona is created by a founding's proposal and its
+// store changed by the write, the adoption and an Invite, no file in the
+// data directory holds the Device seed; the keychain holds exactly one item,
+// by Device key; and the secret org-io reads back renders no bytes.
 // verifies: REQ-v6r2gd
 #[tokio::test(flavor = "multi_thread")]
 async fn the_device_seed_is_in_the_keychain_alone_and_renders_no_bytes() {
     let (_guard, keychain) = fresh_keychain();
     let dir = fresh_dir("seed-nowhere", "a");
     let io = open(&dir, &FakeChain::new());
-    let alice = create(&io, "alice").await;
-    let org = io.found_organisation(&mut OsRng, &alice).await.unwrap();
-    io.issue_invite(&mut OsRng, org, "Acme", "Bob Builder").await.unwrap();
-    io.admit_member(&mut OsRng, org, &joiner(0x61, "bob")).await.unwrap();
-    let device_key = device_key_of(&io, &alice).await;
+    let (org, device_key) = common::handles::founded(&io, "alice").await;
+    io.issue_invite(org, "Bob Builder").await.unwrap();
     let seed = seed_of(&device_key);
 
-    for (name, bytes) in files_in(&dir) {
+    let files = files_in(&dir);
+    assert!(!files.is_empty(), "the handle wrote its store");
+    for (name, bytes) in files {
         assert!(!contains(&bytes, &seed), "{name} holds the Device seed");
     }
     assert_eq!(keychain.items(), vec![(SERVICE.to_string(), hex::encode(device_key.as_bytes()))], "one item, by Device key");
@@ -282,280 +293,151 @@ async fn without_its_keychain_item_a_store_file_opens_nothing() {
     assert_eq!(std::fs::read(&file).unwrap(), sealed, "the file is left as it was");
 }
 
-// ---- REQ-tzr3dk: one receive path ---------------------------------------------
+// ---- REQ-2xgsbn: the outstanding invites, kept in the store files and settled -
 
-/// A has founded an Organisation over `chain`; B has a Persona, Bob, that
-/// declared the admission, and accepts on its endpoint.
-struct Pair {
-    tag: &'static str,
-    a: OrgIo,
-    b: OrgIo,
-    chain_b: FakeChain,
-    org: OrgId,
-    bob: PersonaId,
-    addr_b: iroh::EndpointAddr,
-}
-
-async fn pair(tag: &'static str, b_declares: bool) -> Pair {
-    let chain = FakeChain::new();
-    let a = handle(tag, "a", &chain);
-    let alice = create(&a, "alice").await;
-    let org = a.found_organisation(&mut OsRng, &alice).await.unwrap();
-    let chain_b = FakeChain::sharing_slots_with(&chain);
-    let b = handle(tag, "b", &chain_b);
-    let bob = create(&b, "bob").await;
-    if b_declares {
-        b.expect_admission(&mut OsRng, &bob, org).await.unwrap();
-    }
-    let addr_b = receiving_addr(&b).await;
-    Pair { tag, a, b, chain_b, org, bob, addr_b }
-}
-
-/// B's result while A submits `update` with B's address.
-async fn sent_to_b(pair: &Pair, update: org_io::BuiltUpdate) -> Result<Received, ReceiveError> {
-    let (received, sent) = tokio::join!(
-        async { tokio::time::timeout(NET, pair.b.next_received(&mut OsRng)).await.unwrap() },
-        async {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            pair.a.submit_commit_send(&mut OsRng, &update, at(pair.addr_b.clone())).await
-        }
-    );
-    sent.unwrap();
-    received
-}
-
-/// The epoch of each record B's store files hold.
-fn epochs_on_disk(pair: &Pair) -> Vec<Epoch> {
-    reopened_service(pair.tag, "b", &pair.b).list_orgs().iter().map(|record| record.epoch).collect()
-}
-
-async fn member_id_of(io: &OrgIo, org: OrgId, member_key: org_node::PersonPublicKey) -> MemberId {
-    io.organisation(org).await.unwrap().members.iter().find(|member| member.member_key == member_key).unwrap().id
-}
-
-// One path, `next_received`, commits the three kinds in turn — the first
-// admission B declared, an update to the Organisation it holds, and its own
-// revocation — reading the chain once for each, and each commit reaches B's
-// store files before the outcome returns.
-// verifies: REQ-tzr3dk
+// REQ-2xgsbn (the outstanding invites are kept in the store files and settled by an adoption):
+// the issuing Persona's file keeps the invite across a reopen, and the adoption that admits the
+// invitee removes it, as the file then shows. Every step is the handle's own operation — the
+// founding proposed, written and adopted, the Invite issued, the joiner's request kept by the
+// receive step, the admission proposed, written and adopted by `verify_organisation` — and a
+// fresh `open` of the directory shows what reached the file.
+// verifies: REQ-2xgsbn
 #[tokio::test(flavor = "multi_thread")]
-async fn one_receive_path_commits_a_first_admission_an_update_and_the_own_revocation() {
+async fn outstanding_invites_are_kept_in_the_store_files_and_settled_by_adoption() {
     let (_guard, _keychain) = fresh_keychain();
-    let pair = pair("one-path", true).await;
-    let bob = joiner_of(&pair.b, &pair.bob);
+    let chain = FakeChain::new();
+    let dir_a = fresh_dir("invites-settled", "a");
+    let alice = open(&dir_a, &chain);
+    let (org_id, founder) = common::handles::founded(&alice, "alice").await;
+    let invite = alice.issue_invite(org_id, "Bob").await.unwrap();
+    // What reached the file, read apart from the handle.
+    let kept = |io: &OrgIo| reopened_from(&dir_a, io).store_data(&founder).unwrap().outstanding_invites.len();
+    assert_eq!(kept(&open(&dir_a, &chain)), 1, "the invite is kept in the file across a reopen");
 
-    let admission = pair.a.admit_member(&mut OsRng, pair.org, &bob).await.unwrap();
-    let admitted = committed(sent_to_b(&pair, admission).await);
-    assert_eq!((admitted.org_id, admitted.kind, admitted.epoch), (pair.org, ReceiveKind::Admitted, Epoch::new(2)));
-    assert_eq!(pair.chain_b.reads(), 1, "one read for the admission");
-    assert_eq!(epochs_on_disk(&pair), vec![Epoch::new(2)], "the admission is in B's file");
-
-    let update = pair.a.admit_member(&mut OsRng, pair.org, &joiner(0x71, "carol")).await.unwrap();
-    let updated = committed(sent_to_b(&pair, update).await);
-    assert_eq!((updated.kind, updated.epoch), (ReceiveKind::Updated, Epoch::new(3)));
-    assert_eq!(pair.chain_b.reads(), 2, "one read for the update");
-    assert_eq!(epochs_on_disk(&pair), vec![Epoch::new(3)], "the update is in B's file");
-
-    let bob_member = member_id_of(&pair.a, pair.org, bob.member_key).await;
-    let revocation = pair.a.revoke_member(&mut OsRng, pair.org, bob_member).await.unwrap();
-    let revoked = committed(sent_to_b(&pair, revocation).await);
-    assert_eq!((revoked.org_id, revoked.kind), (pair.org, ReceiveKind::Revoked));
-    assert_eq!(pair.chain_b.reads(), 3, "one read for the revocation");
-    let on_disk = reopened_service(pair.tag, "b", &pair.b);
-    assert!(on_disk.list_orgs().is_empty() && on_disk.list_personas().is_empty(), "the revocation is in B's files");
+    alice.start_receiving().await.unwrap();
+    let bob = open(&fresh_dir("invites-settled", "b"), &FakeChain::sharing_slots_with(&chain));
+    let joiner = bob.propose_member(&invite, "Bob", "Builder", &["bob"]).await.unwrap();
+    let (request, _) = tokio::join!(journey::next(&alice), bob.request_admission(org_id));
+    assert!(matches!(request, Ok(Received::AdmissionRequestKept { .. })), "{request:?}");
+    alice.propose_admission(org_id, joiner.invite_id, None).await.unwrap();
+    alice.propose_updated_organisation(org_id).await.unwrap();
+    let written = alice.write_organisation_to_chain(HeldTarget::Organisation(org_id)).await.unwrap();
+    assert!(matches!(written, WriteReport::Included { .. }), "{written:?}");
+    assert_eq!(kept(&open(&dir_a, &chain)), 1, "kept until the adoption");
+    assert!(matches!(alice.verify_organisation(HeldTarget::Organisation(org_id)).await, Verified::Adopted { .. }));
+    assert_eq!(kept(&open(&dir_a, &chain)), 0, "the adoption that admits the invitee settles the invite, in the file");
 }
 
-// Abnormal: a body org-node's check refuses — bytes that do not decode, and
-// a first admission B never declared — is returned as org-node's refusal,
-// with no chain read and B's store files unchanged.
-// verifies: REQ-tzr3dk
+// REQ-2xgsbn: a Blob that does not parse changes no file and writes no item.
+// verifies: REQ-2xgsbn
+#[tokio::test]
+async fn an_invite_that_does_not_parse_changes_no_file() {
+    let (_guard, keychain) = fresh_keychain();
+    let chain = FakeChain::new();
+    let dir = fresh_dir("invite-unparsed", "b");
+    let bob = open(&dir, &chain);
+    let (files, items) = (files_in(&dir), keychain.items());
+    for blob in ["", "not base64 !", "AAAA"] {
+        assert!(bob.propose_member(blob, "Bob", "Builder", &["bob"]).await.is_err(), "{blob:?} parsed");
+    }
+    assert_eq!((files_in(&dir), keychain.items()), (files, items), "no file changed and no item written");
+}
+
+// REQ-u894ty's two tests, over `send_organisation`.
+
+// Networked semantics aside (Loopback here): A revokes Bob from {Alice, Bob,
+// Carol} and sends the adopted epoch to their real receiving handles. The
+// report names Bob and Carol, never A's own Device; Carol, still listed,
+// keeps the Organisation's information and Bob, removed, the revocation —
+// each from A's Device.
+// verifies: REQ-u894ty
+#[tokio::test(flavor = "multi_thread")]
+async fn each_recipient_receives_the_body_org_node_built_for_the_adopted_epoch() {
+    let (_guard, _keychain) = fresh_keychain();
+    let tag = "expect-per-recipient";
+    let admin = journey::admin(tag).await;
+    let bob = journey::member(&admin, tag, "b", "bob", &[]).await;
+    let carol = journey::member(&admin, tag, "c", "carol", &[&bob]).await;
+    journey::revoke(&admin, bob.device_key).await;
+
+    let (received, report) = journey::epoch_to(&admin, &[&bob.io, &carol.io]).await;
+    let mut reported: Vec<_> = report.per_device.iter().map(|(recipient, _)| *recipient.as_bytes()).collect();
+    reported.sort();
+    let mut expected = vec![*bob.device_key.as_bytes(), *carol.device_key.as_bytes()];
+    expected.sort();
+    assert_eq!(reported, expected, "Bob and Carol, never the sender's own Device");
+    assert!(report.per_device.iter().all(|(_, sent)| matches!(sent, Delivery::Delivered)), "{report:?}");
+    assert!(
+        matches!(received[1], Ok(Received::ProvisionalOrganisationReceived { from, .. }) if from == admin.device_key),
+        "Carol keeps the information: {:?}",
+        received[1]
+    );
+    assert!(
+        matches!(received[0], Ok(Received::RevocationNoticeKept { from, .. }) if from == admin.device_key),
+        "Bob keeps the revocation: {:?}",
+        received[0]
+    );
+}
+
+// Boundary: revoking the last other Member leaves a record listing the
+// sender alone; the one recipient is the removed Device, and its real
+// receiving handle keeps the revocation.
+// verifies: REQ-u894ty
+#[tokio::test(flavor = "multi_thread")]
+async fn the_last_other_member_removed_is_still_sent_its_revocation_by_send_organisation() {
+    let (_guard, _keychain) = fresh_keychain();
+    let tag = "expect-last-removed";
+    let admin = journey::admin(tag).await;
+    let bob = journey::member(&admin, tag, "b", "bob", &[]).await;
+    journey::revoke(&admin, bob.device_key).await;
+    assert_eq!(admin.io.organisation(admin.org).await.unwrap().members.len(), 1, "the sender alone");
+    let (to_bob, report) = journey::deliver_epoch(&admin.io, admin.org, &bob.io).await;
+    assert_eq!(report.per_device.len(), 1, "{report:?}");
+    assert_eq!(report.per_device[0].0, bob.device_key, "the removed Device, which the record no longer names");
+    assert!(matches!(to_bob, Ok(Received::RevocationNoticeKept { from, .. }) if from == admin.device_key), "{to_bob:?}");
+}
+
+// One path, `next_received`, keeps the three kinds in turn — the admission request at
+// the Admin, the admitting epoch at the joiner, the revocation notice at the
+// removed Member — each in its store file before the report, none adopted.
+// verifies: REQ-2yw5y3
+#[tokio::test(flavor = "multi_thread")]
+async fn one_receive_path_keeps_organisation_information_an_admission_request_and_a_notice() {
+    let (_guard, _keychain) = fresh_keychain();
+    let tag = "expect-one-path";
+    let admin = journey::admin(tag).await;
+    admin.io.start_receiving().await.unwrap();
+    let bob = journey::invited(&admin, tag, "b", "bob").await;
+    bob.io.start_receiving().await.unwrap();
+    let (kept, _) = journey::request_over_transport(&admin, &bob).await;
+    assert!(matches!(kept, Ok(Received::AdmissionRequestKept { .. })), "{kept:?}");
+    assert_eq!(admin.io.admission_requests().await.len(), 1, "the request is kept");
+    journey::propose_admission(&admin, &bob).await;
+    journey::write_and_adopt(&admin).await;
+    let (information, _) = journey::deliver_epoch(&admin.io, admin.org, &bob.io).await;
+    assert!(matches!(information, Ok(Received::ProvisionalOrganisationReceived { .. })), "{information:?}");
+    assert!(bob.io.organisations().await.is_empty(), "kept, not adopted");
+    assert!(matches!(bob.io.verify_all().await.as_slice(), [(_, Verified::Adopted { .. })]));
+    journey::revoke(&admin, bob.device_key).await;
+    let (notice, _) = journey::deliver_epoch(&admin.io, admin.org, &bob.io).await;
+    assert!(matches!(notice, Ok(Received::RevocationNoticeKept { .. })), "{notice:?}");
+    assert_eq!(bob.io.organisations().await.len(), 1, "kept, nothing removed on receipt");
+}
+
+// Abnormal: a body org-node's check refuses reads no
+// chain and writes nothing.
+// verifies: REQ-2yw5y3
 #[tokio::test(flavor = "multi_thread")]
 async fn a_body_the_check_refuses_reads_no_chain_and_writes_nothing() {
     let (_guard, _keychain) = fresh_keychain();
-    let pair = pair("check-refuses", false).await;
-    let files_before = store_bytes(pair.tag, "b");
-
-    let stranger = bind_seed([0x5c; 32]).await;
-    let (refused, ()) = tokio::join!(async { tokio::time::timeout(NET, pair.b.next_received(&mut OsRng)).await.unwrap() }, async {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        tokio::time::timeout(NET, stranger.send_body(pair.addr_b.clone(), b"not a wire message")).await.unwrap().unwrap();
-    });
+    let tag = "expect-check-refuses";
+    let admin = journey::admin(tag).await;
+    admin.io.start_receiving().await.unwrap();
+    let (files, reads) = (store_bytes(tag, "a"), admin.chain.reads());
+    let stranger = keep_device_seed([0x64; 32]);
+    let addr = journey::address_of(&admin.io).await;
+    let (refused, _) = tokio::join!(journey::next(&admin.io), dial_direct_as(&stranger, addr, b"not a wire message"));
     assert!(matches!(refused, Err(ReceiveError::Refused(OrgNodeError::MalformedMessage))), "{refused:?}");
-
-    let bob = joiner_of(&pair.b, &pair.bob);
-    let admission = pair.a.admit_member(&mut OsRng, pair.org, &bob).await.unwrap();
-    let refused = sent_to_b(&pair, admission).await;
-    assert!(
-        matches!(refused, Err(ReceiveError::Refused(OrgNodeError::AdmissionNotExpected { org_id })) if org_id == pair.org),
-        "{refused:?}"
-    );
-    assert_eq!(pair.chain_b.reads(), 0, "no chain read after a refused check");
-    assert_eq!(store_bytes(pair.tag, "b"), files_before, "nothing written");
-}
-
-// ---- REQ-jxyh9c: each recipient gets the body org-node built for it ----------
-
-async fn next_body(received: &mut mpsc::UnboundedReceiver<(DevicePublicKey, Vec<u8>)>) -> (DevicePublicKey, WireMessage) {
-    let (sender, body) = tokio::time::timeout(NET, received.recv()).await.unwrap().unwrap();
-    (sender, decode_message(&body).unwrap())
-}
-
-// Networked (the in-process relay, dialled by endpoint id): A revokes Bob
-// from {Alice, Bob, Carol}. The report names Carol and Bob, never A's own
-// Device; Carol, still listed, receives the Organisation's information and
-// Bob, removed, receives the revocation — each from A's Device.
-// verifies: REQ-jxyh9c
-#[tokio::test(flavor = "multi_thread")]
-async fn each_recipient_receives_the_body_org_node_built_for_it() {
-    let (_guard, _keychain) = fresh_keychain();
-    let (relay_map, _relay_url, _relay_server) = iroh::test_utils::run_relay_server().await.unwrap();
-    let lookup = MemoryLookup::new();
-    let plan = BindPlan::Relay(relay_map, lookup.clone());
-    let chain = FakeChain::new();
-    let a = handle("per-recipient", "a", &chain).with_bind_plan_for_test(plan.clone());
-    let alice = create(&a, "alice").await;
-    let org = a.found_organisation(&mut OsRng, &alice).await.unwrap();
-    let sender = a.endpoint_for_test(&alice).await.unwrap();
-    tokio::time::timeout(NET, sender.inner().online()).await.unwrap();
-    lookup.add_endpoint_info(sender.inner().addr());
-    let sender_device = device_key_of(&a, &alice).await;
-
-    let (bob, carol) = (joiner(0x61, "bob"), joiner(0x63, "carol"));
-    let mut receivers = vec![];
-    for device_seed in [[0x62; 32], [0x64; 32]] {
-        let device = keep_device_seed(device_seed);
-        let endpoint = OrgEndpoint::bind_from_keychain(&device, plan.clone()).await.unwrap();
-        tokio::time::timeout(NET, endpoint.inner().online()).await.unwrap();
-        lookup.add_endpoint_info(endpoint.inner().addr());
-        receivers.push(forwarding(endpoint).1);
-    }
-    let (mut bob_receives, mut carol_receives) = (receivers.remove(0), receivers.remove(0));
-    for joining in [&bob, &carol] {
-        let update = a.admit_member(&mut OsRng, org, joining).await.unwrap();
-        a.submit_commit_send(&mut OsRng, &update, None).await.unwrap();
-    }
-    next_body(&mut bob_receives).await;
-    next_body(&mut bob_receives).await;
-    next_body(&mut carol_receives).await;
-
-    let bob_member = member_id_of(&a, org, bob.member_key).await;
-    let revocation = a.revoke_member(&mut OsRng, org, bob_member).await.unwrap();
-    let submitted = tokio::time::timeout(Duration::from_secs(120), a.submit_commit_send(&mut OsRng, &revocation, None))
-        .await
-        .unwrap()
-        .unwrap();
-    let mut reported: Vec<DevicePublicKey> = submitted.sends.per_device.iter().map(|(device, _)| *device).collect();
-    reported.sort_by_key(|device| *device.as_bytes());
-    let mut expected = vec![bob.device_key, carol.device_key];
-    expected.sort_by_key(|device| *device.as_bytes());
-    assert_eq!(reported, expected, "Carol, listed, and Bob, removed; never the sender's own Device");
-    assert!(submitted.sends.per_device.iter().all(|(_, sent)| sent.is_ok()), "{:?}", submitted.sends);
-
-    let (from, to_carol) = next_body(&mut carol_receives).await;
-    assert_eq!(from, sender_device);
-    assert!(matches!(to_carol, WireMessage::OrgInformation { .. }), "Carol, still listed, gets the Organisation's information");
-    let (from, to_bob) = next_body(&mut bob_receives).await;
-    assert_eq!(from, sender_device);
-    assert!(matches!(to_bob, WireMessage::Revocation(_)), "Bob, removed, gets the revocation");
-}
-
-// Boundary (Loopback): revoking the last other Member leaves a record that
-// lists the sender alone; the one recipient is the removed Device, which the
-// record no longer names, and it receives the revocation.
-// verifies: REQ-jxyh9c
-#[tokio::test(flavor = "multi_thread")]
-async fn the_last_other_member_removed_is_still_sent_its_revocation() {
-    let (_guard, _keychain) = fresh_keychain();
-    let chain = FakeChain::new();
-    let a = handle("last-removed", "a", &chain);
-    let alice = create(&a, "alice").await;
-    let org = a.found_organisation(&mut OsRng, &alice).await.unwrap();
-    let sender_device = device_key_of(&a, &alice).await;
-    let bob = joiner(0x61, "bob");
-    let (bob_addr, mut bob_receives) = forwarding(bind_seed([0x62; 32]).await);
-    let admission = a.admit_member(&mut OsRng, org, &bob).await.unwrap();
-    a.submit_commit_send(&mut OsRng, &admission, at(bob_addr.clone())).await.unwrap();
-    next_body(&mut bob_receives).await;
-
-    let bob_member = member_id_of(&a, org, bob.member_key).await;
-    let revocation = a.revoke_member(&mut OsRng, org, bob_member).await.unwrap();
-    let submitted = a.submit_commit_send(&mut OsRng, &revocation, at(bob_addr)).await.unwrap();
-    let record = a.organisation(org).await.unwrap();
-    assert_eq!(record.members.len(), 1, "the record lists the sender alone");
-    assert_eq!(submitted.sends.per_device.len(), 1, "{:?}", submitted.sends);
-    assert_eq!(submitted.sends.per_device[0].0, bob.device_key, "the removed Device, which the record no longer names");
-    assert!(submitted.sends.per_device[0].1.is_ok(), "{:?}", submitted.sends);
-    let (from, to_bob) = next_body(&mut bob_receives).await;
-    assert_eq!(from, sender_device);
-    assert!(matches!(to_bob, WireMessage::Revocation(_)), "{to_bob:?}");
-}
-
-// ---- REQ-txkm94: Blobs, outstanding identifiers and expectations in the store
-
-// The outstanding identifier and the declared expectation are in the store
-// files: a reopened inviter accepts the reply and a reopened joiner holds
-// the expectation; once the reply is acted on, a reopened inviter refuses
-// it as no longer outstanding.
-// verifies: REQ-txkm94
-#[tokio::test(flavor = "multi_thread")]
-async fn outstanding_invites_and_expectations_are_kept_and_settled_in_the_store_files() {
-    let (_guard, _keychain) = fresh_keychain();
-    let (dir_a, dir_b) = (fresh_dir("exchange", "a"), fresh_dir("exchange", "b"));
-    let chain = FakeChain::new();
-    let chain_b = FakeChain::sharing_slots_with(&chain);
-    let a = open(&dir_a, &chain);
-    let alice = create(&a, "alice").await;
-    let org = a.found_organisation(&mut OsRng, &alice).await.unwrap();
-    let invite = a.issue_invite(&mut OsRng, org, "Acme", "Bob Builder").await.unwrap();
-    let b = open(&dir_b, &chain_b);
-    let bob = create(&b, "bob").await;
-    let reply = b.produce_reply(&mut OsRng, &invite, &bob, true).await.unwrap();
-
-    let reopened_b = open(&dir_b, &chain_b);
-    let expected: Vec<OrgId> = reopened_b.node_for_test().expected_admissions().iter().map(|expected| expected.org_id).collect();
-    assert_eq!(expected, vec![org], "the declared expectation is in B's file");
-    let reopened_a = open(&dir_a, &chain);
-    let imported = reopened_a.import_reply(&reply).await.unwrap();
-    assert_eq!((imported.org_id, imported.handle.as_str()), (org, "bob"), "the outstanding identifier is in A's file");
-
-    reopened_a.admit_reply(&mut OsRng, org, &reply, None).await.unwrap();
-    let settled = open(&dir_a, &chain);
-    let refused = settled.import_reply(&reply).await.unwrap_err();
-    assert!(matches!(refused, ExchangeError::Node(OrgNodeError::InviteNotOutstanding)), "settled in A's file: {refused:?}");
-    assert_eq!(settled.organisation(org).await.unwrap().members.len(), 2, "and the admission with it");
-}
-
-// Abnormal: Blobs that do not parse are refused by org-node's parse, and a
-// true reply admitted under another Organisation A holds is refused by the
-// outstanding check; nothing is written to either side's files and nothing
-// reaches the chain.
-// verifies: REQ-txkm94
-#[tokio::test(flavor = "multi_thread")]
-async fn blobs_that_do_not_parse_and_a_reply_for_another_organisation_change_no_file() {
-    let (_guard, _keychain) = fresh_keychain();
-    let (dir_a, dir_b) = (fresh_dir("exchange-refused", "a"), fresh_dir("exchange-refused", "b"));
-    let chain = FakeChain::new();
-    let a = open(&dir_a, &chain);
-    let alice = create(&a, "alice").await;
-    let org = a.found_organisation(&mut OsRng, &alice).await.unwrap();
-    let carol = create(&a, "carol").await;
-    let elsewhere = a.found_organisation(&mut OsRng, &carol).await.unwrap();
-    let invite = a.issue_invite(&mut OsRng, org, "Acme", "Bob Builder").await.unwrap();
-    let b = open(&dir_b, &FakeChain::sharing_slots_with(&chain));
-    let bob = create(&b, "bob").await;
-    let reply = b.produce_reply(&mut OsRng, &invite, &bob, true).await.unwrap();
-    let (files_a, files_b, writes) = (files_in(&dir_a), files_in(&dir_b), chain.update_writes());
-
-    for blob in ["", "not a blob", "00", &"ab".repeat(200), &invite[..invite.len() / 2]] {
-        let as_invite = b.produce_reply(&mut OsRng, blob, &bob, true).await.unwrap_err();
-        assert!(matches!(as_invite, ExchangeError::Node(_)), "{blob:?} as an Invite: {as_invite:?}");
-        let as_reply = a.admit_reply(&mut OsRng, org, blob, None).await.unwrap_err();
-        assert!(matches!(as_reply, ExchangeError::Node(_)), "{blob:?} as a reply: {as_reply:?}");
-    }
-    let misdirected = a.admit_reply(&mut OsRng, elsewhere, &reply, None).await.unwrap_err();
-    assert!(matches!(misdirected, ExchangeError::Node(OrgNodeError::ReplyForAnotherOrganisation)), "{misdirected:?}");
-
-    assert_eq!(files_in(&dir_a), files_a, "nothing written on A's side");
-    assert_eq!(files_in(&dir_b), files_b, "nothing written on B's side");
-    assert_eq!(chain.update_writes(), writes, "nothing written to the chain");
+    assert_eq!(admin.chain.reads(), reads, "no chain read after a refused check");
+    assert_eq!(store_bytes(tag, "a"), files, "nothing written");
 }

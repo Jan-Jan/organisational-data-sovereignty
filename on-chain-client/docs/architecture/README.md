@@ -90,6 +90,20 @@ reader as well, so neither the app nor org-node depends on this unit. org-io
 also calls the two signatory-set reads of SDD-rxfu6h. No item's meaning
 changes.
 
+*Amended 2026-10-20 (change `worktree-org-io-domain-api`, owner answer A4).*
+The writer's genesis ceremony is also offered in two steps, `create_proxy`
+then `found_at`, the second resumable from chain reads (REQ-v86pyy,
+REQ-6vh3ht); `genesis` is their composition. The design is
+`2026-10-20-domain-api.md`; no item is added.
+
+*Amended 2026-10-20 (change `worktree-org-io-domain-api`, consistency
+pass):* the table lacks one in-force item, added since it was written; with
+it the table lists every in-force item of the unit:
+
+| Item | Responsibility | Source |
+|---|---|---|
+| SDD-rxfu6h | the signatory-set reads: the pure decoders of the two storage values that let a consumer confirm a multisig signatory set, and their two fetches (the fetches in SDD-3b8zef's shell) | `src/write/signatory_set.rs`, `src/client.rs` (the two fetches) |
+
 **Source cells corrected 2026-09-28 by this change's review sweep.**
 SDD-4z3k2u read `` `src/client.rs` (`internals`) ``, but the item is
 `internals::log_is_ours` **and** `event_admin`, and `event_admin` is not inside

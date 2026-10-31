@@ -88,8 +88,8 @@ pub fn proxied(pure_proxy: [u8; 32], call: Value) -> Value {
 /// fresh **pure proxy** that has never called `map_account` cannot be a
 /// `Revive.call` origin: the dispatch reverts with Revive error 43
 /// (pallet index 100) *before* the contract runs, so no
-/// `ContractEmitted` event is produced. Empirically pinned by the
-/// genesis-event diagnostic during Task 7: the pure proxy must dispatch
+/// `ContractEmitted` event is produced. Empirically pinned by a
+/// genesis-event diagnostic: the pure proxy must dispatch
 /// `Revive.map_account` (which takes **no arguments** — verified against
 /// live Paseo-AH metadata: `Revive::map_account fields=[]`) once after
 /// being funded, AS ITSELF, before it can submit `OrgRegistry.update`.

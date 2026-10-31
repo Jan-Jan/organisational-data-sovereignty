@@ -1,34 +1,25 @@
 /**
- * REQ-ab2mfz / RC-wzb48r (LLR-n2u4uf): what the user is told before an
- * Invite reply is produced, and the decision that gates producing it.
- *
- * The reply's keys are per-Organisation and expose nothing about the person,
- * so the warning names only what the reply does reveal: the handle, name and
- * surname entered for the chosen Persona.
+ * SDD-7aq69w, REQ-2yh3c8 (LLR-qcg6bz, LLR-prh433): what a provisional Member is told
+ * before its first admission request, and the decision that gates sending
+ * it. There is no Persona to choose: each Member proposal is its own new
+ * Persona (org-io's Persona per proposal).
  */
-import type { PersonaDto } from './api';
 
-export const REPLY_WARNING =
+export const ADMISSION_REQUEST_WARNING =
 	'Nothing has verified who sent this Invite, or the Organisation name it states. ' +
-	'Your reply will reveal the handle, name and surname entered for the Persona you choose to whoever sent it.';
+	'Your admission request will reveal the name, surname and preferred Handles you entered to the Device the Invite names.';
+
+export type RequestCheck = { ok: true } | { ok: false; message: string };
 
 /**
- * LLR-pms47e: the Personas to offer as the one to reply as — only those bound
- * to no Organisation (one Persona, one Organisation). org-io refuses a bound
- * one as well (org-io's one-Persona-one-Organisation item).
+ * LLR-qcg6bz: refuses, naming the missing confirmation, until the user
+ * confirms the first request. LLR-prh433: a request for a provisional
+ * Member whose earlier request the user confirmed is allowed with no
+ * confirmation asked again.
  */
-export function unboundPersonas(personas: PersonaDto[]): PersonaDto[] {
-	return personas.filter((p) => p.org_id === null);
-}
-
-export type ReplyCheck = { ok: true } | { ok: false; message: string };
-
-export function replyGate(input: { personaId: string; confirmed: boolean }): ReplyCheck {
-	if (input.personaId.trim() === '') {
-		return { ok: false, message: 'Choose the Persona to reply as.' };
+export function admissionRequestGate(input: { confirmedBefore: boolean; confirmed: boolean }): RequestCheck {
+	if (input.confirmedBefore || input.confirmed) {
+		return { ok: true };
 	}
-	if (!input.confirmed) {
-		return { ok: false, message: 'Read the warning and confirm before replying.' };
-	}
-	return { ok: true };
+	return { ok: false, message: 'Read the warning and confirm before requesting admission.' };
 }

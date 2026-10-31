@@ -145,6 +145,7 @@ for Organisation information, 01 for revocation), and has no invite
 identifier bytes (LLR-ms8njy); the Organisation information has no signature
 bytes after its Change set bytes (LLR-e7s4ye).
 satisfies: derived
+superseded-by: LLR-mkvx2k
 
 *Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, S3 T4;
 LLR-js9dsu and LLR-dc45ur as amended there).* The pinned revocation Wire
@@ -386,6 +387,7 @@ holds its typed form (`MemberSeed`, `DeviceSeed`, `OrgPrivateKey`,
 `ChainAccount`, `PersonaId`, `OrgId`, `Epoch`, `SequenceNumber`); `OrgRecord`
 has no administrator key and no Organisation secret.
 satisfies: REQ-qn2erx
+superseded-by: LLR-pv2rdy
 
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 The typed forms listed `OrgSecret`, the type of `OrgRecord.org_secret`. Both
@@ -410,6 +412,7 @@ that parses through it before `OrgService::create_persona` creates nothing for
 a refused detail; a Persona record loaded from a store parses its details
 through it.
 satisfies: REQ-qn2erx
+superseded-by: LLR-rjphn4
 
 (Amended 2026-10-04 after independent review round 2: the item did not say
 that the parsed values are in NFC, although that is what is stored, listed
@@ -428,6 +431,7 @@ snapshot's DevicePublicKeys are held as a list of parsed keys, so a repeated
 key or more than four is not refused here; org-members refuses them, as a
 `Trie` error, when the members are rebuilt.
 satisfies: REQ-qn2erx
+superseded-by: LLR-7yu2xy
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change

@@ -55,3 +55,25 @@ are in `docs/plans/2026-10-06-org-io-create.md` §2.
 
 No software item is defined yet: the crate lands in S2's develop phase. Every
 item is class C, the unit's class, and no segregation is argued.
+
+*Amended 2026-10-20 (change `worktree-org-io-domain-api`, consistency
+pass):* the paragraph above is history; the items are defined. The in-force
+software items, by what they hold (the dated files and
+`2026-10-16-domain-api.md` define them):
+
+| Area | Items | What it decides or does |
+|---|---|---|
+| **The handle** | SDD-z3ychz, SDD-3qwjs2 | The app's one way in, its domain surface and queries; the one random source every operation draws from |
+| **Persons and Personas** | SDD-j7k844, SDD-bzu2jg | The user's Person, kept apart; a new Persona, with its keychain item, store file and endpoint, per founding and per provisional Member |
+| **Invitation** | SDD-zqv3v6, SDD-9rbm8t, SDD-cxh9d8 | The Organisation's outstanding invites, issued or cancelled; an imported Invite read; the kept admission requests listed |
+| **Proposals** | SDD-frsa73 | Recording provisional changes and proposing the updated Organisation; no command discards |
+| **Chain** | SDD-mk39e5, SDD-4bbt47, SDD-f4khqn, SDD-z85ux9, SDD-789u6d | Writing one provisional organisation (the founding in two steps); the read at a finalised block; the own-admin rule; the connection to a chain; the signatory key |
+| **Verification** | SDD-t4z8sz | Judging a held Organisation against the chain through org-node, writing what org-node returns, settling an unknown write |
+| **Transport** | SDD-2bzgtp, SDD-dhh3pw, SDD-2fc2cq, SDD-8uyg4s, SDD-xwft92, SDD-b8tuv3 | The send path to a Device key at its kept addresses; admission and organisation requests; the receive step and its one verdict; the endpoint whose identity is the Device key, one per Persona, and when it exists |
+| **Storage** | SDD-egx8rv, SDD-4fvypt | The sealed store files and the OS keychain |
+| **This node's removal** | SDD-3my66m, SDD-wyn7b6 | Sending the kept acknowledgements on a backoff, having org-node delete each one accepted; keeping the removed Persona's data and deleting its keychain item and then its store file when none is left or after 7 days |
+
+Out of force: SDD-83un8g (split into SDD-3my66m and SDD-wyn7b6, 2026-10-28), SDD-6gb59p (split into SDD-zqv3v6, SDD-9rbm8t and SDD-cxh9d8, 2026-10-28), SDD-erzj3m, SDD-6qz9ms, SDD-6mpmsw, SDD-aw3nka, SDD-v2bq89 and
+SDD-rr7dtw (superseded in that change), and SDD-wr8m5n (the peer-address
+parse, superseded by SDD-2bzgtp when its requirement was retired, owner
+answer A2).

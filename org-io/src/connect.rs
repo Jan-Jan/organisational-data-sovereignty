@@ -35,7 +35,7 @@ impl fmt::Display for ConnectFailure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ConnectFailure::DevSeedNotBuilt => formatter.write_str(DEV_SEED_NOT_BUILT),
-            ConnectFailure::SeedNotSet => formatter.write_str(crate::submit::NOT_CONFIGURED),
+            ConnectFailure::SeedNotSet => formatter.write_str(crate::write::NOT_CONFIGURED),
             ConnectFailure::Config(error) => write!(formatter, "{error}"),
             ConnectFailure::CoSignerIsOwnAccount => {
                 formatter.write_str("ODS_COSIGNER_PUB is this node's own account; a co-signer must be another account")
@@ -53,7 +53,8 @@ impl std::error::Error for ConnectFailure {}
 /// never holds org-node's service itself (review round 2, finding 2).
 /// Returned boxed: the service is large.
 pub struct ConnectFailed {
-    service: OrgService,
+    /// Shared, as the handle held it (SDD-3my66m).
+    service: Arc<tokio::sync::Mutex<OrgService>>,
     /// The handle's data directory, keychain and endpoints, handed back
     /// with the service.
     local: crate::LocalStore,
@@ -61,30 +62,30 @@ pub struct ConnectFailed {
 }
 
 impl ConnectFailed {
-    pub(crate) fn boxed(service: OrgService, local: crate::LocalStore, reason: ConnectFailure) -> Box<Self> {
+    pub(crate) fn boxed(service: Arc<tokio::sync::Mutex<OrgService>>, local: crate::LocalStore, reason: ConnectFailure) -> Box<Self> {
         Box::new(Self { service, local, reason })
     }
 
     /// The handle with the chain not configured, over the service, data
     /// directory and keychain the refused connect was given.
     pub fn into_not_configured(self) -> crate::OrgIo {
-        crate::OrgIo::unconfigured(self.service, self.local)
+        crate::OrgIo::unconfigured_shared(self.service, self.local)
     }
 }
 
 /// The read when the chain is not configured (the app's former
 /// `ChainNotConfigured`): every read refused with the message that says what
-/// to set. Its write half is `submit::WriterNotConfigured`.
+/// to set. Its write half is `write::WriterNotConfigured`.
 pub struct StateReaderNotConfigured;
 
 #[async_trait]
 impl StateReader for StateReaderNotConfigured {
     async fn read_state(&self, _org_id: OrgId) -> Result<Option<OrgState>, OrgNodeError> {
-        Err(OrgNodeError::Chain(crate::submit::NOT_CONFIGURED.into()))
+        Err(OrgNodeError::Chain(crate::write::NOT_CONFIGURED.into()))
     }
 
     async fn finalised_block(&self) -> Result<u64, OrgNodeError> {
-        Err(OrgNodeError::Chain(crate::submit::NOT_CONFIGURED.into()))
+        Err(OrgNodeError::Chain(crate::write::NOT_CONFIGURED.into()))
     }
 }
 
@@ -104,7 +105,7 @@ pub async fn connect(
 
     // Use the reconnecting RPC client rather than `from_insecure_url`. Public RPC
     // nodes close idle WS connections; with a plain client the next call after an
-    // idle period (e.g. the app's genesis write minutes after startup) fails
+    // idle period (e.g. the founding's two steps minutes after startup) fails
     // deep in subxt with "cannot get the current block: ... Error reason could not
     // be found. This is a bug." (a jsonrpsee dead-connection error). The
     // reconnecting client keeps the link alive with WS pings AND transparently

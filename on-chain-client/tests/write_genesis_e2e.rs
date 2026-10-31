@@ -14,7 +14,11 @@ use common::chopsticks_fork::{spawn_fork, ChopsticksHandle};
 use common::chopsticks_reorg::mine_block;
 use common::conn::legacy_client;
 use on_chain_client::write::subxt_ops::{BlockSink, SubxtWriteOps};
-use on_chain_client::write::{genesis, submit_update, WriteError};
+use on_chain_client::write::proxy::{map_account_call, proxied};
+use on_chain_client::write::{create_proxy, genesis, submit_update, DispatchOutcome, WriteError, WriteOps, FUND_AMOUNT};
+
+#[path = "support/write_reads_contract.rs"]
+mod contract;
 use on_chain_client::{Epoch, OnChainRootHash, OrgPubKey, OrgRegistryClient};
 use subxt_signer::sr25519::dev;
 
@@ -76,6 +80,33 @@ fn deploy_org_registry() -> [u8; 20] {
     assert_eq!(bytes.len(), 20, "deployed H160 was not 20 bytes");
     h160.copy_from_slice(&bytes);
     h160
+}
+
+/// The contract of `write_compose.rs`'s substitute reads (TEST_GUIDELINES
+/// Doubles 3): the same assertions, against `SubxtWriteOps` on the fork, at a pure proxy taken
+/// through each chain state `found_at` decides from — just created, funded,
+/// then mapped from its own origin.
+///
+/// It calls no `found_at`, so it does not cite `found_at`'s skip rules
+/// (LLR-jk76wf, LLR-95puh9); it reaches `free_balance_of` through
+/// `SubxtWriteOps::free_balance`.
+// verifies: LLR-htp5tk
+#[tokio::test(flavor = "multi_thread")]
+async fn subxt_reads_answer_the_write_reads_contract() {
+    let fork = spawn_fork().await.expect("spawn chopsticks fork");
+    let api = legacy_client(&fork.ws_url).await.expect("legacy subxt client");
+    let ops = SubxtWriteOps::new(api, ChopsticksSink { handle: &fork });
+    let alice = dev::alice();
+
+    let proxy = create_proxy(&ops, &alice, &[]).await.expect("create_proxy");
+    contract::untouched(&ops, proxy).await;
+
+    ops.fund(&alice, proxy, FUND_AMOUNT).await.expect("fund");
+    contract::funded_unmapped(&ops, proxy, FUND_AMOUNT).await;
+
+    let mapped = ops.dispatch(&alice, &[], proxied(proxy, map_account_call()), None).await.expect("map_account");
+    assert_eq!(mapped, DispatchOutcome::Executed);
+    contract::mapped_to_itself(&ops, proxy, FUND_AMOUNT).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -15,8 +15,8 @@ export interface VerifyRow {
  * REQ-a83vqr, REQ-akt4p7. The row's outcome comes from the event that produced
  * it and from nowhere else.
  *
- * Before this change the component assigned `verified: true` at both of its
- * assignment sites, so the ✗ state was unreachable by any input (HAZ-9fmhm4).
+ * A component that assigned `verified: true` itself would make the ✗ state
+ * unreachable by any input (HAZ-9fmhm4).
  *
  * `epoch` and `root` are `null` on a failure rather than `0` and `''` — the
  * same rule as REQ-tw4cb5 on the Rust side, applied on this one. A failure

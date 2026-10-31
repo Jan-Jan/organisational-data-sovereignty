@@ -17,6 +17,7 @@
 //! contrast case against `Updated` — which legitimately does carry an epoch —
 //! so the absence is shown to be discriminating rather than incidental.
 
+use ods_poc_lib::entry::{EntryResultDto, VerificationEntryDto, WriteLabelDto};
 use ods_poc_lib::events::{self, Emission, ReceiverOutcome};
 
 const MEMBERSHIP_EVENTS: [&str; 3] = ["membership-updated", "incoming-verified", "epoch-changed"];
@@ -43,11 +44,26 @@ fn has_key_anywhere(v: &serde_json::Value, key: &str) -> bool {
     }
 }
 
+/// A verification entry for the Organisation `org()`, with `result`.
+fn entry_of(result: EntryResultDto) -> VerificationEntryDto {
+    VerificationEntryDto { org_id: Some(org()), founder: None, result, write: None }
+}
+
+/// `entry`, as the `verification-result` payload carries it.
+fn wire(entry: &VerificationEntryDto) -> serde_json::Value {
+    serde_json::to_value(entry).expect("serialises")
+}
+
+/// An `adopted` result at epoch 4, `own` as given, nothing discarded.
+fn adopted_at_4(own: bool) -> EntryResultDto {
+    EntryResultDto::Adopted { epoch: 4, own, discarded: Vec::new(), sends: None, sends_refused: None }
+}
+
 /// Every emission the self-delete path produces for `org_id`, with the offending
 /// payload returned when any of them carries an `epoch` key at any depth.
 fn self_delete_epoch_offender(org_id: &str) -> Option<serde_json::Value> {
     events::emissions_for(&ReceiverOutcome::SelfDeleted {
-        org_id: org_id.to_string(),
+        org_id: Some(org_id.to_string()),
     })
     .into_iter()
     .find(|e| has_key_anywhere(&e.payload, "epoch"))
@@ -116,7 +132,7 @@ fn updated_carries_boundary_epochs_and_roots_verbatim() {
 // verifies: LLR-hgsdm8
 #[test]
 fn record_unreadable_emits_no_membership_event() {
-    let out = events::emissions_for(&ReceiverOutcome::RecordUnreadable { org_id: org() });
+    let out = events::emissions_for(&ReceiverOutcome::RecordUnreadable { org_id: Some(org()) });
     let names = names(&out);
     for forbidden in MEMBERSHIP_EVENTS {
         assert!(!names.contains(&forbidden), "emitted {forbidden}: {names:?}");
@@ -130,7 +146,7 @@ fn record_unreadable_emits_no_epoch_event() {
     // record, so the frontend was told the organisation was at genesis with an
     // empty root — a reachable, meaningful value that was simply untrue
     // (HAZ-5ha5vv). No epoch event may be emitted at all.
-    let out = events::emissions_for(&ReceiverOutcome::RecordUnreadable { org_id: org() });
+    let out = events::emissions_for(&ReceiverOutcome::RecordUnreadable { org_id: Some(org()) });
     assert!(!names(&out).contains(&"epoch-changed"), "{:?}", names(&out));
     for e in &out {
         assert!(
@@ -153,7 +169,7 @@ fn record_unreadable_emits_no_epoch_event() {
 // verifies: LLR-hgsdm8
 #[test]
 fn record_unreadable_names_the_organisation() {
-    let out = events::emissions_for(&ReceiverOutcome::RecordUnreadable { org_id: org() });
+    let out = events::emissions_for(&ReceiverOutcome::RecordUnreadable { org_id: Some(org()) });
     assert_eq!(names(&out), vec!["record-unreadable"]);
     assert_eq!(out[0].payload["org_id"], serde_json::json!(org()));
 }
@@ -161,7 +177,7 @@ fn record_unreadable_names_the_organisation() {
 // verifies: LLR-hgsdm8
 #[test]
 fn record_unreadable_emits_exactly_one_event() {
-    let out = events::emissions_for(&ReceiverOutcome::RecordUnreadable { org_id: org() });
+    let out = events::emissions_for(&ReceiverOutcome::RecordUnreadable { org_id: Some(org()) });
     assert_eq!(out.len(), 1, "{:?}", names(&out));
 }
 
@@ -182,7 +198,7 @@ fn record_unreadable_holds_for_any_organisation_id() {
         over_long.as_str(),
     ] {
         let out = events::emissions_for(&ReceiverOutcome::RecordUnreadable {
-            org_id: org_id.to_string(),
+            org_id: Some(org_id.to_string()),
         });
         assert_eq!(names(&out), vec!["record-unreadable"], "{org_id:?}");
         assert_eq!(out[0].payload, serde_json::json!({ "org_id": org_id }), "{org_id:?}");
@@ -196,7 +212,7 @@ fn record_unreadable_holds_for_any_organisation_id() {
 // verifies: LLR-2vg79y
 #[test]
 fn self_delete_emits_no_epoch_event() {
-    let out = events::emissions_for(&ReceiverOutcome::SelfDeleted { org_id: org() });
+    let out = events::emissions_for(&ReceiverOutcome::SelfDeleted { org_id: Some(org()) });
     let names = names(&out);
     for forbidden in MEMBERSHIP_EVENTS {
         assert!(!names.contains(&forbidden), "emitted {forbidden}: {names:?}");
@@ -212,8 +228,7 @@ fn self_delete_emits_no_epoch_event() {
 
 /// verifies: LLR-2vg79y
 ///
-/// A received acknowledgement announces nothing to the UI (S3: org-io keeps
-/// it, from S3b-io).
+/// A received acknowledgement announces nothing to the UI (org-io keeps it).
 #[test]
 fn a_received_acknowledgement_emits_nothing() {
     assert!(events::emissions_for(&ReceiverOutcome::AcknowledgementReceived { org_id: org() }).is_empty());
@@ -222,7 +237,7 @@ fn a_received_acknowledgement_emits_nothing() {
 // verifies: LLR-2vg79y
 #[test]
 fn self_delete_emits_revoked_naming_the_organisation() {
-    let out = events::emissions_for(&ReceiverOutcome::SelfDeleted { org_id: org() });
+    let out = events::emissions_for(&ReceiverOutcome::SelfDeleted { org_id: Some(org()) });
     assert_eq!(names(&out), vec!["revoked"]);
     assert_eq!(out[0].payload["org_id"], serde_json::json!(org()));
 }
@@ -235,7 +250,7 @@ fn self_delete_payload_carries_no_epoch_key_at_any_depth() {
     // its payload — satisfies both of them and violates REQ-tw4cb5. This asserts
     // on the payload object's KEYS instead, recursively, so a nested
     // `{"state": {"epoch": 0}}` is caught as well as a top-level one.
-    let out = events::emissions_for(&ReceiverOutcome::SelfDeleted { org_id: org() });
+    let out = events::emissions_for(&ReceiverOutcome::SelfDeleted { org_id: Some(org()) });
     assert!(!out.is_empty(), "the self-delete path emits something");
     for e in &out {
         let keys: Vec<&str> = e
@@ -279,7 +294,7 @@ fn self_delete_carries_no_epoch_for_any_organisation_id() {
         over_long.as_str(),
     ] {
         let out = events::emissions_for(&ReceiverOutcome::SelfDeleted {
-            org_id: org_id.to_string(),
+            org_id: Some(org_id.to_string()),
         });
         assert!(
             !out.is_empty(),
@@ -422,12 +437,11 @@ fn stopped_emits_exactly_one_event() {
 // failure is reported as a receiver error (RC-3rddh7)
 // ---------------------------------------------------------------------------
 //
-// The receiver loop used to route EVERY `Err` from the receive path into
-// `VerifyFailed`, which the frontend renders as a "✗ MISMATCH" row under
-// "Verified Updates (chain root match)". A transport hiccup or a chain read
-// failure was therefore displayed to the operator as a root mismatch — a fresh
-// instance of HAZ-9fmhm4, the verification display misrepresenting the
-// verification state.
+// A receive-path `Err` routed into `VerifyFailed` is rendered by the frontend
+// as a "✗ MISMATCH" row under "Verified Updates (chain root match)". A
+// transport hiccup or a chain read failure routed there would be displayed to
+// the operator as a root mismatch — an instance of HAZ-9fmhm4, the
+// verification display misrepresenting the verification state.
 //
 // The classification is asserted VARIANT BY VARIANT, against concrete event
 // names. It deliberately does not re-derive the partition from a predicate: a
@@ -451,13 +465,13 @@ fn verification_verdicts() -> Vec<OrgNodeError> {
         OrgNodeError::DeltaBaseMismatch,
         OrgNodeError::RootMismatch,
         OrgNodeError::StaleEpoch { got: 2, last: 9 },
-        // Added 2026-10-05: a Sequence number that is not the chain's epoch
+        // A Sequence number that is not the chain's epoch
         // (an org-node commit rule) refuses the received update itself.
         OrgNodeError::SeqNotEpoch { seq: 9, epoch: 3 },
     ]
 }
 
-// verifies: LLR-7bk6qh
+// verifies: LLR-wgr46u
 #[test]
 fn every_verification_verdict_is_classified_as_a_verification_failure() {
     for e in verification_verdicts() {
@@ -474,7 +488,7 @@ fn every_verification_verdict_is_classified_as_a_verification_failure() {
     }
 }
 
-// verifies: LLR-7bk6qh
+// verifies: LLR-wgr46u
 #[test]
 fn a_verification_verdict_carries_its_own_message_and_no_invented_organisation() {
     for e in verification_verdicts() {
@@ -492,7 +506,7 @@ fn a_verification_verdict_carries_its_own_message_and_no_invented_organisation()
     }
 }
 
-// verifies: LLR-7bk6qh
+// verifies: LLR-wgr46u
 #[test]
 fn a_chain_failure_is_classified_as_a_receiver_error() {
     // `Chain` is a chain read or transport failure. It is not a verdict on any
@@ -514,11 +528,10 @@ fn a_chain_failure_is_classified_as_a_receiver_error() {
 // verifies: LLR-7bk6qh, LLR-usxk57
 #[test]
 fn a_chain_failure_emits_no_verification_event_for_any_message() {
-    // Abnormal inputs: an empty message, one the loop's old substring check
-    // stopped on, and an ordinary transient one. None of them is a verdict, so
-    // none of them may be announced as one. *S4, task T16, 2026-10-14:* the
-    // second input no longer names iroh's wording; terminality is org-io's
-    // typed condition now, not this text.
+    // Abnormal inputs: an empty message, one that reads like a closed
+    // endpoint, and an ordinary transient one. None of them is a verdict, so
+    // none of them may be announced as one. Terminality is org-io's typed
+    // condition, not this text.
     for msg in [
         "",
         "accept error: endpoint closed",
@@ -587,7 +600,7 @@ fn the_receiver_error_payload_carries_a_message_and_no_verification_state() {
     }
 }
 
-// verifies: LLR-7bk6qh
+// verifies: LLR-wgr46u
 #[test]
 fn the_two_classes_are_actually_distinguished() {
     // Contrast. If every error classified the same way, the assertions above
@@ -614,19 +627,11 @@ fn the_two_classes_are_actually_distinguished() {
 // REQ-jfxah3 — the terminal messages that actually occur
 // ---------------------------------------------------------------------------
 //
-// The terminal check was a substring match on "endpoint not bound", a string
-// neither org-node nor iroh ever formats. The loop therefore never broke, the
-// `receiver-stopped` event was never emitted, and the guard was never released
-// by task exit: the trigger for REQ-jfxah3 was unreachable.
-//
-// *Rewritten 2026-10-14 (S4, task T16):* the loop now stops on org-io's
-// typed `ReceiveError::Terminal` (LLR-zw6jqy, which supersedes LLR-a9rjtf),
-// so the cases below are org-io's two terminal causes, and the message each
-// carries is whatever org-io renders: nothing is keyed to its text any more.
-// The three tests keep their `verifies:` lines; the text-independence itself
-// is `terminal_is_decided_by_the_error_variant_not_its_text`'s.
-// *Review round 1, 2026-10-14:* the three now also verify LLR-zw6jqy, the
-// typed rule they were rewritten for; LLR-a9rjtf stays beside it as history.
+// The loop stops on org-io's typed `ReceiveError::Terminal` (LLR-zw6jqy,
+// which supersedes LLR-a9rjtf), so the cases below are org-io's two terminal
+// causes, and the message each carries is whatever org-io renders: nothing
+// is keyed to its text. The text-independence itself is
+// `terminal_is_decided_by_the_error_variant_not_its_text`'s.
 
 /// Every terminal case: the error as the app receives it, and the message the
 /// operator is shown.
@@ -645,7 +650,7 @@ fn terminal_cases() -> Vec<(ReceiveError, String)> {
     .collect()
 }
 
-// inherited from LLR-a9rjtf (superseded by LLR-zw6jqy), review round 1, 2026-10-14
+// inherited from LLR-a9rjtf (superseded by LLR-zw6jqy)
 // verifies: LLR-zw6jqy, LLR-a9rjtf
 #[test]
 fn every_real_terminal_message_stops_the_loop() {
@@ -660,29 +665,28 @@ fn every_real_terminal_message_stops_the_loop() {
     }
 }
 
-// inherited from LLR-a9rjtf (superseded by LLR-zw6jqy), review round 1, 2026-10-14
+// inherited from LLR-a9rjtf (superseded by LLR-zw6jqy)
 // verifies: LLR-zw6jqy, LLR-a9rjtf
 #[test]
 fn a_non_terminal_failure_does_not_stop_the_loop() {
     // Abnormal inputs: a transport hiccup, a chain timeout, a local startup
     // condition and an empty message. None of them is terminal — stopping on one
-    // would end the receiver for a failure it could have retried past.
-    // *S4, task T16, 2026-10-14:* each arrives as org-io's `ReceiveError`
-    // (a chain read failure); the first no longer names iroh's wording.
+    // would end the receiver for a failure it could have retried past. Each
+    // arrives as org-io's `ReceiveError::Connection`.
     for inner in [
         "stream error: connection reset by peer",
         "rpc timeout",
         "no persona found — create one first",
         "",
     ] {
-        let e = ReceiveError::Chain(OrgNodeError::Chain(inner.to_string()));
-        let outcomes = events::outcomes_for_receive_error(&e);
+        let failure = ReceiveError::Connection(TransportError::Stream(inner.to_string()));
+        let outcomes = events::outcomes_for_receive_error(&failure);
         assert_eq!(
             outcomes,
             vec![ReceiverOutcome::ReceiveError {
-                message: e.to_string()
+                message: failure.to_string()
             }],
-            "Chain({inner:?}) is not terminal and must not stop the loop"
+            "Connection({inner:?}) is not terminal and must not stop the loop"
         );
     }
     // …and neither is a verdict on an update: a root mismatch is a reason to
@@ -697,7 +701,7 @@ fn a_non_terminal_failure_does_not_stop_the_loop() {
     );
 }
 
-// inherited from LLR-a9rjtf (superseded by LLR-zw6jqy), review round 1, 2026-10-14
+// inherited from LLR-a9rjtf (superseded by LLR-zw6jqy)
 // verifies: LLR-zw6jqy, LLR-a9rjtf
 #[test]
 fn the_stop_is_announced_after_the_failure_for_the_same_error() {
@@ -731,10 +735,10 @@ fn the_stop_is_announced_after_the_failure_for_the_same_error() {
 // REQ-kn5rtx — a variant reachable from a local condition is not a verdict
 // ---------------------------------------------------------------------------
 
-// verifies: LLR-7bk6qh
+// verifies: LLR-wgr46u
 #[test]
 fn the_commit_workflow_refusals_are_classified_as_receiver_errors() {
-    // The ten refusals org-node gained with the commit workflow (S3). None is
+    // The ten refusals of org-node's commit workflow. None is
     // a verdict of `verify_envelope_against_chain` on an update: the
     // reconcile refusals are about a chain state read or the node's own
     // record, a revocation's proof and an acknowledgement are not updates
@@ -757,9 +761,6 @@ fn the_commit_workflow_refusals_are_classified_as_receiver_errors() {
         OrgNodeError::AcknowledgementForListedDevice { org_id },
         OrgNodeError::AcknowledgementSignatureInvalid { org_id },
         OrgNodeError::DeviceSecretNotSupplied { org_id },
-        // *2026-10-14 (S4, task T15):* `NoRevocationForRecipient` left
-        // org-node in task T5 (the commit returns every recipient's body),
-        // so the tenth case left this list.
     ] {
         assert_eq!(
             events::classify_receive_error(&e),
@@ -769,10 +770,10 @@ fn the_commit_workflow_refusals_are_classified_as_receiver_errors() {
     }
 }
 
-// verifies: LLR-7bk6qh
+// verifies: LLR-wgr46u
 #[test]
 fn the_sender_refusals_are_classified_as_receiver_errors() {
-    // Owner rulings of 2026-10-07: a message from a Device the record does
+    // A message from a Device the record does
     // not list, or an acknowledgement not sent by its own Device, is refused
     // before anything is verified, so neither is a verdict on an update.
     let org_id = org_io::node::OrgId::new([1; 20]);
@@ -785,20 +786,18 @@ fn the_sender_refusals_are_classified_as_receiver_errors() {
     }
 }
 
-// verifies: LLR-7bk6qh
+// verifies: LLR-wgr46u
 #[test]
 fn the_store_and_invitation_refusals_are_classified_as_receiver_errors() {
-    // S4 (task T15): the refusals org-node gained with the sealed per-Persona
-    // store and the invitation bookkeeping concern this node's own store or
-    // its outstanding Invites, never whether an update verified, so each is
-    // a receiver error — `OrganisationHeldByAnotherPersona` (task T6) among
-    // them.
+    // The refusals of the sealed per-Persona store and the invitation
+    // bookkeeping concern this node's own store or its outstanding Invites,
+    // never whether an update verified, so each is a receiver error —
+    // `OrganisationHeldByAnotherPersona` among them.
     let org_id = org_io::node::OrgId::new([1; 20]);
     for e in [
         OrgNodeError::DeviceSecretMismatch,
         OrgNodeError::DuplicatePersonaStore,
-        OrgNodeError::ReplyForAnotherOrganisation,
-        OrgNodeError::InviteNotOutstanding,
+        OrgNodeError::InviteNotOutstanding { org_id, invite_id: org_io::node::InviteId::new([3; 32]) },
         OrgNodeError::OrganisationHeldByAnotherPersona { org_id },
     ] {
         assert_eq!(
@@ -809,48 +808,25 @@ fn the_store_and_invitation_refusals_are_classified_as_receiver_errors() {
     }
 }
 
-// S4 (task T22): a commit refused because this node's own record moved
-// after the message was checked says nothing about whether the update
-// verified, so it is a receiver error.
-// verifies: LLR-7bk6qh
-#[test]
-fn a_record_moved_since_the_check_is_classified_as_a_receiver_error() {
-    let e = OrgNodeError::RecordMovedSinceCheck { org_id: org_io::node::OrgId::new([1; 20]) };
-    assert_eq!(events::classify_receive_error(&e), ReceiverOutcome::ReceiveError { message: e.to_string() });
-}
-
-// verifies: LLR-7bk6qh
+// verifies: LLR-wgr46u
 #[test]
 fn locally_reachable_variants_are_classified_as_receiver_errors() {
     // `OrgNotOnChain` and `Trie(_)` sound like verdicts and are not always:
-    // `receive_and_self_delete_if_revoked` in org-node/src/service.rs returns
-    // `OrgNotOnChain` when the LOCAL store has no record of the organisation,
-    // and the same function returns `Trie(_)` when the LOCAL members snapshot
-    // fails to reconstruct. Neither says anything about
-    // whether an update verified, so neither may be rendered as a ✗ MISMATCH row
-    // under "Verified Updates (chain root match)" — the defect RC-3rddh7 exists
-    // to remove. Of the four refusals org-node gained with provisional
-    // operations, an unexpected first admission is refused before anything is
-    // verified, one that lists none of this node's Personas on a rule about
-    // this node, and the other two never arise on receive. A Persona already
-    // bound to an Organisation is a refusal about this node's own store,
-    // raised before anything is verified.
-    // The four refusals of a received Wire message are not verdicts of
-    // `verify_envelope_against_chain` either: a message that does not decode
-    // and a revocation about an Organisation not held are refused before
-    // anything is verified, and a key that is not the chain's and a
-    // revocation that leaves this node listed after it, on a rule about the
-    // key or this node.
+    // each is also reachable from a LOCAL condition (no record held, a local
+    // members snapshot that fails to reconstruct), so neither may be
+    // rendered as a ✗ MISMATCH row — the defect RC-3rddh7 exists to remove.
+    // An unexpected first admission, one that lists none of this node's
+    // Personas, and the provisional limit are refusals about this node.
+    // A message that does not decode and a revocation about an Organisation
+    // not held are refused before anything is verified, and a revocation
+    // that leaves this node listed after it, on a rule about this node.
     for e in [
         OrgNodeError::OrgNotOnChain,
         OrgNodeError::Trie(OrgMembersError::IdNotFound),
         OrgNodeError::AdmissionNotExpected { org_id: org_io::node::OrgId::new([1; 20]) },
         OrgNodeError::AdmissionNotOurs { org_id: org_io::node::OrgId::new([1; 20]) },
         OrgNodeError::ProvisionalLimit { limit: 1 },
-        OrgNodeError::NoProvisionalUpdate,
-        OrgNodeError::PersonaAlreadyBound { persona_id: org_io::node::PersonaId::new("p".into()) },
         OrgNodeError::MalformedMessage,
-        OrgNodeError::OrgKeyMismatch { org_id: org_io::node::OrgId::new([1; 20]) },
         OrgNodeError::RevocationNotHeld { org_id: org_io::node::OrgId::new([1; 20]) },
         OrgNodeError::RevocationNotForThisDevice { org_id: org_io::node::OrgId::new([1; 20]) },
     ] {
@@ -872,26 +848,22 @@ fn locally_reachable_variants_are_classified_as_receiver_errors() {
     }
 }
 
-// A Wire message over the bound (S4, task T2: the codec's own refusal since
-// it left the transport) is refused before anything is decoded, so it is no
+// A Wire message over the bound (the codec's own refusal) is refused before anything is decoded, so it is no
 // verdict on an update.
-// verifies: LLR-7bk6qh
+// verifies: LLR-wgr46u
 #[test]
 fn a_wire_message_over_the_bound_is_classified_as_a_receiver_error() {
     let e = OrgNodeError::MessageTooLarge { length: 1 << 21 };
     assert_eq!(events::classify_receive_error(&e), ReceiverOutcome::ReceiveError { message: e.to_string() });
 }
 
-// verifies: LLR-7bk6qh
+// verifies: LLR-wgr46u
 #[test]
 fn a_refused_key_or_field_is_classified_as_a_receiver_error() {
     // Neither is a verdict on an update: an Organisation public key the chain
     // holds that is not a valid key, or a received or stored record holding
-    // a value its type refuses. Before org-node parsed these they surfaced as
-    // `Chain(..)` or `Trie(..)`, both receiver errors; the class is unchanged.
-    // Merged 2026-10-05 into worktree-person-shared-types: master's
-    // `InvalidKey` (an Organisation public key off the Edwards curve) is
-    // `InvalidOrgPublicKey` here (an invalid X25519 key).
+    // a value its type refuses. `InvalidOrgPublicKey` is an Organisation
+    // public key that is not a valid X25519 key.
     let cases = [
         OrgNodeError::InvalidOrgPublicKey,
         OrgNodeError::InvalidField {
@@ -909,13 +881,11 @@ fn a_refused_key_or_field_is_classified_as_a_receiver_error() {
 }
 
 // ---------------------------------------------------------------------------
-// Review round 3a of worktree-person-shared-types (2026-10-05): whether each
-// refusal this change added stops the loop
+// Whether a refusal about one Organisation or one update stops the loop
 // ---------------------------------------------------------------------------
 
-// Finding-12. REQ-jfxah3's loop stops only when it cannot continue: the
-// transport endpoint is gone (org-io's `ReceiveError::Terminal` since S4 task
-// T16; `TERMINAL_ERRORS` before it). None of these refusals is
+// REQ-jfxah3's loop stops only when it cannot continue: the transport
+// endpoint is gone (org-io's `ReceiveError::Terminal`). None of these refusals is
 // about the endpoint. An Organisation public key on chain that is not a valid
 // X25519 key is refused on every read of that Organisation for as long as the
 // chain holds it, but it concerns that one Organisation: the endpoint still
@@ -926,8 +896,7 @@ fn a_refused_key_or_field_is_classified_as_a_receiver_error() {
 // verifies: REQ-jfxah3, REQ-kn5rtx
 #[test]
 fn a_refusal_this_change_added_does_not_stop_the_loop() {
-    // *S4, task T16, 2026-10-14:* each refusal arrives as org-io's
-    // `ReceiveError::Refused`.
+    // Each refusal arrives as org-io's `ReceiveError::Refused`.
     let receiver_errors = [OrgNodeError::InvalidOrgPublicKey];
     for e in receiver_errors {
         let (message, shown) = (e.to_string(), format!("{e:?}"));
@@ -946,11 +915,9 @@ fn a_refusal_this_change_added_does_not_stop_the_loop() {
 }
 
 // ---------------------------------------------------------------------------
-// S4, task T16: org-io's typed receive error and its receive kinds
+// org-io's typed receive error and its receive kinds
 // ---------------------------------------------------------------------------
 
-use ods_poc_lib::events::Arrival;
-use org_io::node::ReceiveKind;
 use org_io::transport::TransportError;
 use org_io::{ReceiveError, TerminalCause};
 
@@ -958,8 +925,6 @@ use org_io::{ReceiveError, TerminalCause};
 // on nothing else, whatever its text (REQ-x3c8n2, answered by org-io's
 // REQ-8e57wm). Each case is checked twice: the outcomes, and the emissions in
 // order.
-// LLR-a9rjtf removed 2026-10-14 (review round 1): its substring rule is the
-// opposite of what this test asserts.
 // verifies: LLR-zw6jqy
 #[test]
 fn terminal_is_decided_by_the_error_variant_not_its_text() {
@@ -983,14 +948,17 @@ fn terminal_is_decided_by_the_error_variant_not_its_text() {
         assert_eq!(names(&emitted), vec!["receiver-error", "receiver-stopped"], "{terminal:?}");
     }
 
-    // Abnormal input: failures after which the loop goes on, each with the
-    // text the old substring match stopped on.
+    // Abnormal input: failures after which the loop goes on, each with a
+    // text that reads like a closed or unbound endpoint.
     for not_terminal in [
         ReceiveError::Connection(TransportError::Stream("endpoint closed".to_string())),
         ReceiveError::Connection(TransportError::Accept("endpoint bind: refused".to_string())),
-        ReceiveError::Chain(OrgNodeError::Chain("endpoint bind failed unexpectedly".to_string())),
+        ReceiveError::Connection(TransportError::Stream("endpoint bind failed unexpectedly".to_string())),
         ReceiveError::Refused(OrgNodeError::Chain("endpoint closed".to_string())),
         ReceiveError::Connection(TransportError::Stream(String::new())),
+        // org-io's own refusal of a body kept by a Persona bound to no
+        // Organisation yet.
+        ReceiveError::NoOrganisation { receiver: Box::new(org_io::node::DevicePublicKey::parse(&ARRIVAL_DEVICE_KEY).expect("a point")) },
     ] {
         let outcomes = events::outcomes_for_receive_error(&not_terminal);
         assert_eq!(
@@ -1008,75 +976,16 @@ fn terminal_is_decided_by_the_error_variant_not_its_text() {
     );
 }
 
-// verifies: LLR-bym4md
-#[test]
-fn the_outcome_kind_comes_from_receive_kind() {
-    let root = "cd".repeat(32);
-    let record = || Some((7, root.clone()));
-    // Removed and Revoked are a self-delete, even when a record still reads.
-    for kind in [ReceiveKind::Removed, ReceiveKind::Revoked] {
-        for read in [record(), None] {
-            assert_eq!(
-                events::outcome_for_arrival(Arrival::Committed(kind), org(), read.clone()),
-                ReceiverOutcome::SelfDeleted { org_id: org() },
-                "{kind:?} with record {read:?}"
-            );
-        }
-    }
-    // Updated and Admitted announce the record read back, or that it could not be.
-    for kind in [ReceiveKind::Updated, ReceiveKind::Admitted] {
-        assert_eq!(
-            events::outcome_for_arrival(Arrival::Committed(kind), org(), record()),
-            ReceiverOutcome::Updated { org_id: org(), epoch: 7, root: root.clone() },
-            "{kind:?}"
-        );
-        assert_eq!(
-            events::outcome_for_arrival(Arrival::Committed(kind), org(), None),
-            ReceiverOutcome::RecordUnreadable { org_id: org() },
-            "{kind:?} with no record"
-        );
-    }
-    // An acknowledgement is announced as received, record or not.
-    for read in [record(), None] {
-        assert_eq!(
-            events::outcome_for_arrival(Arrival::Acknowledged, org(), read),
-            ReceiverOutcome::AcknowledgementReceived { org_id: org() }
-        );
-    }
-}
-
-// verifies: LLR-2vg79y, LLR-bym4md
-#[test]
-fn a_revocation_accepted_by_its_notice_is_announced_as_self_deleted() {
-    // org-io accepted this node's revocation notice (`ReceiveKind::Revoked`):
-    // exactly one `revoked`, naming the Organisation, with no epoch at any
-    // depth, whatever epoch the record read back would have carried.
-    for epoch in [0, 1, u64::MAX] {
-        let outcome =
-            events::outcome_for_arrival(Arrival::Committed(ReceiveKind::Revoked), org(), Some((epoch, "ef".repeat(32))));
-        let emitted = events::emissions_for(&outcome);
-        assert_eq!(names(&emitted), vec!["revoked"], "epoch {epoch}");
-        assert_eq!(emitted[0].payload["org_id"], serde_json::json!(org()));
-        assert!(!has_key_anywhere(&emitted[0].payload, "epoch"), "epoch {epoch}: {}", emitted[0].payload);
-    }
-}
-
-// Abnormal (S4 review round 2, finding-7): a store write that failed after a
-// commit, and a keychain refusal, are each one receiver error and never stop
-// the loop: neither is org-io's `Terminal`. Each keychain cause and both
-// store failures are fed in, with the emissions checked as well.
+// Abnormal: a store write that failed after a
+// check is one receiver error and never stops the loop: it is not org-io's
+// `Terminal`. Both store failures are fed in, with the emissions checked as
+// well.
 // verifies: LLR-zw6jqy
 #[test]
-fn store_and_keychain_failures_are_one_receiver_error_and_do_not_stop_the_loop() {
-    use org_io::node::DevicePublicKey;
+fn store_failures_are_one_receiver_error_and_do_not_stop_the_loop() {
     use org_io::store_file::{StoreFileError, StoreFileStep};
-    use org_io::{KeychainError, OpenError, StoreFailure};
+    use org_io::{OpenError, StoreFailure};
 
-    const BASE_POINT: [u8; 32] = [
-        0x58, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
-        0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
-    ];
-    let device_key = DevicePublicKey::parse(&BASE_POINT).unwrap();
     let failed = || StoreFileError { step: StoreFileStep::Write, path: "/data/store".into(), reason: "disk full".into() };
     let failures = [
         ReceiveError::Store(StoreFailure::Reloaded { failed: failed() }),
@@ -1084,11 +993,6 @@ fn store_and_keychain_failures_are_one_receiver_error_and_do_not_stop_the_loop()
             failed: failed(),
             reload: Box::new(OpenError::ReadStore(failed())),
         }),
-        ReceiveError::Keychain(Box::new(KeychainError::ItemMissing { device_key })),
-        ReceiveError::Keychain(Box::new(KeychainError::Locked { device_key })),
-        ReceiveError::Keychain(Box::new(KeychainError::Unavailable { device_key, reason: "NoNativeBackend" })),
-        ReceiveError::Keychain(Box::new(KeychainError::KeyMismatch { device_key })),
-        ReceiveError::Keychain(Box::new(KeychainError::Malformed { device_key })),
     ];
     for failure in failures {
         assert_eq!(
@@ -1100,4 +1004,514 @@ fn store_and_keychain_failures_are_one_receiver_error_and_do_not_stop_the_loop()
             events::outcomes_for_receive_error(&failure).iter().flat_map(events::emissions_for).collect();
         assert_eq!(names(&emitted), vec!["receiver-error"], "{failure:?}");
     }
+}
+
+// ---------------------------------------------------------------------------
+// What the receiver maps an arrival to
+// ---------------------------------------------------------------------------
+
+/// The ed25519 base point's canonical encoding: a valid Device public key.
+const ARRIVAL_DEVICE_KEY: [u8; 32] = [
+    0x58, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+    0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+];
+
+fn device_hex() -> String {
+    hex::encode(ARRIVAL_DEVICE_KEY)
+}
+
+fn admission_requested() -> events::AdmissionRequested {
+    events::AdmissionRequested {
+        org_id: org(),
+        invite_id: "1c".repeat(32),
+        invitee_name: "Bob Builder".to_string(),
+        name: "Bob".to_string(),
+        surname: "Builder".to_string(),
+        preferred_handles: vec!["bob".to_string(), "bobb".to_string(), "builder".to_string()],
+        device_public_key: device_hex(),
+    }
+}
+
+// verifies: LLR-4bvdn7
+#[test]
+fn a_received_provisional_organisation_is_provisional_received_never_updated() {
+    let outcome = events::outcome_for_arrival(events::Arrival::ProvisionalOrganisation { org_id: org() });
+    assert_eq!(outcome, ReceiverOutcome::ProvisionalReceived { org_id: org() });
+    assert!(
+        !matches!(outcome, ReceiverOutcome::Updated { .. } | ReceiverOutcome::RecordUnreadable { .. }),
+        "a received provisional organisation is never an adoption: {outcome:?}"
+    );
+    let emitted = events::emissions_for(&outcome);
+    for forbidden in MEMBERSHIP_EVENTS.iter().chain(["record-unreadable"].iter()) {
+        assert!(
+            !names(&emitted).contains(forbidden),
+            "{forbidden} emitted for a provisional organisation: {:?}",
+            names(&emitted)
+        );
+    }
+    for emission in &emitted {
+        for key in ["epoch", "root"] {
+            assert!(!has_key_anywhere(&emission.payload, key), "{} carries `{key}`: {}", emission.name, emission.payload);
+        }
+    }
+}
+
+// verifies: LLR-ygr6gd
+#[test]
+fn removed_is_self_deleted_then_the_result_and_a_kept_notice_announces_nothing() {
+    let entry = entry_of(EntryResultDto::Removed);
+    // Whatever record is read back, `removed` is a self-delete, then the result.
+    for record in [Some((7, "cd".repeat(32))), Some((0, String::new())), None] {
+        assert_eq!(
+            events::outcomes_for_verification(&entry, record.clone()),
+            vec![
+                ReceiverOutcome::SelfDeleted { org_id: Some(org()) },
+                ReceiverOutcome::VerificationResult { entry: wire(&entry) },
+            ],
+            "record {record:?}"
+        );
+    }
+    // The self-delete states no epoch (REQ-tw4cb5).
+    assert_eq!(self_delete_epoch_offender(&org()), None);
+
+    // A kept revocation notice names the Organisation and announces nothing.
+    let kept = events::outcome_for_arrival(events::Arrival::RevocationNoticeKept { org_id: org() });
+    assert_eq!(kept, ReceiverOutcome::RevocationNoticeKept { org_id: org() });
+    assert_eq!(events::emissions_for(&kept), Vec::<Emission>::new());
+
+    // An acknowledgement is AcknowledgementReceived, announced by nothing.
+    let acknowledged = events::outcome_for_arrival(events::Arrival::Acknowledged { org_id: org() });
+    assert_eq!(acknowledged, ReceiverOutcome::AcknowledgementReceived { org_id: org() });
+    assert_eq!(events::emissions_for(&acknowledged), Vec::<Emission>::new());
+}
+
+// verifies: LLR-dp45mm
+#[test]
+fn an_admission_request_kept_is_one_admission_requested_event_with_its_fields() {
+    let outcome = events::outcome_for_arrival(events::Arrival::AdmissionRequestKept(admission_requested()));
+    assert_eq!(outcome, ReceiverOutcome::AdmissionRequested(admission_requested()));
+    let emitted = events::emissions_for(&outcome);
+    assert_eq!(names(&emitted), vec!["admission-requested"]);
+    assert_eq!(
+        emitted[0].payload,
+        serde_json::json!({
+            "org_id": org(),
+            "invite_id": "1c".repeat(32),
+            "invitee_name": "Bob Builder",
+            "name": "Bob",
+            "surname": "Builder",
+            "preferred_handles": ["bob", "bobb", "builder"],
+            "device_public_key": device_hex(),
+        }),
+        "exactly the request's fields, verbatim and in order"
+    );
+    assert_eq!(emitted[0].payload["org_id"].as_str().map(str::len), Some(40));
+    assert_eq!(emitted[0].payload["invite_id"].as_str().map(str::len), Some(64));
+    assert_eq!(emitted[0].payload["device_public_key"].as_str().map(str::len), Some(64));
+}
+
+// verifies: LLR-t9rdf8
+#[test]
+fn an_answered_organisation_request_is_announced_by_no_event() {
+    let outcome = events::outcome_for_arrival(events::Arrival::OrganisationRequestAnswered {
+        org_id: org(),
+        requester: device_hex(),
+    });
+    assert_eq!(outcome, ReceiverOutcome::OrganisationRequestAnswered { org_id: org(), requester: device_hex() });
+    assert_eq!(events::emissions_for(&outcome), Vec::<Emission>::new());
+}
+
+/// Every `OrgNodeError` variant the app can build through org-io's
+/// re-exports, with whether it is a verdict on a delivered update
+/// (LLR-wgr46u). `StoreRefused(_)` is the one variant left out: org-io
+/// does not re-export `StoreRefusal`, so the app cannot build it. The
+/// no-wildcard scan below covers it, because its arm must name it.
+fn every_org_node_error_variant() -> Vec<(org_io::node::OrgNodeError, bool)> {
+    use org_io::node::{DevicePublicKey, Epoch, MemberId, OrgId, OrgMembersError, OrgNodeError};
+    let org_id = OrgId::new([1; 20]);
+    let member_id = MemberId::new([2; 32]);
+    let recipient = DevicePublicKey::parse(&ARRIVAL_DEVICE_KEY).unwrap();
+    let invite_id = org_io::node::InviteId::new([3; 32]);
+    vec![
+        // The five refusals of a delivered update's own content, and the two chain verdicts.
+        (OrgNodeError::OrgIdMismatch, true),
+        (OrgNodeError::StaleSeq { got: 3, last_seen: 7 }, true),
+        (OrgNodeError::MalformedDelta, true),
+        (OrgNodeError::DeltaBaseMismatch, true),
+        (OrgNodeError::SeqNotEpoch { seq: 9, epoch: 3 }, true),
+        (OrgNodeError::RootMismatch, true),
+        (OrgNodeError::StaleEpoch { got: 2, last: 9 }, true),
+        // Every other variant: a receiver error.
+        (OrgNodeError::Chain("io".to_string()), false),
+        (OrgNodeError::OrgNotOnChain, false),
+        (OrgNodeError::Trie(OrgMembersError::IdNotFound), false),
+        (OrgNodeError::InvalidOrgPublicKey, false),
+        (OrgNodeError::InvalidField { field: "member.handle", reason: "bad".to_string() }, false),
+        (OrgNodeError::AdmissionNotExpected { org_id }, false),
+        (OrgNodeError::AdmissionNotOurs { org_id }, false),
+        (OrgNodeError::ProvisionalLimit { limit: 1 }, false),
+        (OrgNodeError::MalformedMessage, false),
+        (OrgNodeError::MessageTooLarge { length: 1 << 21 }, false),
+        (OrgNodeError::RevocationNotHeld { org_id }, false),
+        (OrgNodeError::RevocationNotForThisDevice { org_id }, false),
+        (OrgNodeError::OrgNotHeld { org_id }, false),
+        (OrgNodeError::StaleChainState { org_id, chain_epoch: Epoch::new(1), record_epoch: Epoch::new(2) }, false),
+        (OrgNodeError::ChainStateConflict { org_id }, false),
+        (OrgNodeError::RevocationProofRefused { org_id, cause: OrgMembersError::IdNotFound }, false),
+        (OrgNodeError::AcknowledgementNotHeld { org_id }, false),
+        (OrgNodeError::AcknowledgementFromFuture { org_id }, false),
+        (OrgNodeError::AcknowledgementForListedDevice { org_id }, false),
+        (OrgNodeError::AcknowledgementSignatureInvalid { org_id }, false),
+        (OrgNodeError::DeviceSecretNotSupplied { org_id }, false),
+        (OrgNodeError::SenderNotListed { org_id }, false),
+        (OrgNodeError::AcknowledgementNotFromItsDevice { org_id }, false),
+        (OrgNodeError::DeviceSecretMismatch, false),
+        (OrgNodeError::DuplicatePersonaStore, false),
+        (OrgNodeError::InviteNotOutstanding { org_id, invite_id }, false),
+        (OrgNodeError::OrganisationHeldByAnotherPersona { org_id }, false),
+        (OrgNodeError::NoProvisionalChange, false),
+        (OrgNodeError::OrganisationBehind { org_id, chain_epoch: Epoch::new(5) }, false),
+        (OrgNodeError::NoAdmissionRequestKept { invite_id }, false),
+        (OrgNodeError::AdmissionAlreadyRecorded { invite_id }, false),
+        (OrgNodeError::NoFreeHandle, false),
+        (OrgNodeError::HandleTaken { handle: org_io::node::Handle::parse("zed").unwrap() }, false),
+        (OrgNodeError::MemberNotHeld { member_id }, false),
+        (OrgNodeError::RevocationAlreadyRecorded { member_id }, false),
+        (OrgNodeError::NoProvisionalFounding, false),
+        (OrgNodeError::FoundingProxyAlreadyRecorded, false),
+        (OrgNodeError::FoundingNotWritten, false),
+        (OrgNodeError::NoProvisionalMember, false),
+        (OrgNodeError::OrganisationNotRequested { org_id }, false),
+        (OrgNodeError::PersonaNotHeld { device_key: Box::new(recipient) }, false),
+        (OrgNodeError::PersonaIdNotHeld { persona_id: org_io::node::PersonaId::new("nobody".into()) }, false),
+        (OrgNodeError::AdmissionKeyNotSender { org_id }, false),
+        (OrgNodeError::OrganisationRemoved { org_id }, false),
+        (OrgNodeError::AcknowledgementNotKept { recipient: Box::new(recipient) }, false),
+        (OrgNodeError::DuplicateOrgPublicKey, false),
+    ]
+}
+
+/// `classify_receive_error`'s body, as written in `src/events.rs`.
+fn classify_source() -> &'static str {
+    let source = include_str!("../src/events.rs");
+    let start = source.find("pub fn classify_receive_error").expect("classify_receive_error is defined");
+    let end = start + source[start..].find("\n}\n").expect("its body ends at a closing brace in column one");
+    &source[start..end]
+}
+
+// verifies: LLR-wgr46u
+#[test]
+fn every_org_node_error_variant_is_classified_with_no_wildcard() {
+    for (refusal, verdict) in every_org_node_error_variant() {
+        let expected = if verdict {
+            ReceiverOutcome::VerifyFailed { org_id: None, message: refusal.to_string() }
+        } else {
+            ReceiverOutcome::ReceiveError { message: refusal.to_string() }
+        };
+        assert_eq!(events::classify_receive_error(&refusal), expected, "{refusal:?}");
+    }
+    let body = classify_source();
+    assert!(!body.contains("_ =>"), "classify_receive_error has a wildcard arm:\n{body}");
+    let all_variants = [
+        "OrgIdMismatch",
+        "StaleSeq",
+        "MalformedDelta",
+        "DeltaBaseMismatch",
+        "SeqNotEpoch",
+        "RootMismatch",
+        "StaleEpoch",
+        "Chain",
+        "OrgNotOnChain",
+        "Trie",
+        "InvalidOrgPublicKey",
+        "InvalidField",
+        "AdmissionNotExpected",
+        "AdmissionNotOurs",
+        "ProvisionalLimit",
+        "MalformedMessage",
+        "MessageTooLarge",
+        "RevocationNotHeld",
+        "RevocationNotForThisDevice",
+        "OrgNotHeld",
+        "StaleChainState",
+        "ChainStateConflict",
+        "RevocationProofRefused",
+        "AcknowledgementNotHeld",
+        "AcknowledgementFromFuture",
+        "AcknowledgementForListedDevice",
+        "AcknowledgementSignatureInvalid",
+        "DeviceSecretNotSupplied",
+        "SenderNotListed",
+        "AcknowledgementNotFromItsDevice",
+        "StoreRefused",
+        "DeviceSecretMismatch",
+        "DuplicatePersonaStore",
+        "InviteNotOutstanding",
+        "OrganisationHeldByAnotherPersona",
+        "NoProvisionalChange",
+        "OrganisationBehind",
+        "NoAdmissionRequestKept",
+        "AdmissionAlreadyRecorded",
+        "NoFreeHandle",
+        "HandleTaken",
+        "MemberNotHeld",
+        "RevocationAlreadyRecorded",
+        "NoProvisionalFounding",
+        "FoundingProxyAlreadyRecorded",
+        "FoundingNotWritten",
+        "NoProvisionalMember",
+        "OrganisationNotRequested",
+        "PersonaNotHeld",
+        "PersonaIdNotHeld",
+        "AdmissionKeyNotSender",
+        "OrganisationRemoved",
+        "AcknowledgementNotKept",
+        "DuplicateOrgPublicKey",
+    ];
+    for variant in all_variants {
+        assert!(body.contains(&format!("OrgNodeError::{variant}")), "classify_receive_error names no arm for {variant}");
+    }
+    // The removed variants are named nowhere (org-node's final error set).
+    for removed in [
+        "NoProvisionalUpdate",
+        "ReplyForAnotherOrganisation",
+        "PersonaAlreadyBound",
+        "RecordMovedSinceCheck",
+        "OrgKeyMismatch",
+    ] {
+        assert!(!body.contains(removed), "classify_receive_error still names {removed}");
+    }
+}
+
+// verifies: LLR-4bvdn7, LLR-ygr6gd, LLR-dp45mm, LLR-t9rdf8
+#[test]
+fn the_outcome_kind_comes_from_the_received_kind() {
+    let cases = [
+        (events::Arrival::ProvisionalOrganisation { org_id: org() }, ReceiverOutcome::ProvisionalReceived { org_id: org() }),
+        (events::Arrival::AdmissionRequestKept(admission_requested()), ReceiverOutcome::AdmissionRequested(admission_requested())),
+        (
+            events::Arrival::OrganisationRequestAnswered { org_id: org(), requester: device_hex() },
+            ReceiverOutcome::OrganisationRequestAnswered { org_id: org(), requester: device_hex() },
+        ),
+        (events::Arrival::RevocationNoticeKept { org_id: org() }, ReceiverOutcome::RevocationNoticeKept { org_id: org() }),
+        (events::Arrival::Acknowledged { org_id: org() }, ReceiverOutcome::AcknowledgementReceived { org_id: org() }),
+    ];
+    for (arrival, expected) in cases {
+        let outcome = events::outcome_for_arrival(arrival.clone());
+        assert_eq!(outcome, expected, "{arrival:?}");
+        // No arrival is an adoption, and none is a self-delete: those come from verification only.
+        assert!(
+            !matches!(
+                outcome,
+                ReceiverOutcome::Updated { .. } | ReceiverOutcome::RecordUnreadable { .. } | ReceiverOutcome::SelfDeleted { .. }
+            ),
+            "{arrival:?} gave {outcome:?}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The follow-up verification and its outcomes
+// ---------------------------------------------------------------------------
+
+// verifies: LLR-j9m88u
+// `receive_iteration` has its own item, beside `follow_up_for`'s
+// (LLR-w7m3d4), since the order it states cannot be observed through the
+// spawned receiver loop without faking org-io.
+#[tokio::test]
+async fn one_iteration_verifies_once_before_the_next_message_and_announces_what_it_verified() {
+    use std::cell::RefCell;
+    let second_org = "bb".repeat(20);
+    let verified_entry = |org_id: &str| serde_json::json!({ "result": "in_step", "org_id": org_id, "epoch": 2 });
+    // Popped from the end: the first message, then the second, then the third.
+    let script = RefCell::new(vec![
+        vec![ReceiverOutcome::AdmissionRequested(admission_requested())],
+        vec![ReceiverOutcome::RevocationNoticeKept { org_id: second_org.clone() }],
+        vec![ReceiverOutcome::ProvisionalReceived { org_id: org() }],
+    ]);
+    let log = RefCell::new(Vec::<String>::new());
+    for _ in 0..3 {
+        let stopping = events::receive_iteration(
+            || {
+                log.borrow_mut().push("next".to_string());
+                std::future::ready(script.borrow_mut().pop().unwrap())
+            },
+            |org_id: String| {
+                log.borrow_mut().push(format!("verify {org_id}"));
+                std::future::ready(vec![ReceiverOutcome::VerificationResult { entry: verified_entry(&org_id) }])
+            },
+            |emission: Emission| log.borrow_mut().push(format!("emit {}", emission.name)),
+        )
+        .await;
+        assert!(!stopping, "no outcome stopped the loop");
+    }
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "next".to_string(),
+            format!("verify {}", org()),
+            "emit verification-result".to_string(),
+            "next".to_string(),
+            format!("verify {second_org}"),
+            "emit verification-result".to_string(),
+            "next".to_string(),
+            "emit admission-requested".to_string(),
+        ],
+        "one verification per provisional organisation or kept notice, announced before the next message, and none otherwise"
+    );
+
+    // A stopped receive ends the loop, after its event is emitted.
+    let emitted = RefCell::new(Vec::<&'static str>::new());
+    let stopping = events::receive_iteration(
+        || std::future::ready(vec![ReceiverOutcome::Stopped { reason: "endpoint closed".to_string() }]),
+        |_org_id: String| std::future::ready(Vec::new()),
+        |emission: Emission| emitted.borrow_mut().push(emission.name),
+    )
+    .await;
+    assert!(stopping, "a Stopped outcome stops the loop");
+    assert_eq!(*emitted.borrow(), vec!["receiver-stopped"]);
+}
+
+// verifies: LLR-w7m3d4
+#[test]
+fn follow_up_for_asks_a_verification_for_a_provisional_or_a_kept_notice_only() {
+    // follow_up_for: exactly those two outcomes ask, every other asks nothing.
+    assert_eq!(
+        events::follow_up_for(&ReceiverOutcome::ProvisionalReceived { org_id: org() }),
+        Some(events::FollowUp::Verify { org_id: org() })
+    );
+    assert_eq!(
+        events::follow_up_for(&ReceiverOutcome::RevocationNoticeKept { org_id: org() }),
+        Some(events::FollowUp::Verify { org_id: org() })
+    );
+    for other in [
+        ReceiverOutcome::SelfDeleted { org_id: Some(org()) },
+        ReceiverOutcome::AcknowledgementReceived { org_id: org() },
+        ReceiverOutcome::AdmissionRequested(admission_requested()),
+        ReceiverOutcome::OrganisationRequestAnswered { org_id: org(), requester: device_hex() },
+        ReceiverOutcome::Updated { org_id: org(), epoch: 2, root: "ff".repeat(32) },
+        ReceiverOutcome::RecordUnreadable { org_id: Some(org()) },
+        ReceiverOutcome::VerificationResult { entry: serde_json::json!({ "result": "in_step", "org_id": org(), "epoch": 2 }) },
+        ReceiverOutcome::VerifyFailed { org_id: None, message: "m".to_string() },
+        ReceiverOutcome::ReceiveError { message: "m".to_string() },
+        ReceiverOutcome::Stopped { reason: "r".to_string() },
+    ] {
+        assert_eq!(events::follow_up_for(&other), None, "{other:?}");
+    }
+}
+
+// verifies: LLR-acb5g4
+#[test]
+fn adopted_maps_to_updated_or_record_unreadable_then_the_result() {
+    let root = "cd".repeat(32);
+    let adopted = entry_of(adopted_at_4(true));
+    assert_eq!(
+        events::outcomes_for_verification(&adopted, Some((4, root.clone()))),
+        vec![
+            ReceiverOutcome::Updated { org_id: org(), epoch: 4, root: root.clone() },
+            ReceiverOutcome::VerificationResult { entry: wire(&adopted) },
+        ]
+    );
+    assert_eq!(
+        events::outcomes_for_verification(&adopted, None),
+        vec![
+            ReceiverOutcome::RecordUnreadable { org_id: Some(org()) },
+            ReceiverOutcome::VerificationResult { entry: wire(&adopted) },
+        ]
+    );
+    // A verification that also settled an unknown write is entered as its
+    // inner outcome with a `write` label (LLR-jf63e4): an adoption still.
+    let settled = VerificationEntryDto { write: Some(WriteLabelDto::Adopted), ..entry_of(adopted_at_4(true)) };
+    assert_eq!(
+        events::outcomes_for_verification(&settled, Some((4, root.clone()))),
+        vec![
+            ReceiverOutcome::Updated { org_id: org(), epoch: 4, root: root.clone() },
+            ReceiverOutcome::VerificationResult { entry: wire(&settled) },
+        ]
+    );
+    // Every other result is the result alone, whatever record reads back.
+    // The entry is typed, so a result the app does not know cannot be
+    // built; a result the entry gains is a compile error in
+    // `outcomes_for_verification`.
+    for entry in [
+        entry_of(EntryResultDto::InStep { epoch: 4 }),
+        entry_of(EntryResultDto::Behind { chain_epoch: 9, requests: Some(Vec::new()), requests_refused: None }),
+        entry_of(EntryResultDto::Inconsistent { reason: "root differs".to_string() }),
+        entry_of(EntryResultDto::Unverified { reason: "chain not configured".to_string() }),
+        VerificationEntryDto { write: Some(WriteLabelDto::NotExecuted), ..entry_of(EntryResultDto::InStep { epoch: 4 }) },
+        VerificationEntryDto {
+            org_id: None,
+            founder: Some(device_hex()),
+            result: EntryResultDto::Unverified { reason: "the founding is not written".to_string() },
+            write: None,
+        },
+    ] {
+        for record in [Some((4, root.clone())), None] {
+            assert_eq!(
+                events::outcomes_for_verification(&entry, record.clone()),
+                vec![ReceiverOutcome::VerificationResult { entry: wire(&entry) }],
+                "{entry:?} with {record:?}"
+            );
+        }
+    }
+}
+
+// verifies: LLR-acb5g4, LLR-ygr6gd
+// An entry with no Organisation
+// identifier (a provisional founding whose proxy is not recorded) names
+// none in the `record-unreadable` or `revoked` event: `org_id` null, never
+// an empty string, as the entry itself carries it (LLR-jf63e4).
+#[test]
+fn an_entry_with_no_org_id_names_none_in_record_unreadable_or_revoked() {
+    let founding = |result| VerificationEntryDto { org_id: None, founder: Some(device_hex()), result, write: None };
+    for (entry, outcome, event) in [
+        (founding(adopted_at_4(true)), ReceiverOutcome::RecordUnreadable { org_id: None }, "record-unreadable"),
+        (founding(EntryResultDto::Removed), ReceiverOutcome::SelfDeleted { org_id: None }, "revoked"),
+    ] {
+        let outcomes = events::outcomes_for_verification(&entry, None);
+        assert_eq!(outcomes, vec![outcome, ReceiverOutcome::VerificationResult { entry: wire(&entry) }], "{entry:?}");
+        let emitted: Vec<Emission> = outcomes.iter().flat_map(events::emissions_for).collect();
+        assert_eq!(names(&emitted), vec![event, "verification-result"]);
+        assert_eq!(emitted[0].payload, serde_json::json!({ "org_id": null }), "{event} names no Organisation");
+        assert_eq!(emitted[1].payload["founder"], serde_json::json!(device_hex()), "the result names the founding");
+    }
+}
+
+// verifies: LLR-8grnbb
+#[test]
+fn a_verification_result_is_one_event_carrying_the_entry() {
+    let device = device_hex();
+    for entry in [
+        serde_json::json!({
+            "result": "adopted", "org_id": org(), "epoch": 4, "own": true,
+            "discarded": [
+                { "kind": "admission", "invite_id": "1c".repeat(32), "name": "Bob", "surname": "Builder", "handle": "bob" },
+                { "kind": "revocation", "member_id": "2d".repeat(32), "handle": "carol" }
+            ],
+            "sends": [ { "device": device, "result": "sent" }, { "device": "3e".repeat(32), "result": "failed", "reason": "no address" } ]
+        }),
+        serde_json::json!({
+            "result": "behind", "org_id": org(), "chain_epoch": 9,
+            "requests": [ { "device": device, "result": "failed", "reason": "timed out" } ]
+        }),
+        serde_json::json!({ "result": "in_step", "org_id": org(), "epoch": 4 }),
+        serde_json::json!({ "result": "in_step", "org_id": org(), "epoch": 4, "write": "deprecated" }),
+        serde_json::json!({ "result": "unverified", "org_id": null, "founder": device.clone(), "reason": "refused by org-node" }),
+        serde_json::json!({ "result": "removed", "org_id": org() }),
+    ] {
+        let emitted = events::emissions_for(&ReceiverOutcome::VerificationResult { entry: entry.clone() });
+        assert_eq!(names(&emitted), vec!["verification-result"], "{entry}");
+        assert_eq!(emitted[0].payload, entry, "the payload is the entry, unchanged");
+    }
+    // Through the mapping: an adoption announces the record's events, then exactly one result.
+    let adopted = entry_of(adopted_at_4(false));
+    let emitted: Vec<Emission> = events::outcomes_for_verification(&adopted, Some((4, "cd".repeat(32))))
+        .iter()
+        .flat_map(events::emissions_for)
+        .collect();
+    assert_eq!(
+        names(&emitted),
+        vec!["membership-updated", "incoming-verified", "epoch-changed", "verification-result"]
+    );
+    assert_eq!(emitted[3].payload, wire(&adopted));
 }

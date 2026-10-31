@@ -15,7 +15,10 @@ storage values that let a consumer confirm a multisig signatory set
 `multi_account_id`), and their two fetches in `client.rs`, which are the
 subxt shell SDD-3b8zef's and carry no low-level requirement by its recorded
 deviation.
-traces: REQ-8p2veg, REQ-v8jczx, REQ-b8x2py
+traces: REQ-8p2veg, REQ-b8x2py
+
+*Traces amended 2026-10-20 (change worktree-org-io-domain-api): REQ-v8jczx →
+REQ-b8x2py (already traced).*
 
 *Note 2026-10-08 (change worktree-org-io-publish, task T16a):* the item also
 realises REQ-b8x2py, the one pinned read (LLR-n2vx5q, LLR-sc79gq in

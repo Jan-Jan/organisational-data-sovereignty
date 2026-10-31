@@ -52,7 +52,7 @@ postcard = { version = "1", features = ["alloc", "use-std"] }
 # bolero 0.13 matches the version used in on-chain-client (the repo's other fuzz targets).
 bolero = "0.13"
 # org-members is also a normal [dependency], but integration test crates cannot
-# see the library's normal deps directly — re-declared here so fuzz_verify_against_chain
+# see the library's normal deps directly — re-declared here so the test targets
 # can name org_members::trie::OrgTrie, org_members::MemberLeaf, etc.
 org-members = { path = "../org-members", features = ["std", "serde"] }
 # JSON for the golden encodings in tests/encoding_golden.rs.
@@ -69,13 +69,9 @@ name = "fuzz_envelope_decode"
 path = "tests/fuzz_envelope_decode/fuzz_target.rs"
 harness = false
 
-[[test]]
-name = "fuzz_verify_against_chain"
-path = "tests/fuzz_verify_against_chain/fuzz_target.rs"
-harness = false
-# Its device key pairs come from `test_fixtures::device_keypair` since S4
-# task T3 removed `DeviceSeed`.
-required-features = ["test-support"]
+# The target `fuzz_verify_against_chain` was deleted with the function it
+# fuzzed (merge review MR1-N1 of change worktree-org-io-domain-api,
+# owner ruling 2026-10-29).
 
 # `first_admission_base` lives in `service`, which only exists under `app`.
 [[test]]
@@ -99,17 +95,14 @@ name = "service_stories"
 path = "tests/service_stories.rs"
 required-features = ["app", "test-support"]
 
-# The four targets below were added 2026-09-09 by org-node's risk analysis
+# The targets below were added 2026-09-09 by org-node's risk analysis
 # (docs/plans/2026-09-09-org-node-risk-analysis.md). They carry the
 # `verifies:` annotations the traceability gate reads from `tests/`; the
-# verify-path, frame and store cases were relocated here from `src` unit
-# tests, the sender-check cases are new. `test-support` exposes
-# `org_node::test_fixtures` to them.
-
-[[test]]
-name = "verify_against_chain"
-path = "tests/verify_against_chain.rs"
-required-features = ["test-support"]
+# frame and store cases were relocated here from `src` unit tests, the
+# sender-check cases are new. `test-support` exposes
+# `org_node::test_fixtures` to them. The fourth, `verify_against_chain`, was
+# deleted with `verify_envelope_against_chain` (merge review MR1-N1, owner
+# ruling 2026-10-29).
 
 [[test]]
 name = "wire_frame_bound"
@@ -169,6 +162,7 @@ path = "tests/value_types.rs"
 [[test]]
 name = "key_custody"
 path = "tests/key_custody.rs"
+required-features = ["app", "test-support"]
 
 [[test]]
 name = "envelope_binding"
@@ -194,15 +188,6 @@ name = "receive_chain_reads"
 path = "tests/receive_chain_reads.rs"
 required-features = ["app", "test-support"]
 
-# A first admission is read against the chain only when the app expects it
-# under its invite identifier, and committed only when it lists one of this
-# node's Personas (REQ-8amu2a, REQ-kt877x), change
-# worktree-org-node-chain-authority.
-[[test]]
-name = "expected_admission"
-path = "tests/expected_admission.rs"
-required-features = ["app", "test-support"]
-
 # What org-node must not contain after the chain-authority change
 # (2026-10-06): reads org-node's own source and manifest.
 [[test]]
@@ -216,22 +201,9 @@ name = "provisional_store"
 path = "tests/provisional_store.rs"
 required-features = ["app", "test-support"]
 
-# The node's own provisional updates and their commit: genesis built and kept,
-# `commit_genesis` once the chain carries it (2026-10-06, T9 of
-# docs/plans/2026-10-05-chain-authority.md).
-[[test]]
-name = "commit_paths"
-path = "tests/commit_paths.rs"
-required-features = ["app", "test-support"]
-
 [[test]]
 name = "revocation"
 path = "tests/revocation.rs"
-required-features = ["app", "test-support"]
-
-[[test]]
-name = "reconcile"
-path = "tests/reconcile.rs"
 required-features = ["app", "test-support"]
 
 [[test]]
@@ -250,6 +222,15 @@ required-features = ["app", "test-support"]
 [[test]]
 name = "fuzz_unseal"
 path = "tests/fuzz_unseal/fuzz_target.rs"
+harness = false
+required-features = ["app", "test-support"]
+
+# `check_received` on arbitrary and on perturbed honest Organisation-information
+# bodies, in a store with a record and one without (LLR-7u3dg7), merge review
+# MR2-N1 of change worktree-org-io-domain-api.
+[[test]]
+name = "fuzz_check_received"
+path = "tests/fuzz_check_received/fuzz_target.rs"
 harness = false
 required-features = ["app", "test-support"]
 
@@ -278,4 +259,36 @@ required-features = ["app", "test-support"]
 name = "fuzz_invitation_parse"
 path = "tests/fuzz_invitation_parse/fuzz_target.rs"
 harness = false
+required-features = ["app", "test-support"]
+
+# The domain API's targets: the store's epoch state, the Person store, the
+# proposals, verification, the organisation request and the own removal.
+[[test]]
+name = "epoch_store"
+path = "tests/epoch_store.rs"
+required-features = ["app", "test-support"]
+
+[[test]]
+name = "person_store"
+path = "tests/person_store.rs"
+required-features = ["app", "test-support"]
+
+[[test]]
+name = "proposals"
+path = "tests/proposals.rs"
+required-features = ["app", "test-support"]
+
+[[test]]
+name = "verification"
+path = "tests/verification.rs"
+required-features = ["app", "test-support"]
+
+[[test]]
+name = "organisation_request"
+path = "tests/organisation_request.rs"
+required-features = ["app", "test-support"]
+
+[[test]]
+name = "own_removal"
+path = "tests/own_removal.rs"
 required-features = ["app", "test-support"]

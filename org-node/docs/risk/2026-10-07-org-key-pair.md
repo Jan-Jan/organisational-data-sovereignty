@@ -17,6 +17,16 @@ the Wire message carries one, it decodes as 32 bytes, and its X25519 public
 half equals the `org_pub_key` the chain holds for that Organisation;
 otherwise it refuses the whole message, leaving the store unchanged.
 mitigates: HAZ-ep6uzs
+superseded-by: RC-5gbgwb
+
+*Superseded 2026-10-21 (owner decision of 2026-10-20, change
+`worktree-org-io-domain-api`):* receipt reads no chain (owner ruling R2 of
+2026-10-15). On receipt the key must decode as 32 bytes and its public half
+must equal the Organisation public key the received provisional organisation
+itself states, else the whole message is refused; at verification that
+provisional organisation is adopted only when that key is the chain's
+(RC-5gbgwb, with HAZ-ep6uzs's residual unchanged, in
+`org-node/docs/risk/2026-10-15-domain-api.md`).
 
 What it breaks: a genuine update relayed by a peer that strips or alters the
 key is refused instead of committed. A relay can drop any message, so the

@@ -99,6 +99,13 @@ sender; `replyGate` refuses, naming what is missing, until a Persona is chosen
 (a blank choice counts as none) and the user has confirmed, and allows the
 reply only then.
 satisfies: REQ-ab2mfz
+superseded-by: LLR-qcg6bz
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-qcg6bz*
+(`2026-10-16-domain-api.md`): the Invite reply is
+gone; the warning precedes the provisional Member's first admission request
+and names its preferred Handles, and no Persona is chosen (each Member
+proposal creates its own Persona, owner ruling R1).
 
 Normal: "states each thing the user must be told", "allows the reply once a
 Persona is chosen and the user confirmed" (invite.confirm).
@@ -111,6 +118,7 @@ in the order given, none when every Persona is bound or there is none — and
 the founding panel offers no choice of Persona: it founds with the one it has
 just created.
 satisfies: derived
+retired: 2026-10-15 — propose_member and propose_founding_organisation each create their own Persona (owner ruling R1, change worktree-org-io-domain-api), so the webview offers no Persona to choose and there is no Invite reply to choose one for.
 
 Normal: "keeps only the Personas bound to no Organisation, in order"
 (invite.personas).

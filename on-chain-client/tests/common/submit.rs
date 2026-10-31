@@ -1,7 +1,6 @@
 //! Single-account submitter for `OrgRegistry.update(...)` via subxt.
-//! Sufficient for Task 5's Scenario A + C gates (single accounts act as
-//! their own admin). Task 7's Scenario B layers a multisig + pure-proxy
-//! pseudo-account on top.
+//! For scenarios where a single account acts as its own admin; the
+//! multisig + pure-proxy scenarios layer `proxy` on top.
 //!
 //! Two pieces:
 //!

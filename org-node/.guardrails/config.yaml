@@ -16,266 +16,62 @@
 guardrails_version: 0.5.1
 guardrails_commit: 2bc3cca04b75e1205d1c79a8e7b40c302036bf6f
 
-# IEC 62304 software safety class. C: org-node holds the keys, makes the trust
-# decisions, and does the chain and p2p I/O through which a member's access is
-# granted or withdrawn. See docs/adr/2026-09-05-units-and-per-unit-classes.md.
+# IEC 62304 software safety class. C: org-node holds the keys and makes the
+# trust decisions through which a member's access is granted or withdrawn.
+# See docs/adr/2026-09-05-units-and-per-unit-classes.md.
 safety_class: C
 
 id_prefixes: REQ HAZ RC SDD LLR PR ADR
 
-# Canonical document locations. Ledgers populated 2026-09-09 by org-node's own
-# risk analysis (tooth 3, docs/plans/2026-09-09-org-node-risk-analysis.md):
-# six hazards and nine controls in doc_rmf, fifteen requirements in doc_srs,
-# five open problem reports in doc_problems — one of them the chain-reader
-# finality report, moved here from org-members' ledger (D14) with its
-# `affects:` retargeted to an org-node control, because a consumer may not
-# cite a provider's controls and a provider may not cite a consumer's items.
+# Canonical document locations. A consumer may not cite a provider's controls
+# and a provider may not cite a consumer's items, so every `affects:` in
+# doc_problems names an org-node item.
 doc_srs: org-node/docs/requirements
 doc_rmf: org-node/docs/risk
 doc_sad: org-node/docs/architecture
 doc_soup: org-node/docs/architecture/soup.md
 doc_problems: org-node/docs/problems
 
-# First time under trace discipline (this was tooth 7 of the 2026-08-26 plan).
-# There are no item references in org-node yet, so this costs nothing today
-# and stops new code being born untraced.
+# Every line of org-node's production code is under trace discipline.
 strict_paths:
   - org-node/src
 
 test_paths:
   - org-node/tests
 
-# The target `preflight` is excluded: since 2026-10-08 (change
-# worktree-org-io-create, T6) it holds the transport check only — its chain
-# check and the chopsticks harness left for org-io — and its networked check
-# depends on relay reachability, so it is not hermetic. (It was excluded
-# before because it spawned a chopsticks fork and needed
-# on-chain/scripts/node_modules.) The remaining targets are named explicitly so
-# that a future chopsticks target added to the crate is not silently pulled
-# in — and so the two fuzz targets cannot silently drop out.
-# `--features app,test-support` is REQUIRED: the named targets carry
-# `required-features` (app for service_stories, transport for
-# transport_handshake, transport+test-support for transport_networked) and
-# cargo refuses an explicit `--test` whose features are off. The first draft
-# of this line omitted it and failed closed at the verification gate on
-# 2026-09-05. `--lib` therefore compiles the library with `app` plus
-# `test-support` — `app` is the configuration org-node ships in;
-# `test-support` is never enabled in production builds (Cargo.toml) and exists
-# only to expose gated test constructors, so the lib under test differs from
-# the shipped lib by that feature alone.
-# Measured 2026-09-05 (agent sandbox, CARGO_HOME=/tmp/cargo_home_fuzz), on
-# the shorter line this comment then described: 38 passed, 0 failed.
-# 2026-09-09: four targets added by org-node's risk analysis. Three hold unit
-# tests relocated out of `src` into `tests/`, where `test_paths` reads their
-# `verifies:` annotations, each from its own module: verify_against_chain from
-# `verify.rs` and `sequence.rs`, wire_frame_bound from `transport/wire.rs`, and
-# store_at_rest from `store.rs`. The fourth, admission_sender, is new: the
-# sender cross-check tests, written against the service API.
-# Measured 2026-09-10 (agent sandbox, CARGO_HOME=/tmp/cargo_home_fuzz) on the
-# line below: 51 passed, 0 failed — lib 23, verify_against_chain 13,
-# store_at_rest 4, wire_frame_bound 3, admission_sender 3, service_stories 3,
-# transport_handshake 1, transport_networked 1. The two bolero targets report
-# no pass count: each prints its iteration total and exits on its one-second
-# budget.
-# 2026-10-03: six targets added by org-node's architecture tooth
-# (docs/plans/2026-10-03-org-node-architecture.md). Each holds unit tests
-# relocated out of a `#[cfg(test)]` module in `src` into `tests/`, because
-# `test_paths` above reads `verifies:` annotations only from `org-node/tests`
-# and a low-level requirement whose only evidence sits in `src` cannot be
-# traced at all. The `src` modules they came from were deleted in the same
-# change, so nothing is duplicated and the lib target now carries one test.
-# Measured 2026-10-03 (agent sandbox, CARGO_HOME=/tmp/cargo_home_fuzz) on the
-# line below (re-measured 2026-10-04 after review round 1 and the `0f85cb9`
-# merge; the figure recorded here on 2026-10-03 said 80 and was not refreshed
-# when the sweep's remedies added tests, which review round 1 caught):
-# 101 passed, 0 failed — admission_sender 22, verify_against_chain 18,
-# envelope_binding 8, chain_write_pure 7, service_lifecycle 7, store_at_rest 7,
-# key_custody 6, value_types 6, blob_exchange 5, transport_handshake 5,
-# wire_frame_bound 5, service_stories 3, transport_networked 1, lib 1
-# (re-measured 2026-10-04 after review round 3; round 2 added ten tests and
-# round 3 two more). Re-measured again 2026-10-04 at gate round 6, after
-# review rounds 4 and 5 added eight tests: 109 passed, 0 failed —
-# admission_sender 30, every other target as above. And at gate round 7,
-# after review round 6 added four more: 113 passed, 0 failed —
-# admission_sender 33, chain_write_pure 8. Gate round 8, after review round
-# 7: 116 passed, 0 failed — admission_sender 36. Gate round 9, after review
-# round 8: 121 passed, 0 failed — admission_sender 38, verify_against_chain
-# 19, service_lifecycle 8, transport_handshake 6. Gate round 10, after
-# review round 9: 122 passed, 0 failed — admission_sender 39. The
-# three bolero targets report no pass count: each prints its iteration total
-# and exits on its one-second budget — and that is exactly why two of them were
-# found this round to have been exercising a guard that never fired. See Gap 18
-# of docs/verification/2026-10-03-worktree-guardrails-org-node-arch.md: nothing
-# here measures whether a fuzz target reaches the code it is named for.
+# The cargo line names every test target explicitly, so a target added to the
+# crate is not silently pulled in and no target (the bolero fuzz targets
+# among them) silently drops out. Every file under org-node/tests that is a
+# target is named; `support/` is a shared module, not a target.
+# `--features app,test-support` is REQUIRED: cargo refuses an explicit
+# `--test` whose `required-features` are off. `--lib` therefore compiles the
+# library with `app` plus `test-support`: `app` is the configuration org-node
+# ships in; `test-support` is never enabled in production builds (Cargo.toml)
+# and exposes only gated test constructors and accessors, so the lib under
+# test differs from the shipped lib by that feature alone. org-node is
+# sans-IO and every test is synchronous.
+# The bolero targets (fuzz_envelope_decode,
+# fuzz_first_admission_base, fuzz_wire_decode, fuzz_unseal,
+# fuzz_invitation_parse) report no pass count: each prints its iteration
+# total and exits on its one-second budget. Nothing here measures whether a
+# fuzz target reaches the code it is named for.
+# Per-target pass counts are recorded in each change's verification record
+# (docs/verification), not here.
 #
-# 2026-10-03, part 2 of docs/adr/2026-10-03-quint-conformance-gate.md: the
-# protocol models moved into org-node/quint/, and their checks are
-# unconditional entries here (decision 3) — both typechecks and the five
-# simulator invariants, each with an explicit --max-steps (decision 7). Quint
-# is not pinned; `quint --version` puts the version into every verification
-# record (decision 7). The simulator runs use the default rust backend and
-# need a writable ~/.quint (decision 9). Measured 2026-10-03 (agent sandbox,
-# quint 0.33.0, rust backend): all five pass, about 1 s wall each, 5 s for
-# the five together. These are checks of the system model only: org-node has
-# no conformance test, so a Rust change to org-node is not checked against
-# the model (decision 13's known gap).
-# 2026-10-03, T2 of docs/plans/2026-10-03-random-member-id.md: a third bolero
-# target, fuzz_first_admission_base (REQ-d9g6nt), asserts a first admission
-# without a record snapshot is refused and fuzzes the snapshot decode.
-# 2026-10-04/05, docs/plans/2026-10-04-org-node-type-safety.md: six targets
-# added by the org-node type-safety change, each the test file of one part of
-# its design ledger (org-node/docs/architecture/2026-10-04-type-safety.md), so
-# test_paths reads their `verifies:` annotations: encoding_golden (T1) pins
-# the stored, sent, blob and calldata bytes before the refactor and is never
-# edited (LLR-ayrdr8); value_types (T3, renamed node_value_types at the
-# 2026-10-05 merge below) the value types at their own interface; chain_read_state the chain read's parse of the Organisation
-# state and its cache (LLR-mmdu38, LLR-s7whrn); persona_records (T4a-T4c) the
-# Persona's records, parsed on create, open and import;
-# secret_redaction that no secret reaches debug output (REQ-y7tsft,
-# PR-hqwpg9); calldata_typed that the typed calldata paths build the pinned
-# bytes (LLR-ayrdr8), added after independent review because the pins cover
-# only the untyped builder. Measured 2026-10-05 (agent sandbox,
-# CARGO_HOME=/tmp/cargo_home_fuzz) on the line below: 100 passed, 0 failed —
-# lib 23, persona_records 18, verify_against_chain 13, value_types 9,
-# admission_sender 7, secret_redaction 6, encoding_golden 5, store_at_rest 4,
-# chain_read_state 3, service_stories 3, transport_handshake 3,
-# wire_frame_bound 3, calldata_typed 2, transport_networked 1; the three
-# bolero targets report no pass count.
+# The quint entries check the protocol models in org-node/quint/
+# (docs/adr/2026-10-03-quint-conformance-gate.md): both typechecks and the
+# five simulator invariants, each with an explicit --max-steps. Quint is not
+# pinned; `quint --version` puts the version into every verification record.
+# The simulator runs use the default rust backend and need a writable quint
+# home (QUINT_HOME). These check the system model only: org-node has no
+# conformance test, so a Rust change to org-node is not checked against the
+# model.
+# The all-targets clippy line runs last.
 #
-# Merged 2026-10-03: `5850ed7` and this change both rewrote this key. The
-# cargo line is this change's (it names the six relocated-test targets the
-# other change could not have known about); the quint lines are `5850ed7`'s
-# unchanged. Neither side's intent is lost and the key is still set once.
-# The list must be contiguous — a comment between two `- item` lines fails the
-# config validator, which is how this merge's first resolution was caught.
-#
-# Merged 2026-10-04: `0f85cb9` added `--test fuzz_first_admission_base` (a
-# third bolero target, T2 of docs/plans/2026-10-03-random-member-id.md,
-# REQ-d9g6nt: a first admission without a record snapshot is refused, and the
-# snapshot decode is fuzzed). It is carried below alongside this change's six
-# relocated-test targets; both sides' targets run. Note the rule stated two
-# comments up — it applies between the key and its first item too, which is
-# how this second merge repeated the first one's mistake.
-#
-# Merged 2026-10-05 into worktree-person-shared-types: this change
-# (docs/plans/2026-10-05-org-node-organisation-public-key.md) adds a target
-# organisation_key (REQ-ech45n, REQ-8jb4ny) to the line below, after master's
-# targets. The Envelope lost its signature; by owner ruling nothing replaced it
-# (trimmed 2026-10-05, docs/plans/2026-10-05-switch-trim.md).
-# Measured before this merge (agent sandbox, 2026-10-05): 70 passed on this
-# branch's shorter line. Measured after it (agent sandbox, 2026-10-05,
-# CARGO_HOME=/tmp/cargo_home_fuzz) on the line below: 131 passed, 0 failed —
-# admission_sender 42, verify_against_chain 20, organisation_key 8,
-# service_lifecycle 8, chain_write_pure 8, key_custody 7, store_at_rest 7,
-# value_types 6, transport_handshake 6, blob_exchange 5, wire_frame_bound 5,
-# envelope_binding 4, service_stories 3, transport_networked 1, lib 1; the
-# three bolero targets report iteration totals, not pass counts.
-# Re-measured 2026-10-05 after review round 1 of that change (agent sandbox,
-# CARGO_HOME=/tmp/cargo_home_fuzz), which added eight tests: 139 passed,
-# 0 failed — admission_sender 48, verify_against_chain 21, organisation_key 9,
-# every other target as above. The fuzz_verify_against_chain envelope now
-# carries the chain's epoch (9) as its Sequence number, as REQ-txvtm9 requires,
-# so its accepting path is still reachable.
-# Re-measured 2026-10-05 after review round 2 of that change (agent sandbox,
-# CARGO_HOME=/tmp/cargo_home_fuzz), which added four tests: 143 passed,
-# 0 failed — admission_sender 50, verify_against_chain 22, key_custody 8,
-# every other target as above.
-# Merged 2026-10-05: master `05f6f04` (ratchet tooth 4) into the org-node
-# type-safety change. Master's line is the base; the type-safety change's six
-# targets are appended. Both sides wrote a `tests/value_types.rs`: master's
-# (SDD-swtd3w, OrgId and the rejection vocabulary) keeps the name
-# `value_types`, and the type-safety change's (the secret, key and tag types)
-# is renamed `node_value_types`. Measured 2026-10-05 (agent sandbox,
-# CARGO_HOME=/tmp/cargo_home_fuzz) on the line below: 167 passed, 0 failed —
-# admission_sender 39, verify_against_chain 19, persona_records 18,
-# node_value_types 11, chain_write_pure 8, envelope_binding 8,
-# service_lifecycle 8, store_at_rest 7, key_custody 6, secret_redaction 6,
-# transport_handshake 6, value_types 6, blob_exchange 5, encoding_golden 5,
-# wire_frame_bound 5, chain_read_state 3, service_stories 3, calldata_typed 2,
-# lib 1, transport_networked 1 (master's 122 and the type-safety change's 45);
-# the three bolero targets report no pass count. (Re-measured 2026-10-05 after
-# review round 8 added two `node_value_types` Debug tests: 165 -> 167.)
-# Merged 2026-10-05: master `1feb608` (org-node type-safety) into
-# worktree-person-shared-types. Master's line is the base; this change's
-# organisation_key target is appended. Pass counts are recorded in the
-# change's verification record once re-measured.
-# Re-measured 2026-10-05 after review round 3a and the merge items of that
-# change (agent sandbox, CARGO_HOME=/tmp/cargo_home_fuzz, quint 0.33.0) on the
-# line below: 190 passed, 0 failed — admission_sender 50, verify_against_chain
-# 22, persona_records 18, node_value_types 12, organisation_key 9, chain_write_pure
-# 8, key_custody 8, service_lifecycle 8, secret_redaction 7, store_at_rest 7,
-# transport_handshake 6, value_types 6, blob_exchange 5, encoding_golden 5,
-# wire_frame_bound 5, envelope_binding 4, chain_read_state 3, service_stories 3,
-# calldata_typed 2, lib 1, transport_networked 1; the three bolero targets
-# report iteration totals, not pass counts. The two typechecks and five
-# simulator runs pass.
-# Re-measured 2026-10-05 after the switch trim
-# (docs/plans/2026-10-05-switch-trim.md; agent sandbox,
-# CARGO_HOME=/tmp/cargo_home_fuzz, quint 0.33.0) on the line below: 183
-# passed, 0 failed — admission_sender 45, verify_against_chain 20,
-# persona_records 18, node_value_types 12, organisation_key 9,
-# chain_write_pure 8, key_custody 8, service_lifecycle 8, secret_redaction 7,
-# store_at_rest 7, transport_handshake 6, value_types 6, blob_exchange 5,
-# encoding_golden 5, wire_frame_bound 5, envelope_binding 4,
-# chain_read_state 3, service_stories 3, calldata_typed 2, lib 1,
-# transport_networked 1; the three bolero targets report iteration totals,
-# not pass counts. The two typechecks and five simulator runs pass.
-# Re-measured 2026-10-06 after review round 4 of that change added three
-# tests (agent sandbox, a clean scratch CARGO_HOME copied from
-# /tmp/cargo_home_fuzz, whose extracted sources were found emptied; quint
-# 0.33.0): 186 passed, 0 failed — admission_sender 46, key_custody 9,
-# secret_redaction 8, every other target as above.
-# 2026-10-06, T5 of docs/plans/2026-10-05-chain-authority.md:
-# `receive_chain_reads` counts the receive paths' chain reads.
-# 2026-10-06, T6 of docs/plans/2026-10-05-chain-authority.md:
-# `expected_admission` covers expected first admissions and the own-Persona rule.
-# 2026-10-06, T7 of docs/plans/2026-10-05-chain-authority.md: the invitation
-# exchange left org-node; blob_exchange deleted; `absences` reads org-node's
-# source for what it must not contain.
-# 2026-10-06, T8 of docs/plans/2026-10-05-chain-authority.md:
-# `provisional_store` covers the provisional-update store and its bound.
-# 2026-10-06, T13 of docs/plans/2026-10-05-chain-authority.md:
-# chain_genesis_e2e and finality_polling deleted with the chain write, which
-# moved to on-chain-client; chain_write_pure and calldata_typed deleted and
-# dropped from the line below (their evidence is on-chain-client's
-# write_pure and org-node's absences).
-# 2026-10-06, T4 of docs/plans/2026-10-06-org-key-pair.md: a fourth bolero
-# target, fuzz_wire_decode (LLR-js9dsu), fuzzes `decode_body` of the
-# two-kind Wire message. Change worktree-org-node-org-key-pair adds no other
-# target; per-target counts at the final run: see the verification record.
-# 2026-10-08, S4 task T3 of docs/plans/2026-10-06-org-io-transport.md: the
-# sealed per-Persona store; `sealed_store` (SDD-asxwp8) and a fifth bolero
-# target, `fuzz_unseal` (LLR-bg538c). `transport_handshake` needs
-# `test-support` since `DeviceSeed` went (its key pairs come from
-# `test_fixtures::device_keypair`); the line already enables it.
-# 2026-10-13, S4 task T5: `outgoing_bodies` (SDD-bm27xt, LLR-gdfqn9), the
-# bodies the commit returns. Measured (agent sandbox,
-# CARGO_HOME=/tmp/cargo_home_fuzz) on the line below: 355 passed, 0 failed,
-# five bolero targets clean.
-# 2026-10-13, S4 task T6: `invitation` (SDD-xshv5b: the Invite, the reply and
-# their bookkeeping) and a sixth bolero target, `fuzz_invitation_parse`
-# (LLR-b7wgpf). Measured (agent sandbox, CARGO_HOME=/tmp/cargo_home_fuzz) on
-# the line below: 371 passed, 0 failed, six bolero targets clean.
-# 2026-10-13, S4 task T10: `transport_handshake` and `transport_networked`
-# left the line, moved to org-io with the transport.
-# 2026-10-14, S4 task T14: org-node is sans-IO. The `transport` feature, the
-# `preflight` binary and its test target are deleted (the transport check is
-# org-io's), so the exclusion above no longer applies; `wire_frame_bound`
-# needs `test-support` only, and every test is synchronous (no tokio). The
-# line is unchanged. Measured (agent sandbox, CARGO_HOME=/tmp/cargo_home_fuzz)
-# on the line below: 360 passed, 0 failed, six bolero targets clean (361
-# less the three tests deleted with the transitional send, plus the two
-# absences `org_node_is_sans_io` and `org_node_holds_no_dialling_address`).
-# 2026-10-14, S4 task T18: the all-targets clippy line joins, last. Its
-# pre-existing hits (T1 report; T5's four in `outgoing_bodies`) are fixed:
-# the two test files missing `clippy::panic` or the whole test-file allow gain
-# it, the `Clone` probes lose an ignored `?Sized`, and the probes' constant
-# assertions carry a targeted, reasoned allow.
-# 2026-10-14, S4 task T22: `stale_check` joins (a check whose record moved
-# before its commit, PR-erskh4).
+# The list must be contiguous: a comment between the key and its first item,
+# or between two `- item` lines, fails the config validator.
 verify_commands:
-  # 2026-10-07: three targets added by S3 (docs/plans/2026-10-06-org-io-commit-workflow.md).
-  - cargo test -p org-node --features app,test-support --lib --test service_stories --test fuzz_envelope_decode --test fuzz_verify_against_chain --test fuzz_first_admission_base --test fuzz_wire_decode --test verify_against_chain --test wire_frame_bound --test store_at_rest --test admission_sender --test value_types --test key_custody --test envelope_binding --test service_lifecycle --test encoding_golden --test node_value_types --test persona_records --test secret_redaction --test organisation_key --test receive_chain_reads --test expected_admission --test absences --test provisional_store --test commit_paths --test revocation --test reconcile --test commit_workflow_errors --test sealed_store --test fuzz_unseal --test receive_path --test outgoing_bodies --test invitation --test fuzz_invitation_parse --test stale_check
+  - cargo test -p org-node --features app,test-support --lib --test service_stories --test fuzz_envelope_decode --test fuzz_first_admission_base --test fuzz_wire_decode --test wire_frame_bound --test store_at_rest --test admission_sender --test value_types --test key_custody --test envelope_binding --test service_lifecycle --test encoding_golden --test node_value_types --test persona_records --test secret_redaction --test organisation_key --test receive_chain_reads --test absences --test provisional_store --test revocation --test commit_workflow_errors --test sealed_store --test fuzz_unseal --test receive_path --test outgoing_bodies --test invitation --test fuzz_invitation_parse --test epoch_store --test person_store --test proposals --test verification --test organisation_request --test own_removal --test fuzz_check_received
   - quint --version
   - quint typecheck org-node/quint/protocol.qnt
   - quint typecheck org-node/quint/ods_instances.qnt
@@ -286,28 +82,14 @@ verify_commands:
   - quint run org-node/quint/protocol.qnt --invariant=convergence --max-steps=16 --max-samples=5000
   - cargo clippy -p org-node --all-targets --features app,test-support -- -D warnings
 
-# Raised from 30 to 45 on 2026-10-05 by owner ruling, during the chain-authority
-# change: PR-vt244s, the unchecked-Loopback-address report (org-io's since
-# 2026-10-13, S4 task T12), PR-u4c2vp and PR-w88sr9 reach 30 days around
-# 2026-10-09 while the four-change chain-authority sequence that reworks their
-# code is under way.
-# Raised from 45 to 60 on 2026-10-08 by owner ruling (decision D1 of
+# 60 days, by owner ruling (confirmed 2026-10-08; decision D1 of
 # docs/plans/2026-10-08-org-io-publish.md): PR-vt244s is kept open until
-# S3b-io part 2 merges, which depends on S4 (worktree-org-io-transport).
-# PR-vt244s (opened 2026-09-09) would be stale after 2026-10-24 at 45; at 60
-# it is stale after 2026-11-08. The figure is the smallest that plausibly
-# covers S4 (18 tasks) and part 2 (8 tasks) at the pace of S2 and S3a (each
-# about two days from plan to merge), with a week for review rounds; it is
-# not a ruling not to fix, and it applies to every org-node report.
-# Confirmed by the owner on 2026-10-08: 60 days.
+# S3b-io part 2 merges. The figure is the smallest that plausibly covers that
+# work with a week for review rounds; it is not a ruling not to fix, and it
+# applies to every org-node report.
 problem_age_days: 60
-# Raised 2026-10-05 by owner ruling: the org-node type-safety change opens four
-# deferred reports (PR-szkat6, PR-vkw22m, PR-4b2v6p, PR-k2xxaq) on top of the
-# nine other reports open after tooth 4 (13 open in all); each is genuine
-# deferred work, not a ruling not to fix. (2026-10-05, worktree-person-shared-types:
-# PR-szkat6 and PR-vkw22m are resolved there; 11 open after it.)
-# (2026-10-05, docs/plans/2026-10-05-switch-trim.md: PR-szkat6 is open again
-# after the trim; PR-vkw22m is resolved. 12 open after it.)
+# 15, by owner ruling (2026-10-05): each open report is genuine deferred
+# work, not a ruling not to fix.
 problem_open_max: 15
 
 # No coverage_command: org-node's coverage has never been measured. Under
@@ -321,16 +103,12 @@ problem_open_max: 15
 expectation_age_days: 90
 expectation_open_max: 10
 
-# Declared 2026-09-06 after the dependency assessment in
-# docs/plans/2026-09-06-dependency-edges.md. Both providers are class C, so
-# the class floor (MISCLASSED-DEPENDENCY) has nothing to convict and no
-# segregated_from: entry is needed. What org-node relies on that neither
-# provider states as a requirement is recorded as expects: items in this
-# unit's SRS (org-io's finalised-block expectation (moved 2026-10-07) on on-chain-client, REQ-q92yac on org-members).
-# 2026-10-08 (change worktree-org-io-create, T6, ruling B): on-chain-client
-# leaves the list. org-node reads no chain and names no on-chain-client path;
-# org-io holds that edge and its expectation. org-node depends on
-# org-members and person.
+# The dependency assessment is docs/plans/2026-09-06-dependency-edges.md.
+# Both providers are class C, so the class floor (MISCLASSED-DEPENDENCY) has
+# nothing to convict and no segregated_from: entry is needed. What org-node
+# relies on that a provider does not state as a requirement is recorded as
+# expects: items in this unit's SRS (REQ-q92yac on org-members). org-node
+# reads no chain and names no on-chain-client path; org-io holds that edge.
 depends_on:
   - org-members
   - person

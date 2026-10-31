@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 #![allow(clippy::result_large_err, reason = "the handle's `CreateError`, which names a Device public key")]
-//! The transport preflight by the keychain path (LLR-h9tcat; S4, task T10 of
-//! docs/plans/2026-10-06-org-io-transport.md, owner rulings 7 and 12): the
+//! The transport preflight by the keychain path (LLR-h9tcat; owner rulings 7
+//! and 12): the
 //! check binds each Device key's endpoint through its keychain item, and the
 //! preflight finds the Device keys by listing the data directory's store
 //! files, as the node does. No key or seed comes from the environment.
@@ -12,12 +12,11 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use org_node::{DevicePublicKey, Handle, Name, Surname};
+use org_node::DevicePublicKey;
 use org_io::preflight::{check_transport, check_transport_for_data_dir, CheckResult};
 use org_io::test_support::{MemoryKeychain, Refusal};
 use org_io::transport::TransportMode;
 use org_io::OrgIo;
-use rand::rngs::OsRng;
 
 mod common;
 use common::handles::keep_device_seed;
@@ -30,6 +29,7 @@ const ONLINE_TIMEOUT: Duration = Duration::from_secs(1);
 /// A fresh, not yet created directory for test `tag`.
 fn scratch(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("org-io-preflight-transport-{tag}-{}", std::process::id()));
+    // A directory an earlier run left is cleared; none there is fine.
     let _ = std::fs::remove_dir_all(&dir);
     dir
 }
@@ -78,13 +78,10 @@ async fn a_missing_or_locked_item_fails_the_check_naming_the_key_and_binds_nothi
     keychain.refuse_as(None);
 }
 
-/// Create a Persona through a handle over `dir`, as the app does: its
-/// keychain item, then its store file. Its Device key.
+/// Create a Persona through a handle over `dir`: its keychain item, then its
+/// store file, as `common::handles::create` makes one. Its Device key.
 async fn create_persona(io: &OrgIo, handle_text: &str) -> DevicePublicKey {
-    let persona_id = io
-        .create_persona(&mut OsRng, Handle::parse(handle_text).unwrap(), Name::parse("Test").unwrap(), Surname::parse("User").unwrap())
-        .await
-        .unwrap();
+    let persona_id = common::handles::create(io, handle_text).await;
     io.persona_public_keys(&persona_id).await.unwrap().1
 }
 
@@ -133,11 +130,7 @@ async fn a_data_dir_with_no_store_fails_the_check_naming_the_dir_and_binds_nothi
 
 // Abnormal: the binary with `ODS_DATA_DIR` unset, every other variable set,
 // refuses and exits non-zero before any check: it names the variable and
-// prints no checklist row (LLR-h9tcat as clarified 2026-10-13: no default).
-// *Added 2026-10-14 (S4 review round 1, finding 12).* Mutation check, that
-// day: with the binary's refusal replaced by a default (the temporary
-// directory), this test failed ("the binary did not exit: it went on to the
-// checks"); the refusal was restored.
+// prints no checklist row (LLR-h9tcat: no default).
 // verifies: LLR-h9tcat
 #[test]
 fn the_binary_without_a_data_dir_exits_non_zero_before_any_check() {
@@ -171,9 +164,6 @@ fn the_binary_without_a_data_dir_exits_non_zero_before_any_check() {
 // check, saying what is wrong with the variable rather than that it is
 // unset (LLR-h9tcat). Unix only: there an environment value can be any
 // bytes.
-// Mutation check, 2026-10-15: with the binary's two refusals merged back
-// into one (`Err(_)` reporting "ODS_DATA_DIR not set"), this test failed on
-// the stderr assertion; the split was restored.
 // verifies: LLR-h9tcat
 #[cfg(unix)]
 #[test]

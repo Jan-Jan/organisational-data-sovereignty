@@ -1,216 +1,215 @@
 #![cfg(all(feature = "app", feature = "test-support"))]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! The commit returns every recipient's body (S4, task T5 of
-//! docs/plans/2026-10-06-org-io-transport.md; LLR-gdfqn9, PR-gnh3j2): built
-//! inside the commit, from the record as committed and with the key that
-//! commit stored, so a later commit cannot change a body already returned.
+//! The messages of the adopted current epoch (SDD-qzv5mn): built from the
+//! record's kept Change set and base snapshot, after adoption, changing
+//! nothing, so a send that fails or never happens is repeated with the
+//! same bodies.
 
 mod support;
+use support::{CloneProbe, NotCloneFallback};
 
-use org_node::reconcile::Reconciled;
-use org_node::service::{CommitOutcome, OutgoingMessage, StoreChange};
-use org_node::store::{OrgRecord, ProvisionalChange, ProvisionalUpdate};
-use org_node::test_fixtures::{device_key, member_key};
-use org_node::wire::{decode_message, encode_message, WireMessage};
-use org_node::{DevicePublicKey, Envelope, Epoch, Joiner, MemberId, OrgId};
-use rand::rngs::OsRng;
-use support::*;
+use org_members::hasher::Blake3Hasher;
+use org_node::envelope::Envelope;
+use org_node::error::OrgNodeError;
+use org_node::service::OutgoingMessage;
+use org_node::store::{MemberSnapshot, OrgRecord};
+use org_node::wire::{decode_message, WireMessage};
+use org_node::{DevicePublicKey, SequenceNumber};
 
-/// A joiner no node holds a Persona for, from fixture keys.
-fn joiner_from(seed: u8, handle: &str) -> Joiner {
-    Joiner { handle: h(handle), name: nm("Test"), surname: sn("Joiner"), member_key: member_key(seed), device_key: device_key(seed + 1) }
+/// Ada's store, its admission and revocation proposed and adopted.
+mod bodies {
+    use org_node::chain::OrgState;
+    use org_node::invitation::InviteId;
+    use org_node::service::OrgService;
+    use org_node::store::{KeptAdmissionRequest, MemberSnapshot, OutstandingInvite, StoreData};
+    use org_node::test_fixtures::{device_key, member_key};
+    use org_node::{Handle, Name, Surname, VerificationTime, Verified};
+    use rand::rngs::OsRng;
+
+    pub use crate::support::fixtures::*;
+    pub use crate::support::the_org;
+
+    /// Eve, listed with two Devices.
+    pub fn eve_with_two_devices() -> MemberSnapshot {
+        snapshot(0x05, "eve", 0x65, &[EVE, 0xe2])
+    }
+
+    pub fn invite_id() -> InviteId {
+        invite_id_of(0x11)
+    }
+
+    /// Ada's store: the record at epoch 3 listing Ada, Bob and Eve;
+    /// Carol's request kept with its outstanding invite.
+    pub fn admin_store() -> StoreData {
+        let mut store_data = ada_store(3, &[ada(), bob(), eve_with_two_devices()]);
+        store_data.kept_admission_requests = vec![KeptAdmissionRequest {
+            org_id: the_org(),
+            invite_id: invite_id(),
+            from: device_key(CAROL),
+            name: Name::parse("Carol").unwrap(),
+            surname: Surname::parse("Coder").unwrap(),
+            preferred_handles: vec![Handle::parse("carol").unwrap()],
+            member_key: member_key(0x63),
+            device_key: device_key(CAROL),
+            addresses: addresses(&["carol.example:4433"]),
+        }];
+        store_data.outstanding_invites =
+            vec![OutstandingInvite { org_id: the_org(), invite_id: invite_id(), invitee_name: "Carol".to_string() }];
+        store_data
+    }
+
+    /// Ada's store after recording Carol's admission (`admit`) and Eve's
+    /// revocation (`revoke`), proposing, and adopting the proposal. The
+    /// service holds the store, so the sealed writes are not read.
+    pub fn adopted(admit: bool, revoke: bool) -> OrgService {
+        let mut svc = service(ADA, admin_store());
+        if admit {
+            crate::support::unread(svc.record_admission(&mut OsRng, &ada_device(), invite_id(), None).unwrap());
+        }
+        if revoke {
+            crate::support::unread(svc.record_revocation(&mut OsRng, &ada_device(), eve_with_two_devices().id).unwrap());
+        }
+        crate::support::unread(svc.propose_updated_organisation(&mut OsRng, &ada_device()).unwrap());
+        let held = &held(&svc, ADA).provisional_organisations[0];
+        let state = OrgState { root_hash: held.root, org_pub_key: held.org_pub_key, epoch: held.epoch };
+        let (verified, _sealed) = svc
+            .verify(&mut OsRng, &ada_device(), Some(state), VerificationTime(1), org_node::AheadLimit(1200), crate::support::none_held)
+            .unwrap();
+        assert!(matches!(verified, Verified::Adopted { .. }), "fixture: adopted");
+        svc
+    }
 }
 
-/// Every Device `record` lists, in record order (Member, then slot).
+/// Every Device `record` lists, in record order (member, then slot).
 fn devices_of(record: &OrgRecord) -> Vec<DevicePublicKey> {
     record.trie_members.iter().flat_map(|member| member.device_keys.iter().copied()).collect()
 }
 
-/// The recipients of `outcome`'s bodies, in order.
-fn recipients(outcome: &CommitOutcome) -> Vec<DevicePublicKey> {
-    outcome.outgoing.iter().map(|message| message.recipient).collect()
+fn recipients(messages: &[OutgoingMessage]) -> Vec<DevicePublicKey> {
+    messages.iter().map(|message| message.recipient).collect()
 }
 
-/// The Organisation information a commit of `update` on `before` sends: the
-/// Envelope built from the update, the record as it stood before and the
-/// key the update holds, encoded.
-fn information_for(update: &ProvisionalUpdate, before: &OrgRecord) -> Vec<u8> {
-    let ProvisionalChange::ChangeSet { change_set, org_private_key } = update.change_for_test().clone() else {
-        panic!("a Change set")
-    };
-    encode_message(&WireMessage::OrgInformation {
-        envelope: Envelope { org_id: before.org_id, parent_seq: update.seq, delta_bytes: change_set },
-        record_snapshot: postcard::to_allocvec(&before.trie_members).unwrap(),
-        org_private_key,
-    })
-    .unwrap()
+/// The adopted record and the members of the record it extends.
+fn record_and_base(svc: &org_node::service::OrgService) -> (OrgRecord, Vec<MemberSnapshot>) {
+    let record = bodies::held(svc, bodies::ADA).record.clone().unwrap();
+    let base: Vec<MemberSnapshot> = postcard::from_bytes(record.kept_base_snapshot.as_ref().unwrap()).unwrap();
+    (record, base)
 }
 
-/// Build `update` with `build`, write it to the chain (mock) and commit it
-/// on `node`; returns the update, the record before and the outcome.
-fn build_and_commit(
-    node: &mut Node,
-    chain: &org_node::test_fixtures::ChainSlots,
-    org_id: OrgId,
-    build: impl FnOnce(&mut Node) -> ProvisionalUpdate,
-) -> (ProvisionalUpdate, OrgRecord, CommitOutcome) {
-    let before = rec_of(node, org_id);
-    let update = build(node);
-    chain.apply_update(org_id, update.resulting_root, update.org_pub_key, before.epoch).unwrap();
-    let outcome = node.commit_update(&mut OsRng, org_id).unwrap();
-    (update, before, outcome)
-}
-
-/// A, B (on its own node) and C (a further Persona on A's node) are Members.
-fn three_members(tag: &str) -> (Setup, Joiner) {
-    let mut s = admit_b_directly(setup(tag));
-    let joiner_c = joiner_for_c(&mut s.svc_a);
-    commit_admission(&mut s.svc_a, &s.chain, s.org_id, &joiner_c).unwrap();
-    (s, joiner_c)
-}
-
-/// The MemberId listing `device` in `record`.
-fn member_listing(record: &OrgRecord, device: DevicePublicKey) -> MemberId {
-    record.trie_members.iter().find(|member| member.device_keys.contains(&device)).unwrap().id
-}
-
-// Normal: an admission's outcome holds one Organisation-information body for
-// each Device the committed record lists other than the sender's, in record
-// order, each the Envelope, the record before the commit and the key the
-// commit stored.
-// verifies: LLR-gdfqn9
-#[test]
-fn an_admission_sends_information_to_every_listed_device_but_the_senders() {
-    let (mut s, joiner_c) = three_members("bodies-admission");
-    let joiner_d = joiner_from(0x41, "dave");
-    let (update, before, outcome) =
-        build_and_commit(&mut s.svc_a, &s.chain, s.org_id, |a| a.admit_member(&mut OsRng, s.org_id, &joiner_d).unwrap());
-    let committed = rec_of(&s.svc_a, s.org_id);
-    let sender_device = s.svc_a.persona_public_keys(&s.pid_a).unwrap().1;
-    let expected: Vec<DevicePublicKey> = devices_of(&committed).into_iter().filter(|device| *device != sender_device).collect();
-    assert_eq!(recipients(&outcome), expected, "every listed Device but the sender's, in record order");
-    let mut sorted = expected.clone();
-    sorted.sort_by_key(|device| *device.as_bytes());
-    let mut named = vec![s.joiner_b.device_key, joiner_c.device_key, joiner_d.device_key];
-    named.sort_by_key(|device| *device.as_bytes());
-    assert_eq!(sorted, named, "B, C and D");
-    assert_eq!(outcome.sender, s.pid_a);
-    let information = information_for(&update, &before);
-    for message in &outcome.outgoing {
-        assert_eq!(message.body, information, "the Envelope, the record before and the commit's key");
-    }
-    let WireMessage::OrgInformation { org_private_key, .. } = decode_message(&information).unwrap() else { panic!() };
-    assert_eq!(&org_private_key, committed.org_private_key_for_test(), "the key the commit stored");
-}
-
-// Normal: a removal's outcome holds the listed Devices' information, then
-// one revocation per removed Device: the notice naming that Device and its
-// MemberId, with an absence proof that verifies against the committed root.
-// verifies: LLR-gdfqn9, LLR-a8z7r5
-#[test]
-fn a_removal_sends_revocations_to_every_removed_device_after_the_listed_ones() {
-    let (mut s, joiner_c) = three_members("bodies-removal");
-    let b_id = member_listing(&rec_of(&s.svc_a, s.org_id), s.joiner_b.device_key);
-    let (update, before, outcome) =
-        build_and_commit(&mut s.svc_a, &s.chain, s.org_id, |a| a.revoke_member(&mut OsRng, s.org_id, b_id).unwrap());
-    assert_eq!(recipients(&outcome), vec![joiner_c.device_key, s.joiner_b.device_key], "listed first, then removed");
-    assert_eq!(outcome.outgoing[0].body, information_for(&update, &before));
-    let WireMessage::Revocation(notice) = decode_message(&outcome.outgoing[1].body).unwrap() else {
-        panic!("a revocation for the removed Device")
-    };
-    assert_eq!((notice.org_id, notice.member_id, notice.device), (s.org_id, b_id, s.joiner_b.device_key));
-    let committed = rec_of(&s.svc_a, s.org_id);
-    assert_eq!(outcome.root, committed.root_hash);
-    notice
-        .proof
-        .verify::<org_members::hasher::Blake3Hasher>(&committed.root_hash, &b_id, &s.joiner_b.device_key)
-        .expect("the absence proof verifies against the committed root");
-}
-
-// Normal: a commit that removes this node forgets the Organisation and
-// returns its acknowledgements and no bodies.
-// verifies: LLR-gdfqn9, LLR-b27jr6
-#[test]
-fn a_commit_that_removes_this_node_returns_its_acknowledgements_and_no_bodies() {
-    let mut s = admit_b_directly(setup("bodies-self-removal"));
-    let own = s.joiner_b.device_key;
-    let b_id = member_listing(&rec_of(&s.svc_b, s.org_id), own);
-    let update = s.svc_b.revoke_member(&mut OsRng, s.org_id, b_id).unwrap();
-    s.chain.apply_update(s.org_id, update.resulting_root, update.org_pub_key, rec_of(&s.svc_b, s.org_id).epoch).unwrap();
-    let state = s.chain.get(&s.org_id);
-    let keychain = s.svc_b.keychain.clone();
-    let (outcome, change) = s.svc_b.svc.commit_update(&mut OsRng, s.org_id, state, |keys| keychain.secrets(keys)).unwrap();
-    assert!(matches!(change, StoreChange::Forgotten { device_key } if device_key == own));
-    assert!(outcome.outgoing.is_empty(), "no bodies");
-    assert_eq!(outcome.acknowledgements.len(), 1);
-    assert_eq!(outcome.acknowledgements[0].device, own);
-}
-
-// Normal: a founder's genesis commit returns no recipients: its outcome is a
-// receive outcome, which holds no body.
-// verifies: LLR-gdfqn9
-#[test]
-fn commit_genesis_returns_no_recipients() {
-    let chain = org_node::test_fixtures::ChainSlots::new();
-    let mut a = Node::new(open_store("bodies-genesis", "a"), chain.clone());
-    let pid = a.create_persona(&mut OsRng, h("alice"), nm("Alice"), sn("Smith")).unwrap();
-    let update = a.create_organisation(&mut OsRng, &pid).unwrap();
-    let org_id = chain.apply_genesis(update.resulting_root, update.org_pub_key);
-    // *Rewritten 2026-10-15 (S4 review round 2, finding-8):* the outcome's
-    // Debug text was searched for fields `ReceiveOutcome` does not have, so
-    // the test passed by construction. The outcome is now read: a receive
-    // outcome (the type annotation: no `outgoing` field, so no body), the
-    // founder admitted with nothing to deliver, and the record lists the
-    // founder's Device alone, so no other Device could be a recipient.
-    let (outcome, _write): (org_node::ReceiveOutcome, org_node::StoreWrite) =
-        a.svc.commit_genesis(&mut OsRng, &pid, org_id, test_proxy(), chain.get(&org_id)).unwrap();
-    assert!(matches!(outcome.kind, org_node::service::ReceiveKind::Admitted), "{outcome:?}");
-    assert_eq!(outcome.org_id, org_id);
-    assert!(outcome.acknowledgements.is_empty(), "nothing to deliver: {outcome:?}");
-    let founder_device = a.svc.persona_public_keys(&pid).unwrap().1;
-    assert_eq!(devices_of(&rec_of(&a, org_id)), vec![founder_device], "no Device but the founder's");
-}
-
-// Normal: a commit found at startup returns the same bodies a commit_update
-// of the same update returns (LLR-fm38ww's one commit step).
-// verifies: LLR-gdfqn9
-#[test]
-fn a_reconciled_commit_returns_the_same_bodies_as_commit_update() {
-    let mut s = admit_b_directly(setup("bodies-reconcile"));
-    let joiner_d = joiner_from(0x43, "dave");
-    let before = rec_of(&s.svc_a, s.org_id);
-    let update = s.svc_a.admit_member(&mut OsRng, s.org_id, &joiner_d).unwrap();
-    s.chain.apply_update(s.org_id, update.resulting_root, update.org_pub_key, before.epoch).unwrap();
-    let Reconciled::Committed { outcome, .. } = s.svc_a.reconcile(&mut OsRng, s.org_id).unwrap() else {
-        panic!("the held update is committed")
-    };
-    let committed = rec_of(&s.svc_a, s.org_id);
-    let sender_device = s.svc_a.persona_public_keys(&s.pid_a).unwrap().1;
-    let expected: Vec<DevicePublicKey> = devices_of(&committed).into_iter().filter(|device| *device != sender_device).collect();
-    assert_eq!(recipients(&outcome), expected);
-    let information = information_for(&update, &before);
-    assert!(outcome.outgoing.iter().all(|message| message.body == information), "commit_update's bodies");
-}
-
-// Abnormal (PR-gnh3j2): an earlier commit's bodies keep that commit's key
-// after a later commit stored a new one.
-// verifies: LLR-gdfqn9, PR-gnh3j2
-#[test]
-fn a_later_commit_cannot_change_an_earlier_body() {
-    let mut s = admit_b_directly(setup("bodies-later"));
-    let (first, _, first_outcome) = build_and_commit(&mut s.svc_a, &s.chain, s.org_id, |a| {
-        a.admit_member(&mut OsRng, s.org_id, &joiner_from(0x45, "dave")).unwrap()
-    });
-    let (second, _, _) = build_and_commit(&mut s.svc_a, &s.chain, s.org_id, |a| {
-        a.admit_member(&mut OsRng, s.org_id, &joiner_from(0x47, "erin")).unwrap()
-    });
-    assert_ne!(private_key_of(&first), private_key_of(&second), "the second commit stored a new key");
-    let to_b = first_outcome.outgoing.iter().find(|message| message.recipient == s.joiner_b.device_key).unwrap();
-    let WireMessage::OrgInformation { envelope, org_private_key, .. } = decode_message(&to_b.body).unwrap() else {
+/// The Organisation information every listed Device but Ada's receives:
+/// the adopted epoch's Envelope, the base snapshot and the record's key.
+fn assert_information(body: &[u8], record: &OrgRecord) {
+    let WireMessage::OrgInformation { envelope, record_snapshot, org_private_key } = decode_message(body).unwrap() else {
         panic!("Organisation information")
     };
-    assert_eq!(envelope.parent_seq, first.seq);
-    assert_eq!(org_private_key, private_key_of(&first), "the first commit's key");
+    assert_eq!(
+        envelope,
+        Envelope {
+            org_id: record.org_id,
+            parent_seq: SequenceNumber::new(record.epoch.get()),
+            delta_bytes: record.kept_change_set.clone().unwrap()
+        }
+    );
+    assert_eq!(Some(record_snapshot), record.kept_base_snapshot.clone());
+    assert_eq!(&org_private_key, record.org_private_key_for_test());
+}
+
+/// A revocation notice for `recipient`, a Device of the removed Member
+/// `removed`, proving its absence from `record`.
+fn assert_notice(body: &[u8], recipient: DevicePublicKey, removed: &MemberSnapshot, record: &OrgRecord) {
+    let WireMessage::Revocation(notice) = decode_message(body).unwrap() else { panic!("a revocation notice") };
+    assert_eq!(notice.device, recipient);
+    assert!(removed.device_keys.contains(&recipient), "fixture: {recipient:?} is a Device of the removed Member");
+    assert_eq!(notice.member_id, removed.id, "the notice names the removed Member");
+    assert_eq!(notice.org_id, record.org_id);
+    notice.proof.verify::<Blake3Hasher>(&record.root_hash, &notice.member_id, &notice.device).unwrap();
+}
+
+// One Organisation-information body per Device the adopted record lists
+// other than Ada's, in record order, then one revocation notice per Device
+// the base lists and the record does not (Eve's two, in slot order).
+// verifies: LLR-degg8t
+#[test]
+fn messages_for_the_current_epoch_inform_every_listed_device_but_the_own_then_notify_every_removed_one() {
+    let svc = bodies::adopted(true, true);
+    let (record, base) = record_and_base(&svc);
+    let messages = svc.messages_for_current_epoch(&bodies::ada_device()).unwrap();
+    let listed: Vec<_> = devices_of(&record).into_iter().filter(|device| *device != bodies::ada_device()).collect();
+    let removed: Vec<_> = base
+        .iter()
+        .flat_map(|member| member.device_keys.iter().copied())
+        .filter(|device| !devices_of(&record).contains(device))
+        .collect();
+    assert_eq!(removed, bodies::eve_with_two_devices().device_keys, "fixture: Eve's two Devices are removed");
+    assert_eq!(recipients(&messages), [listed.clone(), removed].concat());
+    for message in &messages[..listed.len()] {
+        assert_information(&message.body, &record);
+    }
+    for message in &messages[listed.len()..] {
+        assert_notice(&message.body, message.recipient, &bodies::eve_with_two_devices(), &record);
+    }
+}
+
+// A store with no record is refused with `OrgNotHeld`; no body of an
+// adopted epoch carries the invite identifier the store holds.
+// verifies: LLR-degg8t
+#[test]
+fn a_store_with_no_record_is_refused_and_no_body_carries_an_invite_id() {
+    let (provisional, key) = bodies::provisional_member();
+    assert_eq!(provisional.messages_for_current_epoch(&key).unwrap_err(), OrgNodeError::OrgNotHeld { org_id: bodies::the_org() });
+    let svc = bodies::adopted(true, true);
+    let invite_id = bodies::invite_id();
+    for message in svc.messages_for_current_epoch(&bodies::ada_device()).unwrap() {
+        assert!(!message.body.windows(32).any(|window| window == invite_id.as_bytes()), "no invite id in a body");
+    }
+}
+
+// `Debug` renders the recipient and the body's length, and nothing else.
+// verifies: LLR-rsjs8e
+#[test]
+fn outgoing_message_debug_renders_the_recipient_and_the_length_only() {
+    let message = OutgoingMessage { recipient: bodies::ada_device(), body: vec![0x5a; 40] };
+    assert_eq!(format!("{message:?}"), format!("OutgoingMessage {{ recipient: {:?}, body_len: 40 }}", bodies::ada_device()));
+}
+
+// An adopted admission sends Organisation information to every listed
+// Device but Ada's, Carol's among them, and no notice.
+// verifies: LLR-degg8t
+#[test]
+fn an_adopted_admission_sends_information_to_every_listed_device_but_the_own() {
+    let svc = bodies::adopted(true, false);
+    let (record, _base) = record_and_base(&svc);
+    let messages = svc.messages_for_current_epoch(&bodies::ada_device()).unwrap();
+    let listed: Vec<_> = devices_of(&record).into_iter().filter(|device| *device != bodies::ada_device()).collect();
+    assert_eq!(recipients(&messages), listed);
+    assert!(listed.contains(&org_node::test_fixtures::device_key(bodies::CAROL)), "Carol is informed");
+    for message in &messages {
+        assert_information(&message.body, &record);
+    }
+}
+
+// An adopted removal informs the listed Devices first, then notifies each
+// removed Device.
+// verifies: LLR-degg8t
+#[test]
+fn an_adopted_removal_sends_revocations_to_every_removed_device_after_the_listed_ones() {
+    let svc = bodies::adopted(false, true);
+    let (record, _base) = record_and_base(&svc);
+    let messages = svc.messages_for_current_epoch(&bodies::ada_device()).unwrap();
+    let listed: Vec<_> = devices_of(&record).into_iter().filter(|device| *device != bodies::ada_device()).collect();
+    assert_eq!(recipients(&messages), [listed.clone(), bodies::eve_with_two_devices().device_keys].concat());
+    for message in &messages[listed.len()..] {
+        assert_notice(&message.body, message.recipient, &bodies::eve_with_two_devices(), &record);
+    }
+}
+
+// A record that keeps no Change set (here one no adoption has replaced) returns no
+// message.
+// verifies: LLR-degg8t
+#[test]
+fn a_record_with_no_kept_change_set_returns_no_message() {
+    let svc = bodies::service(bodies::ADA, bodies::admin_store());
+    assert!(svc.messages_for_current_epoch(&bodies::ada_device()).unwrap().is_empty());
 }
 
 /// Every rendering of an 8-byte window of `bytes` a `Debug` could print:
@@ -220,126 +219,57 @@ fn renderings(bytes: &[u8]) -> Vec<String> {
         .windows(8)
         .flat_map(|window| {
             let decimal = format!("{window:?}");
-            let hex: String = window.iter().map(|byte| format!("{byte:02x}")).collect();
-            [decimal.trim_matches(|c| c == '[' || c == ']').to_string(), hex]
+            [decimal.trim_matches(|character| character == '[' || character == ']').to_string(), support::hex(window)]
         })
         .collect()
 }
 
-// Abnormal: the outcome's `Debug` prints recipients and lengths, never a
-// body byte or the key a body carries.
-// verifies: LLR-gdfqn9
+// The messages' `Debug` shows each body's length and no window of a body, nor of the
+// record's private key.
+// verifies: LLR-rsjs8e
 #[test]
-fn outgoing_debug_shows_no_body_byte() {
-    let mut s = admit_b_directly(setup("bodies-debug"));
-    let (update, _, outcome) = build_and_commit(&mut s.svc_a, &s.chain, s.org_id, |a| {
-        a.admit_member(&mut OsRng, s.org_id, &joiner_from(0x49, "dave")).unwrap()
-    });
-    // The bodies are checked against the bodies' rendering: the outcome's
-    // other fields print public values (the Organisation id) a body also
-    // holds.
-    let rendered = format!("{outcome:?}");
-    let bodies = format!("{:?}", outcome.outgoing);
-    assert!(!outcome.outgoing.is_empty());
-    for message in &outcome.outgoing {
-        assert!(bodies.contains(&format!("body_len: {}", message.body.len())), "the body's length: {bodies}");
+fn outgoing_message_debug_shows_no_body_byte() {
+    let svc = bodies::adopted(true, true);
+    let (record, _base) = record_and_base(&svc);
+    let messages = svc.messages_for_current_epoch(&bodies::ada_device()).unwrap();
+    let rendered = format!("{messages:?}");
+    for message in &messages {
+        assert!(rendered.contains(&format!("body_len: {}", message.body.len())));
         for window in renderings(&message.body) {
-            assert!(!bodies.contains(&window), "a body window {window} in {bodies}");
+            assert!(!rendered.contains(&window), "a body window {window} in {rendered}");
         }
     }
-    for window in renderings(private_key_of(&update).expose_secret()) {
+    for window in renderings(record.org_private_key_for_test().expose_secret()) {
         assert!(!rendered.contains(&window), "the key's bytes {window} in {rendered}");
     }
 }
 
-/// A trait probe for `Clone`, resolved at compile time (the probe of
-/// `key_custody.rs`, the pattern of the `impls` crate).
-struct CloneProbe<T: ?Sized>(std::marker::PhantomData<T>);
-
-trait NotCloneFallback {
-    const IS_CLONE: bool = false;
-}
-
-impl<T: ?Sized> NotCloneFallback for CloneProbe<T> {}
-
-// `Clone` implies `Sized`, so this impl takes no `?Sized` (clippy, 2026-10-14,
-// S4 task T18); the probe's answer for every type tested below is unchanged.
-impl<T: Clone> CloneProbe<T> {
-    const IS_CLONE: bool = true;
-}
-
-// Abnormal: neither the outcome nor a body can be cloned; the probe is
+// `OutgoingMessage`, which
+// may carry an Organisation private key, cannot be cloned; the probe is
 // checked against a type whose answer is known.
-// verifies: LLR-gdfqn9
+// verifies: LLR-rsjs8e
 #[test]
 #[allow(
     clippy::assertions_on_constants,
     reason = "the probe's answers are compile-time constants by design; asserting them at run time is the test"
 )]
-fn outgoing_types_are_not_clone() {
+fn outgoing_message_is_not_clone() {
     assert!(CloneProbe::<Vec<u8>>::IS_CLONE, "the probe sees a Clone type");
     assert!(!CloneProbe::<OutgoingMessage>::IS_CLONE, "OutgoingMessage is not Clone");
-    assert!(!CloneProbe::<CommitOutcome>::IS_CLONE, "CommitOutcome is not Clone");
 }
 
-// Abnormal (review round 1 of S4, finding-12): a refused commit — no chain
-// state, or the state from before the chain write — returns no outcome, so
-// no body, and changes nothing in memory or on the disk; the update is still
-// held, and the commit against the state after the write returns its bodies.
-// *Assertion removed 2026-10-15 (S4 TEST review round 1, finding-9):* it
-// also compared the harness disk before and after each refusal, but the
-// test calls `OrgService::commit_update` directly, past the harness that
-// writes a returned change, and a refusal returns no change to write, so
-// that comparison could not fail. "Nothing written" holds by type at
-// org-node's seam (an `Err` carries no `StoreChange`); the in-memory
-// comparison, which can fail, stays.
-// verifies: LLR-gdfqn9
+// `messages_for_current_epoch` changes no byte of the store, and a second call returns the same
+// recipients and bodies.
+// verifies: LLR-degg8t
 #[test]
-fn a_refused_commit_returns_no_bodies_and_changes_nothing() {
-    let tag = "bodies-refused";
-    let mut s = admit_b_directly(setup(tag));
-    let before_write = s.chain.get(&s.org_id);
-    let joiner = joiner_from(0x4d, "erin");
-    let update = s.svc_a.admit_member(&mut OsRng, s.org_id, &joiner).unwrap();
-    s.chain.apply_update(s.org_id, update.resulting_root, update.org_pub_key, rec_of(&s.svc_a, s.org_id).epoch).unwrap();
-    let pid_a = s.pid_a.clone();
-    let in_memory = format!("{:?}", s.svc_a.store_data(&pid_a).unwrap());
-
-    for (state, expected) in [
-        (None, org_node::OrgNodeError::OrgNotOnChain),
-        (before_write, org_node::OrgNodeError::NoProvisionalUpdate),
-    ] {
-        let refused = s.svc_a.svc.commit_update(&mut OsRng, s.org_id, state, |_| Vec::new());
-        match refused {
-            Err(error) => assert_eq!(error, expected),
-            Ok((outcome, _)) => panic!("committed, {} bodies", outcome.outgoing.len()),
-        }
-        assert_eq!(format!("{:?}", s.svc_a.store_data(&pid_a).unwrap()), in_memory, "nothing changed in memory");
-    }
-
-    let (outcome, _) = s.svc_a.svc.commit_update(&mut OsRng, s.org_id, s.chain.get(&s.org_id), |_| Vec::new()).unwrap();
-    assert!(recipients(&outcome).contains(&joiner.device_key), "the held update commits and returns its bodies");
-}
-
-// Normal: building the bodies writes nothing beyond the commit's one store
-// change and sends nothing: no endpoint is bound.
-// *Assertion removed 2026-10-15 (S4 TEST review round 1, finding-9):* it
-// also compared the harness disk before and after the commit, which the
-// test calls on `OrgService` directly, past the harness that writes a
-// returned change, so that comparison could not fail. What the commit
-// writes is what it returns: one `StoreChange`, checked below; org-node
-// writes no file (`absences::org_node_is_sans_io`).
-// verifies: LLR-gdfqn9
-#[test]
-fn building_the_bodies_writes_and_sends_nothing() {
-    let mut s = admit_b_directly(setup("bodies-nothing"));
-    let update = s.svc_a.admit_member(&mut OsRng, s.org_id, &joiner_from(0x4b, "dave")).unwrap();
-    s.chain.apply_update(s.org_id, update.resulting_root, update.org_pub_key, rec_of(&s.svc_a, s.org_id).epoch).unwrap();
-    let state = s.chain.get(&s.org_id);
-    let (outcome, change) = s.svc_a.svc.commit_update(&mut OsRng, s.org_id, state, |_| Vec::new()).unwrap();
-    assert!(!outcome.outgoing.is_empty());
-    assert!(matches!(change, StoreChange::Sealed(_)), "one store change, sealed");
-    // *2026-10-14 (S4, task T14):* "nothing bound, nothing sent" is an
-    // absence now: org-node has no endpoint (`absences::org_node_is_sans_io`).
-    assert_eq!(rec_of(&s.svc_a, s.org_id).epoch, Epoch::new(3));
+fn messages_for_the_current_epoch_change_nothing_and_repeat() {
+    let svc = bodies::adopted(true, true);
+    let before = postcard::to_allocvec(bodies::held(&svc, bodies::ADA)).unwrap();
+    let first = svc.messages_for_current_epoch(&bodies::ada_device()).unwrap();
+    let second = svc.messages_for_current_epoch(&bodies::ada_device()).unwrap();
+    let pairs = |messages: &[OutgoingMessage]| -> Vec<(DevicePublicKey, Vec<u8>)> {
+        messages.iter().map(|message| (message.recipient, message.body.clone())).collect()
+    };
+    assert_eq!(pairs(&first), pairs(&second));
+    assert_eq!(postcard::to_allocvec(bodies::held(&svc, bodies::ADA)).unwrap(), before);
 }

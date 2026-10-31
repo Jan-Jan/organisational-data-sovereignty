@@ -53,7 +53,7 @@ secret_type!(
 );
 secret_type!(
     /// The Organisation's X25519 private key: one per epoch, shared by every
-    /// Member of the Organisation (REQ-ech45n, REQ-szq3ud, LLR-3fwykc). Its
+    /// Member of the Organisation (REQ-ech45n, REQ-szq3ud, LLR-qw8tyu). Its
     /// in-memory key pair is `keys::X25519Keypair` (LLR-98ufry).
     OrgPrivateKey
 );
@@ -81,14 +81,15 @@ impl OrgPublicKey {
         &self.0
     }
 
-    /// Refuses, with `DuplicateKey`, a key equal to any Member-as-a-group
-    /// key or any DevicePublicKey of `members` (REQ-ech45n, LLR-sj7cd5).
+    /// Refuses, with `DuplicateOrgPublicKey`, a key equal to any
+    /// Member-as-a-group key or any DevicePublicKey of `members`
+    /// (LLR-c759yd).
     pub fn ensure_distinct_from(&self, members: &[MemberLeaf]) -> Result<(), OrgNodeError> {
-        let held = members.iter().any(|m| {
-            m.p2p_key().as_bytes() == &self.0 || m.p2p_devices().iter().any(|d| d.as_bytes() == &self.0)
+        let held = members.iter().any(|member| {
+            member.p2p_key().as_bytes() == &self.0 || member.p2p_devices().iter().any(|device| device.as_bytes() == &self.0)
         });
         if held {
-            Err(OrgNodeError::Trie(org_members::OrgMembersError::DuplicateKey))
+            Err(OrgNodeError::DuplicateOrgPublicKey)
         } else {
             Ok(())
         }

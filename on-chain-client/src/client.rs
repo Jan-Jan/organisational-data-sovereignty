@@ -15,9 +15,8 @@
 //!   (the `ReviveApi::get_storage` runtime call that reads a contract
 //!   slot from pallet-revive's per-contract child trie; `RuntimeEvent`
 //!   variant decoding for the event stream).
-//!   The `Rpc` trait + `WsRpc` (hand-rolled layer, now deleted) have been
-//!   removed; the spec-declared generic `OrgRegistryClient<R: Rpc>` was
-//!   dropped here because subxt already
+//!   There is no hand-rolled RPC layer and no generic
+//!   `OrgRegistryClient<R: Rpc>`, because subxt already
 //!   owns the WS connection + metadata cache — having two parallel
 //!   connections would just double the bookkeeping. The smoldot path is
 //!   subxt's light-client backend (feature `smoldot`), preserving one
@@ -352,7 +351,7 @@ impl OrgRegistryClient {
     ///    Backfilled heights are looked up by number via `api.at_block(n)`,
     ///    which ALWAYS resolves the canonical best block at that height —
     ///    so it can never observe a discarded sibling.
-    ///    Empirically pinned by `two_orgs_one_watcher` (Task 7): two
+    ///    Empirically pinned by `two_orgs_one_watcher`: two
     ///    genesis updates mined in consecutive blocks must both reach the
     ///    watcher.
     ///

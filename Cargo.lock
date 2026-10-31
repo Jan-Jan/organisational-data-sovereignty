@@ -4779,7 +4779,6 @@ dependencies = [
  "libc",
  "on-chain-client",
  "org-node",
- "postcard",
  "rand 0.8.8",
  "rand_core 0.6.4",
  "serde_json",

@@ -1,26 +1,18 @@
 <script lang="ts">
 	/**
 	 * Story 5: Revoke a member.
-	 * A: show member list → enter member_id_hex + peer_addr_blob → "Revoke" → revoke_member.
-	 * B: shows "removed & self-deleted" when the "revoked" event fires (monitored via Membership).
+	 * A: show member list → enter member_id_hex → "Propose revocation" → propose_revocation.
+	 * B: shows that this Device is removed when the "revoked" event fires, which a
+	 *    Verification's removed result raises (LLR-ygr6gd; monitored via Membership).
 	 *
-	 * REQ-vgr7s2, REQ-he8ejb: the submit preconditions are NOT decided here. They
-	 * live in `validateRevokeInput`, which is gated by tests; this component reads
-	 * the transport mode and renders the verdict. The peer address is required
-	 * only in Loopback — a Networked join request carries no address at all, so
-	 * demanding one unconditionally made revocation unreachable in the shipped
-	 * configuration (HAZ-n97v5g).
+	 * REQ-he8ejb: the precondition is `validateRevokeInput`'s, gated by tests; it
+	 * takes the member identifier alone. The revocation is recorded as a
+	 * provisional change and goes with the next epoch written (LLR-7n4hgr),
+	 * which is what the panel says once it is proposed (LLR-b59vcx).
 	 */
-	import {
-		listOrgs,
-		revokeMember,
-		onRevoked,
-		connectionStatus,
-		type OrgDto,
-		type TransportMode,
-		type RevokedPayload
-	} from '$lib/api';
+	import { listOrgs, proposeRevocation, onRevoked, type OrgDto, type RevokedPayload } from '$lib/api';
 	import { validateRevokeInput } from '$lib/revoke';
+	import { NEXT_EPOCH_NOTE } from '$lib/epoch';
 	import { subscribeAll, type Unlisten } from '$lib/receiver';
 
 	interface Props {
@@ -31,18 +23,6 @@
 	let orgs = $state<OrgDto[]>([]);
 	let selectedOrgId = $state('');
 	let memberIdHex = $state('');
-	let peerAddrBlob = $state('');
-
-	/**
-	 * REQ-645jq9. Which transport this installation is running, as reported by
-	 * the backend. The initial value is `'networked'` because that is what the
-	 * backend defaults to for any `ODS_TRANSPORT` other than the literal
-	 * "loopback" — so the form's behaviour before the status arrives matches the
-	 * behaviour after it, in the overwhelmingly common case. Defaulting to
-	 * 'loopback' would demand an address the operator cannot supply, which is
-	 * HAZ-n97v5g with a shorter window.
-	 */
-	let transportMode = $state<TransportMode>('networked');
 
 	let revokeBusy = $state(false);
 	let revokeErr = $state('');
@@ -59,17 +39,8 @@
 		}
 	}
 
-	async function loadTransportMode() {
-		try {
-			transportMode = (await connectionStatus()).transport_mode;
-		} catch {
-			/* keep the default; the status bar reports the failure */
-		}
-	}
-
 	$effect(() => {
 		loadOrgs();
-		loadTransportMode();
 
 		// REQ-rq8g2v / PR-u34uqm: the cleanup cancels the subscription even when
 		// the component is destroyed while `listen` is still pending. Assigning
@@ -83,7 +54,7 @@
 				onRevoked,
 				(p: RevokedPayload) => {
 					revokedEvents = [
-						`Org …${p.org_id.slice(-12)} — member self-deleted (received revoke, removed self)`,
+						`${p.org_id === null ? 'A provisional founding' : `Org …${p.org_id.slice(-12)}`} — this Device is removed: a Verification found it absent from the adopted Membership record`,
 						...revokedEvents
 					];
 				}
@@ -104,8 +75,8 @@
 			revokeErr = 'Select an org.';
 			return;
 		}
-		// REQ-vgr7s2, REQ-he8ejb. One decision, in one gated place.
-		const check = validateRevokeInput({ transportMode, memberIdHex, peerAddrBlob });
+		// REQ-he8ejb. One decision, in one gated place.
+		const check = validateRevokeInput({ memberIdHex });
 		if (!check.ok) {
 			revokeErr = check.message;
 			return;
@@ -113,7 +84,7 @@
 		revokeBusy = true;
 		revokeErr = '';
 		try {
-			await revokeMember(selectedOrgId, memberIdHex.trim(), peerAddrBlob.trim());
+			await proposeRevocation(selectedOrgId, memberIdHex.trim());
 			revokeDone = true;
 			notifyReload?.();
 		} catch (e) {
@@ -125,7 +96,6 @@
 
 	function reset() {
 		memberIdHex = '';
-		peerAddrBlob = '';
 		revokeErr = '';
 		revokeDone = false;
 	}
@@ -134,15 +104,13 @@
 <section class="panel">
 	<h2>Story 5: Revoke Member</h2>
 	<p class="hint">
-		Enter the member ID (64 hex chars). The peer address (hex, as the member's Device printed
-		it) is needed only in Loopback transport — in Networked the peer is reached by its
-		DevicePublicKey. After revocation, the revoked peer self-deletes and
-		you'll see the "revoked" event below.
+		Enter the member ID (64 hex chars). The revocation is recorded as a provisional change; it
+		reaches the chain only when the next epoch is proposed and written on S4: Membership.
 	</p>
 
 	{#if revokeDone}
 		<div class="result-box ok">
-			<p>Revocation submitted. Waiting for the remote peer to receive + self-delete…</p>
+			<p>Revocation proposed. {NEXT_EPOCH_NOTE}</p>
 		</div>
 		<button onclick={reset}>Revoke another</button>
 	{:else}
@@ -169,23 +137,11 @@
 				class="mono"
 			/>
 		</label>
-		<label>
-			Peer addr blob (hex — required in Loopback transport only; transport is {transportMode})
-			<input
-				type="text"
-				bind:value={peerAddrBlob}
-				placeholder={transportMode === 'loopback'
-					? 'peer address, hex (required)'
-					: 'peer address, hex (optional in Networked)'}
-				disabled={revokeBusy}
-				class="mono"
-			/>
-		</label>
 
 		{#if revokeErr}<p class="err">{revokeErr}</p>{/if}
 
 		<button class="revoke-btn" onclick={doRevoke} disabled={revokeBusy || orgs.length === 0}>
-			{revokeBusy ? 'Revoking…' : 'Revoke Member'}
+			{revokeBusy ? 'Proposing…' : 'Propose revocation'}
 		</button>
 	{/if}
 

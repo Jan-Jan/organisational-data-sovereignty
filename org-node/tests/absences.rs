@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! Absences the chain-authority change requires: things org-node must not
+//! Absences org-node's requirements state: things org-node must not
 //! contain. The compiler enforces most of them for callers; these tests make
 //! each one observable in the gate by reading the source and the manifest. A
 //! removed name must not appear in `src/` at all — reword any comment that
@@ -12,7 +12,7 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
         let path = entry.unwrap().path();
         if path.is_dir() {
             rust_files(&path, out);
-        } else if path.extension().is_some_and(|e| e == "rs") {
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
             out.push(path);
         }
     }
@@ -24,22 +24,25 @@ pub fn sources() -> Vec<(PathBuf, String)> {
     rust_files(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut files);
     files
         .into_iter()
-        .map(|p| {
-            let s = std::fs::read_to_string(&p).unwrap();
-            (p, s)
+        .map(|path| {
+            let text = std::fs::read_to_string(&path).unwrap();
+            (path, text)
         })
         .collect()
 }
 
-pub fn assert_absent(needle: &str, why: &str) {
-    for (path, text) in sources() {
-        assert!(!text.contains(needle), "{} contains `{needle}`: {why}", path.display());
-    }
+/// The text of `src/<file>`.
+pub fn source_of(file: &str) -> String {
+    std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(file)).unwrap()
 }
 
-/// `assert_absent`, over the files whose path ends with `suffix`.
-pub fn assert_absent_in(suffix: &str, needle: &str, why: &str) {
-    for (path, text) in sources().into_iter().filter(|(p, _)| p.ends_with(suffix)) {
+/// Every method that removes entries from a list, as a scan for a removal
+/// matches it: `dedup` with its variants.
+const REMOVING_METHODS: [&str; 10] =
+    ["retain(", "retain_mut(", "remove(", "swap_remove(", "clear()", "drain(", "truncate(", "pop()", "split_off(", "dedup"];
+
+pub fn assert_absent(needle: &str, why: &str) {
+    for (path, text) in sources() {
         assert!(!text.contains(needle), "{} contains `{needle}`: {why}", path.display());
     }
 }
@@ -52,34 +55,39 @@ pub fn normal_dependencies() -> String {
     rest[..rest.find("\n[").unwrap_or(rest.len())].to_string()
 }
 
-// org-node defines, exports and imports no Join request, and returns no
-// dialling address (absences: no input side).
-// *Amended 2026-10-13 (S4, task T6):* the Invite returns to org-node (owner
-// ruling 1 on the chain-authority sweep). The `export_invite`/`import_invite`
-// absences are inverted into the presence of `fn build_invite` and
-// `fn build_reply` (LLR-zj88e6 as rewritten); armoured text reaches org-node
-// only through the Invite and reply parse, so `base64` is named only in
-// `invitation.rs` (LLR-8qxwst as rewritten). The retired item of the old
-// "no Invite" absence (S4 T6; see the S4 verification record) leaves the
-// annotation.
-// verifies: LLR-zj88e6, LLR-qezw3n, LLR-836z24, LLR-8qxwst, REQ-qn2erx
+// org-node defines, exports and imports no Join request and no Invite
+// reply, and returns no dialling address (absences: no input side). The
+// Invite is org-node's: the service builds it (`fn build_invite`,
+// LLR-zj88e6), and armoured text reaches org-node only through the Invite
+// parse, so `base64` is named only in `invitation.rs` (LLR-8qxwst). What a
+// joining Device composes reaches the inviting store only as an admission
+// request `check_received` parses (LLR-96z2k5): no Joiner, no Invite reply,
+// nothing builds or checks one. org-node builds no address to dial
+// (LLR-ds228z).
+// verifies: LLR-zj88e6, LLR-ds228z, LLR-96z2k5, LLR-8qxwst
 #[test]
 fn org_node_holds_no_invitation_exchange() {
     for (needle, why) in [
         ("pub mod blobs", "no blob module"),
         ("fn export_join_request", "LLR-437fvx"),
-        ("fn import_join_request", "LLR-836z24"),
-        ("struct JoinRequest {", "LLR-836z24"),
+        ("fn import_join_request", "LLR-96z2k5"),
+        ("struct JoinRequest {", "LLR-96z2k5"),
+        ("struct Joiner {", "LLR-96z2k5: no Joiner type"),
+        ("struct InviteReply {", "LLR-96z2k5: no Invite-reply type"),
+        ("fn build_reply", "LLR-96z2k5: no Invite reply is built"),
+        ("fn check_reply", "LLR-96z2k5: no Invite reply is checked"),
         ("PendingInvite", "no pending invites"),
         ("pending_invites", "no pending invites"),
-        // a call, not the definition, which stays in transport/endpoint.rs
-        (".node_addr_for_dial(", "LLR-qezw3n: no value carries a dialling address"),
+        (".node_addr_for_dial(", "LLR-ds228z: org-node builds no address to dial"),
     ] {
         assert_absent(needle, why);
     }
-    let service = sources().into_iter().find(|(path, _)| path.ends_with("service.rs")).expect("service.rs").1;
-    for present in ["fn build_invite<", "fn build_reply<"] {
-        assert!(service.contains(present), "LLR-zj88e6: the service builds the Invite and the reply ({present})");
+    let service = source_of("service.rs");
+    for present in ["fn build_invite", "fn check_received"] {
+        assert!(
+            service.contains(present),
+            "LLR-zj88e6, LLR-96z2k5: the service builds the Invite and parses the admission request ({present})"
+        );
     }
     for (path, text) in sources() {
         if !path.ends_with("invitation.rs") {
@@ -90,7 +98,7 @@ fn org_node_holds_no_invitation_exchange() {
 
 // org-node has no administrator: no record carries one and no Persona is
 // looked up by one (absences: no input side).
-// verifies: LLR-xq9nrq, LLR-rys5nx, LLR-g76zqd
+// verifies: LLR-q4puca, LLR-rys5nx
 #[test]
 fn org_node_has_no_administrator_key() {
     assert_absent("admin_member_key", "OrgRecord has no administrator key");
@@ -98,7 +106,7 @@ fn org_node_has_no_administrator_key() {
     assert_absent("fn admin_persona_for_org", "no Persona is looked up by an administrator key");
 }
 
-// The Organisation secret is gone: org-node defines, holds, takes and returns
+// org-node has no Organisation secret: it defines, holds, takes and returns
 // none, and the Organisation private key is the only Organisation key
 // material it holds (LLR-qsjde3).
 // verifies: LLR-qsjde3
@@ -108,39 +116,120 @@ fn org_node_holds_no_organisation_secret() {
     assert_absent("org_secret", "LLR-qsjde3: no record, message or operation holds one");
 }
 
-// The invite identifier never travels between peers: org-node defines no type
-// for it, no Wire message or expectation holds one, and no outgoing body
-// carries one (REQ-8amu2a as amended; `send_update` until S4 task T5).
-// *Narrowed 2026-10-13 (S4, task T6; LLR-ms8njy as narrowed):* the Invite and
-// its `InviteId` return to org-node, so the scan reads the Wire message
-// (`wire.rs`, which every outgoing body encodes) and the `ExpectedAdmission`
-// struct body only.
-// verifies: LLR-ms8njy, LLR-48jakr
+// The invite identifier travels in one Wire message only: of the six kinds,
+// `AdmissionRequest` alone has an `invite_id` field (LLR-g3wmen); no other
+// kind, and no expected admission, holds one. Read from `wire.rs`'s enum,
+// variant by variant, and from the `ExpectedAdmission` struct body.
+// verifies: LLR-g3wmen
 #[test]
-fn org_node_holds_no_invite_identifier() {
-    assert_absent_in("wire.rs", "InviteId", "LLR-ms8njy: no Wire message names the invite identifier type");
-    assert_absent_in("wire.rs", "invite_id", "LLR-ms8njy, LLR-48jakr: no Wire message or outgoing body carries one");
-    let store = sources().into_iter().find(|(path, _)| path.ends_with("store.rs")).expect("store.rs").1;
+fn only_the_admission_request_carries_an_invite_identifier() {
+    let wire = code_of(&source_of("wire.rs"));
+    let start = wire.find("pub enum WireMessage {").expect("the WireMessage enum");
+    let body = &wire[start..start + wire[start..].find("\n}").expect("its closing brace")];
+    let mut variants: Vec<(String, String)> = vec![];
+    for line in body.lines().skip(1) {
+        let first = line.trim_start().chars().next();
+        if line.starts_with("    ") && !line.starts_with("     ") && first.is_some_and(char::is_uppercase) {
+            let name: String = line.trim_start().chars().take_while(|character| character.is_alphanumeric()).collect();
+            variants.push((name, String::new()));
+        }
+        if let Some((_, text)) = variants.last_mut() {
+            text.push_str(line);
+            text.push('\n');
+        }
+    }
+    let names: Vec<&str> = variants.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(
+        names,
+        ["OrgInformation", "Revocation", "Acknowledgement", "AdmissionRequest", "OrganisationRequest", "Organisation"],
+        "the six kinds, in index order"
+    );
+    for (name, text) in &variants {
+        let carries = text.contains("invite_id") || text.contains("InviteId");
+        assert_eq!(carries, name == "AdmissionRequest", "{name}: only the admission request carries an invite identifier");
+    }
+    let store = source_of("store.rs");
     let start = store.find("pub struct ExpectedAdmission {").expect("the ExpectedAdmission struct");
-    let body = &store[start..start + store[start..].find('}').expect("its closing brace")];
-    assert!(body.contains("org_id"), "the scan reads the struct body: {body}");
+    let expectation = &store[start..start + store[start..].find('}').expect("its closing brace")];
+    assert!(expectation.contains("org_id"), "the scan reads the struct body: {expectation}");
     for needle in ["invite_id", "InviteId"] {
-        assert!(!body.contains(needle), "LLR-ms8njy: an expectation names the Organisation alone: {body}");
+        assert!(!expectation.contains(needle), "LLR-g3wmen: an expectation names the Organisation alone: {expectation}");
+    }
+    for kind in ["RevocationNotice {", "Acknowledgement {"] {
+        let revocation = source_of("revocation.rs");
+        let start = revocation.find(&format!("pub struct {kind}")).expect("the struct");
+        let fields = &revocation[start..start + revocation[start..].find('}').expect("its closing brace")];
+        assert!(!fields.contains("invite_id"), "{kind} carries no invite identifier");
     }
 }
 
-// The service writes nothing to the chain; the proxy account is never handed
-// to a chain write (absences, no input side).
-// verifies: LLR-65py3d, LLR-3v5nu9, REQ-xs4ab8
+// The service writes nothing to the chain, and the proxy account is passed
+// to no operation: no function of org-node submits, synchronous or not; no
+// public function but `record_founding_proxy` takes a `ChainAccount`; and
+// every line of code that names the proxy (`proxy`, `proxy_account`) is
+// reached only from the operations LLR-x5asbx names as reading or setting
+// it — `propose_founding` (none yet), `record_founding_proxy`,
+// `proxy_account`, `persona_view` (the founding's copy, handed back) and
+// `verify` (the founding's adoption, and an adoption that keeps it). The
+// store's own encoding (struct fields and their conversions, outside any
+// operation) is where it reaches the disk sealed.
+// verifies: LLR-7en38k, LLR-x5asbx
 #[test]
 fn the_service_presents_no_chain_write() {
-    assert_absent_in("service.rs", "async fn submit_", "the service has no submission, so nothing can take the proxy account to the chain");
+    for (path, text) in sources() {
+        let code = code_of(&text);
+        assert!(identifier_occurrences(&code, "fn submit_").is_empty(), "{}: a submission (LLR-7en38k)", path.display());
+        for start in identifier_occurrences(&code, "pub fn ") {
+            let signature = squeezed(&code[start..start + code[start..].find(['{', ';']).expect("a signature's end")]);
+            let parameters = signature.split("->").next().expect("the parameters");
+            let name: String = signature["pubfn".len()..].chars().take_while(|&character| is_identifier_char(character)).collect();
+            assert!(
+                name == "record_founding_proxy" || !parameters.contains("ChainAccount"),
+                "{}: `{name}` takes a ChainAccount (LLR-x5asbx: the proxy is passed to no operation)",
+                path.display()
+            );
+        }
+    }
+    let mut reaching: Vec<String> = vec![];
+    for (path, text) in sources() {
+        let code = code_of(&text);
+        let file = path.file_name().expect("a file name").to_string_lossy().to_string();
+        for needle in ["proxy_account", "proxy"] {
+            for offset in identifier_occurrences(&code, needle) {
+                if code[offset + needle.len()..].chars().next().is_some_and(is_identifier_char) {
+                    continue; // a longer identifier: `proxy_account` when looking for `proxy`
+                }
+                let Some(function) = enclosing_function(&code, offset) else { continue }; // a field or a message
+                if file == "store.rs" && ["from", "try_from"].contains(&function.as_str()) {
+                    continue; // the store's encoding of the field
+                }
+                if is_public(&function) {
+                    reaching.push(format!("{file}::{function}"));
+                } else {
+                    reaching.extend(public_entry_points_reaching(&function));
+                }
+            }
+        }
+    }
+    reaching.sort();
+    reaching.dedup();
+    assert_eq!(
+        reaching,
+        [
+            "service.rs::persona_view",
+            "service.rs::propose_founding",
+            "service.rs::proxy_account",
+            "service.rs::record_founding_proxy",
+            "service.rs::verify",
+        ],
+        "LLR-x5asbx: no other operation reads or changes the proxy account"
+    );
 }
 
 // org-node builds no calldata, derives no multisig account, holds no
 // signatory key and dispatches nothing (absences: no input side). The
 // account is opaque: nothing converts it to subxt's type.
-// verifies: LLR-rv4vux, LLR-rc74nq, LLR-txqmz4, LLR-66h529, LLR-463d89, LLR-8m3bwj, LLR-f74xwb, LLR-s7whrn, REQ-xs4ab8
+// verifies: LLR-rv4vux, LLR-rc74nq, LLR-txqmz4, LLR-66h529, LLR-463d89, LLR-8m3bwj, LLR-f74xwb, LLR-s7whrn, REQ-dhr58q, REQ-4qh2h8
 #[test]
 fn org_node_writes_nothing_to_the_chain() {
     for (needle, why) in [
@@ -166,15 +255,17 @@ fn org_node_writes_nothing_to_the_chain() {
     }
     let deps = normal_dependencies();
     for dep in ["subxt-signer", "blake2", "parity-scale-codec"] {
-        assert!(!deps.lines().any(|l| l.trim_start().starts_with(dep)), "{dep} is not a dependency");
+        assert!(!deps.lines().any(|line| line.trim_start().starts_with(dep)), "{dep} is not a dependency");
     }
 }
 
-// org-node does no chain IO (ruling B, change worktree-org-io-create): no
-// chain library, no chain seam, no chain read, no `chain` feature.
-// verifies: LLR-mn5c2q, LLR-65py3d
+// org-node does no chain IO (LLR-7en38k): no chain library, seam or read, no `chain` feature, no operation that
+// writes to the chain, and the one operation that judges against the
+// chain, `verify`, takes the state as a value and is synchronous; the
+// source defines no other judging operation (`commit_*`, `reconcile`).
+// verifies: LLR-7en38k
 #[test]
-fn org_node_names_no_chain_library_and_reads_no_chain() {
+fn org_node_names_no_chain_library_and_only_verify_judges_against_the_chain() {
     for (needle, why) in [
         // Paths, not the bare words: `types.rs`'s doc comment names subxt's
         // account type in prose, as `org_node_writes_nothing_to_the_chain` notes.
@@ -186,9 +277,21 @@ fn org_node_names_no_chain_library_and_reads_no_chain() {
         ("OnChainReader", "deleted with its cache (PR-k2xxaq)"),
         ("OrgStateCache", "deleted (PR-k2xxaq)"),
         ("connect_chain_client", "the connection is org-io's"),
+        ("fn commit_genesis", "LLR-7en38k: verify alone judges against the chain"),
+        ("fn commit_update", "LLR-7en38k: verify alone judges against the chain"),
+        ("fn commit_checked", "LLR-7en38k: verify alone judges against the chain"),
+        ("fn reconcile", "LLR-7en38k: verify alone judges against the chain"),
+        ("async fn submit_", "LLR-7en38k: org-node presents no chain write"),
+        ("async fn verify", "LLR-7en38k: verify is synchronous"),
     ] {
         assert_absent(needle, why);
     }
+    let service = source_of("service.rs");
+    let start = service.find("pub fn verify").expect("OrgService::verify");
+    let signature = &service[start..start + service[start..].find('{').expect("verify's body")];
+    assert!(signature.contains("Option<OrgState>"), "LLR-7en38k: verify takes the state as a value: {signature}");
+    let verify_org = source_of("verify_org.rs");
+    assert!(!verify_org.contains("async"), "LLR-7en38k: verify_org.rs is synchronous");
     let dependencies = normal_dependencies();
     for crate_name in ["subxt", "on-chain-client", "async-trait", "hex"] {
         assert!(!dependencies.contains(&format!("{crate_name} =")), "org-node depends on {crate_name}");
@@ -199,7 +302,7 @@ fn org_node_names_no_chain_library_and_reads_no_chain() {
     );
 }
 
-// --- S4 (org-io transport): org-node is sans-IO ------------------------------
+// --- org-node is sans-IO -----------------------------------------------------
 
 /// The whole of org-node's manifest.
 fn manifest() -> String {
@@ -207,7 +310,7 @@ fn manifest() -> String {
 }
 
 /// What in `text` names `std`'s file system or environment in a form the
-/// plain `std::fs` needle misses (review round 1 of S4, finding-9): `fs` or
+/// plain `std::fs` needle misses: `fs` or
 /// `env` inside a grouped `std::{…}` import, and any environment read by
 /// path (`env::var(`, `env::var_os(`, `env::vars(`, `std::env`).
 fn file_and_environment_reads(text: &str) -> Vec<String> {
@@ -223,8 +326,8 @@ fn file_and_environment_reads(text: &str) -> Vec<String> {
         let mut depth = 1;
         let end = group
             .char_indices()
-            .find(|&(_, c)| {
-                depth += match c {
+            .find(|&(_, character)| {
+                depth += match character {
                     '{' => 1,
                     '}' => -1,
                     _ => 0,
@@ -236,8 +339,8 @@ fn file_and_environment_reads(text: &str) -> Vec<String> {
         let mut item_depth = 0;
         let mut item_start = 0;
         let mut items = vec![];
-        for (index, c) in group[..end].char_indices() {
-            match c {
+        for (index, character) in group[..end].char_indices() {
+            match character {
                 '{' => item_depth += 1,
                 '}' => item_depth -= 1,
                 ',' if item_depth == 0 => {
@@ -261,12 +364,9 @@ fn file_and_environment_reads(text: &str) -> Vec<String> {
 
 /// The self-check `org_node_is_sans_io` runs before its real scan: the
 /// helper catches each grouped import and environment read, and passes
-/// grouped imports of neither (review round 1 of S4, finding-9). A helper
-/// that stops catching them would let the real scan pass on a crate that
-/// does IO, so the annotated test fails instead.
-/// *Folded in 2026-10-15 (S4 TEST review round 2, finding-1):* this was the
-/// separate, unannotated test
-/// `the_sans_io_scan_catches_grouped_file_imports_and_environment_reads`.
+/// grouped imports of neither. A helper that stops catching them would let
+/// the real scan pass on a crate that does IO, so the annotated test fails
+/// instead.
 fn assert_the_scan_catches_grouped_file_imports_and_environment_reads() {
     for (text, expected) in [
         ("use std::{fs, io};", vec!["std::{fs}"]),
@@ -284,26 +384,24 @@ fn assert_the_scan_catches_grouped_file_imports_and_environment_reads() {
 }
 
 // org-node binds no endpoint, sends and receives nothing, opens no file and
-// awaits nothing: it has no transport, no file IO, no async and no keychain
-// (S4, task T14). The transport and its preflight check are org-io's.
-// Subsumes `revocation_and_reconcile_do_no_io` for the whole crate.
-// *Strengthened 2026-10-14 (review round 1 of S4, finding-9):* a grouped
+// awaits nothing: it has no transport, no file IO, no async and no keychain.
+// The transport and its preflight check are org-io's. A grouped
 // `use std::{fs, …}` import and an environment read (`env::var(` and its
-// kin) are caught too (`file_and_environment_reads`).
-// *2026-10-15 (S4 TEST review round 2, finding-1):* the helper is checked on
-// strings first, so a helper that misses grouped imports fails this test.
-// verifies: LLR-4tcxsu, REQ-x3jrh8
+// kin) are caught too (`file_and_environment_reads`), and that helper is
+// checked on strings first, so a helper that misses grouped imports fails
+// this test.
+// verifies: LLR-g2jeqd, REQ-x3jrh8
 #[test]
 fn org_node_is_sans_io() {
     assert_the_scan_catches_grouped_file_imports_and_environment_reads();
     for (needle, why) in [
-        ("iroh", "LLR-4tcxsu: the transport is org-io's"),
-        ("OrgEndpoint", "LLR-4tcxsu: org-node has no endpoint"),
-        ("pub mod transport", "LLR-4tcxsu: no transport module"),
-        ("crate::transport", "LLR-4tcxsu: no transport module"),
-        ("fn bind_endpoint", "LLR-4tcxsu: nothing binds an endpoint"),
-        ("fn send_body", "LLR-4tcxsu: nothing sends"),
-        ("fn receive_body", "LLR-4tcxsu: nothing receives"),
+        ("iroh", "LLR-g2jeqd: the transport is org-io's"),
+        ("OrgEndpoint", "LLR-g2jeqd: org-node has no endpoint"),
+        ("pub mod transport", "LLR-g2jeqd: no transport module"),
+        ("crate::transport", "LLR-g2jeqd: no transport module"),
+        ("fn bind_endpoint", "LLR-g2jeqd: nothing binds an endpoint"),
+        ("fn send_body", "LLR-g2jeqd: nothing sends"),
+        ("fn receive_body", "LLR-g2jeqd: nothing receives"),
         ("std::fs", "REQ-x3jrh8: org-node opens no file"),
         ("PathBuf", "REQ-x3jrh8: org-node names no file path"),
         ("tokio", "org-node runs no runtime"),
@@ -326,25 +424,33 @@ fn org_node_is_sans_io() {
     }
     let manifest = manifest();
     for needle in ["iroh", "tokio", "transport = [", "\"transport\"", "name = \"preflight\""] {
-        assert!(!manifest.contains(needle), "org-node's manifest names `{needle}` (LLR-4tcxsu: no transport, no runtime)");
+        assert!(!manifest.contains(needle), "org-node's manifest names `{needle}` (LLR-g2jeqd: no transport, no runtime)");
     }
 }
 
 // No value org-node returns carries a dialling address: org-node holds no
 // endpoint address type and no function that builds one for a dial.
-// verifies: LLR-qezw3n
+// `EndpointAddr` is matched as a whole identifier (the transport's endpoint
+// address type), so the opaque address list `EndpointAddresses`
+// (LLR-h4gwns) does not match it.
+// verifies: LLR-ds228z
 #[test]
 fn org_node_holds_no_dialling_address() {
     for (needle, why) in [
-        ("node_addr_for_dial", "LLR-qezw3n: no dialling address is built"),
-        ("EndpointAddr", "LLR-qezw3n: no value carries an endpoint address"),
-        ("peer_addr", "LLR-qezw3n: no peer address is taken or returned"),
+        ("node_addr_for_dial", "LLR-ds228z: no dialling address is built"),
+        ("peer_addr", "LLR-ds228z: no peer address is taken or returned"),
     ] {
         assert_absent(needle, why);
     }
+    for (path, text) in sources() {
+        let whole = text.match_indices("EndpointAddr").any(|(offset, _)| {
+            !text[offset + "EndpointAddr".len()..].chars().next().is_some_and(is_identifier_char)
+        });
+        assert!(!whole, "{} names `EndpointAddr`: LLR-ds228z: no transport address type", path.display());
+    }
 }
 
-// --- S3 (commit workflow): scans of the code, not of its comments ----------
+// --- Scans of the code, not of its comments ----------------------------------
 //
 // The scans below read code only: every `//` comment (doc comments included)
 // is cut before matching, so a comment may name what the code must not do.
@@ -423,29 +529,239 @@ fn without_function(code: &str, function_name: &str) -> String {
     panic!("fn {function_name} has no closing brace");
 }
 
-/// The name of the `fn` whose signature most recently precedes `offset` in
-/// `code`: the function a call at `offset` sits in.
+// --- One deleting path, no IO and no clock -----------------------------------
+
+/// The name of the innermost `fn` whose body holds byte `offset` of `code`
+/// (comment-free code: its braces balance), or `None` outside every body.
 fn enclosing_function(code: &str, offset: usize) -> Option<String> {
-    code[..offset].lines().rev().find_map(|line| {
-        let mut signature = line.trim_start();
-        while let Some(rest) = ["pub(crate) ", "pub(super) ", "pub ", "async ", "const ", "unsafe "]
-            .iter()
-            .find_map(|qualifier| signature.strip_prefix(qualifier))
-        {
-            signature = rest;
+    let mut innermost: Option<(usize, String)> = None;
+    for start in identifier_occurrences(code, "fn ") {
+        if start >= offset {
+            break;
         }
-        let name: String = signature.strip_prefix("fn ")?.chars().take_while(|&character| is_identifier_char(character)).collect();
-        Some(name)
+        let name: String = code[start + 3..].trim_start().chars().take_while(|&character| is_identifier_char(character)).collect();
+        let Some(open) = code[start..].find(['{', ';']).map(|found| start + found) else { continue };
+        if code.as_bytes()[open] == b';' || open > offset {
+            continue; // a body-less declaration, or a body that starts after `offset`
+        }
+        let mut depth = 0i32;
+        let mut close = code.len();
+        for (index, character) in code[open..].char_indices() {
+            match character {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = open + index;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if offset < close && innermost.as_ref().is_none_or(|(held, _)| open > *held) {
+            innermost = Some((open, name));
+        }
+    }
+    innermost.map(|(_, name)| name)
+}
+
+/// The files defining `name`, and the callers, as `file::function`, of every
+/// call of `name(` (or `name::<`) in `src/` other than its definition.
+fn callers_of(name: &str) -> (Vec<String>, Vec<String>) {
+    let mut definitions = vec![];
+    let mut callers = vec![];
+    for (path, text) in sources() {
+        let code = code_of(&text);
+        let file = path.file_name().unwrap().to_string_lossy().to_string();
+        for offset in identifier_occurrences(&code, name) {
+            let after = &code[offset + name.len()..];
+            if !(after.starts_with('(') || after.starts_with("::<") || after.starts_with('<')) {
+                continue;
+            }
+            if code[..offset].trim_end().ends_with("fn") {
+                definitions.push(file.clone());
+                continue;
+            }
+            let caller = enclosing_function(&code, offset)
+                .unwrap_or_else(|| panic!("{file}: a call of `{name}` outside every function, which the scan cannot place"));
+            callers.push(format!("{file}::{caller}"));
+        }
+    }
+    callers.sort();
+    (definitions, callers)
+}
+
+/// Whether `src/` defines a `pub fn` named `function` (a `pub(crate)` one is
+/// not public).
+fn is_public(function: &str) -> bool {
+    sources().iter().any(|(_, text)| {
+        let code = code_of(text);
+        code.contains(&format!("pub fn {function}(")) || code.contains(&format!("pub fn {function}<"))
     })
 }
 
-/// revocation.rs and reconcile.rs are values in, values out: no `async`, no
-/// chain seam, no transport, endpoint or file system, and no store taken by
-/// mutable reference (LLR-xgefn8).
-/// verifies: LLR-xgefn8
+/// The public functions, as `file::function`, from which a call of `name`
+/// in `src/` is reached: its callers, and the callers of each non-public
+/// one among them, followed up to the first public function on each path.
+/// How the private steps between are named or split is not looked at.
+fn public_entry_points_reaching(name: &str) -> Vec<String> {
+    let mut entries = vec![];
+    let mut seen: Vec<String> = vec![];
+    let mut frontier = vec![name.to_string()];
+    while let Some(current) = frontier.pop() {
+        for caller in callers_of(&current).1 {
+            if seen.contains(&caller) {
+                continue;
+            }
+            seen.push(caller.clone());
+            let function = caller.split("::").nth(1).expect("a caller is `file::function`").to_string();
+            if is_public(&function) {
+                entries.push(caller);
+            } else {
+                frontier.push(function);
+            }
+        }
+    }
+    entries.sort();
+    entries
+}
+
+/// `into_removed` is defined once, in removal.rs, and reached from one
+/// public function: `verify`. Private callers are followed up to the public
+/// ones, which is what LLR-9jn3z8 states ("`verify`'s removal"), so how the
+/// private steps between are named or split is not pinned.
+// verifies: LLR-9jn3z8
 #[test]
-fn revocation_and_reconcile_do_no_io() {
-    let forbidden_names = [
+fn into_removed_is_called_only_from_verify() {
+    let (definitions, _) = callers_of("into_removed");
+    assert_eq!(definitions, ["removal.rs"]);
+    assert_eq!(public_entry_points_reaching("into_removed"), ["service.rs::verify"]);
+}
+
+/// A kept acknowledgement is removed only on behalf of
+/// `acknowledgement_accepted`: every removing call on an `acknowledgements`
+/// list in `src/` is followed up to the public functions that reach it, and
+/// that is the one public function found. No private helper is named or
+/// exempted: the scan anchors on the removing calls and the public entry
+/// point LLR-9jn3z8 names.
+// verifies: LLR-9jn3z8
+#[test]
+fn a_kept_acknowledgement_is_removed_only_on_acceptance() {
+    let mut reaching: Vec<String> = vec![];
+    for (path, text) in sources() {
+        let code = code_of(&text);
+        let squeezed_code = squeezed(&code);
+        let file = path.file_name().unwrap().to_string_lossy().to_string();
+        for method in REMOVING_METHODS {
+            for offset in identifier_occurrences(&code, &format!("acknowledgements.{method}")) {
+                let function = enclosing_function(&code, offset)
+                    .unwrap_or_else(|| panic!("{file}: an `acknowledgements.{method}` outside every function"));
+                if is_public(&function) {
+                    reaching.push(format!("{file}::{function}"));
+                } else {
+                    reaching.extend(public_entry_points_reaching(&function));
+                }
+            }
+            // A call split over lines (`acknowledgements\n.remove(`) is caught too.
+            let call = format!("acknowledgements.{method}");
+            assert_eq!(
+                identifier_occurrences(&squeezed_code, &call).len(),
+                identifier_occurrences(&code, &call).len(),
+                "{file}: a `{call}` the scan cannot place"
+            );
+        }
+    }
+    reaching.sort();
+    reaching.dedup();
+    assert_eq!(reaching, ["service.rs::acknowledgement_accepted"]);
+}
+
+/// Nothing in org-node removes a store except `drop_store` (org-io's
+/// local-IO exception): no removing method on `stores`, no rebuild of it
+/// through a filter, no reassignment to an empty list and no
+/// `mem::take`/`mem::replace` of it. Nothing empties the current record:
+/// `record` is never set to `None`, taken, or swapped out. The Persona is
+/// never reset. A removed form is built only on behalf of `verify` and
+/// rebuilt only by `acknowledgement_accepted`.
+// verifies: LLR-9jn3z8
+#[test]
+fn only_the_removal_and_the_accepted_acknowledgement_delete() {
+    let service = code_of(&source_of("service.rs"));
+    let drop_store = &service[service.find("fn drop_store(").expect("OrgService::drop_store")..];
+    let drop_store = squeezed(&drop_store[..drop_store.find("\n    }\n").expect("the end of drop_store")]);
+    // Any removing method, not `retain` alone.
+    assert!(
+        REMOVING_METHODS.iter().any(|method| drop_store.contains(&format!("stores.{method}"))),
+        "drop_store removes a store"
+    );
+    for (path, text) in sources() {
+        let mut code = code_of(&text);
+        if path.ends_with("service.rs") {
+            code = without_function(&code, "drop_store");
+        }
+        let squeezed_code = squeezed(&code);
+        let file = path.display();
+        for method in REMOVING_METHODS {
+            assert!(identifier_occurrences(&squeezed_code, &format!("stores.{method}")).is_empty(), "{file} removes a store");
+        }
+        for binding in ["stores:", "stores="] {
+            for offset in identifier_occurrences(&squeezed_code, binding) {
+                let expression = expression_from(&squeezed_code, offset + binding.len());
+                if binding.ends_with('=') && expression.starts_with('=') {
+                    continue; // a comparison, `==`
+                }
+                assert!(!expression.contains(".filter(") && !expression.contains(".retain"), "{file} rebuilds `stores` through a filter");
+                if binding.ends_with('=') {
+                    for empty in ["Vec::new()", "vec![]", "Default::default()"] {
+                        assert!(!expression.contains(empty), "{file} empties `stores`: `{binding}{expression}`");
+                    }
+                }
+            }
+        }
+        for swap in ["mem::take(", "mem::replace("] {
+            for offset in squeezed_code.match_indices(swap).map(|(offset, _)| offset) {
+                let argument = expression_from(&squeezed_code, offset + swap.len());
+                assert!(!argument.ends_with("stores"), "{file} takes `stores` out with `{swap}{argument}`");
+            }
+        }
+        for emptying in ["record=None", "record.take()", "mem::take(&mutdata.record)", "mem::replace(&mutdata.record"] {
+            assert!(!squeezed_code.contains(emptying), "{file}: `{emptying}` removes the current record (LLR-9jn3z8)");
+        }
+        for reset in ["persona=", "member_seed="] {
+            for offset in identifier_occurrences(&squeezed_code, reset) {
+                assert!(squeezed_code[offset + reset.len()..].starts_with('='), "{file} rewrites `{reset}` (LLR-9jn3z8)");
+            }
+        }
+    }
+    // A removed form is built by the removal and rebuilt only on an acceptance; `StoreContent::Removed(removed)`
+    // is a pattern, not a construction. A private builder is followed up to
+    // the public functions that reach it, so its own name is not pinned.
+    let mut builders: Vec<String> = identifier_occurrences(&service, "StoreContent::Removed(")
+        .into_iter()
+        .filter(|&offset| !service[offset..].starts_with("StoreContent::Removed(removed)"))
+        .map(|offset| enclosing_function(&service, offset).expect("a removed form built outside every function"))
+        .flat_map(|builder| {
+            if is_public(&builder) {
+                vec![format!("service.rs::{builder}")]
+            } else {
+                public_entry_points_reaching(&builder)
+            }
+        })
+        .collect();
+    builders.sort();
+    builders.dedup();
+    assert_eq!(builders, ["service.rs::acknowledgement_accepted", "service.rs::verify"]);
+}
+
+/// `verify` and the functions it calls in revocation.rs, verify_org.rs and
+/// removal.rs are values in, values out: no `async`, no chain, transport,
+/// endpoint or file system, and no clock (LLR-g2jeqd); no public function of
+/// theirs takes the store or itself mutably.
+// verifies: LLR-g2jeqd
+#[test]
+fn verification_revocation_and_removal_do_no_io_and_read_no_clock() {
+    let forbidden = [
         "async ",
         ".await",
         "impl Future",
@@ -460,139 +776,40 @@ fn revocation_and_reconcile_do_no_io() {
         "std::io",
         "std::net",
         "File::",
-        "Store::",
         ".save(",
+        "SystemTime",
+        "Instant",
+        "std::time",
     ];
-    for file in ["revocation.rs", "reconcile.rs"] {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(file);
-        let code = code_of(&std::fs::read_to_string(&path).unwrap());
-        for name in forbidden_names {
-            assert!(!code.contains(name), "{file} names `{name}` (LLR-xgefn8: no IO)");
+    for file in ["revocation.rs", "verify_org.rs", "removal.rs"] {
+        let code = code_of(&source_of(file));
+        for name in forbidden {
+            assert!(!code.contains(name), "{file} names `{name}` (LLR-g2jeqd)");
         }
-        let squeezed_code = squeezed(&code);
-        for borrow in ["&mutStoreData", "&mutself"] {
-            assert!(!squeezed_code.contains(borrow), "{file} takes `{borrow}` (LLR-xgefn8: the store is taken as &StoreData)");
-        }
-    }
-}
-
-/// No code in org-node removes an `OrgRecord` or a Persona's store except
-/// `StoreData::forget_organisation`, `OrgService::adopt` (a removal step's
-/// forgotten store) and `OrgService::drop_store` (org-io's two local-IO
-/// cases): no removing method on `orgs` or `stores`, no rebuild of either
-/// through a filter, no reassignment to an empty list and no
-/// `mem::take`/`mem::replace` of either (LLR-jd82t6).
-///
-/// *Replaces 2026-10-13 (S4, task T9; owner ruling of that day, option A)*
-/// the scan of the retired removal item, which exempted `adopt` alone. It was
-/// written red first, against a temporary `stores.retain` in
-/// `restore_store`.
-/// verifies: LLR-jd82t6
-#[test]
-fn only_the_removal_step_adopt_and_drop_store_remove_records_or_stores() {
-    let removing_methods =
-        ["retain(", "retain_mut(", "remove(", "swap_remove(", "clear()", "drain(", "truncate(", "pop()", "split_off(", "dedup"];
-    let service = code_of(&std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/service.rs")).unwrap());
-    let adopt = &service[service.find("fn adopt<").expect("OrgService::adopt")..];
-    let adopt = &adopt[..adopt.find("\n    }\n").expect("the end of adopt")];
-    // *Loosened 2026-10-15 (S4 TEST review round 1, finding-11; Seams 1):*
-    // the two exemptions were checked by the exact statement each removes
-    // with; they are checked now by the rule alone: each exempt function
-    // removes from `stores` by some removing method (so the exemption names
-    // the function that does it), adopt reports the removal as forgotten,
-    // and neither removes a record. Mutation check, that day: a
-    // `self.stores.retain(|_| true);` added to `restore_store` failed the
-    // scan below; it was removed.
-    let removes_from = |body: &str, collection: &str| {
-        let body = squeezed(body);
-        removing_methods.iter().any(|method| !identifier_occurrences(&body, &format!("{collection}.{method}")).is_empty())
-    };
-    assert!(removes_from(adopt, "stores"), "adopt is where a removal step's forgotten store is removed");
-    assert!(adopt.contains("StoreChange::Forgotten"), "and reports it as forgotten");
-    let drop_store = &service[service.find("fn drop_store(").expect("OrgService::drop_store")..];
-    let drop_store = &drop_store[..drop_store.find("\n    }\n").expect("the end of drop_store")];
-    assert!(removes_from(drop_store, "stores"), "drop_store removes a store");
-    for (name, body) in [("adopt", adopt), ("drop_store", drop_store)] {
-        assert!(!removes_from(body, "orgs"), "{name} removes no record inside a store");
-    }
-    assert!(!drop_store.contains("orgs"), "drop_store touches no record inside a store");
-    for (path, text) in sources() {
-        let mut code = code_of(&text);
-        if path.ends_with("store.rs") {
-            code = without_function(&code, "forget_organisation");
-        }
-        if path.ends_with("service.rs") {
-            code = without_function(&without_function(&code, "adopt"), "drop_store");
-        }
-        let squeezed_code = squeezed(&code);
-        let file = path.display();
-        for collection in ["orgs", "stores"] {
-            for method in removing_methods {
-                let call = format!("{collection}.{method}");
-                assert!(identifier_occurrences(&squeezed_code, &call).is_empty(), "{file} calls `{call}` (LLR-jd82t6)");
-            }
-            for binding in [format!("{collection}:"), format!("{collection}=")] {
-                for offset in identifier_occurrences(&squeezed_code, &binding) {
-                    let value = expression_from(&squeezed_code, offset + binding.len());
-                    if binding.ends_with('=') && value.starts_with('=') {
-                        continue; // a comparison, `==`
-                    }
-                    assert!(
-                        !value.contains(".filter(") && !value.contains(".retain"),
-                        "{file} rebuilds `{collection}` through a filter: `{binding}{value}` (LLR-jd82t6)"
-                    );
-                    if binding.ends_with('=') {
-                        for empty in ["Vec::new()", "vec![]", "Default::default()"] {
-                            assert!(!value.contains(empty), "{file} empties `{collection}`: `{binding}{value}` (LLR-jd82t6)");
-                        }
-                    }
-                }
-            }
-            for swap in ["mem::take(", "mem::replace("] {
-                for offset in squeezed_code.match_indices(swap).map(|(offset, _)| offset) {
-                    let argument = expression_from(&squeezed_code, offset + swap.len());
-                    assert!(!argument.ends_with(collection), "{file} takes `{collection}` out with `{swap}{argument}` (LLR-jd82t6)");
-                }
+        // The public functions' signatures, as LLR-g2jeqd states: a private helper may change the
+        // fresh copy an adoption builds (`settle_admitted(next: &mut StoreData, …)`), and the removed
+        // store's own list is changed through `acknowledgement_accepted` (LLR-9jn3z8), never here.
+        // `pub fn` only, which `is_public` calls public; in verify_org.rs, whose functions are all
+        // `pub(crate)` since merge review MR1 (finding-6) and are the ones `verify` calls, those.
+        let prefixes: &[&str] = if file == "verify_org.rs" { &["pub fn ", "pub(crate) fn "] } else { &["pub fn "] };
+        let signatures: Vec<String> = prefixes
+            .iter()
+            .flat_map(|prefix| identifier_occurrences(&code, prefix))
+            .map(|start| squeezed(&code[start..start + code[start..].find(['{', ';']).unwrap()]))
+            .collect();
+        assert!(!signatures.is_empty(), "{file}: the scan reads its public functions");
+        for signature in &signatures {
+            for borrow in ["&mutStoreData", "&mutself"] {
+                assert!(!signature.contains(borrow), "{file}: `{signature}` takes `{borrow}` (LLR-g2jeqd: the store is taken as a value)");
             }
         }
     }
-}
-
-/// `forget_organisation` is defined once, in store.rs (`OrgService` has none
-/// of its own), and called from exactly two functions: `revocation::accept`
-/// and the commit paths' one removal step, `removal_step` in service.rs.
-///
-/// *Pointed at the successor 2026-10-15 (S4 TEST review round 2, finding-2;
-/// the upgraded guardrails rule on superseded IDs):* this verified the
-/// removal item LLR-jd82t6 superseded on 2026-10-13 (S4, task T9). That
-/// item's definition is deleted (owner ruling of 2026-10-13), so only the
-/// successor, whose first clause this checks, is cited.
-/// verifies: LLR-jd82t6
-#[test]
-fn forget_organisation_is_defined_once_and_called_only_from_accept_and_the_removal_step() {
-    let mut definitions = Vec::new();
-    let mut callers = Vec::new();
-    for (path, text) in sources() {
-        let code = code_of(&text);
-        let file_name = path.file_name().unwrap().to_string_lossy().to_string();
-        definitions.extend(identifier_occurrences(&code, "fn forget_organisation").iter().map(|_| file_name.clone()));
-        for (offset, _) in code.match_indices("forget_organisation") {
-            let preceding = code[..offset].trim_end();
-            if preceding.ends_with("fn") {
-                continue;
-            }
-            assert!(
-                !code[..offset].chars().next_back().is_some_and(is_identifier_char),
-                "{file_name} names an identifier ending in forget_organisation"
-            );
-            callers.push(format!("{file_name}::{}", enclosing_function(&code, offset).unwrap_or_default()));
-        }
+    let service = code_of(&source_of("service.rs"));
+    let verify = &service[service.find("pub fn verify<").expect("OrgService::verify")..];
+    let verify = &verify[..verify.find("\n    }\n").expect("the end of verify")];
+    for name in forbidden {
+        assert!(!verify.contains(name), "verify names `{name}` (LLR-g2jeqd)");
     }
-    assert_eq!(definitions, ["store.rs"], "forget_organisation is defined once, in store.rs");
-    callers.sort();
-    assert_eq!(
-        callers,
-        ["revocation.rs::accept", "service.rs::removal_step"],
-        "forget_organisation is called from accept and the removal step only"
-    );
+    assert!(verify.contains("chain: Option<OrgState>"), "verify takes the chain state as a value");
+    assert!(!service.contains("SystemTime") && !service.contains("Instant::now"), "service.rs reads no clock: the time is the caller's");
 }

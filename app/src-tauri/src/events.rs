@@ -1,30 +1,47 @@
 //! What the receiver loop announces, and the guard that decides whether a
-//! receiver loop may start.
+//! receiver loop may start, and what a verification the app ran announces.
 //!
 //! `emissions_for` is a total function from an outcome to the events that
 //! outcome produces. It exists so the receiver's announcements can be tested
 //! without a Tauri application, an OrgService, a chain or a peer — none of
 //! which any gate in this repository can stand up.
 
-use org_io::node::{OrgNodeError, ReceiveKind};
-use org_io::ReceiveError;
+use org_io::node::OrgNodeError;
+use org_io::{ReceiveError, Received};
+
+use crate::entry::{EntryResultDto, VerificationEntryDto};
 use serde::Serialize;
+use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-/// What one iteration of the receiver loop concluded.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What one iteration of the receiver loop, or one verification it ran,
+/// concluded.
+#[derive(Debug, Clone, PartialEq)]
 pub enum ReceiverOutcome {
-    /// This persona was revoked and deleted itself.
-    SelfDeleted { org_id: String },
-    /// A revoked Device's acknowledgement of its removal from this
-    /// organisation verified (S3, LLR-2vg79y). Nothing is announced.
+    /// LLR-ygr6gd: a verification found this node removed; its Persona's
+    /// data is deleted. No epoch (REQ-tw4cb5).
+    SelfDeleted { org_id: Option<String> },
+    /// LLR-ygr6gd: a removed Device's acknowledgement was kept. Nothing is announced.
     AcknowledgementReceived { org_id: String },
-    /// An update verified and the organisation record was read back.
+    /// LLR-4bvdn7: a provisional organisation was received and kept. It is
+    /// never an adoption, so it states no epoch and no root.
+    ProvisionalReceived { org_id: String },
+    /// LLR-dp45mm: an admission request was kept.
+    AdmissionRequested(AdmissionRequested),
+    /// LLR-t9rdf8: an organisation request was answered. Nothing is announced.
+    OrganisationRequestAnswered { org_id: String, requester: String },
+    /// LLR-ygr6gd: a revocation notice was kept; the next verification acts
+    /// on it. Nothing is announced.
+    RevocationNoticeKept { org_id: String },
+    /// A verification adopted an epoch and its record was read back.
     Updated { org_id: String, epoch: u64, root: String },
-    /// REQ-2k7ys4 / REQ-dp95pv: an update verified and the record could NOT be
-    /// read back. This variant is what stops `(0, String::new())` existing.
-    RecordUnreadable { org_id: String },
+    /// REQ-2k7ys4 / REQ-dp95pv: an epoch was adopted and the record could NOT
+    /// be read back. This variant is what stops `(0, String::new())` existing.
+    RecordUnreadable { org_id: Option<String> },
+    /// One verification result: the entry `verify_organisation` returns for
+    /// it (LLR-jf63e4), as its JSON value.
+    VerificationResult { entry: serde_json::Value },
     /// REQ-affyf5: verification failed. `org_id` is present when the failing
     /// update named an organisation and absent when the failure happened
     /// before one was identified.
@@ -36,6 +53,21 @@ pub enum ReceiverOutcome {
     ReceiveError { message: String },
     /// REQ-jfxah3: the loop is about to exit.
     Stopped { reason: String },
+}
+
+/// LLR-dp45mm: the `admission-requested` payload, field for field, in this
+/// order: `org_id` (40 hex), `invite_id` (64), the `invitee_name` typed for
+/// that Invite, the request's `name`, `surname` and `preferred_handles`,
+/// and its `device_public_key` (64).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AdmissionRequested {
+    pub org_id: String,
+    pub invite_id: String,
+    pub invitee_name: String,
+    pub name: String,
+    pub surname: String,
+    pub preferred_handles: Vec<String>,
+    pub device_public_key: String,
 }
 
 /// RC-3rddh7 / REQ-kn5rtx. Which kind of failure a receive-path error is, from
@@ -70,72 +102,27 @@ pub enum ReceiverOutcome {
 ///
 /// There is no wildcard arm, deliberately: a new `OrgNodeError` variant is a
 /// compile error here, not a silent default into one of the two classes.
+///
+/// The refusals of the proposal, verification, request and removal
+/// operations are about this node's store or the caller, never a verdict on
+/// a received update.
 pub fn classify_receive_error(e: &OrgNodeError) -> ReceiverOutcome {
     match e {
-        // Verdicts on an incoming update: each one means "this did not verify",
-        // and each is produced only by `verify_envelope_against_chain`.
-        // `StaleEpoch` refuses the update because the chain holds no state
-        // newer than the node's record for it to be the change to.
+        // Verdicts on an incoming update: each one means "this did not verify".
         OrgNodeError::OrgIdMismatch
         | OrgNodeError::StaleSeq { .. }
         | OrgNodeError::MalformedDelta
         | OrgNodeError::DeltaBaseMismatch
         | OrgNodeError::RootMismatch
         | OrgNodeError::StaleEpoch { .. }
-        // A Sequence number other than the chain's epoch (an org-node commit
-        // rule) refuses the received update itself.
         | OrgNodeError::SeqNotEpoch { .. } => ReceiverOutcome::VerifyFailed {
-            // REQ-affyf5: the organisation is absent rather than invented. The
-            // service reports the failure without naming one.
+            // REQ-affyf5: the organisation is absent rather than invented.
             org_id: None,
             message: e.to_string(),
         },
 
-        // Not a verdict: the chain could not be read or answered with an
-        // Organisation state the node refuses (`InvalidOrgPublicKey`, before
-        // anything is verified against it), the transport failed, the local
-        // store could not supply what the verification needed, or a value
-        // read from the store or a received snapshot is not one its type
-        // admits (`InvalidField` — before org-node parsed these they surfaced
-        // as Chain or Trie, so the class is unchanged). An unexpected first
-        // admission is refused before anything is verified
-        // (`AdmissionNotExpected`), one that lists none of this node's
-        // Personas on a rule about this node (`AdmissionNotOurs`), and the
-        // provisional-update refusals never arise on receive. A Persona
-        // already bound to an Organisation (`PersonaAlreadyBound`) is a
-        // refusal about this node's own store, before anything is verified.
-        // The four refusals of a received Wire message are not verdicts of
-        // `verify_envelope_against_chain` either (LLR-7bk6qh): a message that
-        // does not decode (`MalformedMessage`) and a revocation about an
-        // Organisation not held (`RevocationNotHeld`) are refused before
-        // anything is verified; a key that is not the chain's
-        // (`OrgKeyMismatch`) and a revocation that leaves this node listed
-        // (`RevocationNotForThisDevice`) after it, on a rule about the key or
-        // this node. The nine refusals of the commit workflow (S3) are not
-        // verdicts on an update either: reconcile's refusals concern a chain
-        // state read or the node's own record (`OrgNotHeld`,
-        // `StaleChainState`, `ChainStateConflict`); a revocation's proof and
-        // an acknowledgement are not updates (`RevocationProofRefused`, the
-        // four `Acknowledgement*`); and the last concerns what the caller
-        // supplied (`DeviceSecretNotSupplied`).
-        // The two sender refusals of the owner rulings of 2026-10-07 are
-        // made before anything is verified, before the chain is read: a
-        // message from a Device the record does not list (`SenderNotListed`)
-        // and an acknowledgement not sent by its own Device
-        // (`AcknowledgementNotFromItsDevice`). A Wire message over the bound
-        // (`MessageTooLarge`) is refused before it is decoded.
-        // The store and invitation refusals are about this node's own store
-        // or its invitation bookkeeping, never verdicts on an update: a sealed
-        // store refused (`StoreRefused`), a Device secret that is not the
-        // store's (`DeviceSecretMismatch`), two stores for one Device
-        // (`DuplicatePersonaStore`), a reply for another Organisation or not
-        // outstanding (`ReplyForAnotherOrganisation`, `InviteNotOutstanding`),
-        // and an Organisation another Persona holds or expects
-        // (`OrganisationHeldByAnotherPersona`).
-        // A commit refused because this node's own record
-        // moved after the message was checked (`RecordMovedSinceCheck`) is
-        // about this node's store, not a verdict on the update; org-io
-        // checks the body once more before it reports one.
+        // Not a verdict: a chain read, a value refused, a refusal about this
+        // node's own store or bookkeeping, or about what the caller supplied.
         OrgNodeError::Chain(_)
         | OrgNodeError::OrgNotOnChain
         | OrgNodeError::Trie(_)
@@ -144,11 +131,8 @@ pub fn classify_receive_error(e: &OrgNodeError) -> ReceiverOutcome {
         | OrgNodeError::AdmissionNotExpected { .. }
         | OrgNodeError::AdmissionNotOurs { .. }
         | OrgNodeError::ProvisionalLimit { .. }
-        | OrgNodeError::NoProvisionalUpdate
-        | OrgNodeError::PersonaAlreadyBound { .. }
         | OrgNodeError::MalformedMessage
         | OrgNodeError::MessageTooLarge { .. }
-        | OrgNodeError::OrgKeyMismatch { .. }
         | OrgNodeError::RevocationNotHeld { .. }
         | OrgNodeError::RevocationNotForThisDevice { .. }
         | OrgNodeError::OrgNotHeld { .. }
@@ -165,10 +149,27 @@ pub fn classify_receive_error(e: &OrgNodeError) -> ReceiverOutcome {
         | OrgNodeError::StoreRefused(_)
         | OrgNodeError::DeviceSecretMismatch
         | OrgNodeError::DuplicatePersonaStore
-        | OrgNodeError::ReplyForAnotherOrganisation
-        | OrgNodeError::InviteNotOutstanding
+        | OrgNodeError::InviteNotOutstanding { .. }
         | OrgNodeError::OrganisationHeldByAnotherPersona { .. }
-        | OrgNodeError::RecordMovedSinceCheck { .. } => ReceiverOutcome::ReceiveError {
+        | OrgNodeError::NoProvisionalChange
+        | OrgNodeError::OrganisationBehind { .. }
+        | OrgNodeError::NoAdmissionRequestKept { .. }
+        | OrgNodeError::AdmissionAlreadyRecorded { .. }
+        | OrgNodeError::NoFreeHandle
+        | OrgNodeError::HandleTaken { .. }
+        | OrgNodeError::MemberNotHeld { .. }
+        | OrgNodeError::RevocationAlreadyRecorded { .. }
+        | OrgNodeError::NoProvisionalFounding
+        | OrgNodeError::FoundingProxyAlreadyRecorded
+        | OrgNodeError::FoundingNotWritten
+        | OrgNodeError::NoProvisionalMember
+        | OrgNodeError::OrganisationNotRequested { .. }
+        | OrgNodeError::PersonaNotHeld { .. }
+        | OrgNodeError::PersonaIdNotHeld { .. }
+        | OrgNodeError::AdmissionKeyNotSender { .. }
+        | OrgNodeError::OrganisationRemoved { .. }
+        | OrgNodeError::AcknowledgementNotKept { .. }
+        | OrgNodeError::DuplicateOrgPublicKey => ReceiverOutcome::ReceiveError {
             message: e.to_string(),
         },
     }
@@ -201,41 +202,158 @@ pub fn outcomes_for_receive_error(error: &ReceiveError) -> Vec<ReceiverOutcome> 
                 ReceiverOutcome::Stopped { reason: message },
             ]
         }
-        ReceiveError::Connection(_) | ReceiveError::Chain(_) | ReceiveError::Store(_) | ReceiveError::Keychain(_) => {
+        ReceiveError::Connection(_) | ReceiveError::Store(_) | ReceiveError::NoOrganisation { .. } => {
             vec![ReceiverOutcome::ReceiveError { message: error.to_string() }]
         }
     }
 }
 
-/// What org-io's `next_received` returned, as far as the announcement
-/// depends on it: a committed message of a `ReceiveKind`, or a revoked
-/// Device's acknowledgement.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What org-io's `next_received` reported, as far as the announcement
+/// depends on it: org-io's `Received`, ids and keys as hex, values as text.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Arrival {
-    Committed(ReceiveKind),
-    Acknowledged,
+    ProvisionalOrganisation { org_id: String },
+    AdmissionRequestKept(AdmissionRequested),
+    OrganisationRequestAnswered { org_id: String, requester: String },
+    RevocationNoticeKept { org_id: String },
+    Acknowledged { org_id: String },
 }
 
-/// LLR-bym4md. The outcome of one received message for `org_id`, given the
-/// record as read back after it (`(epoch, root)`, or `None` when it could not
-/// be read). `Removed` and `Revoked` are a self-delete, whatever the record
-/// read; `Updated` and `Admitted` are `Updated` with the record read, or
-/// `RecordUnreadable` without one (REQ-2k7ys4, REQ-dp95pv); an
-/// acknowledgement is `AcknowledgementReceived`.
-pub fn outcome_for_arrival(arrival: Arrival, org_id: String, record: Option<(u64, String)>) -> ReceiverOutcome {
-    match (arrival, record) {
-        (Arrival::Acknowledged, _) => ReceiverOutcome::AcknowledgementReceived { org_id },
-        (Arrival::Committed(ReceiveKind::Removed | ReceiveKind::Revoked), _) => ReceiverOutcome::SelfDeleted { org_id },
-        (Arrival::Committed(ReceiveKind::Updated | ReceiveKind::Admitted), Some((epoch, root))) => {
-            ReceiverOutcome::Updated { org_id, epoch, root }
+impl From<Received> for Arrival {
+    fn from(received: Received) -> Self {
+        let hex_org = |org_id: &org_io::node::OrgId| hex::encode(org_id.as_bytes());
+        match received {
+            // LLR-4bvdn7: the epoch, root and sender are not carried; nothing
+            // announces them before a verification adopts.
+            Received::ProvisionalOrganisationReceived { org_id, .. } => {
+                Arrival::ProvisionalOrganisation { org_id: hex_org(&org_id) }
+            }
+            Received::AdmissionRequestKept { org_id, invite_id, name, surname, preferred_handles, from, invitee_name } => {
+                Arrival::AdmissionRequestKept(AdmissionRequested {
+                    org_id: hex_org(&org_id),
+                    invite_id: hex::encode(invite_id.as_bytes()),
+                    invitee_name,
+                    name: name.to_string(),
+                    surname: surname.to_string(),
+                    preferred_handles: preferred_handles.iter().map(ToString::to_string).collect(),
+                    device_public_key: hex::encode(from.as_bytes()),
+                })
+            }
+            Received::OrganisationRequestAnswered { org_id, requester, .. } => Arrival::OrganisationRequestAnswered {
+                org_id: hex_org(&org_id),
+                requester: hex::encode(requester.as_bytes()),
+            },
+            Received::RevocationNoticeKept { org_id, .. } => Arrival::RevocationNoticeKept { org_id: hex_org(&org_id) },
+            Received::Acknowledged(verified) => Arrival::Acknowledged { org_id: hex_org(&verified.into_inner().org_id) },
         }
-        // REQ-2k7ys4 / REQ-dp95pv. No record, no epoch or root to announce: a
-        // default such as `(0, String::new())` would announce a verified
-        // update at genesis with an empty root — indistinguishable from a
-        // real one.
-        (Arrival::Committed(ReceiveKind::Updated | ReceiveKind::Admitted), None) => {
-            ReceiverOutcome::RecordUnreadable { org_id }
+    }
+}
+
+/// LLR-4bvdn7, LLR-ygr6gd, LLR-dp45mm, LLR-t9rdf8. The outcome of one
+/// arrival. No arrival is an adoption or a self-delete: those are
+/// verification results (`outcomes_for_verification`).
+pub fn outcome_for_arrival(arrival: Arrival) -> ReceiverOutcome {
+    match arrival {
+        Arrival::ProvisionalOrganisation { org_id } => ReceiverOutcome::ProvisionalReceived { org_id },
+        Arrival::AdmissionRequestKept(request) => ReceiverOutcome::AdmissionRequested(request),
+        Arrival::OrganisationRequestAnswered { org_id, requester } => {
+            ReceiverOutcome::OrganisationRequestAnswered { org_id, requester }
         }
+        Arrival::RevocationNoticeKept { org_id } => ReceiverOutcome::RevocationNoticeKept { org_id },
+        Arrival::Acknowledged { org_id } => ReceiverOutcome::AcknowledgementReceived { org_id },
+    }
+}
+
+/// LLR-w7m3d4: the one follow-up a received message asks for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FollowUp {
+    /// Verify this Organisation, once, before the next message is read.
+    Verify { org_id: String },
+}
+
+/// LLR-w7m3d4. "Verify this Organisation" for a received provisional
+/// organisation or a kept revocation notice, nothing for any other outcome.
+pub fn follow_up_for(outcome: &ReceiverOutcome) -> Option<FollowUp> {
+    match outcome {
+        ReceiverOutcome::ProvisionalReceived { org_id } | ReceiverOutcome::RevocationNoticeKept { org_id } => {
+            Some(FollowUp::Verify { org_id: org_id.clone() })
+        }
+        ReceiverOutcome::SelfDeleted { .. }
+        | ReceiverOutcome::AcknowledgementReceived { .. }
+        | ReceiverOutcome::AdmissionRequested(_)
+        | ReceiverOutcome::OrganisationRequestAnswered { .. }
+        | ReceiverOutcome::Updated { .. }
+        | ReceiverOutcome::RecordUnreadable { .. }
+        | ReceiverOutcome::VerificationResult { .. }
+        | ReceiverOutcome::VerifyFailed { .. }
+        | ReceiverOutcome::ReceiveError { .. }
+        | ReceiverOutcome::Stopped { .. } => None,
+    }
+}
+
+/// LLR-w7m3d4. One iteration of the receiver loop: `next` once, every
+/// outcome's events in order, and, right after an outcome that asks for
+/// one, `verify` once for its Organisation with every outcome of that
+/// verification announced, all before this returns and the loop asks
+/// `next` again. Returns whether the loop stops (REQ-jfxah3).
+pub async fn receive_iteration<Next, NextFuture, Verify, VerifyFuture, Emit>(
+    next: Next,
+    mut verify: Verify,
+    mut emit: Emit,
+) -> bool
+where
+    Next: FnOnce() -> NextFuture,
+    NextFuture: Future<Output = Vec<ReceiverOutcome>>,
+    Verify: FnMut(String) -> VerifyFuture,
+    VerifyFuture: Future<Output = Vec<ReceiverOutcome>>,
+    Emit: FnMut(Emission),
+{
+    let outcomes = next().await;
+    let stopping = outcomes.iter().any(|outcome| matches!(outcome, ReceiverOutcome::Stopped { .. }));
+    for outcome in &outcomes {
+        for emission in emissions_for(outcome) {
+            emit(emission);
+        }
+        if let Some(FollowUp::Verify { org_id }) = follow_up_for(outcome) {
+            for verified in verify(org_id).await {
+                for emission in emissions_for(&verified) {
+                    emit(emission);
+                }
+            }
+        }
+    }
+    stopping
+}
+
+/// LLR-ygr6gd, LLR-acb5g4. The outcomes of one verification result:
+/// `entry` is the entry `verify_organisation` returns for it, and `record`
+/// the record read back after it (epoch and root), or `None`. `adopted` is
+/// `Updated` with the record read, or `RecordUnreadable` without one, then
+/// the result; `removed` is a self-delete with no epoch, whatever the
+/// record reads, then the result; every other result is the result alone,
+/// never `Updated`. The entry is read by its type, so a result the entry
+/// gains is a compile error here, not a silent default.
+pub fn outcomes_for_verification(entry: &VerificationEntryDto, record: Option<(u64, String)>) -> Vec<ReceiverOutcome> {
+    // LLR-acb5g4, LLR-ygr6gd: an entry with no identifier (a founding
+    // whose proxy is not recorded) names none: null, never "".
+    let org_id = entry.org_id.clone();
+    let result = ReceiverOutcome::VerificationResult { entry: json(entry) };
+    match (&entry.result, record, org_id) {
+        (EntryResultDto::Adopted { .. }, Some((epoch, root)), Some(org_id)) => {
+            vec![ReceiverOutcome::Updated { org_id, epoch, root }, result]
+        }
+        // REQ-2k7ys4 / REQ-dp95pv: no record, no epoch or root to announce.
+        // An entry naming no Organisation has no record to read back either.
+        (EntryResultDto::Adopted { .. }, _, org_id) => vec![ReceiverOutcome::RecordUnreadable { org_id }, result],
+        (EntryResultDto::Removed, _, org_id) => vec![ReceiverOutcome::SelfDeleted { org_id }, result],
+        (
+            EntryResultDto::InStep { .. }
+            | EntryResultDto::Behind { .. }
+            | EntryResultDto::Inconsistent { .. }
+            | EntryResultDto::Unverified { .. },
+            _,
+            _,
+        ) => vec![result],
     }
 }
 
@@ -249,7 +367,7 @@ pub struct Emission {
 #[derive(Debug, Clone, Serialize)]
 struct MembershipUpdated<'a> { org_id: &'a str, epoch: u64, root: &'a str }
 #[derive(Debug, Clone, Serialize)]
-struct OrgOnly<'a> { org_id: &'a str }
+struct OrgOnly<'a> { org_id: Option<&'a str> }
 #[derive(Debug, Clone, Serialize)]
 struct EpochChanged<'a> { org_id: &'a str, epoch: u64 }
 #[derive(Debug, Clone, Serialize)]
@@ -271,12 +389,32 @@ pub fn emissions_for(outcome: &ReceiverOutcome) -> Vec<Emission> {
         // genesis and therefore a reachable, meaningful value (HAZ-5ha5vv).
         ReceiverOutcome::SelfDeleted { org_id } => vec![Emission {
             name: "revoked",
-            payload: json(&OrgOnly { org_id }),
+            payload: json(&OrgOnly { org_id: org_id.as_deref() }),
         }],
 
-        // LLR-2vg79y (amended in S3): nothing. org-io keeps a received
-        // acknowledgement from S3b-io; the UI has no use for it today.
+        // LLR-2vg79y: nothing. org-io keeps a received acknowledgement; the
+        // UI has no use for it.
         ReceiverOutcome::AcknowledgementReceived { .. } => Vec::new(),
+
+        // LLR-4bvdn7: nothing of its own. The verification that follows at
+        // once (LLR-w7m3d4) announces what the chain says.
+        ReceiverOutcome::ProvisionalReceived { .. } => Vec::new(),
+
+        // LLR-dp45mm: exactly one event, carrying the request's fields.
+        ReceiverOutcome::AdmissionRequested(request) => vec![Emission {
+            name: "admission-requested",
+            payload: json(request),
+        }],
+
+        // LLR-t9rdf8 / LLR-ygr6gd: announced by no event.
+        ReceiverOutcome::OrganisationRequestAnswered { .. } | ReceiverOutcome::RevocationNoticeKept { .. } => Vec::new(),
+
+        // LLR-8grnbb: exactly one event; its payload is the entry, with its
+        // `discarded`, `sends` and `requests`, whichever verification ran it.
+        ReceiverOutcome::VerificationResult { entry } => vec![Emission {
+            name: "verification-result",
+            payload: entry.clone(),
+        }],
 
         ReceiverOutcome::Updated { org_id, epoch, root } => vec![
             Emission {
@@ -297,7 +435,7 @@ pub fn emissions_for(outcome: &ReceiverOutcome) -> Vec<Emission> {
         // epoch-changed. REQ-dp95pv: an event that says so, naming the org.
         ReceiverOutcome::RecordUnreadable { org_id } => vec![Emission {
             name: "record-unreadable",
-            payload: json(&OrgOnly { org_id }),
+            payload: json(&OrgOnly { org_id: org_id.as_deref() }),
         }],
 
         ReceiverOutcome::VerifyFailed { org_id, message } => vec![Emission {

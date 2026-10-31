@@ -72,6 +72,7 @@ not a curve point, reporting the field that failed, and shall create, store or
 extend nothing in that case.
 (implements: RC-zutc67)
 satisfies: derived
+superseded-by: REQ-kd34f5
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`):*
 the Join request and Invite imports are removed from this item, because the

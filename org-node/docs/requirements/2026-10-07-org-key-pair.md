@@ -78,6 +78,7 @@ every Member-as-a-group key and DevicePublicKey in the resulting record; keep
 its private key with the provisional update in the encrypted store; and give
 its public key as the update's Organisation public key for the chain write.
 satisfies: derived
+superseded-by: REQ-3pj7rd
 
 **REQ-jy6ybw**: The software shall, when it commits its own provisional update
 after it verified against the chain, replace the Organisation private key its
@@ -89,6 +90,14 @@ store unchanged, a received Wire message of the Organisation-information kind
 that carries no Organisation private key or whose key does not decode as 32
 bytes, before it reads the chain. (implements: RC-9cefcn)
 satisfies: derived
+superseded-by: REQ-zxgd46
+
+*Superseded 2026-10-21 (change `worktree-org-io-domain-api`; owner decision
+of 2026-10-20):* "before it reads the chain" assumes a chain read at
+receipt, and receipt reads none (owner ruling R2 of 2026-10-15); RC-9cefcn
+is superseded by RC-5gbgwb. REQ-zxgd46 keeps this refusal, with no chain
+read, and adds RC-5gbgwb's receipt check that the key's public half equals
+the provisional organisation's stated Organisation public key.
 
 **REQ-bwx7eg**: The software shall refuse with a typed error, leaving the
 store unchanged, a received Organisation-information Wire message whose
@@ -96,6 +105,15 @@ Organisation private key has an X25519 public half different from the
 `org_pub_key` the chain holds for that Organisation, whether or not the node
 holds a record of it. (implements: RC-9cefcn)
 satisfies: derived
+superseded-by: REQ-dwb9bq
+
+*Superseded 2026-10-20 (change `worktree-org-io-domain-api`; owner ruling R2
+of 2026-10-15):* receipt reads no chain, so there is no chain key to refuse a
+received key against there. A received Organisation private key is kept with
+a provisional organisation whose public key is derived from it, and a key
+whose public half is not the chain's is "no match" at verification
+(REQ-dwb9bq): that provisional organisation is never adopted. RC-9cefcn keeps
+its other in-force implementer, REQ-c29s93.
 
 **REQ-ju6vn2**: The software shall, when it commits a received
 Organisation-information Wire message, store the Organisation private key the

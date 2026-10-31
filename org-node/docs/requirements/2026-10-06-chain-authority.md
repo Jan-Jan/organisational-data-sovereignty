@@ -123,6 +123,7 @@ set and the Membership root it produces — and keep it in the Persona store,
 alongside any other provisional updates for that Organisation, without writing
 to the chain and without changing its record of the Organisation.
 satisfies: derived
+superseded-by: REQ-dhr58q REQ-4qh2h8
 
 **REQ-uv3v5w**: The software shall, when an update for an Organisation commits
 — one it built or one it received — replace its previous record of that
@@ -131,6 +132,7 @@ produced it and no earlier one (a record created by genesis keeps none), and
 discard every provisional update it holds for it whose base is no longer its
 record's Membership root.
 satisfies: derived
+superseded-by: REQ-x2dnee
 
 *Amended 2026-10-06 (owner ruling recorded in
 `docs/plans/2026-10-06-org-io-roadmap.md`: no legacy trie, each device keeps
@@ -145,6 +147,7 @@ to keep a provisional update that would bring the provisional updates it holds
 for one Organisation above 1 MiB in their stored form, and shall keep nothing
 in that case.
 satisfies: derived
+superseded-by: REQ-g2537c
 
 REQ-xs4ab8, REQ-uv3v5w and REQ-fwfku9 follow the owner's ruling (2026-10-05)
 that provisional updates are persisted: agreeing a change between
@@ -208,6 +211,7 @@ it holds, together with any Organisation private key that update holds, and
 shall refuse with a typed error, changing nothing, a request naming no
 provisional update it holds.
 satisfies: derived
+superseded-by: REQ-x2dnee
 
 REQ-hhva9d follows the owner's ruling (2026-10-06): administrators may never
 agree a drafted change, and a genesis that is never written to the chain would

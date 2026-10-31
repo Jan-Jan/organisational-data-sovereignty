@@ -4980,7 +4980,6 @@ version = "0.1.0"
 dependencies = [
  "hex",
  "org-io",
- "rand 0.8.8",
  "serde",
  "serde_json",
  "tauri",
@@ -5065,7 +5064,6 @@ dependencies = [
  "keyring",
  "on-chain-client",
  "org-node",
- "postcard",
  "rand_core 0.6.4",
  "subxt",
  "subxt-signer",

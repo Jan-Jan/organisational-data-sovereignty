@@ -6,9 +6,8 @@
  * REQ-akt4p7 — a row's outcome is derived from the event that produced it, and
  *              from no other source.
  *
- * Before this change `Membership.svelte` assigned the literal `verified: true`
- * at both of its only two assignment sites, so the ✗ MISMATCH branch was
- * unreachable by any input (HAZ-9fmhm4).
+ * A row whose outcome is a literal `verified: true` makes the ✗ MISMATCH
+ * branch unreachable by any input (HAZ-9fmhm4).
  */
 
 import { describe, it, expect } from 'vitest';

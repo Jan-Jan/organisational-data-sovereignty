@@ -8,10 +8,10 @@
 //!   - forward: anything else is `keccak256(account_id_32)[12..32]`
 //!     (REQ-rz7fja).
 //!
-//! Both requirements implement RC-mugta4. These tests were relocated here out
-//! of `src/h160.rs`'s `#[cfg(test)]` module, which no gate reads
-//! (`test_paths` for this unit is `on-chain-client/tests`), and joined by the
-//! boundary cases class C asks for: the all-`0xEE` AccountId32, where the two
+//! Both requirements implement RC-mugta4. These tests live here, not in a
+//! `#[cfg(test)]` module in `src/h160.rs`, which no gate reads (`test_paths`
+//! for this unit is `on-chain-client/tests`), with the boundary cases class C
+//! asks for: the all-`0xEE` AccountId32, where the two
 //! paths are hardest to tell apart, and each single non-marker byte at the
 //! twelve marker positions, one position at a time.
 //!

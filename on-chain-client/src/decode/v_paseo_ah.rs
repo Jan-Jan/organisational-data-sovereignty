@@ -37,11 +37,9 @@ use super::{DecodeError, Decoder};
 use crate::state::{EmittedEvent, Event, OrgState};
 use crate::types::{Epoch, OnChainRootHash, OrgAdmin, OrgPubKey};
 
-/// Paseo AH runtime spec_version this decoder targets. Captured from a
-/// chopsticks fork in Task 6 (`state_getRuntimeVersion` reported
-/// `specName: "asset-hub-paseo"`, `specVersion: 2002002`). Task 10 may
-/// widen `dispatch::for_runtime` to accept a known-good range once we've
-/// run against several upstream versions.
+/// Paseo AH runtime spec_version this decoder targets, as a chopsticks
+/// fork's `state_getRuntimeVersion` reports it (`specName:
+/// "asset-hub-paseo"`, `specVersion: 2002002`).
 pub const SPEC_VERSION: u32 = 2_002_002;
 
 /// `keccak256("GenesisInitialized(address,bytes32,bytes32)")`.

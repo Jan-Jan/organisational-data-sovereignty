@@ -4,6 +4,8 @@
 
 use org_io::custody::{parse_seed, SignatoryKey};
 
+mod common;
+
 const SEED_HEX: &str = "e5be9a5092b81bca64be81d212e7f2f9eba183bb7a90954f7b76361f6edb5c0a";
 
 fn windows_of(text: &str) -> Vec<String> {
@@ -56,10 +58,16 @@ fn neither_the_seed_nor_the_key_renders_any_part_of_the_secret() {
 #[tokio::test]
 async fn a_build_without_dev_seed_reads_no_seed_and_reports_why() {
     let dir = std::env::temp_dir().join(format!("org-io-no-dev-seed-{}", std::process::id()));
+    // A directory an earlier run left is cleared; none there is fine.
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let service = org_node::service::OrgService::new(Vec::new()).unwrap();
-    let settings = org_io::ChainSettings { ws_url: "ws://127.0.0.1:1".into(), contract_h160: [0u8; 20], co_signer: None };
+    let settings = org_io::ChainSettings {
+        ws_url: "ws://127.0.0.1:1".into(),
+        contract_h160: [0u8; 20],
+        co_signer: None,
+        ahead_limit: std::time::Duration::from_secs(1_200),
+    };
     let refused = org_io::OrgIo::not_configured(service).connect(settings).await.err().unwrap();
     assert_eq!(
         refused.reason.to_string(),
@@ -76,27 +84,19 @@ async fn a_build_without_dev_seed_reads_no_seed_and_reports_why() {
 #[tokio::test]
 async fn a_build_without_dev_seed_never_asks_for_the_seed_on_a_write_or_a_read() {
     use org_io::chain_read::StateReader;
-    use org_node::{Handle, Name, OrgId, Surname};
+    use org_io::write::HeldTarget;
+    use org_io::WriteReport;
+    use org_node::OrgId;
 
-    let dir = std::env::temp_dir().join(format!("org-io-not-configured-message-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    // *Adapted 2026-10-13 (S4, task T8):* the device secret goes to org-io's
-    // in-memory keychain. *Adapted 2026-10-13 (S4, task T9):* a Persona is
-    // created by the handle itself (`OrgIo::create_persona`).
+    // The unconfigured handle's founding write, through
+    // `write_organisation_to_chain`, is refused at its first step.
     org_io::test_support::MemoryKeychain::shared().install();
     let handle = org_io::OrgIo::not_configured(org_node::service::OrgService::new(Vec::new()).unwrap());
-    let persona_id = handle
-        .create_persona(
-            &mut rand::rngs::OsRng,
-            Handle::parse("alice").unwrap(),
-            Name::parse("Alice").unwrap(),
-            Surname::parse("Smith").unwrap(),
-        )
-        .await
-        .unwrap();
-
-    let write = handle.found_organisation(&mut rand::rngs::OsRng, &persona_id).await.unwrap_err();
+    let proposed = handle.propose_founding_organisation("Alice", "Doe", "alice", "Acme").await.unwrap();
+    let WriteReport::Refused { failure } = handle.write_organisation_to_chain(HeldTarget::Founding(proposed.founder)).await.unwrap() else {
+        panic!("the founding write is not refused")
+    };
+    let write = failure.to_string();
     let read = org_io::connect::StateReaderNotConfigured.read_state(OrgId::new([7; 20])).await.unwrap_err().to_string();
     for message in [write, read] {
         assert!(message.contains("read only by development builds"), "{message}");
@@ -104,7 +104,7 @@ async fn a_build_without_dev_seed_never_asks_for_the_seed_on_a_write_or_a_read()
     }
 }
 
-// REQ-8zuka3 through LLR-rgdx22 (review round 2, finding 6): built without
+// REQ-8zuka3 through LLR-rgdx22: built without
 // `dev-seed`, the own-admin check's "not configured" report, and each
 // signatory-set read the unconfigured handle refuses, say that the signing
 // seed is read only by development builds.
@@ -112,13 +112,12 @@ async fn a_build_without_dev_seed_never_asks_for_the_seed_on_a_write_or_a_read()
 #[cfg(not(feature = "dev-seed"))]
 #[tokio::test]
 async fn a_build_without_dev_seed_says_why_the_own_admin_check_is_not_configured() {
-    // *Reconciled with S3b-io part 1, 2026-10-14:* S3b-io's T16a port to the
-    // one `signatory_set` read needs no `AccountId`; `OrgId` from org-node
-    // directly, as S4's tests name it.
+    // The one `signatory_set` read needs no `AccountId`, only the `OrgId`.
     use org_node::OrgId;
     use org_io::signatory::{OwnAdminError, SignatorySetNotConfigured, SignatorySetReader};
 
     let dir = std::env::temp_dir().join(format!("org-io-own-admin-not-configured-{}", std::process::id()));
+    // A directory an earlier run left is cleared; none there is fine.
     let _ = std::fs::remove_dir_all(&dir);
     let handle = org_io::OrgIo::open(&dir, org_io::transport::TransportMode::Loopback).unwrap();
 
@@ -131,7 +130,7 @@ async fn a_build_without_dev_seed_says_why_the_own_admin_check_is_not_configured
     }
 }
 
-// LLR-rgdx22, the hand-back (2026-10-08, task T9b): a refused connect returns
+// LLR-rgdx22, the hand-back: a refused connect returns
 // the service it was given, store and Personas intact, with a typed reason,
 // so the caller builds its unconfigured handle without opening the store
 // again. The co-signer is malformed and the address unreachable, so neither
@@ -142,31 +141,22 @@ async fn a_build_without_dev_seed_says_why_the_own_admin_check_is_not_configured
 #[tokio::test]
 async fn a_refused_connect_hands_back_the_service_it_was_given_and_says_why() {
     use org_io::connect::{ConnectFailed, ConnectFailure};
-    use org_node::{Handle, Name, Surname};
 
     let dir = std::env::temp_dir().join(format!("org-io-connect-hand-back-{}", std::process::id()));
+    // A directory an earlier run left is cleared; none there is fine.
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    // *Adapted 2026-10-08 (S4, task T3):* the Persona is created through the
-    // handle, which keeps its device secret; the hand-back keeps both.
-    // *Adapted 2026-10-13 (S4, task T8):* the device secret goes to org-io's
-    // in-memory keychain. *Adapted 2026-10-13 (S4, task T9):* a Persona is
-    // created by the handle itself (`OrgIo::create_persona`).
+    // The Persona is made through the handle, as `common::handles::create_named`
+    // makes one, its device secret in org-io's in-memory keychain; the
+    // hand-back keeps both.
     org_io::test_support::MemoryKeychain::shared().install();
     let handle = org_io::OrgIo::not_configured(org_node::service::OrgService::new(Vec::new()).unwrap());
-    let persona_id = handle
-        .create_persona(
-            &mut rand::rngs::OsRng,
-            Handle::parse("alice").unwrap(),
-            Name::parse("Alice").unwrap(),
-            Surname::parse("Smith").unwrap(),
-        )
-        .await
-        .unwrap();
+    let persona_id = common::handles::create_named(&handle, "alice", "Alice", "Smith").await;
     let settings = org_io::ChainSettings {
         ws_url: "ws://127.0.0.1:1".into(),
         contract_h160: [0u8; 20],
         co_signer: Some("not a key".into()),
+        ahead_limit: std::time::Duration::from_secs(1_200),
     };
 
     let refused: Box<ConnectFailed> = handle.connect(settings).await.err().unwrap();

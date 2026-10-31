@@ -1,59 +1,48 @@
-//! Story helpers shared by org-node's service-level test targets. Not a test
-//! target: each target that uses it declares `mod support;`.
+//! Helpers shared by org-node's test targets. Not a test target: each target
+//! that uses it declares `mod support;`.
 //!
-//! The story operations — `found`, `prepare_to_join`, `joiner_of`, `admit`,
-//! `revoke` — are the only place a test performs a story step, so a change to
-//! the service API changes their bodies and not the tests that call them.
+//! The story steps — `found_on_chain`, `setup`, `admit_b`, `remove_b` here
+//! and the one-Persona steps of [`sweep`] — run the operations that leave
+//! their state (`propose_founding`, `record_founding_proxy`,
+//! `propose_member`, `build_invite`, `build_admission_request`,
+//! `check_received`, `record_admission`, `record_revocation`,
+//! `propose_updated_organisation`, `messages_for_current_epoch` and
+//! `verify`), with `ChainSlots` or an `OrgState` standing in for org-io's
+//! chain write and read, and keep every returned write on the party's disk.
+//! A test that checks one of those operations calls it itself. No step
+//! builds a store by hand: [`fixtures`] builds a store from parts, and
+//! `Node::put` and `tamper` seal a state this software never writes.
 //!
-//! Since ruling B (change `worktree-org-io-create`) org-node reads no chain:
-//! its chain-judging operations take the state as a value. A test drives a
-//! [`Node`]: an `OrgService` with the chain view (`CountingChain`) a test's
-//! org-io reads through, whose methods run the sequence org-io runs — read
-//! the state, then call the synchronous operation with it; on a receive
-//! (`Node::receive_from`), `check_received`, a read only when it returns
-//! `Checked::ReadChain`, then `commit_checked`.
-//!
-//! Since S4 task T4 no story helper uses an endpoint: a "send" is the body
-//! the sender's commit built for the recipient (`body_for`, since T5 the
-//! outcome's own body; T4's `body_to` rebuilt it), posted with the
-//! sending Device's key to an [`Inbox`] (the stand-in for the address the
-//! sender dialled), and a "receive" takes it from there into
-//! `Node::receive_from`. Since S4 task T14 org-node has no endpoint and no
-//! async operation: every helper is synchronous, and the dial tests are
-//! org-io's.
-//!
-//! Since S4 task T3 org-node writes no file and keeps no device seed: every
-//! change returns its `StoreWrite` (or `StoreChange`), and `create_persona`
-//! returns the Persona's `DeviceSecret`. A [`Node`] plays org-io's part: its
-//! [`Keychain`] keeps each secret's bytes, and its [`Disk`] keeps the latest
-//! sealed store per Persona, updated from every returned write. What
-//! "reached the disk" is what the returned writes carried: `reopen_store`
-//! unseals the [`Disk`] with the [`Keychain`].
-#![allow(dead_code, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+//! A [`Node`] plays org-io's part: its [`Keychain`] keeps each secret's
+//! bytes, and its [`Disk`] keeps the latest sealed store per Persona, updated
+//! from every returned write. What "reached the disk" is what the writes
+//! carried: `Node::reopened` and `Node::reopened_service` unseal the
+//! [`Disk`] with the [`Keychain`].
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+// Each target compiles this module and calls a subset of it, so an item one
+// target leaves unused is not dead. An item no target calls is: compile every
+// target with this allow removed and delete what all of them report.
+#![allow(dead_code)]
+
+pub mod fixtures;
+pub mod sweep;
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
-use org_members::{DevicePublicKey, Handle, MemberId, Name, Surname};
-use org_node::chain::OrgState;
+use org_members::{DevicePublicKey, Handle, MemberId, MemberLeaf, Name, Surname};
 use org_node::error::OrgNodeError;
 use org_node::ids::OrgId;
-use org_node::invitation::InviteId;
-use org_node::keys::{DeviceSecret, SigningKeypair};
-use org_node::reconcile::Reconciled;
-use org_node::revocation::VerifiedAcknowledgement;
-use org_node::service::{Checked, CommitOutcome, OrgService, ReceiveOutcome, StoreChange};
-use org_node::store::{
-    ExpectedAdmission, MemberSnapshot, OrgRecord, PersonaRecord, PersonaStore, ProvisionalChange, ProvisionalUpdate,
-    SealedStore, StoreData, StoreWrite,
-};
-use org_node::test_fixtures::{device_keypair, ChainSlots};
-use org_node::{ChainAccount, Joiner, OrgPrivateKey, ProvisionalTarget};
-use org_node::wire::{decode_message, encode_message, WireMessage};
-use org_node::{Epoch, PersonaId, RootHash};
+use org_node::invitation::Invite;
+use org_node::keys::{DeviceSecret, SigningKeypair, X25519Keypair};
+use org_node::service::{Checked, OrgService, StoreChange};
+use org_node::store::{MemberSnapshot, OrgRecord, PersonaRecord, PersonaStore, SealedStore, StoreData, StoreWrite};
+use org_node::test_fixtures::{device_keypair, seal_for_test, store_for_test, ChainSlots, Trie};
+use org_node::verify_org::{VerificationTime, Verified};
+use org_node::wire::{encode_message, WireMessage};
+use org_node::{ChainAccount, OrgPrivateKey, OrgState, PersonaId, SequenceNumber};
 use rand::rngs::OsRng;
+use rand::RngCore;
 use zeroize::Zeroizing;
 
 /// org-io's keychain, played by the test: each Persona's device seed bytes,
@@ -64,14 +53,7 @@ pub struct Keychain(Arc<Mutex<HashMap<[u8; 32], Vec<u8>>>>);
 impl Keychain {
     /// Keep `secret`'s bytes, as org-io writes a new Persona's keychain item.
     pub fn keep(&self, secret: &DeviceSecret) {
-        let mut bytes = vec![];
-        secret
-            .lend_to_keychain(|seed| {
-                bytes.extend_from_slice(seed);
-                Ok::<(), std::convert::Infallible>(())
-            })
-            .unwrap();
-        self.0.lock().unwrap().insert(*secret.device_key().as_bytes(), bytes);
+        self.0.lock().unwrap().insert(*secret.device_key().as_bytes(), seed_bytes(secret));
     }
 
     /// The secret of `device_key`, read back as org-io reads a keychain item.
@@ -83,12 +65,6 @@ impl Keychain {
     /// The seed bytes of `device_key`.
     pub fn seed(&self, device_key: &DevicePublicKey) -> [u8; 32] {
         self.0.lock().unwrap().get(device_key.as_bytes()).expect("a keychain item").as_slice().try_into().unwrap()
-    }
-
-    /// The secrets of `device_keys` this keychain holds: org-io's
-    /// `device_secrets` closure.
-    pub fn secrets(&self, device_keys: &[DevicePublicKey]) -> Vec<DeviceSecret> {
-        device_keys.iter().filter_map(|key| self.secret(key)).collect()
     }
 }
 
@@ -109,9 +85,6 @@ impl Disk {
     pub fn apply(&self, change: StoreChange) {
         match change {
             StoreChange::Sealed(write) => self.write(write),
-            StoreChange::Forgotten { device_key } => {
-                self.0.lock().unwrap().remove(device_key.as_bytes());
-            }
         }
     }
 
@@ -127,9 +100,9 @@ impl Disk {
             .collect()
     }
 
-    /// Every sealed store, by its Device key.
-    pub fn sealed(&self) -> Vec<(DevicePublicKey, SealedStore)> {
-        self.0.lock().unwrap().values().cloned().collect()
+    /// The sealed store of `device`.
+    pub fn sealed_of(&self, device: &DevicePublicKey) -> SealedStore {
+        self.0.lock().unwrap().get(device.as_bytes()).expect("the store on disk").1.clone()
     }
 
     /// Every sealed byte, in Device-key order (to prove nothing was written:
@@ -147,12 +120,11 @@ pub struct Party {
 }
 
 /// Every party's storage, by test tag and party name: `open_store` starts
-/// one afresh, `reopen_store` and `store_bytes` read it back.
+/// one afresh, `party` and `store_bytes` read it back.
 static PARTIES: LazyLock<Mutex<HashMap<(String, String), Party>>> = LazyLock::new(Default::default);
 
 /// A fresh, empty storage for `party` in test `tag`, replacing any earlier
-/// one. (It took the store passphrase until S4 task T3; the store key comes
-/// from each Persona's device secret.)
+/// one.
 pub fn open_store(tag: &str, party: &str) -> Party {
     let fresh = Party::default();
     PARTIES.lock().unwrap().insert((tag.to_string(), party.to_string()), fresh.clone());
@@ -164,23 +136,9 @@ pub fn party(tag: &str, party: &str) -> Party {
     PARTIES.lock().unwrap().get(&(tag.to_string(), party.to_string())).cloned().expect("open_store first")
 }
 
-/// What reached `party`'s disk in test `tag`: every Persona store it holds,
-/// unsealed, merged in one view of the shape the single store had before
-/// S4 task T3.
-pub fn reopen_store(tag: &str, party_name: &str) -> Reopened {
-    let party = party(tag, party_name);
-    Reopened::of(&party.disk.unseal(&party.keychain))
-}
-
 /// The raw bytes of a party's store files (to prove nothing was written).
 pub fn store_bytes(tag: &str, party_name: &str) -> Vec<u8> {
     party(tag, party_name).disk.bytes()
-}
-
-/// A service over what reached `party`'s disk in test `tag`.
-pub fn reopened_service(tag: &str, party_name: &str) -> OrgService {
-    let party = party(tag, party_name);
-    OrgService::new(party.disk.unseal(&party.keychain)).unwrap()
 }
 
 /// Make `change` to the store of `persona_id` that reached `party`'s disk in
@@ -189,55 +147,21 @@ pub fn reopened_service(tag: &str, party_name: &str) -> OrgService {
 pub fn tamper(tag: &str, party_name: &str, persona_id: &PersonaId, change: impl FnOnce(&mut StoreData)) {
     let party = party(tag, party_name);
     let stores = party.disk.unseal(&party.keychain);
-    let store = stores.iter().find(|store| &store.data().persona.persona_id == persona_id).expect("the Persona's store");
-    let mut data = store.data().clone();
-    change(&mut data);
+    let store = stores.iter().find(|store| &store.data().unwrap().persona.persona_id == persona_id).expect("the Persona's store");
+    let mut store_data = store.data().unwrap().clone();
+    change(&mut store_data);
     let secret = party.keychain.secret(&store.device_key()).expect("a keychain item");
-    let rewritten = org_node::test_fixtures::store_for_test(&secret, data);
-    party.disk.write(org_node::test_fixtures::seal_for_test(&rewritten, &mut OsRng));
+    let rewritten = store_for_test(&secret, store_data);
+    party.disk.write(seal_for_test(&rewritten, &mut OsRng));
 }
 
-/// Every Persona store of one party, merged: the Personas, records,
-/// provisional updates and expectations in store order.
-pub struct Reopened {
-    pub personas: Vec<PersonaRecord>,
-    pub orgs: Vec<OrgRecord>,
-    pub provisional_updates: Vec<ProvisionalUpdate>,
-    pub expected_admissions: Vec<ExpectedAdmission>,
-    /// The outstanding Invites (S4, task T6).
-    pub outstanding_invites: Vec<(OrgId, InviteId)>,
-}
-
-impl Reopened {
-    fn of(stores: &[PersonaStore]) -> Self {
-        Self {
-            personas: stores.iter().map(|store| store.data().persona.clone()).collect(),
-            orgs: stores.iter().flat_map(|store| store.data().orgs.clone()).collect(),
-            provisional_updates: stores.iter().flat_map(|store| store.data().provisional_updates.clone()).collect(),
-            expected_admissions: stores.iter().flat_map(|store| store.data().expected_admissions.clone()).collect(),
-            outstanding_invites: stores.iter().flat_map(|store| store.data().outstanding_invites.clone()).collect(),
-        }
-    }
-
-    /// The merged view itself, so `reopen_store(..).data().orgs` reads as it
-    /// did when one store held every Persona.
-    pub fn data(&self) -> &Self {
-        self
-    }
-}
-
-/// An `OrgService` and the chain view its org-io reads through, with the
-/// keychain and store files org-io keeps. Derefs to the service for every
-/// read; the methods below shadow its changing operations with org-io's
-/// part around them: the chain read before, the keychain and the disk after.
+/// An `OrgService` with the keychain and store files org-io keeps. Derefs
+/// to the service for every read. It holds no chain view: `check_received`
+/// takes no chain.
 pub struct Node {
     pub svc: OrgService,
-    pub view: CountingChain,
     pub keychain: Keychain,
     pub disk: Disk,
-    /// The Device this node's sends come from, when a test names one
-    /// (`sending_as`); else the first Persona bound to the Organisation.
-    pub sends_as: Option<DevicePublicKey>,
 }
 
 impl std::ops::Deref for Node {
@@ -255,591 +179,544 @@ impl std::ops::DerefMut for Node {
 
 impl Node {
     /// A node with no Persona over `party`'s storage.
-    pub fn new(party: Party, view: impl Into<CountingChain>) -> Self {
-        Self::over(OrgService::new(vec![]).unwrap(), party, view)
+    pub fn new(party: Party) -> Self {
+        Self::over(OrgService::new(vec![]).unwrap(), party)
     }
 
     /// A node over what reached `party`'s disk: its stores unsealed with its
     /// keychain.
-    pub fn reopened(party: Party, view: impl Into<CountingChain>) -> Self {
-        Self::over(OrgService::new(party.disk.unseal(&party.keychain)).unwrap(), party, view)
+    pub fn reopened(party: Party) -> Self {
+        Self::over(OrgService::new(party.disk.unseal(&party.keychain)).unwrap(), party)
     }
 
-    fn over(svc: OrgService, party: Party, view: impl Into<CountingChain>) -> Self {
-        Self { svc, view: view.into(), keychain: party.keychain, disk: party.disk, sends_as: None }
+    fn over(svc: OrgService, party: Party) -> Self {
+        Self { svc, keychain: party.keychain, disk: party.disk }
     }
 
-    /// This node's sends come from `device`'s Device.
-    pub fn sending_as(self, device: &SigningKeypair) -> Self {
-        Self { sends_as: Some(device.device_key().unwrap()), ..self }
+    /// A service over what reached this node's disk: every store unsealed
+    /// with its keychain.
+    pub fn reopened_service(&self) -> OrgService {
+        OrgService::new(self.disk.unseal(&self.keychain)).unwrap()
     }
 
-    /// The Device a send of this node about `org_id` comes from: the one
-    /// `sending_as` named, else the first Persona bound to `org_id`.
-    pub fn sender_for(&self, org_id: OrgId) -> DevicePublicKey {
-        self.sends_as.unwrap_or_else(|| {
-            self.svc
-                .list_personas()
-                .into_iter()
-                .find(|persona| persona.org_id == Some(org_id))
-                .map(|persona| persona.device_key)
-                .expect("a Persona bound to the Organisation")
-        })
+    /// The store of `device` as it reached this node's disk, unsealed.
+    pub fn store_on_disk(&self, device: &DevicePublicKey) -> PersonaStore {
+        self.disk.unseal(&self.keychain).into_iter().find(|store| &store.device_key() == device).expect("the store on disk")
     }
 
-    /// `OrgService::create_persona`: the secret kept in the keychain, the
-    /// write on the disk.
-    pub fn create_persona<R: rand_core::RngCore + rand_core::CryptoRng>(
+    /// A new Persona proposing to found "Acme" (`propose_founding`): the
+    /// secret kept in the keychain, the sealed store on the disk and in the
+    /// service. Its store holds the provisional founding, no proxy yet and
+    /// no record; `found_on_chain` writes and adopts it.
+    pub fn propose_and_keep_founding<R: rand_core::RngCore + rand_core::CryptoRng>(
         &mut self,
         rng: &mut R,
         handle: Handle,
         name: Name,
         surname: Surname,
     ) -> Result<PersonaId, OrgNodeError> {
-        let (persona_id, secret, write) = self.svc.create_persona(rng, handle, name, surname)?;
-        self.keychain.keep(&secret);
-        self.disk.write(write);
-        Ok(persona_id)
+        let (device, secret, change) =
+            self.svc.propose_founding(rng, name.as_str(), surname.as_str(), handle.as_str(), "Acme".into())?;
+        self.keep(&secret, change);
+        Ok(persona_with_device(&self.svc, &device).persona_id)
     }
 
-    pub fn create_organisation<R: rand_core::RngCore + rand_core::CryptoRng>(
+    /// A new Persona proposing to join the Organisation of `invite`
+    /// (`propose_member`), its secret and store kept as
+    /// `propose_and_keep_founding` keeps them.
+    pub fn propose_member<R: rand_core::RngCore + rand_core::CryptoRng>(
         &mut self,
         rng: &mut R,
-        persona_id: &PersonaId,
-    ) -> Result<ProvisionalUpdate, OrgNodeError> {
-        let (update, write) = self.svc.create_organisation(rng, persona_id)?;
-        self.disk.write(write);
-        Ok(update)
+        invite: &Invite,
+        name: &str,
+        surname: &str,
+        handles: &[&str],
+    ) -> Result<PersonaId, OrgNodeError> {
+        let (device, secret, change) = self.svc.propose_member(rng, invite, name, surname, handles)?;
+        self.keep(&secret, change);
+        Ok(persona_with_device(&self.svc, &device).persona_id)
     }
 
-    pub fn discard_provisional<R: rand_core::RngCore + rand_core::CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        target: ProvisionalTarget,
-        resulting_root: RootHash,
-        org_pub_key: org_node::OrgPublicKey,
-    ) -> Result<(), OrgNodeError> {
-        let write = self.svc.discard_provisional(rng, target, resulting_root, org_pub_key)?;
-        self.disk.write(write);
-        Ok(())
-    }
-
-    pub fn admit_member<R: rand_core::RngCore + rand_core::CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        org_id: OrgId,
-        joiner: &Joiner,
-    ) -> Result<ProvisionalUpdate, OrgNodeError> {
-        let (update, write) = self.svc.admit_member(rng, org_id, joiner)?;
-        self.disk.write(write);
-        Ok(update)
-    }
-
-    pub fn revoke_member<R: rand_core::RngCore + rand_core::CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        org_id: OrgId,
-        member_id: MemberId,
-    ) -> Result<ProvisionalUpdate, OrgNodeError> {
-        let (update, write) = self.svc.revoke_member(rng, org_id, member_id)?;
-        self.disk.write(write);
-        Ok(update)
-    }
-
-    /// `OrgService::expect_admission` for the Persona a joining node would
-    /// reply with: its first unbound Persona, else its first. Since S4 task
-    /// T3 an expectation is one Persona's (LLR-rdda86); a test with several
-    /// unbound Personas names one with `expect_admission_for`.
-    pub fn expect_admission<R: rand_core::RngCore + rand_core::CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        org_id: OrgId,
-    ) -> Result<(), OrgNodeError> {
-        let personas = self.svc.list_personas();
-        let joining = personas.iter().find(|persona| persona.org_id.is_none()).or(personas.first());
-        let persona_id = joining.map(|persona| persona.persona_id.clone()).expect("a Persona");
-        self.expect_admission_for(rng, &persona_id, org_id)
-    }
-
-    /// `OrgService::expect_admission` for `persona_id`.
-    pub fn expect_admission_for<R: rand_core::RngCore + rand_core::CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        persona_id: &PersonaId,
-        org_id: OrgId,
-    ) -> Result<(), OrgNodeError> {
-        let write = self.svc.expect_admission(rng, persona_id, org_id)?;
-        self.disk.write(write);
-        Ok(())
-    }
-
-    /// Read the state of `org_id`, then `OrgService::commit_genesis` with it.
-    pub fn commit_genesis<R: rand_core::RngCore + rand_core::CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        persona_id: &PersonaId,
-        org_id: OrgId,
-        proxy_account: ChainAccount,
-    ) -> Result<ReceiveOutcome, OrgNodeError> {
-        let state = self.view.read(org_id)?;
-        let (outcome, write) = self.svc.commit_genesis(rng, persona_id, org_id, proxy_account, state)?;
-        self.disk.write(write);
-        Ok(outcome)
-    }
-
-    /// Read the state of `org_id` back after the write, then
-    /// `OrgService::commit_update` with it, the secrets from the keychain.
-    pub fn commit_update<R: rand_core::RngCore + rand_core::CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        org_id: OrgId,
-    ) -> Result<CommitOutcome, OrgNodeError> {
-        let state = self.view.read(org_id)?;
-        let keychain = self.keychain.clone();
-        let (outcome, change) = self.svc.commit_update(rng, org_id, state, |keys| keychain.secrets(keys))?;
+    /// A new Persona's secret in the keychain and its first write on the
+    /// disk, as org-io keeps them.
+    fn keep(&mut self, secret: &DeviceSecret, change: StoreChange) {
+        self.keychain.keep(secret);
         self.disk.apply(change);
-        Ok(outcome)
     }
 
-    /// Read the state of `org_id`, then `OrgService::reconcile` with it.
-    pub fn reconcile<R: rand_core::RngCore + rand_core::CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        org_id: OrgId,
-    ) -> Result<Reconciled, OrgNodeError> {
-        let state = self.view.read(org_id)?;
-        let keychain = self.keychain.clone();
-        let (reconciled, change) = self.svc.reconcile(rng, org_id, state, |keys| keychain.secrets(keys))?;
+    /// The Device key of `persona_id`'s store.
+    pub fn device_of(&self, persona_id: &PersonaId) -> DevicePublicKey {
+        persona_of(&self.svc, persona_id).device_key
+    }
+
+    /// `record_founding_proxy` of `device`'s founding for `org_id`, with
+    /// `the_proxy`, its write kept on the disk.
+    pub fn record_proxy(&mut self, device: &DevicePublicKey, org_id: OrgId) {
+        let change = self.svc.record_founding_proxy(&mut OsRng, device, org_id, the_proxy()).unwrap();
+        self.disk.apply(change);
+    }
+
+    /// `verify` of `device`'s store against `chain` at `story_time`, asking
+    /// for no Device secret; its write, if any, kept on the disk.
+    pub fn verify_and_keep(&mut self, device: &DevicePublicKey, chain: Option<OrgState>) -> Verified {
+        let (verified, change) = self.svc.verify(&mut OsRng, device, chain, story_time(), org_node::AheadLimit(1200), never_asked).unwrap();
         if let Some(change) = change {
             self.disk.apply(change);
         }
-        Ok(reconciled)
+        verified
     }
 
-    /// What org-io does on a receive (S4 task T4): `check_received(sender,
-    /// body)`; for a message to read, the state of the Organisation it
-    /// names, then `commit_checked` with it, the secrets from the keychain,
-    /// the store change on the disk. An acknowledgement is decided in the
-    /// check, with no read.
-    pub fn receive_from<R: rand_core::RngCore + rand_core::CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        sender: DevicePublicKey,
-        body: &[u8],
-    ) -> Result<Received, OrgNodeError> {
-        match self.svc.check_received(sender, body)? {
-            Checked::Acknowledged(verified) => Ok(Received::Acknowledged(verified)),
-            Checked::ReadChain(checked) => {
-                let state = self.view.read(checked.org_id())?;
-                let keychain = self.keychain.clone();
-                let (outcome, change) = self.svc.commit_checked(rng, checked, state, |keys| keychain.secrets(keys))?;
-                self.disk.apply(change);
-                Ok(Received::Committed(outcome))
-            }
-        }
+    /// `verify_and_keep` of `device`'s store against `chain`, which must
+    /// adopt.
+    pub fn adopt(&mut self, device: &DevicePublicKey, chain: OrgState) {
+        let verified = self.verify_and_keep(device, Some(chain));
+        assert!(matches!(verified, Verified::Adopted { .. }), "{verified:?}");
     }
 
-    /// `receive_from` the body posted to `inbox`.
-    pub fn receive_posted(&mut self, inbox: &Inbox) -> Result<Received, OrgNodeError> {
-        let (sender, body) = inbox.take();
-        self.receive_from(&mut OsRng, sender, &body)
+    /// `propose_updated_organisation` from `device`'s held provisional
+    /// changes, its write kept: the chain state a write of the proposal
+    /// leaves.
+    pub fn propose(&mut self, device: &DevicePublicKey) -> OrgState {
+        let change = self.svc.propose_updated_organisation(&mut OsRng, device).unwrap();
+        self.disk.apply(change);
+        let own = held_store(&self.svc, device).provisional_organisations.last().expect("the own provisional organisation");
+        OrgState { root_hash: own.root, org_pub_key: own.org_pub_key, epoch: own.epoch }
+    }
+
+    /// `propose` from `device`'s store, the proposal written to `chain` as
+    /// org-io writes it, then adopted.
+    pub fn propose_and_adopt(&mut self, device: &DevicePublicKey, chain: &ChainSlots, org_id: OrgId) {
+        let proposal = self.propose(device);
+        let written = chain.get(&org_id).expect("the Organisation's slot").epoch;
+        chain.apply_update(org_id, proposal.root_hash, proposal.org_pub_key, written).unwrap();
+        self.adopt(device, chain.get(&org_id).unwrap());
+    }
+
+    /// An Invite issued from `device`'s store for `invitee`, with no
+    /// addresses; its write kept on the disk.
+    pub fn invite(&mut self, device: &DevicePublicKey, invitee: &str) -> Invite {
+        let (invite, change) = self.svc.build_invite(&mut OsRng, device, invitee.to_owned(), vec![]).unwrap();
+        self.disk.apply(change);
+        invite
+    }
+
+    /// The body of `device`'s message of the current epoch for `recipient`.
+    pub fn message_for(&self, device: &DevicePublicKey, recipient: &DevicePublicKey) -> Vec<u8> {
+        self.svc
+            .messages_for_current_epoch(device)
+            .unwrap()
+            .into_iter()
+            .find(|message| message.recipient == *recipient)
+            .expect("a message of the epoch for that Device")
+            .body
+    }
+
+    /// Seal `store_data` as an operation would, write it to the disk and hold it
+    /// in the service in place of the store with its Device key.
+    pub fn put(&mut self, store_data: StoreData) {
+        let secret = self.keychain.secret(&store_data.persona.device_key).expect("a keychain item");
+        let store = store_for_test(&secret, store_data);
+        self.disk.write(seal_for_test(&store, &mut OsRng));
+        self.svc.restore_store(store);
     }
 
     /// The store data of `persona_id`, read only.
     pub fn store_of(&self, persona_id: &PersonaId) -> &StoreData {
-        self.svc.store_data(persona_id).expect("the Persona's store")
+        held_store(&self.svc, &self.device_of(persona_id))
+    }
+
+    /// What org-io does on a receive: `check_received` in `device`'s store,
+    /// the store change, if any, on the disk (the check may keep what it
+    /// received).
+    pub fn receive(&mut self, device: &DevicePublicKey, sender: DevicePublicKey, body: &[u8]) -> Result<Checked, OrgNodeError> {
+        let (checked, change) = self.svc.check_received(&mut OsRng, device, sender, body)?;
+        if let Some(change) = change {
+            self.disk.apply(change);
+        }
+        Ok(checked)
     }
 }
 
-/// What `Node::receive_from` decided: a committed message, or an
-/// acknowledgement decided in the check.
-// One value per received message, moved once to the test: the
-// acknowledgement's size costs nothing worth a box.
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug)]
-pub enum Received {
-    Committed(ReceiveOutcome),
-    Acknowledged(VerifiedAcknowledgement),
+/// `check_received` of `body` from `sender` in the store of `persona_id`
+/// on `node`, its store change returned and not kept on the disk.
+pub fn check(node: &mut Node, persona_id: &PersonaId, sender: DevicePublicKey, body: &[u8]) -> Result<(Checked, Option<StoreChange>), OrgNodeError> {
+    let device_key = node.device_of(persona_id);
+    node.svc.check_received(&mut OsRng, &device_key, sender, body)
 }
 
-impl Received {
-    /// The committed outcome, for a test that delivered a message to commit;
-    /// an acknowledgement there is a failed test.
-    pub fn committed(self) -> ReceiveOutcome {
-        match self {
-            Self::Committed(outcome) => outcome,
-            Self::Acknowledged(verified) => panic!("decided as an acknowledgement: {verified:?}"),
+/// The admission request of `member_device`'s store in `member`, kept by
+/// `inviter_device`'s store in `inviter`.
+pub fn request_admission(inviter: &mut Node, inviter_device: &DevicePublicKey, member: &Node, member_device: &DevicePublicKey) {
+    let request = member.build_admission_request(member_device, vec![]).unwrap();
+    assert_eq!(request.recipient, *inviter_device, "the request goes to the Invite's issuer");
+    let checked = inviter.receive(inviter_device, *member_device, &request.body).unwrap();
+    assert!(matches!(checked, Checked::AdmissionRequest { .. }), "{checked:?}");
+}
+
+/// The Persona record of the store `device` names, cloned.
+fn persona_with_device(svc: &OrgService, device: &DevicePublicKey) -> PersonaRecord {
+    svc.list_personas().into_iter().find(|persona| &persona.device_key == device).expect("the new Persona").clone()
+}
+
+/// The store `device` names in `svc`.
+pub fn held_store<'s>(svc: &'s OrgService, device: &DevicePublicKey) -> &'s StoreData {
+    svc.store_data(device).expect("the store is held")
+}
+
+/// The encoded `StoreData` of the store `device` names: equal bytes, equal
+/// store (the behind marker is not encoded).
+pub fn encoded_store(svc: &OrgService, device: &DevicePublicKey) -> Vec<u8> {
+    postcard::to_allocvec(held_store(svc, device)).unwrap()
+}
+
+/// The encoded `StoreData` of every store `svc` holds, in store order.
+pub fn encoded_stores(svc: &OrgService) -> Vec<Vec<u8>> {
+    svc.list_personas().iter().map(|persona| encoded_store(svc, &persona.device_key)).collect()
+}
+
+/// The `field` of an `InvalidField` refusal.
+pub fn refused_field(error: OrgNodeError) -> &'static str {
+    match error {
+        OrgNodeError::InvalidField { field, .. } => field,
+        other => panic!("expected InvalidField, got {other:?}"),
+    }
+}
+
+/// The text of each production `pub fn` signature in org-node's `src/<file>`,
+/// up to its body or `;`, its lines joined by spaces: functions gated on
+/// `test-support`, by their own attribute or by their top-level `impl`
+/// block's, are left out.
+pub fn public_signatures(file: &str) -> Vec<String> {
+    signatures_starting(file, "pub fn ")
+}
+
+/// As `public_signatures`, for each `pub(crate) fn`: `verify_org.rs`'s
+/// functions are all crate-visible (merge review MR1, finding-6).
+pub fn crate_signatures(file: &str) -> Vec<String> {
+    signatures_starting(file, "pub(crate) fn ")
+}
+
+fn signatures_starting(file: &str, prefix: &str) -> Vec<String> {
+    let text = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(file)).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    let mut signatures = vec![];
+    let mut in_test_impl = false;
+    for (index, line) in lines.iter().enumerate() {
+        if line.starts_with("impl") && index > 0 && lines[index - 1].contains("feature = \"test-support\"") {
+            in_test_impl = true;
+        } else if *line == "}" {
+            in_test_impl = false;
+        }
+        if in_test_impl || !line.trim_start().starts_with(prefix) {
+            continue;
+        }
+        if lines[..index]
+            .iter()
+            .rev()
+            .take_while(|above| above.trim_start().starts_with("#[") || above.trim_start().starts_with("///"))
+            .any(|above| above.contains("test-support"))
+        {
+            continue;
+        }
+        let mut signature = String::new();
+        for continuation in &lines[index..] {
+            let end = continuation.find(['{', ';']);
+            signature.push_str(continuation[..end.unwrap_or(continuation.len())].trim());
+            signature.push(' ');
+            if end.is_some() {
+                break;
+            }
+        }
+        signatures.push(signature.trim_end().to_string());
+    }
+    signatures
+}
+
+/// Each `.rs` file under org-node's `src/`, with its text.
+pub fn src_rust_files() -> Vec<(std::path::PathBuf, String)> {
+    fn collect(dir: &std::path::Path, found: &mut Vec<(std::path::PathBuf, String)>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                collect(&path, found);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                let text = std::fs::read_to_string(&path).unwrap();
+                found.push((path, text));
+            }
         }
     }
+    let mut found = Vec::new();
+    collect(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut found);
+    found
+}
 
-    /// The acknowledgement the check decided; a commit there is a failed
-    /// test.
-    pub fn acknowledged(self) -> VerifiedAcknowledgement {
-        match self {
-            Self::Acknowledged(verified) => verified,
-            Self::Committed(outcome) => panic!("committed, not an acknowledgement: {outcome:?}"),
-        }
+/// A store change a test does not read, or an operation's optional one: the
+/// service under test holds the store the change sealed, and the test reads
+/// that store from the service, so the write org-io would make is not what
+/// the test checks.
+pub fn unread(_change: impl Into<Option<StoreChange>>) {}
+
+/// A trait probe for `Clone`, resolved at compile time.
+/// `CloneProbe::<Probed>::IS_CLONE` names the inherent constant when
+/// `Probed: Clone`, which takes precedence over a trait's, and otherwise
+/// falls back to the trait's default, `false`. This is the pattern of the
+/// `impls` crate.
+pub struct CloneProbe<Probed: ?Sized>(std::marker::PhantomData<Probed>);
+
+pub trait NotCloneFallback {
+    const IS_CLONE: bool = false;
+}
+
+impl<Probed: ?Sized> NotCloneFallback for CloneProbe<Probed> {}
+
+// `Clone` implies `Sized`, so this impl takes no `?Sized`.
+impl<Probed: Clone> CloneProbe<Probed> {
+    pub const IS_CLONE: bool = true;
+}
+
+/// The Device-secret source of a verification whose test gives it none:
+/// asked, it holds no secret.
+pub fn none_held(_: &[DevicePublicKey]) -> Vec<DeviceSecret> {
+    Vec::new()
+}
+
+/// The time every verification of these tests is made at.
+pub fn story_time() -> VerificationTime {
+    VerificationTime(1_790_000_000)
+}
+
+/// The Device-secret source of a verification that removes nobody: it must
+/// never be called (LLR-qvp7mq, LLR-5tvn7g).
+pub fn never_asked(_: &[DevicePublicKey]) -> Vec<DeviceSecret> {
+    panic!("no Device secret is asked for by a verification that removes nobody")
+}
+
+/// The Organisation a founding of these tests is written as, where the test
+/// picks the identifier itself.
+pub fn the_org() -> OrgId {
+    OrgId::new([0x0a; 20])
+}
+
+/// The pure proxy recorded for every founding of these tests.
+pub fn the_proxy() -> ChainAccount {
+    ChainAccount::new([0x5a; 32])
+}
+
+/// The seed bytes of `secret`, as org-io's keychain holds them.
+pub fn seed_bytes(secret: &DeviceSecret) -> Vec<u8> {
+    let mut bytes = vec![];
+    secret
+        .lend_to_keychain(|seed| {
+            bytes.extend_from_slice(seed);
+            Ok::<(), std::convert::Infallible>(())
+        })
+        .unwrap();
+    bytes
+}
+
+/// A second `DeviceSecret` of `secret`'s seed, as org-io reopens its
+/// keychain item.
+pub fn secret_copy(secret: &DeviceSecret) -> DeviceSecret {
+    DeviceSecret::from_keychain_bytes(Zeroizing::new(seed_bytes(secret))).unwrap()
+}
+
+/// Whether `needle` occurs in `haystack`.
+pub fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.windows(needle.len()).any(|window| window == needle)
+}
+
+/// `bytes` in lower-case hex, two digits a byte.
+pub fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// `text` with its whitespace removed.
+pub fn squash(text: &str) -> String {
+    text.chars().filter(|symbol| !symbol.is_whitespace()).collect()
+}
+
+/// Every form in which `secret` could appear in debug output, with whitespace
+/// removed: hex (lower and upper case) of its leading bytes; the leading
+/// elements of a decimal list (`[208, 209, …`) and of a hex list (`[0xd0, …`,
+/// `[d0, …`); and the whole of each `{:?}` rendering of the array
+/// (`{:?}`, `{:#?}`, `{:x?}`, `{:X?}`, `{:#x?}`, `{:#X?}`).
+fn secret_renderings(secret: &[u8; 32]) -> Vec<String> {
+    let lower = hex(&secret[..4]);
+    let head = &secret[..3];
+    let list =
+        |render: &dyn Fn(u8) -> String| head.iter().map(|byte| render(*byte)).collect::<Vec<_>>().join(",");
+    vec![
+        lower.to_uppercase(),
+        lower,
+        list(&|byte| byte.to_string()),
+        list(&|byte| format!("{byte:#04x}")),
+        list(&|byte| format!("{byte:#04X}")),
+        format!("[{}", list(&|byte| format!("{byte:x}"))),
+        format!("[{}", list(&|byte| format!("{byte:X}"))),
+        squash(&format!("{secret:?}")),
+        squash(&format!("{secret:#?}")),
+        squash(&format!("{secret:x?}")),
+        squash(&format!("{secret:X?}")),
+        squash(&format!("{secret:#x?}")),
+        squash(&format!("{secret:#X?}")),
+    ]
+}
+
+/// Fails if `rendered` holds `secret` in any of its `secret_renderings`.
+pub fn assert_not_rendered(rendered: &str, secret: &[u8; 32], what: &str) {
+    let squashed = squash(rendered);
+    for form in secret_renderings(secret) {
+        assert!(!squashed.contains(&form), "{what}: debug output renders the secret as {form:?}");
     }
 }
 
-/// Where a send is delivered (S4 task T4): the value-driven stand-in for the
-/// address a sender dialled. A send posts the sending Device's key and the
-/// body; the receiving side takes the first posted. Clones share one queue.
-#[derive(Clone)]
-pub struct Inbox {
-    posts: std::sync::mpsc::Sender<Post>,
-    queue: Arc<Mutex<std::sync::mpsc::Receiver<Post>>>,
-}
-
-/// One delivery: the sending Device's key and the body.
-type Post = (DevicePublicKey, Vec<u8>);
-
-impl Default for Inbox {
-    fn default() -> Self {
-        let (posts, queue) = std::sync::mpsc::channel();
-        Self { posts, queue: Arc::new(Mutex::new(queue)) }
-    }
-}
-
-impl Inbox {
-    /// Deliver `body` as sent by `sender`'s Device.
-    pub fn post(&self, sender: DevicePublicKey, body: Vec<u8>) {
-        self.posts.send((sender, body)).unwrap();
-    }
-
-    /// The first body posted and its sender; a test takes it after the send
-    /// it waits for, so none is a failed test.
-    pub fn take(&self) -> (DevicePublicKey, Vec<u8>) {
-        self.queue.lock().unwrap().try_recv().expect("nothing was delivered")
-    }
-}
-
-/// A receive a test runs after the send it waits for: the value-driven
-/// stand-in for a spawned receiving task. `run` runs the receive then, on
-/// the body the send posted. (Until S4 task T14 a call site awaited it, as
-/// it had awaited a spawned task.)
-pub struct Deferred<T>(Box<dyn FnOnce() -> T + Send>);
-
-impl<T> Deferred<T> {
-    pub fn run(self) -> T {
-        (self.0)()
-    }
-}
-
-/// A Device that relays what it is handed: the value-driven stand-in for an
-/// endpoint bound from that Device's secret.
-#[derive(Clone, Copy, Debug)]
-pub struct Relay {
-    device_key: DevicePublicKey,
-}
-
-impl Relay {
-    pub fn new(device: &SigningKeypair) -> Self {
-        Self { device_key: device.device_key().unwrap() }
-    }
-
-    pub fn from_seed(seed: [u8; 32]) -> Self {
-        Self::new(&device_keypair(seed))
-    }
-
-    pub fn device_key(&self) -> DevicePublicKey {
-        self.device_key
-    }
-
-    /// Post `msg`, encoded, to `to` as sent by this Device.
-    pub fn send(&self, to: Inbox, msg: &WireMessage) -> Result<(), OrgNodeError> {
-        to.post(self.device_key, encode_message(msg)?);
-        Ok(())
-    }
+/// A Device key no store lists.
+pub fn relay_device() -> DevicePublicKey {
+    SigningKeypair::generate(&mut OsRng).device_key().unwrap()
 }
 
 /// The rogue relay's device seed — a third device, neither A's nor B's.
 pub const ROGUE_SEED: [u8; 32] = [0x33u8; 32];
 
-pub fn h(s: &str) -> Handle {
-    Handle::parse(s).unwrap()
+/// The Handle `text` parses to.
+pub fn handle(text: &str) -> Handle {
+    Handle::parse(text).unwrap()
 }
-pub fn nm(s: &str) -> Name {
-    Name::parse(s).unwrap()
+/// The Name `text` parses to.
+pub fn parsed_name(text: &str) -> Name {
+    Name::parse(text).unwrap()
 }
-pub fn sn(s: &str) -> Surname {
-    Surname::parse(s).unwrap()
+/// The Surname `text` parses to.
+pub fn parsed_surname(text: &str) -> Surname {
+    Surname::parse(text).unwrap()
 }
 
-/// One party's scratch directory, unique per target, test and process (no
-/// store file lives there since S4 task T3).
-pub fn store_dir(tag: &str, party: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "ods-{}-{tag}-{party}-{}",
-        env!("CARGO_CRATE_NAME"),
-        std::process::id()
-    ))
+/// A random source that fills every draw with one byte: the boundary fake of
+/// randomness. Every seed drawn from it is the same 32 bytes.
+pub struct ConstRng(pub u8);
+
+impl rand_core::RngCore for ConstRng {
+    fn next_u32(&mut self) -> u32 {
+        u32::from_le_bytes([self.0; 4])
+    }
+    fn next_u64(&mut self) -> u64 {
+        u64::from_le_bytes([self.0; 8])
+    }
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        dest.fill(self.0);
+    }
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand_core::Error> {
+        dest.fill(self.0);
+        Ok(())
+    }
 }
+
+impl rand_core::CryptoRng for ConstRng {}
+
+/// A random source that counts the bytes drawn from it and delegates to
+/// `OsRng`, so a test can show how much an operation drew.
+#[derive(Default)]
+pub struct CountingRng {
+    pub drawn: usize,
+}
+
+impl rand_core::RngCore for CountingRng {
+    fn next_u32(&mut self) -> u32 {
+        self.drawn += 4;
+        OsRng.next_u32()
+    }
+    fn next_u64(&mut self) -> u64 {
+        self.drawn += 8;
+        OsRng.next_u64()
+    }
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        self.drawn += dest.len();
+        OsRng.fill_bytes(dest)
+    }
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand_core::Error> {
+        self.fill_bytes(dest);
+        Ok(())
+    }
+}
+
+impl rand_core::CryptoRng for CountingRng {}
 
 /// A persona's record, cloned.
 pub fn persona_of(svc: &OrgService, persona_id: &PersonaId) -> PersonaRecord {
     svc.list_personas()
         .into_iter()
-        .find(|p| &p.persona_id == persona_id)
+        .find(|persona| &persona.persona_id == persona_id)
         .expect("persona not found")
         .clone()
 }
 
 /// The device keypair of a persona, from its secret in `node`'s keychain.
-pub fn device_kp(node: &Node, persona_id: &PersonaId) -> SigningKeypair {
+pub fn persona_device_keypair(node: &Node, persona_id: &PersonaId) -> SigningKeypair {
     device_keypair(device_seed_of(node, persona_id))
 }
 
 /// `svc`'s record of `org_id`, cloned.
-pub fn rec_of(svc: &OrgService, org_id: OrgId) -> OrgRecord {
-    svc.list_orgs().into_iter().find(|o| o.org_id == org_id).expect("record").clone()
+pub fn record_of(svc: &OrgService, org_id: OrgId) -> OrgRecord {
+    svc.list_orgs().into_iter().find(|record| record.org_id == org_id).expect("record").clone()
 }
 
-/// The record of `org_id` as it reached the disk, cloned.
-pub fn disk_rec_of(store: &Reopened, org_id: OrgId) -> OrgRecord {
-    store.orgs.iter().find(|o| o.org_id == org_id).expect("record on disk").clone()
-}
-
-/// The MemberId of the member with `handle` in `rec`.
-pub fn id_by_handle(rec: &OrgRecord, handle: &str) -> MemberId {
-    rec.trie_members.iter().find(|m| m.handle.as_str() == handle).expect("member in the record").id
-}
-
-/// The receive `spawn_receive` returns: B's node back with its result.
-pub type Receiving = Deferred<(Node, Result<ReceiveOutcome, OrgNodeError>)>;
-
-/// B waits for a send: returns the inbox a sender delivers to and the
-/// receive that takes the first body posted there into B's `receive_from`
-/// (a message to commit), yielding `(svc_b, result)`.
-pub fn spawn_receive(mut svc_b: Node) -> (Inbox, Receiving) {
-    let inbox = Inbox::default();
-    let posted = inbox.clone();
-    let receive = Deferred(Box::new(move || {
-        let result = svc_b.receive_posted(&posted).map(Received::committed);
-        (svc_b, result)
-    }));
-    (inbox, receive)
-}
-
-/// A Device (from `seed`) that captures the first message sent to it: the
-/// inbox a sender delivers to, and the capture yielding that Device as a
-/// [`Relay`], the sender's Device and the message. A rogue relay R
-/// (`ROGUE_SEED`) relays it on; a sink (random seed) only holds it.
-pub fn spawn_recv_one(seed: [u8; 32]) -> (Inbox, Deferred<(Relay, DevicePublicKey, WireMessage)>) {
-    let inbox = Inbox::default();
-    let posted = inbox.clone();
-    let capture = Deferred(Box::new(move || {
-        let (sender, body) = posted.take();
-        (Relay::from_seed(seed), sender, decode_message(&body).expect("a Wire message"))
-    }));
-    (inbox, capture)
-}
-
-/// The proxy account the app hands `commit_genesis` in these tests.
-pub fn test_proxy() -> ChainAccount {
-    ChainAccount::new([0x5a; 32])
-}
-
-/// The Organisation private key a provisional update holds.
-pub fn private_key_of(update: &ProvisionalUpdate) -> OrgPrivateKey {
-    match update.change_for_test() {
-        ProvisionalChange::Genesis { org_private_key, .. } | ProvisionalChange::ChangeSet { org_private_key, .. } => {
-            org_private_key.clone()
-        }
+/// The persisted snapshot of a trie member.
+pub fn snapshot_of(leaf: &MemberLeaf) -> MemberSnapshot {
+    MemberSnapshot {
+        id: *leaf.id(),
+        handle: leaf.handle().clone(),
+        name: leaf.name().clone(),
+        surname: leaf.surname().clone(),
+        member_key: *leaf.p2p_key(),
+        device_keys: leaf.p2p_devices().to_vec(),
     }
 }
 
-/// Story 1: `pid` founds an Organisation — the genesis update is built,
-/// org-io's chain write is stood in for by the slots, and the update
-/// committed against the state read back.
-pub fn found(svc: &mut Node, chain: &ChainSlots, pid: &PersonaId) -> OrgId {
-    let update = svc.create_organisation(&mut OsRng, pid).expect("build the genesis update");
-    let org_id = chain.apply_genesis(update.resulting_root, update.org_pub_key);
-    svc.commit_genesis(&mut OsRng, pid, org_id, test_proxy()).expect("commit genesis");
+/// Story 1: `persona_id`, whose founding `propose_and_keep_founding` proposed, founds the
+/// Organisation: org-io's genesis write of the founding's root and key
+/// (`chain`, at epoch 1), `record_proxy`, and `verify` against the slot,
+/// which adopts the founding record. Every write is kept on the disk.
+pub fn found_on_chain(node: &mut Node, chain: &ChainSlots, persona_id: &PersonaId) -> OrgId {
+    let device = node.device_of(persona_id);
+    let founding = node.persona_view(&device).unwrap().founding.expect("a provisional founding");
+    let org_id = chain.apply_genesis(founding.root, founding.org_pub_key);
+    node.record_proxy(&device, org_id);
+    node.adopt(&device, chain.get(&org_id).unwrap());
     org_id
 }
 
-/// Story 2, the joining node's half: whatever it must hold before an
-/// admission to `org_id` reaches it.
-pub fn prepare_to_join(svc_b: &mut Node, org_id: OrgId) {
-    svc_b.expect_admission(&mut OsRng, org_id).expect("expect the admission");
-}
-
-/// The joiner `pid` of `svc` is admitted as: the Persona's details and its
-/// two public keys, as the app reads them from org-node (LLR-437fvx).
-pub fn joiner_of(svc: &OrgService, pid: &PersonaId) -> Joiner {
-    let p = persona_of(svc, pid);
-    let (member_key, device_key) = svc.persona_public_keys(pid).unwrap();
-    Joiner { handle: p.handle, name: p.name, surname: p.surname, member_key, device_key }
-}
-
-/// Story 3 without the send: build the admission of `joiner`, write the
-/// chain (mock), commit. Returns the joiner's new MemberId and the outcome.
-pub fn commit_admission(
-    svc: &mut Node,
-    chain: &ChainSlots,
-    org_id: OrgId,
-    joiner: &Joiner,
-) -> Result<(MemberId, CommitOutcome), OrgNodeError> {
-    let update = svc.admit_member(&mut OsRng, org_id, joiner)?;
-    chain.apply_update(org_id, update.resulting_root, update.org_pub_key, rec_of(svc, org_id).epoch)?;
-    let outcome = svc.commit_update(&mut OsRng, org_id)?;
-    let id = rec_of(svc, org_id)
-        .trie_members
-        .iter()
-        .find(|m| m.member_key == joiner.member_key)
-        .map(|m| m.id)
-        .expect("the joiner is in the committed record");
-    Ok((id, outcome))
-}
-
-/// Story 5 without the send: build the removal of `member_id`, write the
-/// chain (mock), commit. Returns the outcome.
-pub fn commit_removal(
-    svc: &mut Node,
-    chain: &ChainSlots,
-    org_id: OrgId,
-    member_id: MemberId,
-) -> Result<CommitOutcome, OrgNodeError> {
-    let update = svc.revoke_member(&mut OsRng, org_id, member_id)?;
-    chain.apply_update(org_id, update.resulting_root, update.org_pub_key, rec_of(svc, org_id).epoch)?;
-    svc.commit_update(&mut OsRng, org_id)}
-
-/// The body the committed `outcome` holds for `recipient` (LLR-gdfqn9), or
-/// `None`: the commit built none for it (S4 task T5; it replaces T4's
-/// `body_to`, which rebuilt the body from the record at send time).
-pub fn body_for(outcome: &CommitOutcome, recipient: DevicePublicKey) -> Option<Vec<u8>> {
-    outcome.outgoing.iter().find(|message| message.recipient == recipient).map(|message| message.body.clone())
-}
-
-/// The Wire message `outcome` holds for `recipient`, decoded; fails the test
-/// when the commit built none for it.
-pub fn message_for(outcome: &CommitOutcome, recipient: DevicePublicKey) -> WireMessage {
-    decode_message(&body_for(outcome, recipient).expect("the commit built a body for the recipient")).unwrap()
-}
-
-/// The revocation notices among `outcome`'s bodies, in order (S3a's
-/// `revocations` field until S4 task T5).
-pub fn notices_in(outcome: &CommitOutcome) -> Vec<org_node::revocation::RevocationNotice> {
-    outcome
-        .outgoing
-        .iter()
-        .filter_map(|message| match decode_message(&message.body).unwrap() {
-            WireMessage::Revocation(notice) => Some(notice),
-            _ => None,
-        })
-        .collect()
-}
-
-/// Post the body `outcome` holds for `recipient` to `to`, from the Device
-/// `svc` sends as. A recipient the commit built no body for fails the test.
-pub fn send(svc: &Node, outcome: &CommitOutcome, recipient: DevicePublicKey, to: &Inbox) -> Result<(), OrgNodeError> {
-    let body = body_for(outcome, recipient).expect("the commit built a body for the recipient");
-    to.post(svc.sender_for(outcome.org_id), body);
-    Ok(())
-}
-
-/// The first Device of the Member with `handle` in `record`.
-pub fn device_by_handle(record: &OrgRecord, handle: &str) -> DevicePublicKey {
-    record.trie_members.iter().find(|m| m.handle.as_str() == handle).and_then(|m| m.device_keys.first().copied()).unwrap()
-}
-
-/// Story 3: admit `joiner` into `org_id`: build, write the chain (mock),
-/// commit, send to `to`. Returns the joiner's new MemberId.
-pub fn admit(
-    svc: &mut Node,
-    chain: &ChainSlots,
-    org_id: OrgId,
-    joiner: &Joiner,
-    to: Inbox,
-) -> Result<MemberId, OrgNodeError> {
-    let (id, outcome) = commit_admission(svc, chain, org_id, joiner)?;
-    send(svc, &outcome, joiner.device_key, &to)?;
-    Ok(id)
-}
-
-/// The removed member's first Device in `svc`'s record of `org_id`.
-fn first_device_of(svc: &Node, org_id: OrgId, member_id: MemberId) -> DevicePublicKey {
-    rec_of(svc, org_id)
-        .trie_members
-        .iter()
-        .find(|m| m.id == member_id)
-        .and_then(|m| m.device_keys.first().copied())
-        .expect("the removed member has a device")
-}
-
-/// Story 5: revoke `member_id`: build, write the chain (mock), commit, send
-/// the committed revocation to the removed member's first device.
-pub fn revoke(
-    svc: &mut Node,
-    chain: &ChainSlots,
-    org_id: OrgId,
-    member_id: MemberId,
-    to: Inbox,
-) -> Result<(), OrgNodeError> {
-    let recipient = first_device_of(svc, org_id, member_id);
-    revoke_and_tell(svc, chain, org_id, member_id, recipient, to)}
-
-/// Story 5, told to `recipient`: build, write the chain (mock), commit, and
-/// send the committed removal to `recipient` at `to`.
-pub fn revoke_and_tell(
-    svc: &mut Node,
-    chain: &ChainSlots,
-    org_id: OrgId,
-    member_id: MemberId,
-    recipient: DevicePublicKey,
-    to: Inbox,
-) -> Result<(), OrgNodeError> {
-    let outcome = commit_removal(svc, chain, org_id, member_id)?;
-    send(svc, &outcome, recipient, &to)
-}
-
-/// `msg`, of the same kind, with its Envelope replaced.
-pub fn with_envelope(msg: &WireMessage, envelope: org_node::Envelope) -> WireMessage {
-    match msg {
+/// `message`, of the same kind, with its Envelope replaced.
+pub fn with_envelope(message: &WireMessage, envelope: org_node::Envelope) -> WireMessage {
+    match message {
         WireMessage::OrgInformation { record_snapshot, org_private_key, .. } => WireMessage::OrgInformation {
             envelope,
             record_snapshot: record_snapshot.clone(),
             org_private_key: org_private_key.clone(),
         },
-        WireMessage::Revocation(_) => panic!("a revocation carries no Envelope"),
-        WireMessage::Acknowledgement(_) => panic!("an acknowledgement carries no Envelope"),
+        other => panic!("only Organisation information carries an Envelope, got {other:?}"),
     }
 }
 
 /// Organisation information carrying `envelope`, an empty snapshot and a
 /// key no chain holds: for tests of the chain-free checks, which refuse the
-/// Envelope before the snapshot or the key is looked at. (Until S3 T4 those
-/// tests sent the Envelope as a revocation, which holds a notice now.)
+/// Envelope before the snapshot or the key is looked at.
 pub fn carrying(envelope: org_node::Envelope) -> WireMessage {
     WireMessage::OrgInformation { envelope, record_snapshot: Vec::new(), org_private_key: OrgPrivateKey::from([0u8; 32]) }
 }
 
-/// The Envelope of the Organisation information `msg`; only that kind holds
-/// one (LLR-js9dsu).
-pub fn envelope_of(msg: &WireMessage) -> &org_node::Envelope {
-    match msg {
+/// The Envelope of the Organisation information `message`; only that kind holds
+/// one.
+pub fn envelope_of(message: &WireMessage) -> &org_node::Envelope {
+    match message {
         WireMessage::OrgInformation { envelope, .. } => envelope,
         other => panic!("Organisation information, got {other:?}"),
     }
 }
 
-/// The Organisation information `msg`, with its record snapshot replaced.
-pub fn with_snapshot(msg: &WireMessage, record_snapshot: Vec<u8>) -> WireMessage {
-    match msg {
-        WireMessage::OrgInformation { envelope, org_private_key, .. } => WireMessage::OrgInformation {
-            envelope: envelope.clone(),
-            record_snapshot,
-            org_private_key: org_private_key.clone(),
-        },
-        other => panic!("only Organisation information carries a snapshot, got {other:?}"),
-    }
-}
-
-/// The Organisation information `msg`, with its Organisation private key
+/// The Organisation information `message`, with its Organisation private key
 /// replaced.
-pub fn with_key(msg: &WireMessage, org_private_key: OrgPrivateKey) -> WireMessage {
-    match msg {
+pub fn with_key(message: &WireMessage, org_private_key: OrgPrivateKey) -> WireMessage {
+    match message {
         WireMessage::OrgInformation { envelope, record_snapshot, .. } => WireMessage::OrgInformation {
             envelope: envelope.clone(),
             record_snapshot: record_snapshot.clone(),
@@ -849,248 +726,155 @@ pub fn with_key(msg: &WireMessage, org_private_key: OrgPrivateKey) -> WireMessag
     }
 }
 
-/// Stories 1–2 over the service API: A creates a persona and the organisation
-/// (epoch 1); B creates a persona, declares it expects the admission (unless
-/// the test says not to), and A reads the joiner it admits B as. A sends
-/// from its founding Persona's Device; no endpoint is bound (S4 task T4).
+/// Stories 1–2: A proposes and founds the Organisation (epoch 1); B, unless
+/// the test says not to, proposes to join it with A's Invite (`invite`),
+/// and otherwise proposes a founding of its own, which binds it to nothing
+/// and expects no admission.
 pub struct Setup {
     pub chain: ChainSlots,
-    pub svc_a: Node,
-    pub svc_b: Node,
+    pub node_a: Node,
+    pub node_b: Node,
     pub org_id: OrgId,
-    pub pid_a: PersonaId,
-    pub pid_b: PersonaId,
-    pub b_device_kp: SigningKeypair,
-    pub joiner_b: Joiner,
+    pub a_persona_id: PersonaId,
+    pub b_persona_id: PersonaId,
+    pub b_device_keypair: SigningKeypair,
+    pub invite: Option<Invite>,
 }
 
 pub fn setup(tag: &str) -> Setup {
-    setup_with(tag, true)}
+    setup_with(tag, true)
+}
 
 pub fn setup_with(tag: &str, prepare: bool) -> Setup {
-    setup_over_both(tag, prepare, CountingChain::over, CountingChain::over)}
-
-/// `setup_with`, with A's org-io reading the chain through `a_chain(chain)`
-/// and B's through `b_chain(chain)`.
-pub fn setup_over_both(
-    tag: &str,
-    prepare: bool,
-    a_chain: impl FnOnce(ChainSlots) -> CountingChain,
-    b_chain: impl FnOnce(ChainSlots) -> CountingChain,
-) -> Setup {
     let chain = ChainSlots::new();
+    let mut node_a = Node::new(open_store(tag, "a"));
+    let mut node_b = Node::new(open_store(tag, "b"));
 
-    let mut svc_a = Node::new(open_store(tag, "a"), a_chain(chain.clone()));
-    let mut svc_b = Node::new(open_store(tag, "b"), b_chain(chain.clone()));
+    let a_persona_id = node_a.propose_and_keep_founding(&mut OsRng, handle("admin"), parsed_name("Admin"), parsed_surname("User")).unwrap();
+    let org_id = found_on_chain(&mut node_a, &chain, &a_persona_id);
+    assert_eq!(chain.get(&org_id).unwrap().epoch, org_node::Epoch::new(1));
 
-    // Story 1: A creates persona + org.
-    let pid_a = svc_a.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    let org_id = found(&mut svc_a, &chain, &pid_a);
-    assert_eq!(chain.get(&org_id).unwrap().epoch, Epoch::new(1));
-
-    // Story 2: B creates persona and prepares to join A's organisation.
-    let pid_b = svc_b.create_persona(&mut OsRng, h("bob"), nm("Bob"), sn("Builder")).unwrap();
-    if prepare {
-        prepare_to_join(&mut svc_b, org_id);
-    }
-
-    // The joiner A admits B as.
-    let joiner_b = joiner_of(&svc_b, &pid_b);
-    assert_eq!(joiner_b.handle.as_str(), "bob");
-
-    let b_device_kp = device_kp(&svc_b, &pid_b);
-
-    Setup { chain, svc_a, svc_b, org_id, pid_a, pid_b, b_device_kp, joiner_b }
-}
-
-/// Story 3+4 directly: A admits B, B receives from A's device and commits
-/// epoch 2. Returns the setup with B's service carrying the committed record.
-pub fn admit_b_directly(mut s: Setup) -> Setup {
-    let (b_addr, b_task) = spawn_receive(s.svc_b);
-
-    admit(&mut s.svc_a, &s.chain, s.org_id, &s.joiner_b, b_addr)
-        .expect("admit_member(B) failed");
-    assert_eq!(s.chain.get(&s.org_id).unwrap().epoch, Epoch::new(2), "admitting B must bump to epoch 2");
-
-    let (svc_b, outcome) = b_task.run();
-    let outcome = outcome.expect("B's direct admission from A must verify");
-    assert_eq!(outcome.epoch, Epoch::new(2));
-    assert_eq!(svc_b.list_orgs().len(), 1);
-    assert_eq!(svc_b.list_orgs()[0].epoch, Epoch::new(2));
-    assert_eq!(svc_b.list_orgs()[0].trie_members.len(), 2, "A + B");
-    s.svc_b = svc_b;
-    s
-}
-
-/// A creates a further persona C and returns the joiner it is admitted as.
-/// A's founding Persona stays the first bound to the Organisation, so A
-/// still sends from its device.
-pub fn joiner_for_c(svc_a: &mut Node) -> Joiner {
-    let pid_c = svc_a.create_persona(&mut OsRng, h("carol"), nm("Carol"), sn("Coder")).unwrap();
-    let jr = joiner_of(svc_a, &pid_c);
-    assert_eq!(jr.handle.as_str(), "carol");
-    jr
-}
-
-/// A's genuine admission of `joiner`, as sent to the joiner's Device, not
-/// delivered to B.
-pub fn captured_admission(s: &mut Setup, joiner: &Joiner) -> WireMessage {
-    let (_, outcome) = commit_admission(&mut s.svc_a, &s.chain, s.org_id, joiner).expect("admit the joiner");
-    message_for(&outcome, joiner.device_key)
-}
-
-/// A admits a further persona C; the admission is captured, not delivered
-/// to B.
-pub fn captured_admission_of_c(s: &mut Setup) -> WireMessage {
-    let joiner_c = joiner_for_c(&mut s.svc_a);
-    captured_admission(s, &joiner_c)}
-
-/// Send `msg` to `addr` from a relay device that is neither A nor B. No
-/// record lists it, so since the owner rulings of 2026-10-07 (LLR-2r2fha,
-/// LLR-kzgjz8, LLR-3aysup) a held Organisation's receiver refuses what it
-/// sends: use it for first admissions and refusal cases, `deliver_from`
-/// otherwise.
-pub fn deliver(to: Inbox, msg: &WireMessage) {
-    deliver_from([0x5bu8; 32], to, msg);
-}
-
-/// Send `msg` to `to` from the Device of `sender_seed`.
-pub fn deliver_from(sender_seed: [u8; 32], to: Inbox, msg: &WireMessage) {
-    Relay::from_seed(sender_seed).send(to, msg).expect("an encodable message");
-}
-
-/// Send `body` to `to` from a relay device: bytes no `WireMessage` encodes
-/// to.
-pub fn deliver_raw(to: Inbox, body: &[u8]) {
-    to.post(Relay::from_seed([0x5cu8; 32]).device_key(), body.to_vec());
-}
-
-/// The encoded member snapshots of `trie`, as a first admission carries them.
-pub fn snapshot_bytes(trie: &org_members::trie::OrgTrie<org_members::hasher::Blake3Hasher>) -> Vec<u8> {
-    let members: Vec<MemberSnapshot> = trie
-        .members()
-        .iter()
-        .map(|m| MemberSnapshot {
-            id: *m.id(),
-            handle: m.handle().clone(),
-            name: m.name().clone(),
-            surname: m.surname().clone(),
-            member_key: *m.p2p_key(),
-            device_keys: m.p2p_devices().to_vec(),
-        })
-        .collect();
-    postcard::to_allocvec(&members).unwrap()
-}
-
-/// The state source a test's org-io reads through, over shared `ChainSlots`:
-/// it counts reads, can hide an Organisation (answer `None` for it) and can
-/// fail every read.
-#[derive(Clone)]
-pub struct CountingChain {
-    slots: ChainSlots,
-    reads: Arc<AtomicUsize>,
-    hidden: Arc<Mutex<Vec<OrgId>>>,
-    failing: Arc<AtomicBool>,
-}
-
-impl From<ChainSlots> for CountingChain {
-    fn from(slots: ChainSlots) -> Self {
-        Self::over(slots)
-    }
-}
-
-impl CountingChain {
-    pub fn over(slots: ChainSlots) -> Self {
-        Self { slots, reads: Default::default(), hidden: Default::default(), failing: Default::default() }
-    }
-
-    /// One read of `org`'s state: counted, then the failing, hidden or slot
-    /// answer.
-    pub fn read(&self, org: OrgId) -> Result<Option<OrgState>, OrgNodeError> {
-        self.reads.fetch_add(1, Ordering::SeqCst);
-        if self.failing.load(Ordering::SeqCst) {
-            return Err(OrgNodeError::Chain("chain unreachable".into()));
-        }
-        if self.hidden.lock().unwrap().contains(&org) {
-            return Ok(None);
-        }
-        Ok(self.slots.get(&org))
-    }
-    pub fn reads(&self) -> usize {
-        self.reads.load(Ordering::SeqCst)
-    }
-    pub fn hide(&self, org: OrgId) {
-        self.hidden.lock().unwrap().push(org);
-    }
-    pub fn fail_reads(&self) {
-        self.failing.store(true, Ordering::SeqCst);
-    }
-}
-
-/// `setup`, with B's org-io reading the chain through its own
-/// `CountingChain`, returned (B's view).
-pub fn setup_counted(tag: &str) -> (Setup, CountingChain) {
-    let s = setup(tag);
-    let counting = s.svc_b.view.clone();
-    (s, counting)
-}
-
-/// `setup`, with A and B both reading the chain through one `CountingChain`:
-/// its count is every chain read either node makes.
-pub fn setup_counting(tag: &str) -> (Setup, CountingChain) {
-    let shared: Arc<Mutex<Option<CountingChain>>> = Default::default();
-    let counting_for = |shared: Arc<Mutex<Option<CountingChain>>>| {
-        move |c: ChainSlots| -> CountingChain {
-            let mut slot = shared.lock().unwrap();
-            slot.get_or_insert_with(|| CountingChain::over(c)).clone()
-        }
+    let (b_persona_id, invite) = if prepare {
+        let a_device = node_a.device_of(&a_persona_id);
+        let invite = node_a.invite(&a_device, "Bob");
+        (node_b.propose_member(&mut OsRng, &invite, "Bob", "Builder", &["bob"]).unwrap(), Some(invite))
+    } else {
+        (node_b.propose_and_keep_founding(&mut OsRng, handle("bob"), parsed_name("Bob"), parsed_surname("Builder")).unwrap(), None)
     };
-    let s = setup_over_both(tag, true, counting_for(shared.clone()), counting_for(shared.clone()));
-    let counting = shared.lock().unwrap().clone().expect("setup_over_both calls both closures");
-    (s, counting)
+    let b_device_keypair = persona_device_keypair(&node_b, &b_persona_id);
+    Setup { chain, node_a, node_b, org_id, a_persona_id, b_persona_id, b_device_keypair, invite }
 }
 
-/// Deliver `msg` to `svc`'s `receive_from` from a random relay Device no
-/// record lists, and return its result (a message to commit). Since the
-/// owner rulings of 2026-10-07 (LLR-2r2fha, LLR-kzgjz8, LLR-3aysup) such a
-/// sender is refused for every message about a held Organisation: use this
-/// for the refusal cases and first admissions, and `deliver_from_to_receive`
-/// from a listed Device otherwise.
-pub fn deliver_to_receive(svc: &mut Node, msg: WireMessage) -> Result<ReceiveOutcome, OrgNodeError> {
-    deliver_from_to_receive(svc, rand::random(), msg)}
-
-/// Deliver `msg` to `svc`'s `receive_from` from the Device of
-/// `sender_seed`, and return its result (a message to commit).
-pub fn deliver_from_to_receive(
-    svc: &mut Node,
+/// `node`'s `receive` of `message`, encoded, in the store of `persona_id`, from
+/// the Device of `sender_seed`.
+pub fn receive_message_from(
+    node: &mut Node,
+    persona_id: &PersonaId,
     sender_seed: [u8; 32],
-    msg: WireMessage,
-) -> Result<ReceiveOutcome, OrgNodeError> {
-    receive_message_from(svc, sender_seed, &msg).map(Received::committed)
+    message: &WireMessage,
+) -> Result<Checked, OrgNodeError> {
+    let sender = device_keypair(sender_seed).device_key().unwrap();
+    let device = node.device_of(persona_id);
+    node.receive(&device, sender, &encode_message(message).unwrap())
 }
 
-/// `svc`'s `receive_from` for `msg`, encoded, from the Device of
-/// `sender_seed`.
-pub fn receive_message_from(svc: &mut Node, sender_seed: [u8; 32], msg: &WireMessage) -> Result<Received, OrgNodeError> {
-    let sender = Relay::from_seed(sender_seed).device_key();
-    svc.receive_from(&mut OsRng, sender, &encode_message(msg).unwrap())
-}
-
-/// The device seed of `persona_id` in `node`'s keychain, as bytes: the
-/// Device a test sends from when the message must come from that Persona's
-/// Device.
+/// The device seed of `persona_id` in `node`'s keychain, as bytes.
 pub fn device_seed_of(node: &Node, persona_id: &PersonaId) -> [u8; 32] {
     node.keychain.seed(&persona_of(node, persona_id).device_key)
 }
 
-/// A calculated trie of one Member that lists neither `member` nor `device`:
-/// an absence proof from it verifies under its root, not under any chain's.
-pub fn trie_without(member: MemberId, device: DevicePublicKey) -> org_node::test_fixtures::Trie {
+/// The calculated trie of `record`'s members.
+pub fn trie_of(record: &OrgRecord) -> Trie {
+    trie_of_members(&record.trie_members)
+}
+
+/// The trie leaf of `member`.
+pub fn leaf_of(member: &MemberSnapshot) -> MemberLeaf {
+    MemberLeaf::new(
+        member.id,
+        member.handle.clone(),
+        member.member_key,
+        member.name.clone(),
+        member.surname.clone(),
+        member.device_keys.clone(),
+    )
+    .unwrap()
+}
+
+/// The calculated trie of `members`.
+pub fn trie_of_members(members: &[MemberSnapshot]) -> Trie {
+    Trie::genesis(members.iter().map(leaf_of).collect()).unwrap()
+}
+
+/// The trie's members, in the trie's order, as a record holds them.
+pub fn snapshots_of(trie: &Trie) -> Vec<MemberSnapshot> {
+    trie.members().iter().map(snapshot_of).collect()
+}
+
+/// Stories 3–4: B's admission through the operations. B builds its
+/// admission request for A's Invite and A keeps it (`check_received`); A
+/// records the admission, proposes the next epoch, writes it to the chain
+/// and adopts it; A's message of the current epoch reaches B, which keeps it
+/// and adopts it against the same slot. Every write is kept on its party's
+/// disk.
+pub fn admit_b(mut story: Setup) -> Setup {
+    let invite = story.invite.clone().expect("B proposed to join A's Organisation (setup with prepare)");
+    let a_device = story.node_a.device_of(&story.a_persona_id);
+    let b_device = story.node_b.device_of(&story.b_persona_id);
+    request_admission(&mut story.node_a, &a_device, &story.node_b, &b_device);
+    let change = story.node_a.svc.record_admission(&mut OsRng, &a_device, invite.invite_id, None).unwrap();
+    story.node_a.disk.apply(change);
+    story.node_a.propose_and_adopt(&a_device, &story.chain, story.org_id);
+
+    let body = story.node_a.message_for(&a_device, &b_device);
+    let checked = story.node_b.receive(&b_device, a_device, &body).unwrap();
+    assert!(matches!(checked, Checked::ProvisionalOrganisationKept { .. }), "{checked:?}");
+    story.node_b.adopt(&b_device, story.chain.get(&story.org_id).unwrap());
+    story
+}
+
+/// Story 5 on A's side: A records B's revocation, proposes the next epoch,
+/// writes it to the chain and adopts it (B's Device held as revoked); B's
+/// store is left as it was. Returns the setup and B's MemberId.
+pub fn remove_b(mut story: Setup) -> (Setup, MemberId) {
+    let a_device = story.node_a.device_of(&story.a_persona_id);
+    let b_device = story.node_b.device_of(&story.b_persona_id);
+    let b_id = record_of(&story.node_a, story.org_id)
+        .trie_members
+        .iter()
+        .find(|member| member.device_keys.contains(&b_device))
+        .expect("B is listed")
+        .id;
+    let change = story.node_a.svc.record_revocation(&mut OsRng, &a_device, b_id).unwrap();
+    story.node_a.disk.apply(change);
+    story.node_a.propose_and_adopt(&a_device, &story.chain, story.org_id);
+    (story, b_id)
+}
+
+/// Organisation information for the epoch after `record`, as a listed
+/// Device would send it: the Member of seed `member_seed` added under a
+/// drawn MemberId, the Change set from `record` to that, `record`'s members
+/// as the record snapshot and a fresh Organisation private key. Returns the
+/// message and the next record's root.
+pub fn information_after(record: &OrgRecord, member_seed: u8) -> (WireMessage, org_members::RootHash) {
     use org_node::test_fixtures::{device_key, member_key};
-    let other = MemberId::new([0x5e; 32]);
-    assert_ne!(other, member);
-    assert_ne!(device_key(0x5f), device);
-    let leaf = org_members::MemberLeaf::new(other, h("elsewhere"), member_key(0x5e), nm("Else"), sn("Where"), vec![device_key(0x5f)])
-        .unwrap();
-    org_node::test_fixtures::Trie::genesis(vec![leaf]).unwrap()
+    let mut id = [0u8; 32];
+    OsRng.fill_bytes(&mut id);
+    let leaf = MemberLeaf::new(
+        MemberId::new(id),
+        handle(&format!("joiner{member_seed}")),
+        member_key(member_seed),
+        parsed_name("Joe"),
+        parsed_surname("Joiner"),
+        vec![device_key(member_seed.wrapping_add(1))],
+    )
+    .unwrap();
+    let (next, delta) = trie_of(record).add_member(leaf).unwrap().recalculate().unwrap();
+    let envelope = org_node::Envelope::build(record.org_id, SequenceNumber::new(record.epoch.get() + 1), &delta).unwrap();
+    let message = WireMessage::OrgInformation {
+        envelope,
+        record_snapshot: postcard::to_allocvec(&record.trie_members).unwrap(),
+        org_private_key: X25519Keypair::generate(&mut OsRng).org_private_key(),
+    };
+    (message, next.root_hash().unwrap())
 }

@@ -35,6 +35,7 @@ name it states, and that the reply will reveal the handle, name and surname
 entered for the chosen Persona to its sender, and shall produce the reply only once
 the user has confirmed. (implements: RC-wzb48r)
 satisfies: derived
+superseded-by: REQ-2yh3c8
 
 *Moved 2026-10-13 (S4, task T6 of docs/plans/2026-10-06-org-io-transport.md,
 ruling A).* The requirement that stood here — refuse an imported Invite or

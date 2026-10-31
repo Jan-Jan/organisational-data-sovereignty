@@ -92,3 +92,77 @@ org-io report). Line numbers are those of the tree after task rb's fixes.
      the state (`org-io/src/publish.rs:253`, `:257`).
    - LLR-nqvbb6: the `Reconciled(_)` branch other than `InStep`
      (`org-io/src/submit.rs:279-280`) has no test of its report.
+
+*Note 2026-10-16 (change `worktree-org-io-domain-api`, owner ruling Q6 of
+that day).* Item 2 is to be resolved by change `worktree-org-io-domain-api`
+(owner 2026-10-16): an executed write is adopted by verification, never by
+an in-memory unknown write, and its bodies reach every Device it concerns
+by the pull rather than by a resend: the app asks for one send of an
+adopted epoch this node wrote, and every Device the send missed, after an
+app crash between adoption and send included, is behind at its next
+periodic verification and requests the Organisation from its Members, a
+revoked Device being answered with its revocation notice; by REQ-36gxmg,
+REQ-nactq6, REQ-z73ctw and REQ-wpq4fp (with REQ-bm4ppg's note on the
+restart). The status
+stays `open`; the resolution is written by the merging change
+(`resolve-problem`). If `worktree-org-io-domain-api` cannot merge by about
+2026-11-05, the owner is to be asked whether to raise org-node's
+`problem_age_days`, which its report on the publish path writing the chain
+before the record reaches on 2026-11-08.
+
+*Item 2 resolved 2026-10-29 (change `worktree-org-io-domain-api`, plan
+`docs/plans/2026-10-21-org-io-domain-api.md` tasks T34, T35, T38, T39,
+T42, T51, T55).* Root cause: delivery hung on the in-memory unknown write
+that `reconcile` cleared, so every path that committed without that record
+(a restart, a failed read-back or store write, a refused node reconcile, a
+late commit removing this node) sent nothing. `reconcile`, `submit.rs` and
+`publish.rs` are gone: an executed write is adopted only by verification
+against a finalised chain state (REQ-36gxmg, REQ-bm4ppg; LLR-t2pve7,
+LLR-zey4mg), whatever happened in memory or across a restart; the app asks
+once for the send of an adopted epoch this node wrote (REQ-nactq6;
+LLR-pxqdy4); and every Device the send missed, after an app crash between
+adoption and send included, is behind at its next periodic verification and
+requests the Organisation from its Members (REQ-z73ctw; LLR-uf5cyy), which
+answer with the record, or a revoked Device with its revocation notice
+alone, with no user step (REQ-wpq4fp; LLR-898z24). Verified by
+`org-io/tests/verification.rs`
+`a_write_that_executed_before_a_restart_is_adopted_by_the_next_verification`
+(verifies: LLR-t2pve7) and
+`a_verification_that_adopts_an_unknown_write_reports_it_adopted_and_clears_it`
+(verifies: LLR-t2pve7, LLR-zey4mg); `org-io/tests/send_fanout.rs`
+`send_organisation_sends_org_nodes_messages_in_order_to_every_recipient_and_writes_no_store`
+(verifies: LLR-pxqdy4, REQ-u894ty); `org-io/tests/requests.rs`
+`request_organisation_asks_every_listed_device_or_the_invites_issuer`
+(verifies: LLR-uf5cyy); `org-io/tests/receive_step.rs`
+`an_answer_is_written_0x00_then_sent_on_a_new_connection_to_the_kept_addresses`
+and `a_revoked_requester_gets_its_notice_through_the_send_path` (verifies:
+LLR-898z24); and the app's half by `app/src-tauri/tests/verification.rs`
+`an_own_adoption_is_sent_once_and_nothing_else_is` and
+`app/src-tauri/tests/periodic.rs`
+`a_behind_organisation_is_requested_at_each_run_until_in_step`; all pass in
+the change's verify lines.
+
+The report stays `open`: item 1 is not fixed (no keyring call in
+`org-io/src` runs under `spawn_blocking` or behind a per-item lock), and
+item 3 is not fixed (`write_update` and `write_founding` in
+`org-io/src/write.rs` still record an unknown write only on
+`WriteNotDone::TimedOut`; a failed `update` is reported `Refused`, though a
+write that executed anyway is now adopted by the next verification).
+Incidentally answered by the same change, with evidence: item 4, the
+shallow allowlist scan — `org-io/tests/absences.rs`
+`every_returned_type_is_in_the_handle_return_allowlist_and_holds_no_secret`
+(verifies: LLR-gh4rw3) reads the body of every allowlisted org-io type and
+of every org-io type it names, to a fixed point, and fails on a field
+naming a secret-holding type (the scan does not descend into types org-io
+does not define, so a key held as a bare byte array would still pass); and
+of item 5: SDD-v2bq89 (`plan_send` gone, superseded by SDD-2bzgtp),
+LLR-nqvbb6 (the `Reconciled(_)` branch gone with `submit.rs`, superseded by
+LLR-mhn4n5), LLR-2b2ghe (the peer-address parse removed with
+`transport/peer_addr.rs`, task T28), and LLR-t98pk9 (superseded by
+LLR-zey4mg; the read order is now pinned by `org-io/tests/verification.rs`
+`the_finalised_block_is_read_before_the_state`, verifies: LLR-t2pve7). Still
+open in item 5: a failing recipient at a random position of the fan-out
+(LLR-znhmh2, superseded by LLR-pxqdy4, whose tests place none), LLR-murjr6
+(each reloading call site of `LocalStore::store`), LLR-b9bm36 (no
+mutation-killing test of `sync_all` and `create_new`) and LLR-z35vbh (the
+bind after `create_persona` observed through hooks that bind).

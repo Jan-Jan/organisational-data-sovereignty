@@ -48,10 +48,7 @@
 //! target that holds the decision itself, `log_is_ours`, with its boundaries.
 //! `tests/contract_address_filter.rs` is the *decoder's* half (REQ-5upq6n,
 //! that the emitting address is reported byte for byte) and its own header
-//! explicitly declines to claim REQ-9vwcwc; this line pointed there until
-//! review round 4's finding 4. Round 2's finding 6 made the identical
-//! correction to the identical sentence in `tests/decode_revive_event.rs`;
-//! this copy was not swept with it.
+//! explicitly declines to claim REQ-9vwcwc.
 //!
 //! Run this target alone with `cargo test --test fuzz_parse_revive_event`.
 

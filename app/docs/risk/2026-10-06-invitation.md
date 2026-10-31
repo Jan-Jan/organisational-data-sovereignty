@@ -29,6 +29,7 @@ nothing has verified who sent the Invite or the Organisation name it states,
 and that the reply reveals the handle, name and surname entered for the chosen
 Persona to that sender, and produces the reply only once the user confirms.
 mitigates: HAZ-qfb95k
+superseded-by: RC-dfzb5q
 
 This is information for safety, the lowest rank in ISO 14971's order, and the
 owner chose it knowingly (2026-10-05). A design control would need to show the

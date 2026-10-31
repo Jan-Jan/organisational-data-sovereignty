@@ -1,4 +1,4 @@
-//! Stage 2 Task 6 gate. Confirms the test harness can spin a
+//! The fork harness's own check. Confirms the test harness can spin a
 //! chopsticks-Paseo fork up, talk to it, and shut it down cleanly.
 //! Numeric `00_` prefix keeps it ordered first under `cargo test`
 //! reporting so a broken fork shows here before downstream tests fail

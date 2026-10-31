@@ -3,7 +3,7 @@
 //! Requirements carried here: REQ-e4ah9h (the verdict and the endpoint are one
 //! fact and cannot disagree), REQ-bvx4nh (the endpoint reported is the one the
 //! running configuration was built from, never re-read from the environment —
-//! and, since the 2026-09-14 amendment, the data directory on the same terms),
+//! and the data directory on the same terms),
 //! REQ-645jq9 (the transport mode is reported).
 
 use std::path::Path;
@@ -110,8 +110,8 @@ fn endpoint_comes_from_the_built_configuration() {
 // verifies: LLR-kze6ak
 #[test]
 fn data_dir_comes_from_the_built_configuration() {
-    // REQ-bvx4nh's data-directory clause, normal case. The handler no longer
-    // re-derives the directory from ODS_DATA_DIR / app_data_dir(); it reports
+    // REQ-bvx4nh's data-directory clause, normal case. The handler does not
+    // re-derive the directory from ODS_DATA_DIR / app_data_dir(); it reports
     // the directory the store was actually opened in. Two materially different
     // paths are projected so that a constant — of any value — fails: the pair
     // is asserted equal to its own argument AND unequal to the other.
@@ -150,7 +150,7 @@ fn abnormal_data_dir_paths_are_reported_verbatim() {
     // empty, non-ASCII, relative, or very long is reported exactly as the
     // running configuration holds it — never normalised, absolutised, or
     // substituted with a fallback such as policy::DEV_DATA_DIR. Substituting
-    // here is precisely the failure the clause was added to forbid: the
+    // here is precisely the failure the clause forbids: the
     // operator would be shown a directory the store was not opened in.
     let long_path = "/".to_string() + &"o".repeat(4096);
     let cases: [&str; 6] = [

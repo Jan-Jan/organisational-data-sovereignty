@@ -1,13 +1,9 @@
 //! The byte widths of this crate's public newtypes, and `Epoch`'s `Display`.
 //!
-//! Why this target exists. Both cases below lived in a `#[cfg(test)] mod
-//! tests` inside `on-chain-client/src/types.rs` until 2026-09-10. That is
-//! outside this unit's `test_paths` (on-chain-client/tests), so
-//! `check-trace.sh` could not read an annotation on them however they were
-//! written: they were the last two `#[cfg(test)]` tests anywhere in
-//! `on-chain-client/src`, and five documents had already recorded the
-//! relocation as complete. Review round 1, finding 1. Relocating them is what
-//! makes the width case gateable at all.
+//! Why this target exists. A `#[cfg(test)]` module inside
+//! `on-chain-client/src/types.rs` is outside this unit's `test_paths`
+//! (on-chain-client/tests), so `check-trace.sh` could not read an annotation
+//! on it however it was written. Here, the width case is gateable.
 //!
 //! What the width case is really asserting. Not "20 is 20": each newtype
 //! wraps a field of the `OrgRegistry` ABI, and its width is that field's
@@ -27,9 +23,8 @@
 //!     Eight is therefore the width the DECODER gives the field, not the
 //!     width Solidity declares; the narrowing is deliberate (the counter
 //!     increments by one per `update` and cannot reach `u64::MAX`) and the
-//!     refusal of a wider value is gated in `tests/decode_org_state.rs` and, as
-//!     of this change, in `tests/decode_revive_event.rs` too — see the paragraph
-//!     below.
+//!     refusal of a wider value is gated in `tests/decode_org_state.rs` and in
+//!     `tests/decode_revive_event.rs` — see the paragraph below.
 //!
 //! So each assertion below states a width as `ABI word minus the offset the
 //! decoder reads from`, and then proves the newtype's inner array accepts
@@ -37,8 +32,7 @@
 //! convert. A bare `assert_eq!(size_of::<OrgAdmin>(), 20)` would pass just as
 //! happily if the ABI said something else.
 //!
-//! What that phrasing does NOT mean, spelled out because an earlier wording of
-//! this header implied a coupling that does not exist. `ABI_WORD`,
+//! What that phrasing does NOT mean: a coupling to `src`. `ABI_WORD`,
 //! `ABI_ADDRESS_OFFSET` and `ABI_EPOCH_OFFSET` below are `const`s of THIS
 //! FILE. Nothing in `src` feeds them: they are a hand-mirrored record of the
 //! regions `unpack_address_topic` and `decode_uint256_to_u64` read, kept in
@@ -46,50 +40,37 @@
 //!
 //! So this target gates the four WIDTHS, and reds on each of them — a
 //! `#[repr(align(N))]` on a newtype widens `size_of` past the ABI field
-//! without changing the inner array's type, and was watched failing once per
-//! width (32/20, 64/32, 64/32, 16/8). It does NOT gate the decoder's offsets.
+//! without changing the inner array's type, and reds it once per width
+//! (32/20, 64/32, 64/32, 16/8). It does NOT gate the decoder's offsets.
 //! Measured, not assumed: shifting both regions in `v_paseo_ah.rs` while
 //! keeping their widths leaves this target green at 2 passed, and reds
 //! `tests/decode_org_state.rs` at 4 of 9 instead. The offsets are covered
 //! there, by a target that decodes real blobs; what this file records about
 //! them is documentation. Coupling the two would mean exporting the offsets
-//! from `src` — a production change, deliberately not made in the hazard
-//! analysis that found this, and proposed there instead (see
-//! `on-chain-client/docs/risk/`, RC-sxjnx9 and not-minted control 17).
+//! from `src` — a production change, proposed in `on-chain-client/docs/risk/`
+//! (RC-sxjnx9 and not-minted control 17).
 //!
-//! **Where the over-wide-epoch refusal is gated.** An earlier round found that
-//! the epoch bullet above cited two targets where only one gated the refusal.
-//! That was true when it was written and is no longer true: this change added a
-//! gated case on the event path, and this paragraph is re-measured rather than
-//! left standing.
-//!
-//! **Re-measured 2026-09-29 by review round 4.** `DecodeError::EpochOverflow` is
-//! asserted in **two** places, not one: `tests/decode_org_state.rs:237`, in
+//! **Where the over-wide-epoch refusal is gated.** `DecodeError::EpochOverflow`
+//! is asserted in **two** places: `tests/decode_org_state.rs`, in
 //! `a_non_zero_byte_anywhere_in_the_epoch_slots_leading_twenty_four_bytes_is_refused`,
-//! and `tests/decode_revive_event.rs:777`, in
-//! `root_updated_epoch_above_u64_is_refused_not_truncated`. The second is the
-//! one test this change wrote. It starts from the `uint256_be(u64)` helper in
+//! and `tests/decode_revive_event.rs`, in
+//! `root_updated_epoch_above_u64_is_refused_not_truncated`. The second starts
+//! from the `uint256_be(u64)` helper in
 //! `tests/fuzz_support/mod.rs` — which writes eight big-endian bytes into
 //! `out[24..32]` and leaves the high twenty-four zero, so the helper alone can
 //! never construct the word that trips the guard — and then overwrites one of
 //! those high bytes, looping over all twenty-four positions. So the EVENT path
-//! now has an over-wide case of its own, and both paths are gated.
+//! has an over-wide case of its own, and both paths are gated. Both paths call
+//! the one `decode_uint256_to_u64`, but the event-path case is a second piece
+//! of evidence rather than a second copy of it: it shows that the REFUSAL, and
+//! not only the narrowing, is reachable from the event path.
 //!
-//! **The argument this replaces, and why it does not survive.** The earlier
-//! paragraph held that a case on the event path "would be a second copy of that
-//! evidence rather than a second piece of it", because both paths call the one
-//! `decode_uint256_to_u64` — which is still true of the code, and this rewrite
-//! does not dispute it. What undercuts the argument is the narrow thing the
-//! paragraph itself conceded: that the REFUSAL, and not only the narrowing, is
-//! reachable from the event path. Nothing established that before; the new test
-//! does, and that is a second piece of evidence rather than a second copy.
+//! Measured with `bytes[..24]` narrowed to `bytes[..0]` in
+//! `decode_uint256_to_u64` — the guard switched off while every other line
+//! stands — `--test decode_org_state` reports 8 passed, 1 failed, the failure
+//! being the storage case above.
 //!
-//! The 2026-09-11 measurement it cited stands as history and is worth keeping:
-//! with `bytes[..24]` narrowed to `bytes[..0]` in `decode_uint256_to_u64` — the
-//! guard switched off while every other line stands — `--test decode_org_state`
-//! reported 8 passed, 1 failed, the failure being the storage case above.
-//!
-//! `epoch_display_is_the_inner_value` relocates WITHOUT a `verifies:`
+//! `epoch_display_is_the_inner_value` carries no `verifies:`
 //! annotation, deliberately. `Display` for `Epoch` is used in error messages
 //! and logs and no requirement states it; requirements need tests, tests do
 //! not need requirements, and inventing an ID for a smoke test would put a

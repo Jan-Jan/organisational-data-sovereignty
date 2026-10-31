@@ -3,15 +3,14 @@
 //! event, so a log from any other contract can be told apart from this
 //! organisation's own.
 //!
-//! Why this target exists. `parse_revive_event` used to decode the
-//! `ContractEmitted` payload's `contract` field into `let _contract` and drop
-//! it, and `client.rs`'s `event_matches_contract` was
-//! `let _ = (ev, contract); true` — so *any* contract on Asset Hub could emit
-//! a log carrying the OrgRegistry signature hash and a victim organisation's
-//! indexed admin, and every subscriber received it as a genuine event with an
-//! attacker-chosen root (HAZ-werm85, PR-p5ngya). The fix is in two halves:
-//! the decoder carries the address out in `EmittedEvent`, and the caller
-//! compares it against the address the reader was constructed for.
+//! Why this target exists. A decoder that drops the `ContractEmitted`
+//! payload's `contract` field, or a caller that matches every contract, lets
+//! *any* contract on Asset Hub emit a log carrying the OrgRegistry signature
+//! hash and a victim organisation's indexed admin, which every subscriber
+//! receives as a genuine event with an attacker-chosen root (HAZ-werm85,
+//! PR-p5ngya). The control is in two halves: the decoder carries the address
+//! out in `EmittedEvent`, and the caller compares it against the address the
+//! reader was constructed for.
 //!
 //! **This target is the DECODER's half — REQ-5upq6n, that the address the
 //! decoder reports is the one the log actually carried, byte for byte, for
@@ -24,15 +23,9 @@
 //! REQ-9vwcwc here would add a second copy of that evidence rather than a
 //! second piece of it.
 //!
-//! What this file used to do, and why that was a defect (review round 1,
-//! finding 3). Until 2026-09-10 it did not import the decision at all: it
-//! reimplemented it locally as `fn is_from_configured_contract`, commented
-//! "The caller's decision, verbatim". A copy of a predicate tests the copy.
-//! That was measured, not argued — with the real comparison deleted from
-//! `internals::log_is_ours`, this file still reported 3 passed while
-//! `log_ownership` reported 3 failed. The local copy is gone and the calls
-//! below go through `on_chain_client::test_support::log_is_ours`, the same
-//! function `decode_contract_events` applies, so a mutation of the decision
+//! The calls below go through `on_chain_client::test_support::log_is_ours`,
+//! the same function `decode_contract_events` applies, and never a local copy
+//! of it: a copy of a predicate tests the copy. So a mutation of the decision
 //! reds this file too.
 //!
 //! What is still NOT covered here. That `decode_contract_events` really

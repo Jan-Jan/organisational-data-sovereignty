@@ -13,7 +13,6 @@
 
 mod endpoint;
 pub mod frame;
-pub mod peer_addr;
 
 use org_node::{DevicePublicKey, OrgNodeError};
 
@@ -27,8 +26,8 @@ pub use frame::{encode_frame, MAX_FRAME};
 
 /// Selects how an endpoint is bound and how peers are dialled.
 ///
-/// - `Loopback`: relay disabled, binds on `127.0.0.1`, dials the full
-///   `EndpointAddr` the caller holds for the peer.  Used by offline tests and
+/// - `Loopback`: relay disabled, binds on `127.0.0.1`, dials the
+///   addresses kept for the peer's DevicePublicKey.  Used by offline tests and
 ///   same-machine demo runs.
 /// - `Networked`: uses iroh's `presets::N0` (n0 relay servers + DNS/Pkarr
 ///   discovery), binds on all interfaces, and dials purely by `EndpointId`
@@ -47,25 +46,60 @@ pub enum TransportMode {
 pub const ALPN: &[u8] = b"/ods/org-node/1";
 
 /// The one byte the receive side writes back on an inbound stream, after
-/// the body (LLR-unqfj5; owner ruling 9, 2026-10-08): whether the message
-/// was acted on. A revoked Device's sender reads a refusal, or silence, as
-/// its cue to try its next kept address (REQ-ur7z4a).
+/// the body (LLR-hhgdk7): whether the message was acted on, and for an
+/// admission request, which of org-node's verdicts it got.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
     /// Acted on, and its store change (if any) written.
     Accepted,
     /// Refused, or failed, at any step.
     Refused,
+    /// An admission request this store already keeps from the sender.
+    AlreadyReceived,
+    /// An admission request for an invite another Device already used.
+    InviteUsedByAnotherDevice,
 }
 
 impl Verdict {
-    /// The byte on the stream: `0x00` accepted, `0x01` refused.
+    /// The byte on the stream: `0x00` accepted, `0x01` refused, `0x02`
+    /// already received, `0x03` invite used by another Device.
     pub fn as_byte(self) -> u8 {
         match self {
             Self::Accepted => 0x00,
             Self::Refused => 0x01,
+            Self::AlreadyReceived => 0x02,
+            Self::InviteUsedByAnotherDevice => 0x03,
         }
     }
+
+    /// The verdict a byte read back is, or `None` for any other byte
+    /// (LLR-fwz3tb).
+    pub fn from_byte(byte: u8) -> Option<Self> {
+        match byte {
+            0x00 => Some(Self::Accepted),
+            0x01 => Some(Self::Refused),
+            0x02 => Some(Self::AlreadyReceived),
+            0x03 => Some(Self::InviteUsedByAnotherDevice),
+            _ => None,
+        }
+    }
+}
+
+/// How long a send waits for the verdict byte after finishing its stream
+/// (LLR-fwz3tb).
+pub const VERDICT_TIME_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The endpoint identity and socket a kept address names — the form
+/// `OrgEndpoint::addresses` emits (LLR-v9dkrv): the endpoint identity as 64
+/// lower-case hex, `@`, the socket address — or `None` for text of any
+/// other form (the disk and the wire are edges: parsed).
+pub(crate) fn parse_kept_address(text: &str) -> Option<([u8; 32], std::net::SocketAddr)> {
+    let (id, socket) = text.split_once('@')?;
+    if id.len() != 64 || !id.chars().all(|character| character.is_ascii_digit() || ('a'..='f').contains(&character)) {
+        return None;
+    }
+    let id: [u8; 32] = hex::decode(id).ok()?.try_into().ok()?;
+    Some((id, socket.parse().ok()?))
 }
 
 /// Why the transport did not bind, connect, accept or read. Public data

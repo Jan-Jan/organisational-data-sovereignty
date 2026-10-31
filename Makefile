@@ -158,8 +158,16 @@
 # one blocker it names is gone. Enabling per-file floors is the fix for the
 # known limit that same note describes, and it needs a number chosen
 # deliberately for client.rs at 16.37% — its own change, not this one.
-ORG_MEMBERS_LINES := 92
-ORG_MEMBERS_REGIONS := 91
+#
+# Measured with floors at 0 over the recipe below (rustc 1.99.0 (b940084d7
+# 2026-09-28), cargo-llvm-cov 0.9.0, aarch64-darwin):
+#
+#   measured 2026-10-25        lines     regions
+#   org-members                96.55%     94.57%   (1036 of 1073 lines; 1637 of 1731 regions)
+#
+# Floors one point below, rounded down.
+ORG_MEMBERS_LINES := 95
+ORG_MEMBERS_REGIONS := 93
 # Recalibrated 2026-09-10 from 52/58 — see the RESOLVED note above for why the
 # basis changed. Set one point below the then-measured 42.91% / 43.47%; the
 # measurement is 41.75% / 42.45% since `type_widths` joined the recipe, and
@@ -172,8 +180,14 @@ ORG_MEMBERS_REGIONS := 91
 # 49.61% (490 of 1011 lines, 764 of 1540 regions), after falling to 44.49% /
 # 45.32% under the change's new client shell; floors unchanged (see the
 # 2026-10-13 rows above).
-ON_CHAIN_CLIENT_LINES := 46
-ON_CHAIN_CLIENT_REGIONS := 47
+# Measured 2026-10-25 with floors at 0 (rustc 1.99.0 (b940084d7 2026-09-28),
+# cargo-llvm-cov 0.9.0): 50.67% / 50.87% (529 of 1044 lines, 822 of 1616
+# regions); `write/proxy.rs` reads 100.00% lines. Floors one point below,
+# rounded down. The uncovered lines are the chain-facing shell (client.rs
+# 13.82% lines, write/subxt_ops.rs 0.00%, write/mod.rs 50.00%), reached only
+# by the chopsticks targets outside the gate.
+ON_CHAIN_CLIENT_LINES := 49
+ON_CHAIN_CLIENT_REGIONS := 49
 # person, first floors, 2026-10-04 — same rule: one point below the
 # measurement, rounded down to an integer. Measured on the task branch that
 # added this target, with `cargo llvm-cov -p person --summary-only` (stable
@@ -306,8 +320,19 @@ SPARSE_MERKLE_TREE_REGIONS := 95
 # platform keychain's error arms (keychain.rs 91.89%, store_file.rs 90.35%: an
 # OS keychain or file system that refuses is not reproducible in a test over
 # the memory keychain and a writable temporary directory).
-ORG_IO_LINES := 80
-ORG_IO_REGIONS := 78
+#
+# Measured with floors at 0 over the recipe below, which matches the verify
+# line (rustc 1.99.0 (b940084d7 2026-09-28), cargo-llvm-cov 0.9.0,
+# aarch64-darwin):
+#
+#   measured 2026-10-25        lines     regions
+#   org-io                     84.33%     83.53%   (2378 of 2820 lines; 4442 of 5318 regions)
+#
+# Floors one point below, rounded down. The shell left uncovered is as above: bin/preflight.rs 27.59%, preflight.rs 40.00%,
+# connect.rs 30.00%, chain_read.rs 54.17%, signatory.rs 72.92%,
+# transport/mod.rs 72.73%, and the production writer in write.rs (77.48%).
+ORG_IO_LINES := 83
+ORG_IO_REGIONS := 82
 
 # DECISION coverage, the other half of the class C target, added 2026-10-06
 # (worktree-guardrails-branch-coverage, docs/plans/2026-10-06-branch-coverage.md).
@@ -369,6 +394,12 @@ ORG_MEMBERS_BRANCHES := 98
 # to every call, so there is one instantiation. The floor stays at 99.
 # Re-measured 2026-10-13 (worktree-org-io-publish, task gate1fix), same
 # nightly: 58 of 58, 100%; the floor stays at 99.
+# Measured 2026-10-25 with the floor at 0, cargo 1.101.0-nightly (f3865b2a4
+# 2026-09-29), cargo-llvm-cov 0.9.0: 66 of 66 branches, 100%; floor 99. Same
+# day, same toolchain: org-members 123 of 124 branches, 99.19% (floor 98; the
+# one outcome is the `!old.is_calculated()` operand above); person 36 of 36,
+# 100% (floor 99; person's statement figures 100.00% / 100.00%, 344 of 344
+# lines, 535 of 535 regions, floors 99 / 99).
 ON_CHAIN_CLIENT_BRANCHES := 99
 PERSON_BRANCHES := 99
 # sparse-merkle-tree, first floor, 2026-10-25: 77 of 78 branches, 98.72%, on
@@ -415,6 +446,26 @@ SPARSE_MERKLE_TREE_BRANCHES := 97
 # 18), publish.rs (26 of 28), submit.rs (6 of 8), keychain.rs, lib.rs,
 # send.rs, transport/endpoint.rs and transport/frame.rs — the shortfall
 # against the class C target, for the owner to accept or not at merge.
+# Measured 2026-10-25 with the floor at 0, over the recipe matching the verify
+# line, cargo 1.101.0-nightly (f3865b2a4 2026-09-29), cargo-llvm-cov 0.9.0:
+# 180 of 224 branches, 80.36% — BELOW the floor of 82. The floor is not
+# lowered: the shortfall goes to the owner (merge verification record). Of the
+# 44 outcomes no test reaches, 11 are the preflight shell's (preflight.rs 3 of
+# 12, bin/preflight.rs 0 of 2); most of the rest are in: acknowledge.rs 45 of 54,
+# receiver.rs 6 of 10, persona.rs 4 of 6, store_file.rs 10 of 12, verify.rs
+# 24 of 26, and one each in custody.rs, endpoints.rs, exchange.rs,
+# keychain.rs, lib.rs, person.rs, propose.rs, send.rs (6 of 8),
+# transport/endpoint.rs, transport/frame.rs, transport/mod.rs (4 of 6) and
+# write.rs.
+# Re-measured 2026-10-28 (worktree-org-io-domain-api, round 2 review fixes,
+# task o2) with `make coverage-branch-org-io`, same recipe: 202 of 234
+# branches, 86.32% — above the floor of 82, which stays 82.
+# Re-measured 2026-10-28 (round 4 review fixes, task o4), same recipe: 201 of
+# 234 branches, 85.90%; the floor stays 82.
+# Re-measured 2026-10-29 (round 5 review fixes, task o5), same recipe: 202 of
+# 234 branches, 86.32%; the floor stays 82.
+# Re-measured 2026-10-30 (merge review round 1 fixes, task m3), same recipe:
+# 199 of 232 branches, 85.78%; the floor stays 82.
 ORG_IO_BRANCHES := 82
 
 # Per-crate, so a regression in the well-covered crate cannot hide behind the
@@ -445,10 +496,13 @@ coverage: coverage-org-members coverage-on-chain-client coverage-person coverage
 # quint.yml's `mbt` job and the `test` job in rust.yml both RUN that lane with
 # quint installed, which keeps the conformance argument honest. Neither
 # measures its coverage contribution; that remains unknown.
+#
+# Every org-members target the verify line `cargo test -p org-members` runs
+# but `mbt_conformance` is measured.
 ORG_MEMBERS_COVERAGE_ARGS := -p org-members \
 	--lib --test integration_test --test fuzz_tests \
 	--test newtypes --test encoding_golden --test person_error_mapping \
-	--test absence_proofs
+	--test absence_proofs --test device_key_decoding --test member_key_decoding
 
 coverage-org-members:
 	cargo llvm-cov $(ORG_MEMBERS_COVERAGE_ARGS) \
@@ -543,16 +597,17 @@ coverage-sparse-merkle-tree:
 # floors are re-set above ORG_IO_LINES. 2026-10-14 (task T19): `expectations_met`
 # (the six expectations shown through org-io) added, matching the verify line;
 # the floors are unchanged.
+# The targets below are those of the verify line.
 ORG_IO_COVERAGE_ARGS := -p org-io --features test-support,dev-seed \
 	--lib --test key_custody_config --test fuzz_seed_parse --test signatory_key \
-	--test dev_seed_env --test absences --test chain_read_rule --test receive_order \
-	--test submit_flow --test signatory_rule --test app_boundary --test open \
-	--test publish_path --test startup_reconcile \
-	--test keychain --test store_files --test transport_handshake \
+	--test dev_seed_env --test absences --test chain_read_rule \
+	--test signatory_rule --test app_boundary --test open \
+	--test keychain --test keychain_contract --test store_files --test transport_handshake \
 	--test transport_networked --test endpoints --test preflight_transport \
 	--test receive_step --test acknowledgement_inbound --test send_fanout \
-	--test peer_addr --test fuzz_peer_addr --test invitation_exchange \
-	--test node_stories --test expectations_met
+	--test invitation_exchange --test expectations_met \
+	--test rng_source --test person --test persona_creation --test propose \
+	--test chain_write --test verification --test requests --test acknowledgements
 
 coverage-org-io:
 	cargo llvm-cov $(ORG_IO_COVERAGE_ARGS) \

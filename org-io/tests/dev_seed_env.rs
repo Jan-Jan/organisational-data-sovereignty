@@ -39,6 +39,7 @@ fn connect_refuses_a_co_signer_equal_to_the_own_account() {
 
     let own_account = SignatoryKey::from_seed(parse_seed(SEED_HEX).unwrap()).unwrap().account_id();
     let dir = std::env::temp_dir().join(format!("org-io-own-co-signer-{}", std::process::id()));
+    // A directory an earlier run left is cleared; none there is fine.
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let service = org_node::service::OrgService::new(Vec::new()).unwrap();
@@ -46,6 +47,7 @@ fn connect_refuses_a_co_signer_equal_to_the_own_account() {
         ws_url: "ws://127.0.0.1:1".into(),
         contract_h160: [0u8; 20],
         co_signer: Some(format!("0x{}", hex::encode(own_account.0))),
+        ahead_limit: std::time::Duration::from_secs(1_200),
     };
 
     let refused = {

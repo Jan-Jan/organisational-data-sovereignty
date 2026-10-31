@@ -12,11 +12,8 @@
 //!     in `on-chain-client/tests/decode_revive_event.rs` (verifies REQ-52uc8f
 //!     and REQ-wnjz9j), which pins these two functions against the canonical
 //!     Solidity strings written out as literals and then asks the decoder to
-//!     accept those hashes and reject a drifted neighbour. This line named
-//!     the lib's internal `event_signatures_match_solidity_abi` until review
-//!     round 2's finding 7; that test was deleted from `src` by this change
-//!     and relocated here, re-expressed as behaviour rather than as equality
-//!     against a constant a test outside the crate cannot see.
+//!     accept those hashes and reject a drifted neighbour: behaviour, rather
+//!     than equality against a constant a test outside the crate cannot see.
 //!   * `encode_contract_emitted` — the canonical SCALE encoding of
 //!     `pallet_revive::Event::ContractEmitted { contract, data, topics }`,
 //!     mirroring the contract ABI. Independent of the decoder, so a round trip

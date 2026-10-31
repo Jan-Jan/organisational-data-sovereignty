@@ -1,4 +1,4 @@
-// Duplicated from on-chain-client/tests/common/chopsticks_fork.rs for the org-node e2e harness; copied to org-io with the preflight 2026-10-07.
+// The same as on-chain-client/tests/common/chopsticks_fork.rs, which is not a public API.
 //! Spawn / teardown a chopsticks-Paseo fork from a Rust test. Mirrors
 //! `../on-chain/scripts/chopsticks-sanity.sh`'s startup logic — same
 //! config, same HTTP pre-warm (chopsticks's WS metadata path observably
@@ -11,9 +11,9 @@
 //!   in `chopsticks-config.yml` resolves the same as in the shell gate.
 //! - WS URL + (optional) DB cleanup exposed to the caller.
 //!
-//! Single fixed port (8000). If integration tests start running in
-//! parallel and collide, picking a free port per fork is a trivial
-//! extension; not done yet because Task 7 tests are serial.
+//! Single fixed port (8000): the tests that fork run one at a time. If they
+//! run in parallel and collide, picking a free port per fork is a trivial
+//! extension.
 
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};

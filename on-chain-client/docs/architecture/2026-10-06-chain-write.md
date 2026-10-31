@@ -58,12 +58,20 @@ key is an argument of every call. The composition is written against a seam,
 controller), so the order of the steps, which step failed and whether a
 dispatch executed are decided by code a gated test reaches through a
 substitute; `SubxtWriteOps` implements the seam over subxt.
-traces: REQ-6jefu2, REQ-aat4yt, REQ-4aq8zh
+traces: REQ-6jefu2, REQ-aat4yt, REQ-4aq8zh, REQ-v86pyy, REQ-6vh3ht
 
 *Note 2026-10-08 (change worktree-org-io-publish, task T14):* the item also
 realises REQ-4aq8zh, mortal update writes from a reported window
 (LLR-zfm3bf, LLR-zj4jju in
 `on-chain-client/docs/architecture/2026-10-13-publish.md`).
+
+*Note 2026-10-20 (change worktree-org-io-domain-api, owner answer A4):* the
+item also realises REQ-v86pyy and REQ-6vh3ht, the genesis ceremony in two
+steps — `create_proxy`, then `found_at` at the proxy it returned, resumable
+from chain reads — with `genesis` kept as their composition. The seam gains
+two reads, `free_balance` and `mapped_account`, beside its three writes,
+and `WriteError` gains `MalformedStorage`
+(`on-chain-client/docs/architecture/2026-10-20-domain-api.md`).
 
 `SubxtWriteOps` and `FinalitySink` carry no low-level requirement, for the
 reason SDD-3b8zef carries none (the section "The item with no low-level
@@ -83,12 +91,27 @@ map_account_call())`; dispatch `proxied(proxy, revive_update_runtime_call(
 contract, root, key, Epoch(0)))`; and returns `Genesis { proxy, admin }` where
 `admin` is `OrgAdmin(h160_of(proxy))`.
 satisfies: REQ-6jefu2
+superseded-by: LLR-hea6y2
+
+*Superseded 2026-10-20 (change worktree-org-io-domain-api, owner answer
+A4).* LLR-hea6y2
+(`on-chain-client/docs/architecture/2026-10-20-domain-api.md`)
+makes `genesis` the composition of `create_proxy` and `found_at`, which
+reads the chain before funding and mapping; the order of the four writes on
+a fresh proxy is unchanged.
 
 **LLR-z9vugt**: when a genesis step returns an error, or a dispatched step's
 outcome is not `Executed`, `genesis` returns `WriteError::Step { step, reason
 }` whose `step` is the `GenesisStep` that failed — `CreatePure`, `Fund`,
 `MapAccount` or `RecordGenesis` — and performs no later step.
 satisfies: REQ-6jefu2
+superseded-by: LLR-chy957
+
+*Superseded 2026-10-20 (change worktree-org-io-domain-api, owner answer
+A4).* LLR-chy957
+(`on-chain-client/docs/architecture/2026-10-20-domain-api.md`)
+states the rule for `create_proxy` and `found_at`, and names the step of
+the two new chain reads.
 
 **LLR-qs8jfw**: `build_dispatch_tx(co_signatories, call)` returns the call as
 a top-level extrinsic when there are no co-signatories, and otherwise

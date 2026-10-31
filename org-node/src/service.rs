@@ -1,53 +1,49 @@
-//! OrgService: composes the Persona stores into the five user stories. See spec §6 and plan docs/superpowers/plans/2026-06-16-ods-phase-2-4-tauri-shell.md Task 2.
+//! OrgService: one sealed Persona store per Persona (LLR-f9x3vf), each one
+//! Persona's view of one Organisation (SDD-undd7q).
 //!
-//! It reads no chain (ruling B, change `worktree-org-io-create`): every
-//! operation that judges against the chain takes the Organisation's state as
-//! an `Option<OrgState>` argument, which org-io reads, and is synchronous. A
-//! receive is one path in two steps, on values (LLR-zetn7a, LLR-6qjmhf):
-//! `check_received(sender, body)` decodes the body and runs every check that
-//! needs no chain state, deciding an acknowledgement there or naming the
-//! Organisation whose state it needs; `commit_checked` decides the checked
-//! message against that state. It binds no endpoint and sends and receives
-//! nothing: org-io receives the body and its sender, and
-//! sends the bodies a commit returns.
+//! It reads no chain: the one operation that judges against the chain takes
+//! the Organisation's state as a value (LLR-7en38k). It binds no endpoint and
+//! sends and receives nothing: org-io receives a body and its sender and
+//! hands them to `check_received`, and sends the messages org-node builds.
 //!
-//! It writes no file: it holds one sealed store per Persona (LLR-rdda86), and every operation
-//! that changes one returns that store's `StoreWrite` (or, when the store's
-//! Persona is forgotten, `StoreChange::Forgotten`) for org-io to write
-//! (LLR-bvt5up). A refusal changes nothing: each change is made on a copy of
-//! the store's data, sealed, and only then adopted.
+//! It writes no file: every operation that changes a store returns at most
+//! one `StoreChange` for org-io to write (LLR-ay8nvu). A refusal changes
+//! nothing: each change is made on a copy of the store's data, sealed, and
+//! only then adopted.
 //!
 //! Gated on the `app` feature.
-use org_members::delta::Delta;
 use org_members::hasher::Blake3Hasher;
 use org_members::trie::OrgTrie;
-use org_members::{DevicePublicKey, Handle, MemberId, MemberLeaf, Name, PersonPublicKey, RootHash, Surname};
+use org_members::{DevicePublicKey, Handle, MemberId, MemberLeaf, Name, PersonPublicKey, Surname};
 use rand_core::{CryptoRng, RngCore};
 
 use crate::chain::OrgState;
 use crate::envelope::Envelope;
 use crate::error::OrgNodeError;
 use crate::ids::OrgId;
-use crate::invitation::{Invite, InviteId, InviteReply};
+use crate::invitation::{EndpointAddresses, Invite, InviteId};
 use crate::keys::{DeviceSecret, X25519Keypair};
-use crate::revocation::{Acknowledgement, RevocationNotice, VerifiedAcknowledgement};
+use crate::removal::{KeptAcknowledgement, StoreContent};
+use crate::revocation::{RevocationNotice, VerifiedAcknowledgement};
 use crate::sequence::SeqGuard;
 use crate::store::{
-    ExpectedAdmission, MemberSnapshot, OrgRecord, PersonaRecord, PersonaStatus, PersonaStore, ProvisionalChange,
-    ProvisionalUpdate, RawMemberSnapshot, StoreData, StoreWrite,
+    check_preferred_handles, ensure_within_bound, parse_field, parse_members, ExpectedAdmission, FoundingView,
+    KeptAdmissionRequest, MemberSnapshot, OrgRecord, Origin, OutstandingInvite, PersonaRecord, PersonaRecordView,
+    PersonaStatus, PersonaStore, PersonaView, ProvisionalChange, ProvisionalFounding, ProvisionalMember, ProvisionalOrganisation,
+    ProvisionalOrganisationView, RawMemberSnapshot, RecordView, StoreData, StoreWrite,
 };
-pub use crate::store::ProvisionalTarget;
-use crate::types::{ChainAccount, Epoch, OrgPrivateKey, OrgPublicKey, PersonaId, SequenceNumber};
-use crate::verify::{VerifiedUpdate, VerifyContext, verify_envelope_against_chain};
-use crate::wire::{WireMessage, decode_message, encode_message};
+use crate::types::{ChainAccount, Epoch, OrgPrivateKey, PersonaId, SequenceNumber};
+use crate::verify::{check_chain_free, VerifyContext};
+use crate::verify_org::{AheadLimit, Judgement, VerificationTime, Verified};
+use crate::wire::{
+    decode_message, encode_message, peek_admission_request, peek_kind_and_org_id, WireMessage, MAX_MESSAGE,
+    ORGANISATION_INDEX, ORG_INFORMATION_INDEX,
+};
 
 type Trie = OrgTrie<Blake3Hasher>;
 
-// ============================================================
-// Helper: rebuild a trie mirror from persisted MemberSnapshots.
-// ============================================================
-
-fn trie_from_snapshots(snapshots: &[MemberSnapshot]) -> Result<Trie, OrgNodeError> {
+/// A trie mirror rebuilt from persisted member snapshots.
+pub(crate) fn trie_from_snapshots(snapshots: &[MemberSnapshot]) -> Result<Trie, OrgNodeError> {
     let leaves = snapshots
         .iter()
         .map(|s| {
@@ -56,6 +52,27 @@ fn trie_from_snapshots(snapshots: &[MemberSnapshot]) -> Result<Trie, OrgNodeErro
         .collect::<Result<Vec<_>, _>>()
         .map_err(OrgNodeError::Trie)?;
     Trie::genesis(leaves).map_err(OrgNodeError::Trie)
+}
+
+/// The record a first admission extends, decoded from the snapshot its
+/// Organisation-information message carries (REQ-d9g6nt, LLR-j6j95z),
+/// refusing a value its type's parse refuses with `member.*` (LLR-7yu2xy)
+/// and bytes that do not decode as a snapshot with `record_snapshot`: the
+/// bytes come from a peer's message, not from a chain read.
+// Public only for the fuzz target `fuzz_first_admission_base`; not API.
+#[doc(hidden)]
+pub fn first_admission_base(record_snapshot: &[u8]) -> Result<Trie, OrgNodeError> {
+    let raw: Vec<RawMemberSnapshot> = postcard::from_bytes(record_snapshot)
+        .map_err(|error| OrgNodeError::InvalidField { field: "record_snapshot", reason: error.to_string() })?;
+    trie_from_snapshots(&parse_members(raw)?)
+}
+
+/// The members a kept base snapshot encodes, each field parsed by its
+/// type (LLR-7yu2xy's `member.*` refusals).
+fn decode_record_snapshot(bytes: &[u8]) -> Result<Vec<MemberSnapshot>, OrgNodeError> {
+    let raw: Vec<RawMemberSnapshot> = postcard::from_bytes(bytes)
+        .map_err(|error| OrgNodeError::InvalidField { field: "org.kept_base_snapshot", reason: error.to_string() })?;
+    parse_members(raw)
 }
 
 /// The persisted snapshot of a trie member.
@@ -70,62 +87,44 @@ fn snapshot_of(m: &MemberLeaf) -> MemberSnapshot {
     }
 }
 
-/// The record a first admission extends, decoded from the snapshot its
-/// Organisation-information message carries (REQ-d9g6nt, LLR-j6j95z).
-// Public only for the fuzz target `fuzz_first_admission_base`; not API.
-#[doc(hidden)]
-pub fn first_admission_base(record_snapshot: &[u8]) -> Result<Trie, OrgNodeError> {
-    let raw: Vec<RawMemberSnapshot> = postcard::from_bytes(record_snapshot)
-        .map_err(|e| OrgNodeError::Chain(format!("record snapshot decode: {e}")))?;
-    let snaps = raw.into_iter().map(MemberSnapshot::try_from).collect::<Result<Vec<_>, _>>()?;
-    trie_from_snapshots(&snaps)
+/// A Persona identifier from its Member-as-a-group key: the first 16 bytes,
+/// in hex.
+fn persona_id_for(member_key: &PersonPublicKey) -> PersonaId {
+    use std::fmt::Write as _;
+    PersonaId::new(member_key.as_bytes().iter().take(16).fold(String::new(), |mut hex, byte| {
+        // Writing to a `String` cannot fail: its `fmt::Write` returns `Ok`
+        // on every write, so there is no error to report.
+        let _ = write!(hex, "{byte:02x}");
+        hex
+    }))
 }
 
-/// Encode the record a committed update extends, as an
-/// Organisation-information message's `record_snapshot`;
-/// `first_admission_base` decodes it.
-fn encode_record_snapshot(snapshots: &[MemberSnapshot]) -> Result<Vec<u8>, OrgNodeError> {
-    postcard::to_allocvec(snapshots)
-        .map_err(|e| OrgNodeError::Chain(format!("record snapshot encode: {e}")))
+/// A fresh `MemberId`: 32 bytes from the caller's cryptographic random
+/// source, never derived from a key (REQ-d9g6nt, LLR-4rv4kr).
+fn fresh_member_id<R: RngCore + CryptoRng>(rng: &mut R) -> MemberId {
+    let mut id = [0u8; 32];
+    rng.fill_bytes(&mut id);
+    MemberId::new(id)
 }
 
-/// The person an admission adds, as parsed values the app built from the
-/// Invite reply it parsed (LLR-kkj64b).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Joiner {
-    pub handle: Handle,
-    pub name: Name,
-    pub surname: Surname,
-    pub member_key: PersonPublicKey,
-    pub device_key: DevicePublicKey,
-}
-
-/// What an operation that may forget a Persona did to its store
-/// (LLR-bvt5up, LLR-pba7yu): sealed it again, or forgot it with its
-/// Persona, so that org-io removes that Persona's file.
-#[must_use = "org-io must write or remove the store before reporting success (org-io's write-before-success requirement)"]
+/// The one store change an operation returns (LLR-ay8nvu): the store,
+/// sealed again. No variant removes a store: org-io deletes a store's file
+/// and keychain item.
+#[must_use = "org-io must write the store before reporting success (org-io's write-before-success requirement)"]
 #[derive(Debug)]
 pub enum StoreChange {
     Sealed(StoreWrite),
-    Forgotten { device_key: DevicePublicKey },
 }
 
-// ============================================================
-// OrgService — the composition root.
-// ============================================================
-
-/// Composes one `PersonaStore` per Persona into the five org-node user
-/// stories. It holds no chain and no endpoint: the
-/// chain-judging operations take the state as a value, a receive takes the
-/// body and its sender as values, and a commit returns the bodies to send,
-/// so the full composition runs headless on values a test passes.
+/// Holds one `PersonaStore` per Persona (LLR-f9x3vf). It holds no chain and
+/// no endpoint, so it runs headless on values a test passes.
 pub struct OrgService {
     stores: Vec<PersonaStore>,
 }
 
 impl OrgService {
     /// A service over `stores`, one per Persona; two stores with one Device
-    /// key are refused with `DuplicatePersonaStore` (LLR-rdda86).
+    /// key are refused with `DuplicatePersonaStore` (LLR-f9x3vf).
     pub fn new(stores: Vec<PersonaStore>) -> Result<Self, OrgNodeError> {
         for (index, store) in stores.iter().enumerate() {
             if stores[..index].iter().any(|earlier| earlier.device_key() == store.device_key()) {
@@ -136,1109 +135,1426 @@ impl OrgService {
     }
 
     // ----------------------------------------------------------
-    // Story precursor: create a persona (no chain, no network).
+    // Proposing a founding (SDD-hwax8v).
     // ----------------------------------------------------------
 
-    /// Generate a new Persona with a fresh X25519 member seed and a fresh
-    /// device secret, open a new store for it keyed from that secret, and
-    /// return the Persona's id, the secret, by value, for org-io to keep in
-    /// the keychain, and the new store's write; org-node keeps no copy of the
-    /// secret (LLR-e5kqhg).
-    pub fn create_persona<R: RngCore + CryptoRng>(
+    /// Propose a founding (LLR-d4gpxm, LLR-9qavm7, LLR-rjphn4): the name,
+    /// surname and Handle are parsed first, in that order (`InvalidField`
+    /// `member.name`, `member.surname`, `member.handle`), before any draw;
+    /// then a fresh Device seed, a member seed and a MemberId are drawn from
+    /// `rng`, the founding record listing the founder alone is built and its
+    /// Membership root calculated, and only then the Organisation key pair is
+    /// drawn, refused with `DuplicateOrgPublicKey` when its public key equals the
+    /// founder's Member-as-a-group key or DevicePublicKey. A new store is
+    /// added holding the Persona (`org_id` `None`, `handle` set, `status`
+    /// `Proposed`), `org_name` and the provisional founding at epoch 1 with no
+    /// proxy; no current record, no chain operation. The secret is returned by
+    /// value for org-io's keychain and org-node keeps no copy; a refusal adds
+    /// no store and returns no secret.
+    pub fn propose_founding<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
-        handle: Handle,
-        name: Name,
-        surname: Surname,
-    ) -> Result<(PersonaId, DeviceSecret, StoreWrite), OrgNodeError> {
-        let member_kp = X25519Keypair::generate(rng);
+        name: &str,
+        surname: &str,
+        handle: &str,
+        org_name: String,
+    ) -> Result<(DevicePublicKey, DeviceSecret, StoreChange), OrgNodeError> {
+        let name = parse_field("member.name", Name::parse(name))?;
+        let surname = parse_field("member.surname", Surname::parse(surname))?;
+        let handle = parse_field("member.handle", Handle::parse(handle))?;
         let secret = DeviceSecret::generate(rng);
-        // Derive a unique persona_id from the Member-as-a-group key.
-        let persona_id = persona_id_for(&member_kp.member_key()?);
-        let record = PersonaRecord {
-            persona_id: persona_id.clone(),
+        let member_key_pair = X25519Keypair::generate(rng);
+        let member_key = member_key_pair.member_key()?;
+        let founder = MemberLeaf::new(
+            fresh_member_id(rng),
+            handle.clone(),
+            member_key,
+            name.clone(),
+            surname.clone(),
+            vec![secret.device_key()],
+        )
+        .map_err(OrgNodeError::Trie)?;
+        let trie = Trie::genesis(vec![founder.clone()]).map_err(OrgNodeError::Trie)?;
+        let root = trie.root_hash().map_err(OrgNodeError::Trie)?;
+        // REQ-ech45n: drawn for this Organisation alone, after the root, and
+        // equal to no key of the founding record (LLR-9qavm7).
+        let org_key = X25519Keypair::generate(rng);
+        let org_pub_key = org_key.org_public_key()?;
+        org_pub_key.ensure_distinct_from(&trie.members())?;
+        let persona = PersonaRecord {
+            persona_id: persona_id_for(&member_key),
             org_id: None,
-            handle,
             name,
             surname,
-            member_seed: member_kp.member_seed(),
+            handle: Some(handle),
+            member_seed: member_key_pair.member_seed(),
             device_key: secret.device_key(),
             member_id: None,
             status: PersonaStatus::Proposed,
         };
-        let store = PersonaStore::create(&secret, record)?;
-        if self.stores.iter().any(|held| held.device_key() == store.device_key()) {
-            return Err(OrgNodeError::DuplicatePersonaStore);
-        }
-        let write = store.seal(rng)?;
-        self.stores.push(store);
-        Ok((persona_id, secret, write))
-    }
-
-    // ----------------------------------------------------------
-    // Story 1: create_organisation builds the genesis update; commit_genesis
-    // records it once the chain carries it.
-    // ----------------------------------------------------------
-
-    /// Build the genesis provisional update for `persona_id` and keep it: a
-    /// fresh Organisation key pair whose private key the update holds, no
-    /// chain operation, no record, no binding (LLR-s6qnht, LLR-qjz3q4,
-    /// LLR-68yd3j, LLR-sj7cd5). A Persona already bound to an Organisation
-    /// is refused (LLR-6z5xya).
-    pub fn create_organisation<R: RngCore + CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        persona_id: &PersonaId,
-    ) -> Result<(ProvisionalUpdate, StoreWrite), OrgNodeError> {
-        self.ensure_unbound(persona_id)?;
-        let index = self.persona_index(persona_id)?;
-        let persona = &self.stores[index].data().persona;
-        let founder = MemberLeaf::new(
-            fresh_member_id(rng),
-            persona.handle.clone(),
-            persona.member_seed.x25519_keypair().member_key()?,
-            persona.name.clone(),
-            persona.surname.clone(),
-            vec![persona.device_key],
-        )
-        .map_err(OrgNodeError::Trie)?;
-        let trie = Trie::genesis(vec![founder.clone()]).map_err(OrgNodeError::Trie)?;
-        // REQ-ech45n: drawn for this Organisation alone, its public key equal
-        // to no key of the genesis record (LLR-sj7cd5).
-        let org_kp = X25519Keypair::generate(rng);
-        let org_pub_key = org_kp.org_public_key()?;
-        org_pub_key.ensure_distinct_from(&trie.members())?;
-        let update = ProvisionalUpdate {
-            org_id: None,
-            persona_id: persona_id.clone(),
-            base_root: None,
-            resulting_root: trie.root_hash().map_err(OrgNodeError::Trie)?,
-            // Genesis produces epoch 1 on the contract (Decision 16).
-            seq: SequenceNumber::new(1),
+        let founding = ProvisionalFounding {
+            epoch: Epoch::new(1),
+            members: vec![snapshot_of(&founder)],
+            root,
             org_pub_key,
-            change: ProvisionalChange::Genesis {
-                members: vec![snapshot_of(&founder)],
-                org_private_key: org_kp.org_private_key(),
-            },
+            org_private_key: org_key.org_private_key(),
+            proxy: None,
         };
-        let ((), write) = self.change(index, rng, |data| data.insert_provisional(update.clone()))?;
-        Ok((update, write))
+        let data = StoreData { org_name, founding: Some(founding), ..StoreData::new(persona) };
+        let change = self.add_store(rng, &secret, data)?;
+        Ok((secret.device_key(), secret, change))
     }
 
-    /// Commit the genesis update `persona_id` built, once the chain carries
-    /// its root and key at epoch 1, against `chain_state`, the state org-io
-    /// read for `org_id` (`None`: `OrgNotOnChain`): select the update,
-    /// require the epoch to be the update's Sequence number and the members
-    /// to rebuild the root, then create the record with the chain's values,
-    /// mark 1, the update's private key and `proxy_account`, consume the
-    /// update with the Persona's other genesis updates (LLR-pk6mhv) and bind
-    /// the Persona, which must be unbound, with the MemberId of the genesis
-    /// leaf listing its Device (LLR-hby4jr) (LLR-wzqqg9, LLR-qjz3q4,
-    /// LLR-w3fhhg, LLR-dzte8x, LLR-eyc4ud). Any refusal changes nothing and
-    /// returns no write (LLR-ewkg85); no endpoint is bound (LLR-4tcxsu).
-    pub fn commit_genesis<R: RngCore + CryptoRng>(
+    /// Record the founding's pure proxy and its Organisation identifier
+    /// (LLR-nx87k5, LLR-qqqg4b): sets the founding's `proxy` and
+    /// `persona.org_id`. Refused, changing nothing: a store with no
+    /// provisional founding (`NoProvisionalFounding`); a founding holding
+    /// another proxy or a Persona bound to another Organisation
+    /// (`FoundingProxyAlreadyRecorded`). The same proxy and identifier again
+    /// are accepted and the store sealed unchanged in content, so a retry
+    /// after a lost write succeeds.
+    pub fn record_founding_proxy<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
-        persona_id: &PersonaId,
+        device_key: &DevicePublicKey,
         org_id: OrgId,
-        proxy_account: ChainAccount,
-        chain_state: Option<OrgState>,
-    ) -> Result<(ReceiveOutcome, StoreWrite), OrgNodeError> {
-        // One Persona, one Organisation (REQ-yp75u9, LLR-eyc4ud).
-        self.ensure_unbound(persona_id)?;
-        let index = self.persona_index(persona_id)?;
-        let state = chain_state.ok_or(OrgNodeError::OrgNotOnChain)?;
-        let update = self
-            .genesis_updates(persona_id)
-            .find(|u| u.resulting_root == state.root_hash && u.org_pub_key == state.org_pub_key)
-            .cloned()
-            .ok_or(OrgNodeError::NoProvisionalUpdate)?;
-        // A chain already past epoch 1 — another signatory updated the
-        // Organisation first — is refused too: the record then comes from an
-        // update another Member sends (owner ruling 2026-10-06).
-        if state.epoch.get() != update.seq.get() {
-            return Err(OrgNodeError::SeqNotEpoch { seq: update.seq.get(), epoch: state.epoch.get() });
-        }
-        let ProvisionalChange::Genesis { members, org_private_key } = update.change.clone() else {
-            return Err(OrgNodeError::NoProvisionalUpdate);
-        };
-        if trie_from_snapshots(&members)?.root_hash().map_err(OrgNodeError::Trie)? != state.root_hash {
-            return Err(OrgNodeError::RootMismatch);
-        }
-        // The founder's MemberId is the genesis leaf listing this Persona's
-        // Device; the Persona is bound with it (LLR-hby4jr, PR-eqs4fs), and
-        // an update with no such leaf is refused (LLR-wzqqg9).
-        // `create_organisation` builds that leaf from this Persona, so a
-        // genesis update without it is, like a non-genesis change above, no
-        // update this Persona can commit.
-        let device = self.stores[index].device_key();
-        let founder_id = members
-            .iter()
-            .find(|member| member.device_keys.contains(&device))
-            .map(|member| member.id)
-            .ok_or(OrgNodeError::NoProvisionalUpdate)?;
-        // The founding consumes its update and drops the Persona's other
-        // genesis updates, each with its private key (LLR-pk6mhv): they are
-        // all in this Persona's store.
-        let founding = ProvisionalTarget::Genesis(persona_id.clone());
+        proxy: ChainAccount,
+    ) -> Result<StoreChange, OrgNodeError> {
+        let index = self.store_index(device_key)?;
         let ((), write) = self.change(index, rng, |data| {
-            data.orgs.push(OrgRecord {
-                org_id,
-                root_hash: state.root_hash,
-                org_pub_key: state.org_pub_key,
-                epoch: state.epoch,
-                last_seq: update.seq,
-                trie_members: members,
-                proxy_account: Some(proxy_account),
-                org_private_key,
-                kept_change_set: None,
-            });
-            data.provisional_updates.retain(|provisional| !founding.names(provisional));
-            discard_orphans(data, org_id, state.root_hash);
-            bind_persona(data, org_id, founder_id);
+            let founding = data.founding.as_mut().ok_or(OrgNodeError::NoProvisionalFounding)?;
+            if founding.proxy.is_some_and(|held| held != proxy) || data.persona.org_id.is_some_and(|held| held != org_id) {
+                return Err(OrgNodeError::FoundingProxyAlreadyRecorded);
+            }
+            founding.proxy = Some(proxy);
+            data.persona.org_id = Some(org_id);
             Ok(())
         })?;
-        // The founder is admitted to its own Organisation.
-        let outcome = ReceiveOutcome {
-            org_id,
-            epoch: state.epoch,
-            root: state.root_hash,
-            kind: ReceiveKind::Admitted,
-            acknowledgements: Vec::new(),
-        };
-        Ok((outcome, write))
+        Ok(StoreChange::Sealed(write))
     }
 
-    /// Remove the one provisional update for `target` whose resulting root
-    /// is `resulting_root` and whose Organisation public key is
-    /// `org_pub_key`, with the Organisation private key it holds, and return
-    /// the write of the store that held it; refuse one not stored with
-    /// `NoProvisionalUpdate`, changing and returning nothing (LLR-7cmp38).
-    pub fn discard_provisional<R: RngCore + CryptoRng>(
+    // ----------------------------------------------------------
+    // Proposing a Member (SDD-hwax8v).
+    // ----------------------------------------------------------
+
+    /// Propose to join the Organisation of `invite` as a new Persona
+    /// (LLR-6acxu9, LLR-rjphn4, LLR-w2uyyh). The name, surname and each
+    /// preferred Handle are parsed, in that order (`InvalidField`
+    /// `member.name`, `member.surname`, `member.preferred_handles[i]`), and
+    /// the Handles checked to be one to three and pairwise distinct
+    /// (`member.preferred_handles`); an Organisation a held store is bound
+    /// to or expects admission to is refused
+    /// (`OrganisationHeldByAnotherPersona`) — all before any draw, adding no
+    /// store. Then a fresh Device seed and member seed are drawn for this
+    /// Organisation alone, and a new store added holding the Persona
+    /// (`org_id` the Invite's, no Handle, `Proposed`), the Invite's
+    /// Organisation name, the provisional Member and one expected admission;
+    /// no chain operation. The secret is returned by value and org-node
+    /// keeps no copy.
+    pub fn propose_member<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
-        target: ProvisionalTarget,
-        resulting_root: RootHash,
-        org_pub_key: OrgPublicKey,
-    ) -> Result<StoreWrite, OrgNodeError> {
-        let names = |provisional: &ProvisionalUpdate| {
-            provisional.resulting_root == resulting_root
-                && provisional.org_pub_key == org_pub_key
-                && target.names(provisional)
-        };
-        let index = self
-            .stores
+        invite: &Invite,
+        name: &str,
+        surname: &str,
+        handles: &[&str],
+    ) -> Result<(DevicePublicKey, DeviceSecret, StoreChange), OrgNodeError> {
+        const HANDLE_FIELDS: [&str; 3] =
+            ["member.preferred_handles[0]", "member.preferred_handles[1]", "member.preferred_handles[2]"];
+        let name = parse_field("member.name", Name::parse(name))?;
+        let surname = parse_field("member.surname", Surname::parse(surname))?;
+        let preferred_handles = handles
             .iter()
-            .position(|store| store.data().provisional_updates.iter().any(names))
-            .ok_or(OrgNodeError::NoProvisionalUpdate)?;
-        let ((), write) = self.change(index, rng, |data| {
-            let position =
-                data.provisional_updates.iter().position(names).ok_or(OrgNodeError::NoProvisionalUpdate)?;
-            data.provisional_updates.remove(position);
-            Ok(())
-        })?;
-        Ok(write)
-    }
-
-    /// The stored provisional updates for `org_id` (LLR-nvn3wk).
-    pub fn provisional_updates(&self, org_id: OrgId) -> Vec<ProvisionalUpdate> {
-        self.stores
-            .iter()
-            .flat_map(|store| store.data().provisional_updates.iter())
-            .filter(|provisional| provisional.org_id == Some(org_id))
-            .cloned()
-            .collect()
-    }
-
-    /// Whether the store of the Persona bound to `org_id` holds a
-    /// provisional update for `org_id` built on `base_root` with
-    /// `resulting_root` and `org_pub_key`, compared by reference: no update,
-    /// and no private key it holds, is copied (LLR-gwk4nk).
-    pub fn holds_provisional(
-        &self,
-        org_id: OrgId,
-        base_root: RootHash,
-        resulting_root: RootHash,
-        org_pub_key: OrgPublicKey,
-    ) -> bool {
-        self.bound_index(org_id).is_some_and(|index| {
-            self.stores[index].data().provisional_updates.iter().any(|provisional| {
-                provisional.org_id == Some(org_id)
-                    && provisional.base_root == Some(base_root)
-                    && provisional.resulting_root == resulting_root
-                    && provisional.org_pub_key == org_pub_key
+            .enumerate()
+            .map(|(index, handle)| {
+                parse_field(HANDLE_FIELDS.get(index).copied().unwrap_or("member.preferred_handles"), Handle::parse(handle))
             })
-        })
+            .collect::<Result<Vec<_>, _>>()?;
+        check_preferred_handles("member.preferred_handles", &preferred_handles)?;
+        let org_id = invite.org_id;
+        // `data()` refuses only a removed store (`OrganisationRemoved`),
+        // which `bound_org_of` already reads for its Organisation; it holds
+        // no record and no expectation (LLR-2d5a7m), so nothing is missed by
+        // reading the refusal as "neither".
+        let held_elsewhere = self.stores.iter().any(|store| {
+            bound_org_of(store) == Some(org_id)
+                || store.data().ok().is_some_and(|data| {
+                    data.record.as_ref().is_some_and(|record| record.org_id == org_id)
+                        || data.expected_admissions.iter().any(|expected| expected.org_id == org_id)
+                })
+        });
+        if held_elsewhere {
+            return Err(OrgNodeError::OrganisationHeldByAnotherPersona { org_id });
+        }
+        let secret = DeviceSecret::generate(rng);
+        let member_key_pair = X25519Keypair::generate(rng);
+        let member_key = member_key_pair.member_key()?;
+        let persona = PersonaRecord {
+            persona_id: persona_id_for(&member_key),
+            org_id: Some(org_id),
+            name: name.clone(),
+            surname: surname.clone(),
+            handle: None,
+            member_seed: member_key_pair.member_seed(),
+            device_key: secret.device_key(),
+            member_id: None,
+            status: PersonaStatus::Proposed,
+        };
+        let provisional = ProvisionalMember {
+            org_id,
+            invite_id: invite.invite_id,
+            issuer: invite.issuer,
+            issuer_addresses: invite.issuer_addresses.clone(),
+            name,
+            surname,
+            preferred_handles,
+            member_key,
+            device_key: secret.device_key(),
+        };
+        let data = StoreData {
+            org_name: invite.org_name.clone(),
+            member: Some(provisional),
+            expected_admissions: vec![ExpectedAdmission { org_id }],
+            ..StoreData::new(persona)
+        };
+        let change = self.add_store(rng, &secret, data)?;
+        Ok((secret.device_key(), secret, change))
     }
 
-    /// The genesis updates `persona_id` built (LLR-nvn3wk).
-    pub fn genesis_provisional_updates(&self, persona_id: &PersonaId) -> Vec<ProvisionalUpdate> {
-        self.genesis_updates(persona_id).cloned().collect()
+    // ----------------------------------------------------------
+    // The receive path (chain-free).
+    // ----------------------------------------------------------
+
+    /// The check of a received body, in the store of `device_key`
+    /// (LLR-94rzrk): `sender` is the Device the transport authenticated for
+    /// it. It takes no chain state. A body over `MAX_MESSAGE` is refused
+    /// (`MessageTooLarge`); an admission request is read first with
+    /// `peek_admission_request` (LLR-6gkxpg); any other body that does not
+    /// decode is `MalformedMessage`. Then the sender rule (LLR-283x6f,
+    /// LLR-w7b9kd): in a store with a current record, Organisation
+    /// information, a revocation notice and an organisation answer only from
+    /// a Device the record lists, an organisation request only from a listed
+    /// Device or one held as revoked, an acknowledgement and an admission
+    /// request from any Device; anything else is `SenderNotListed` before it
+    /// is used. Every refusal returns no `StoreChange`.
+    ///
+    /// In a store with no current record (a provisional founding or a
+    /// provisional Member) a body is decoded no further than its kind and
+    /// Organisation identifier unless it is Organisation information, or an
+    /// organisation answer, for an Organisation an expected admission names
+    /// (LLR-e6w3nr):
+    /// `AdmissionNotExpected` for other Organisation information, `OrgNotHeld`
+    /// for any other kind. Organisation information is kept as a received
+    /// provisional organisation (LLR-76bhw9, LLR-s3vq6d), within the bound of
+    /// LLR-m76r4k.
+    ///
+    /// A revocation notice `revocation::check_notice` passes is kept,
+    /// within the same bound, and never acted on at receipt
+    /// (`RevocationNoticeKept`, LLR-r4qtqe). An acknowledgement is decided by
+    /// `revocation::check_acknowledgement` with `sender` and changes nothing
+    /// (`Acknowledged`, LLR-5wg8cu).
+    ///
+    /// An organisation request is answered with the record and its key to a
+    /// listed Device and with its notice to a revoked one, the sender's
+    /// address-book entry set (`OrganisationRequest`, LLR-7kdhst,
+    /// LLR-j338wq, LLR-h9d65p); an organisation answer is kept only while
+    /// behind (`OrganisationAnswerKept`, LLR-kd7u2r; with no record,
+    /// LLR-e6w3nr).
+    pub fn check_received<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        device_key: &DevicePublicKey,
+        sender: DevicePublicKey,
+        body: &[u8],
+    ) -> Result<(Checked, Option<StoreChange>), OrgNodeError> {
+        let index = self.store_index(device_key)?;
+        if body.len() > MAX_MESSAGE {
+            return Err(OrgNodeError::MessageTooLarge { length: body.len() });
+        }
+        if self.stores[index].data()?.record.is_none() {
+            return self.check_without_record(rng, index, sender, body);
+        }
+        if let Some((org_id, invite_id)) = peek_admission_request(body) {
+            return self.check_admission_request(rng, index, sender, org_id, invite_id, body);
+        }
+        let message = decode_message(body)?;
+        let org_id = message.org_id();
+        let data = self.stores[index].data()?;
+        let Some(record) = &data.record else {
+            return Err(OrgNodeError::OrgNotHeld { org_id });
+        };
+        let listed = record.lists_device(&sender);
+        let revoked = data.revoked_devices.iter().any(|revoked| revoked.device_key == sender);
+        let acted_on = match &message {
+            WireMessage::Acknowledgement(_) | WireMessage::AdmissionRequest { .. } => true,
+            WireMessage::OrganisationRequest { .. } => listed || revoked,
+            WireMessage::OrgInformation { .. } | WireMessage::Revocation(_) | WireMessage::Organisation { .. } => listed,
+        };
+        if !acted_on {
+            return Err(OrgNodeError::SenderNotListed { org_id });
+        }
+        match message {
+            WireMessage::Acknowledgement(ack) => {
+                // LLR-5wg8cu: no listing rule; the sender the transport
+                // authenticated is the only key passed.
+                let verified = crate::revocation::check_acknowledgement(data, sender, ack)?;
+                Ok((Checked::Acknowledged(verified), None))
+            }
+            WireMessage::Revocation(notice) => {
+                // LLR-r4qtqe: kept, under the bound, never acted on at
+                // receipt; only `verify` decides a kept notice (LLR-jhy6t6).
+                crate::revocation::check_notice(data, &notice)?;
+                let ((), write) = self.change(index, rng, |data| {
+                    data.kept_revocation_notices.push(notice);
+                    ensure_within_bound(data)
+                })?;
+                Ok((Checked::RevocationNoticeKept, Some(StoreChange::Sealed(write))))
+            }
+            WireMessage::OrgInformation { envelope, record_snapshot, org_private_key } => {
+                let base = trie_from_snapshots(&record.trie_members)?;
+                let expected = (record.org_id, Some(record.epoch));
+                let last_seq = record.last_seq;
+                self.keep_information(rng, index, sender, base, last_seq, expected, envelope, record_snapshot, org_private_key)
+            }
+            WireMessage::OrganisationRequest { org_id, addresses } => {
+                self.answer_organisation_request(rng, index, sender, org_id, addresses)
+            }
+            WireMessage::Organisation { org_id, epoch, record_snapshot, org_private_key } => {
+                self.keep_organisation_answer(rng, index, sender, (org_id, epoch), record_snapshot, org_private_key)
+            }
+            WireMessage::AdmissionRequest { .. } => Err(OrgNodeError::MalformedMessage),
+        }
     }
 
-    fn genesis_updates<'a>(&'a self, persona_id: &'a PersonaId) -> impl Iterator<Item = &'a ProvisionalUpdate> + 'a {
-        let target = ProvisionalTarget::Genesis(persona_id.clone());
-        self.stores
-            .iter()
-            .filter(move |store| &store.data().persona.persona_id == persona_id)
-            .flat_map(|store| store.data().provisional_updates.iter())
-            .filter(move |provisional| target.names(provisional))
+    /// The organisation-request arm of `check_received`. Who may ask is
+    /// LLR-283x6f's rule: a listed Device or one held as revoked. The answer
+    /// is built whole or not at all (LLR-xc9c6w): the record snapshot and
+    /// its key for a listed requester (LLR-7kdhst), the notice proving its
+    /// absence from the current record for a revoked one (LLR-j338wq). Then
+    /// the requester's address-book entry is set, sealing only when it
+    /// changed (LLR-h9d65p). Every refusal keeps nothing.
+    fn answer_organisation_request<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        index: usize,
+        sender: DevicePublicKey,
+        org_id: OrgId,
+        addresses: Vec<String>,
+    ) -> Result<(Checked, Option<StoreChange>), OrgNodeError> {
+        let data = self.stores[index].data()?;
+        let record = match &data.record {
+            Some(record) if record.org_id == org_id => record,
+            _ => return Err(OrgNodeError::OrgNotHeld { org_id }),
+        };
+        let listed = record.lists_device(&sender);
+        let revoked = if listed {
+            None
+        } else {
+            Some(
+                data.revoked_devices
+                    .iter()
+                    .find(|revoked| revoked.device_key == sender)
+                    .ok_or(OrgNodeError::SenderNotListed { org_id })?,
+            )
+        };
+        let addresses = parse_field("request.addresses", EndpointAddresses::parse(addresses))?;
+        let body = match revoked {
+            None => encode_message(&WireMessage::Organisation {
+                org_id,
+                epoch: record.epoch,
+                record_snapshot: encode_record_snapshot(&record.trie_members)?,
+                org_private_key: record.org_private_key.clone(),
+            })?,
+            Some(revoked) => {
+                let proof = trie_from_snapshots(&record.trie_members)?
+                    .prove_absent(&revoked.member_id, &sender)
+                    .map_err(OrgNodeError::Trie)?;
+                let notice = RevocationNotice { org_id, member_id: revoked.member_id, device: sender, proof };
+                encode_message(&WireMessage::Revocation(notice))?
+            }
+        };
+        let answer = OutgoingMessage { recipient: sender, body };
+        if data.address_book.iter().any(|(key, kept)| *key == sender && *kept == addresses) {
+            return Ok((Checked::OrganisationRequest { answer }, None));
+        }
+        let ((), write) = self.change(index, rng, |data| {
+            data.set_address(sender, addresses);
+            Ok(())
+        })?;
+        Ok((Checked::OrganisationRequest { answer }, Some(StoreChange::Sealed(write))))
     }
 
-    /// The proxy account the record holds, unchanged and uninterpreted
-    /// (LLR-3v5nu9).
+    /// The organisation-answer arm of `check_received` (LLR-kd7u2r) and of
+    /// `check_without_record` (LLR-e6w3nr). With a record, an answer is kept
+    /// only from a listed Device (`SenderNotListed`), only while the behind
+    /// marker is set (`OrganisationNotRequested`), and only for an epoch
+    /// after the record's (`StaleChainState`); with none, only while the
+    /// behind marker is set. Its snapshot is decoded with the `member.*`
+    /// refusals and its root calculated. It is kept as an `Answer`
+    /// provisional organisation with the key derived from the carried one
+    /// and no Change set, through the one bound-checked keep (LLR-m76r4k).
+    /// An identity already held is `AlreadyHeld`, with no change.
+    fn keep_organisation_answer<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        index: usize,
+        sender: DevicePublicKey,
+        (org_id, epoch): (OrgId, Epoch),
+        record_snapshot: Vec<u8>,
+        org_private_key: OrgPrivateKey,
+    ) -> Result<(Checked, Option<StoreChange>), OrgNodeError> {
+        let data = self.stores[index].data()?;
+        // With a record: LLR-kd7u2r's three conditions, in its order. With
+        // none (a provisional Member's store, which `check_without_record`
+        // lets through only for the Organisation its expected admission
+        // names): the behind marker alone, from whichever Device (LLR-e6w3nr).
+        let base_root = match &data.record {
+            Some(record) if record.org_id == org_id => {
+                if !record.lists_device(&sender) {
+                    return Err(OrgNodeError::SenderNotListed { org_id });
+                }
+                if data.behind.is_none() {
+                    return Err(OrgNodeError::OrganisationNotRequested { org_id });
+                }
+                if epoch <= record.epoch {
+                    return Err(OrgNodeError::StaleChainState { org_id, chain_epoch: epoch, record_epoch: record.epoch });
+                }
+                Some(record.root_hash)
+            }
+            Some(_) => return Err(OrgNodeError::OrgNotHeld { org_id }),
+            None => {
+                if data.behind.is_none() {
+                    return Err(OrgNodeError::OrganisationNotRequested { org_id });
+                }
+                None
+            }
+        };
+        let trie = first_admission_base(&record_snapshot)?;
+        let root = trie.root_hash().map_err(OrgNodeError::Trie)?;
+        let org_pub_key = org_private_key.x25519_keypair().org_public_key()?;
+        if data.holds_provisional_identity(&root, &org_pub_key) {
+            return Ok((Checked::AlreadyHeld, None));
+        }
+        let organisation = ProvisionalOrganisation {
+            epoch,
+            // An answer carries no Change set; in a store with no record
+            // there is no base, and the answer's own root stands in (no
+            // adoption reads `base_root` of an `Answer`).
+            base_root: base_root.unwrap_or(root),
+            members: trie.members().iter().map(snapshot_of).collect(),
+            root,
+            org_pub_key,
+            org_private_key,
+            change_set: None,
+            base_snapshot: None,
+            origin: Origin::Answer { from: sender },
+            applied: Vec::new(),
+            first_ahead_at: None,
+        };
+        let ((), write) = self.change(index, rng, |data| {
+            data.provisional_organisations.push(organisation);
+            ensure_within_bound(data)
+        })?;
+        Ok((Checked::OrganisationAnswerKept { epoch }, Some(StoreChange::Sealed(write))))
+    }
+
+    /// `check_received` in a store with no current record (LLR-e6w3nr): the
+    /// body's kind and Organisation identifier are read alone
+    /// (`MalformedMessage` if it has neither); only Organisation information
+    /// for an Organisation an expected admission names is decoded further,
+    /// from whichever Device sent it: its snapshot decoded
+    /// (`first_admission_base`, `member.*`), the chain-free checks run
+    /// against it, and it is kept as a received provisional organisation,
+    /// the expectations untouched. Other Organisation information is
+    /// `AdmissionNotExpected`; an organisation answer for an expected
+    /// Organisation is kept as `keep_organisation_answer` keeps one, while
+    /// behind; every other kind `OrgNotHeld`.
+    fn check_without_record<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        index: usize,
+        sender: DevicePublicKey,
+        body: &[u8],
+    ) -> Result<(Checked, Option<StoreChange>), OrgNodeError> {
+        let (kind, org_id) = peek_kind_and_org_id(body).ok_or(OrgNodeError::MalformedMessage)?;
+        let expected = self.stores[index].data()?.expected_admissions.contains(&ExpectedAdmission { org_id });
+        if kind == ORGANISATION_INDEX && expected {
+            // The peeked kind is the organisation answer's, so a body that
+            // decodes is that kind; any other is refused as malformed.
+            let WireMessage::Organisation { org_id, epoch, record_snapshot, org_private_key } = decode_message(body)? else {
+                return Err(OrgNodeError::MalformedMessage);
+            };
+            return self.keep_organisation_answer(rng, index, sender, (org_id, epoch), record_snapshot, org_private_key);
+        }
+        if kind != ORG_INFORMATION_INDEX {
+            return Err(OrgNodeError::OrgNotHeld { org_id });
+        }
+        if !expected {
+            return Err(OrgNodeError::AdmissionNotExpected { org_id });
+        }
+        let WireMessage::OrgInformation { envelope, record_snapshot, org_private_key } = decode_message(body)? else {
+            return Err(OrgNodeError::MalformedMessage);
+        };
+        let base = first_admission_base(&record_snapshot)?;
+        let expected = (org_id, None);
+        self.keep_information(rng, index, sender, base, SequenceNumber::new(0), expected, envelope, record_snapshot, org_private_key)
+    }
+
+    /// Keep received Organisation information as a provisional organisation
+    /// (LLR-76bhw9, LLR-s3vq6d, LLR-m76r4k): `check_chain_free` against
+    /// `base` (`OrgIdMismatch`, `StaleSeq`, `MalformedDelta`,
+    /// `DeltaBaseMismatch`), `expected` naming the Organisation and, when
+    /// the store holds a record, its epoch: `SeqNotEpoch` unless the Sequence
+    /// number is that epoch plus one; the Change set applied to give the next record and root;
+    /// `org_pub_key` derived from the carried key. An identity already held
+    /// is `AlreadyHeld`, nothing changed; else the keep is measured by the
+    /// bound and `ProvisionalOrganisationKept { epoch }` returned with the
+    /// store sealed. No chain state is used.
+    #[allow(clippy::too_many_arguments)]
+    fn keep_information<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        index: usize,
+        sender: DevicePublicKey,
+        base: Trie,
+        last_seq: SequenceNumber,
+        expected: (OrgId, Option<Epoch>),
+        envelope: Envelope,
+        record_snapshot: Vec<u8>,
+        org_private_key: OrgPrivateKey,
+    ) -> Result<(Checked, Option<StoreChange>), OrgNodeError> {
+        let (expected_org_id, record_epoch) = expected;
+        let ctx = VerifyContext { expected_org_id, seq_guard: SeqGuard::from_last_seen(last_seq) };
+        check_chain_free(&base, &envelope, &ctx)?;
+        let delta = envelope.decode_delta()?;
+        if let Some(epoch) = record_epoch {
+            if envelope.parent_seq.get() != epoch.get() + 1 {
+                return Err(OrgNodeError::SeqNotEpoch { seq: envelope.parent_seq.get(), epoch: epoch.get() + 1 });
+            }
+        }
+        let candidate = base.apply_delta(&delta).map_err(OrgNodeError::Trie)?;
+        let root = candidate.root_hash();
+        let next = candidate.verify_against(&root).map_err(OrgNodeError::Trie)?;
+        let org_pub_key = org_private_key.x25519_keypair().org_public_key()?;
+        let data = self.stores[index].data()?;
+        if data.holds_provisional_identity(&root, &org_pub_key) {
+            return Ok((Checked::AlreadyHeld, None));
+        }
+        let epoch = Epoch::new(envelope.parent_seq.get());
+        let kept = ProvisionalOrganisation {
+            epoch,
+            base_root: base.root_hash().map_err(OrgNodeError::Trie)?,
+            members: next.members().iter().map(snapshot_of).collect(),
+            root,
+            org_pub_key,
+            org_private_key,
+            change_set: Some(envelope.delta_bytes),
+            base_snapshot: Some(record_snapshot),
+            origin: Origin::Received { from: sender },
+            applied: Vec::new(),
+            first_ahead_at: None,
+        };
+        let ((), write) = self.change(index, rng, |data| {
+            data.provisional_organisations.push(kept);
+            ensure_within_bound(data)
+        })?;
+        Ok((Checked::ProvisionalOrganisationKept { epoch }, Some(StoreChange::Sealed(write))))
+    }
+
+    /// An admission request to the store at `index` (LLR-6gkxpg,
+    /// LLR-v3av9t): its `(org_id, invite_id)` must be outstanding there, else
+    /// `InviteNotOutstanding` before any later field is decoded; then the
+    /// body is decoded whole (`MalformedMessage`), its DevicePublicKey must be
+    /// `sender` (`AdmissionKeyNotSender`), its preferred Handles one to three
+    /// and distinct and its addresses parse (`InvalidField`
+    /// `request.preferred_handles`, `request.addresses`). The first request
+    /// for the invite is kept with `from: sender` — `Accepted`, the store
+    /// sealed; a repeat from `sender` is `AlreadyReceived`, one from another
+    /// Device `InviteUsedByAnotherDevice`, neither changing anything.
+    fn check_admission_request<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        index: usize,
+        sender: DevicePublicKey,
+        org_id: OrgId,
+        invite_id: InviteId,
+        body: &[u8],
+    ) -> Result<(Checked, Option<StoreChange>), OrgNodeError> {
+        let data = self.stores[index].data()?;
+        if !data.outstanding_invites.iter().any(|invite| invite.org_id == org_id && invite.invite_id == invite_id) {
+            return Err(OrgNodeError::InviteNotOutstanding { org_id, invite_id });
+        }
+        let WireMessage::AdmissionRequest { name, surname, preferred_handles, member_key, device_key, addresses, .. } =
+            decode_message(body)?
+        else {
+            return Err(OrgNodeError::MalformedMessage);
+        };
+        if device_key != sender {
+            return Err(OrgNodeError::AdmissionKeyNotSender { org_id });
+        }
+        check_preferred_handles("request.preferred_handles", &preferred_handles)?;
+        let addresses = parse_field("request.addresses", EndpointAddresses::parse(addresses))?;
+        if let Some(kept) = data.kept_admission_requests.iter().find(|kept| kept.invite_id == invite_id) {
+            let outcome = if kept.from == sender {
+                AdmissionRequestOutcome::AlreadyReceived
+            } else {
+                AdmissionRequestOutcome::InviteUsedByAnotherDevice
+            };
+            return Ok((Checked::AdmissionRequest { outcome }, None));
+        }
+        let request = KeptAdmissionRequest {
+            org_id,
+            invite_id,
+            from: sender,
+            name,
+            surname,
+            preferred_handles,
+            member_key,
+            device_key,
+            addresses,
+        };
+        let ((), write) = self.change(index, rng, |data| {
+            data.kept_admission_requests.push(request);
+            Ok(())
+        })?;
+        Ok((Checked::AdmissionRequest { outcome: AdmissionRequestOutcome::Accepted }, Some(StoreChange::Sealed(write))))
+    }
+
+    // ----------------------------------------------------------
+    // Reads.
+    // ----------------------------------------------------------
+
+    /// The proxy account the record of `org_id` holds, unchanged and
+    /// uninterpreted (LLR-x5asbx); `OrgNotHeld` when no store holds it.
     pub fn proxy_account(&self, org_id: OrgId) -> Result<Option<ChainAccount>, OrgNodeError> {
-        Ok(self.find_org(org_id)?.proxy_account)
+        let index = self.record_index(org_id).ok_or(OrgNodeError::OrgNotHeld { org_id })?;
+        Ok(self.stores[index].data()?.record.as_ref().and_then(|record| record.proxy_account))
     }
 
     /// The Persona's Member-as-a-group key, from its seed, and its
     /// DevicePublicKey, as the store holds it, and no dialling address
-    /// (LLR-437fvx).
+    /// (LLR-437fvx). A removed store keeps no Persona identifier
+    /// (LLR-2d5a7m), so `persona_id` names none and the answer is
+    /// `PersonaIdNotHeld`, not `OrganisationRemoved`: see `persona_index`.
     pub fn persona_public_keys(&self, persona_id: &PersonaId) -> Result<(PersonPublicKey, DevicePublicKey), OrgNodeError> {
-        let p = self.find_persona(persona_id)?;
-        Ok((p.member_seed.x25519_keypair().member_key()?, p.device_key))
+        let persona = &self.stores[self.persona_index(persona_id)?].data()?.persona;
+        Ok((persona.member_seed.x25519_keypair().member_key()?, persona.device_key))
     }
 
-    // ----------------------------------------------------------
-    // Story 3: admit_member builds the admission; commit_update records it
-    // once the chain carries it and returns every recipient's body.
-    // ----------------------------------------------------------
-
-    /// Build the admission of `joiner` into `org_id` and keep it: no chain
-    /// operation, no endpoint, no send, the record unchanged (LLR-rb8r65,
-    /// LLR-vdyu65). The new Member's id is drawn, so a re-admission with the
-    /// same keys gets a new one (REQ-d9g6nt).
-    pub fn admit_member<R: RngCore + CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        org_id: OrgId,
-        joiner: &Joiner,
-    ) -> Result<(ProvisionalUpdate, StoreWrite), OrgNodeError> {
-        let index = self.record_index(org_id)?;
-        let rec = self.find_org(org_id)?.clone();
-        let leaf = MemberLeaf::new(
-            fresh_member_id(rng),
-            joiner.handle.clone(),
-            joiner.member_key,
-            joiner.name.clone(),
-            joiner.surname.clone(),
-            vec![joiner.device_key],
-        )
-        .map_err(OrgNodeError::Trie)?;
-        let (new_trie, delta) = trie_from_snapshots(&rec.trie_members)?
-            .add_member(leaf)
-            .map_err(OrgNodeError::Trie)?
-            .recalculate()
-            .map_err(OrgNodeError::Trie)?;
-        self.keep_change_set(index, rng, &rec, &new_trie, &delta)
-    }
-
-    /// Keep a Change set built on `rec` as a provisional update of the store
-    /// at `index`: its Sequence number is the epoch it produces, the record's
-    /// plus one (LLR-ghja3x, REQ-txvtm9, Decision 16). Its root calculated,
-    /// the batch ends and a fresh Organisation key pair is drawn for it
-    /// (REQ-stx9v3, LLR-e2b7gv): distinct from the record's current key and
-    /// from every key of the resulting record, else `DuplicateKey`, nothing
-    /// kept or written. The update holds the private key; the record's keys
-    /// are not changed. A refusal by the bound writes nothing (LLR-jq7qh7).
-    fn keep_change_set<R: RngCore + CryptoRng>(
-        &mut self,
-        index: usize,
-        rng: &mut R,
-        rec: &OrgRecord,
-        new_trie: &Trie,
-        delta: &Delta,
-    ) -> Result<(ProvisionalUpdate, StoreWrite), OrgNodeError> {
-        let seq = SequenceNumber::new(rec.epoch.get() + 1);
-        let resulting_root = new_trie.root_hash().map_err(OrgNodeError::Trie)?;
-        let org_kp = X25519Keypair::generate(rng);
-        let org_pub_key = org_kp.org_public_key()?;
-        if org_pub_key == rec.org_pub_key {
-            return Err(OrgNodeError::Trie(org_members::OrgMembersError::DuplicateKey));
-        }
-        org_pub_key.ensure_distinct_from(&new_trie.members())?;
-        let update = ProvisionalUpdate {
-            org_id: Some(rec.org_id),
-            persona_id: self.stores[index].data().persona.persona_id.clone(),
-            base_root: Some(rec.root_hash),
-            resulting_root,
-            seq,
-            org_pub_key,
-            change: ProvisionalChange::ChangeSet {
-                change_set: Envelope::build(rec.org_id, seq, delta)?.delta_bytes,
-                org_private_key: org_kp.org_private_key(),
-            },
-        };
-        let ((), write) = self.change(index, rng, |data| data.insert_provisional(update.clone()))?;
-        Ok((update, write))
-    }
-
-    /// Commit the node's own provisional update for `org_id` once the chain
-    /// carries its root and key, against `chain_state`, the state org-io read
-    /// back after its write (`None`: `OrgNotOnChain`), by the checks a
-    /// received update passes, taking the update's key pair into the record
-    /// (LLR-cmdrp9, LLR-6s785x), and return every recipient's body, built
-    /// with that key (LLR-gdfqn9).
-    /// A refusal changes nothing and returns no store change (LLR-ewkg85);
-    /// nothing is bound or sent (LLR-4tcxsu). A commit that removes the
-    /// Persona bound to the Organisation forgets it instead, through the one
-    /// removal step, signing with the secrets `device_secrets` yields for the
-    /// Device keys it names — called on that path alone — and returns the
-    /// acknowledgements it signed and `StoreChange::Forgotten` (LLR-b27jr6,
-    /// LLR-jd82t6, LLR-uw7nmv).
-    pub fn commit_update<R: RngCore + CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        org_id: OrgId,
-        chain_state: Option<OrgState>,
-        device_secrets: impl FnOnce(&[DevicePublicKey]) -> Vec<DeviceSecret>,
-    ) -> Result<(CommitOutcome, StoreChange), OrgNodeError> {
-        let index = self.record_index(org_id)?;
-        let state = chain_state.ok_or(OrgNodeError::OrgNotOnChain)?;
-        let data = self.stores[index].data();
-        let update = data.held_update_for(org_id, &state).cloned().ok_or(OrgNodeError::NoProvisionalUpdate)?;
-        let committed = commit_step(data, org_id, &update, &state, device_secrets)?;
-        let change = self.adopt(index, rng, committed.successor)?;
-        Ok((committed.outcome, change))
-    }
-
-    /// The chain-free half of a received revocation notice (LLR-pt32fx):
-    /// `check_notice` first (LLR-38e2kn, LLR-r7zm39); then `sender` must be
-    /// listed in the record (LLR-kzgjz8). A refusal returns no checked
-    /// message, so no chain state is asked for.
-    fn check_revocation(&self, sender: &DevicePublicKey, notice: RevocationNotice) -> Result<CheckedKind, OrgNodeError> {
-        let index = self.notice_index(&notice)?;
-        sender_listed(find_record(self.stores[index].data(), notice.org_id)?, notice.org_id, sender)?;
-        Ok(CheckedKind::Revocation { notice })
-    }
-
-    /// The marks of `org_id`'s record as a store holds it now, `None` when
-    /// no store does (PR-erskh4).
-    fn record_marks(&self, org_id: OrgId) -> Option<RecordMarks> {
-        self.find_org(org_id).ok().map(|record| RecordMarks {
-            epoch: record.epoch,
-            root: record.root_hash,
-            last_seq: record.last_seq,
-        })
-    }
-
-    /// The checked message for `kind`, with the marks of the record its
-    /// check read (PR-erskh4).
-    fn checked(&self, kind: CheckedKind) -> CheckedMessage {
-        let record_at_check = self.record_marks(kind.org_id());
-        CheckedMessage { kind, record_at_check }
-    }
-
-    /// The store whose Persona a notice is for (`revocation::notice_store`,
-    /// LLR-r7zm39, LLR-38e2kn).
-    fn notice_index(&self, notice: &RevocationNotice) -> Result<usize, OrgNodeError> {
-        crate::revocation::notice_store(self.stores.iter().map(PersonaStore::data), notice)
-    }
-
-    /// The commit half of a received revocation notice: `revocation::accept`
-    /// against `chain_state` (LLR-tx8ruv). A refusal changes nothing. On
-    /// acceptance the successor store is adopted; returns the state the
-    /// notice was accepted against, the acknowledgements and the store
-    /// change.
-    fn accept_revocation<R: RngCore + CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        notice: &RevocationNotice,
-        chain_state: Option<OrgState>,
-        device_secrets: impl FnOnce(&[DevicePublicKey]) -> Vec<DeviceSecret>,
-    ) -> Result<(OrgState, Vec<Acknowledgement>, StoreChange), OrgNodeError> {
-        let index = self.notice_index(notice)?;
-        let accepted = crate::revocation::accept(self.stores[index].data(), notice, chain_state, device_secrets)?;
-        // `accept` succeeds only with a chain state.
-        let state = chain_state.ok_or(OrgNodeError::OrgNotOnChain)?;
-        let change = self.adopt(index, rng, Successor::Removed(accepted.store))?;
-        Ok((state, accepted.acknowledgements, change))
-    }
-
-    /// The chain-free half of received Organisation information, from the
-    /// held record (`existing`) or, for a first admission (`None`), from the
-    /// snapshot the message carries: the Change set must pass every check
-    /// that needs no chain (LLR-9ew26y, RC-6a2dke, RC-e5atck).
-    fn check_org_information(
-        envelope: Envelope,
-        record_snapshot: &[u8],
-        carried_key: OrgPrivateKey,
-        existing: Option<&OrgRecord>,
-        expectation: Option<ExpectedAdmission>,
-    ) -> Result<CheckedKind, OrgNodeError> {
-        let (local_trie, last_seq, last_epoch) = match existing {
-            Some(rec) => (trie_from_snapshots(&rec.trie_members)?, rec.last_seq, rec.epoch),
-            // The record a first admission extends: from the snapshot its
-            // Organisation-information message carries (REQ-d9g6nt,
-            // LLR-j6j95z).
-            None => (first_admission_base(record_snapshot)?, SequenceNumber::new(0), Epoch::new(0)),
-        };
-        let ctx = VerifyContext {
-            expected_org_id: envelope.org_id,
-            seq_guard: SeqGuard::from_last_seen(last_seq),
-            last_committed_epoch: last_epoch,
-        };
-        crate::verify::check_chain_free(&local_trie, &envelope, &ctx)?;
-        Ok(CheckedKind::OrgInformation { envelope, carried_key, local_trie, ctx, expectation })
-    }
-
-    // ----------------------------------------------------------
-    // Story 4: receive — one path, by values: the check with no chain
-    // state, then the commit against the state org-io read (ruling B).
-    // ----------------------------------------------------------
-
-    /// The check of a received body (LLR-zetn7a): `sender` is the Device the
-    /// transport authenticated for it, passed in by org-io. The body is
-    /// decoded first (`MalformedMessage`, before any record, expectation or
-    /// chain is consulted: LLR-xn5pwc, REQ-c29s93). Then, with no chain
-    /// state: an acknowledgement is decided here against the store alone,
-    /// only from the Device it names (LLR-3aysup, LLR-5azhry:
-    /// `Checked::Acknowledged`); a revocation passes `check_notice`
-    /// (LLR-38e2kn, LLR-r7zm39) and the sender rule (LLR-kzgjz8);
-    /// Organisation information about a held Organisation is acted on only
-    /// from a Device the record lists (LLR-2r2fha), a first admission from
-    /// any sender (REQ-xa6smf) but only when a store expects it (LLR-s8xp7m),
-    /// and either must decode its snapshot and pass `check_chain_free`
-    /// (LLR-9ew26y). A refusal returns no `CheckedMessage`, so no chain
-    /// state is asked for. Writes nothing.
-    pub fn check_received(&self, sender: DevicePublicKey, body: &[u8]) -> Result<Checked, OrgNodeError> {
-        // What the message is (LLR-js9dsu). A revocation is decided by its
-        // proof — an unheld Organisation refused before the expectations are
-        // consulted (LLR-38e2kn) — and an acknowledgement by the store alone
-        // (LLR-pt32fx).
-        let (envelope, record_snapshot, carried_key) = match decode_message(body)? {
-            WireMessage::OrgInformation { envelope, record_snapshot, org_private_key } => {
-                (envelope, record_snapshot, org_private_key)
-            }
-            WireMessage::Revocation(notice) => {
-                return self.check_revocation(&sender, notice).map(|kind| Checked::ReadChain(self.checked(kind)));
-            }
-            WireMessage::Acknowledgement(ack) => {
-                return self.check_acknowledgement(sender, ack).map(Checked::Acknowledged);
-            }
-        };
-        let org_id = envelope.org_id;
-
-        // The record this message extends. No Invite is required (REQ-xa6smf,
-        // owner ruling 2026-10-05). For a held Organisation the sender must
-        // be listed in the record, before anything is decoded (LLR-2r2fha);
-        // a first admission is accepted from any sender (owner amendment of
-        // 2026-10-07).
-        let existing = self.find_org(org_id).ok();
-        if let Some(record) = existing {
-            sender_listed(record, org_id, &sender)?;
-        }
-        // A first admission is read only when a store expects one to this
-        // Organisation — before its snapshot is decoded (LLR-s8xp7m,
-        // RC-2ferct).
-        let expectation = match existing {
-            Some(_) => None,
-            None => {
-                let expectation = ExpectedAdmission { org_id };
-                if !self.expected_admissions().contains(&expectation) {
-                    return Err(OrgNodeError::AdmissionNotExpected { org_id });
-                }
-                Some(expectation)
-            }
-        };
-        Self::check_org_information(envelope, &record_snapshot, carried_key, existing, expectation)
-            .map(|kind| Checked::ReadChain(self.checked(kind)))
-    }
-
-    /// `revocation::check_acknowledgement` against the store holding the
-    /// Organisation's record; `AcknowledgementNotHeld` when none does
-    /// (LLR-5azhry).
-    fn check_acknowledgement(
-        &self,
-        sender: DevicePublicKey,
-        ack: Acknowledgement,
-    ) -> Result<VerifiedAcknowledgement, OrgNodeError> {
-        let org_id = ack.org_id;
-        let index = self.record_index(org_id).map_err(|_| OrgNodeError::AcknowledgementNotHeld { org_id })?;
-        crate::revocation::check_acknowledgement(self.stores[index].data(), sender, ack)
-    }
-
-    /// The commit of a checked message (LLR-6qjmhf), against `chain_state`,
-    /// the state org-io read once for `checked.org_id()` (`None`: no state,
-    /// `OrgNotOnChain`). A revocation is decided by `revocation::accept`
-    /// (LLR-tx8ruv: `Revoked`); Organisation information is verified against
-    /// the state and its carried key checked (LLR-ba2ejp), then committed as
-    /// a first admission (`Admitted`, LLR-3f5h7b) or an update (`Updated`),
-    /// or — when the committed record no longer lists this node — through
-    /// the one removal step (`Removed`, LLR-b27jr6). Only the revocation and
-    /// the removal call `device_secrets`, and only after every check passed
-    /// (LLR-uw7nmv). A refusal changes nothing and returns no store change.
-    ///
-    /// First of all, the record the check read must be the record held
-    /// now: a check whose record's epoch, root or sequence guard moved, or
-    /// whose record appeared or went, since the check is refused with
-    /// `RecordMovedSinceCheck`, so a local commit that fell between the check
-    /// and the commit is never judged with the values it replaced (PR-erskh4).
-    pub fn commit_checked<R: RngCore + CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        checked: CheckedMessage,
-        chain_state: Option<OrgState>,
-        device_secrets: impl FnOnce(&[DevicePublicKey]) -> Vec<DeviceSecret>,
-    ) -> Result<(ReceiveOutcome, StoreChange), OrgNodeError> {
-        let checked_org = checked.org_id();
-        if self.record_marks(checked_org) != checked.record_at_check {
-            return Err(OrgNodeError::RecordMovedSinceCheck { org_id: checked_org });
-        }
-        let (envelope, carried_key, local_trie, ctx, expectation) = match checked.kind {
-            CheckedKind::Revocation { notice } => {
-                let (state, acknowledgements, change) =
-                    self.accept_revocation(rng, &notice, chain_state, device_secrets)?;
-                let outcome = ReceiveOutcome {
-                    org_id: notice.org_id,
-                    epoch: state.epoch,
-                    root: state.root_hash,
-                    kind: ReceiveKind::Revoked,
-                    acknowledgements,
-                };
-                return Ok((outcome, change));
-            }
-            CheckedKind::OrgInformation { envelope, carried_key, local_trie, ctx, expectation } => {
-                (envelope, carried_key, local_trie, ctx, expectation)
-            }
-        };
-        let org_id = envelope.org_id;
-        // What the Change set must reach (RC-6a2dke, RC-e5atck).
-        let chain_state = chain_state.ok_or(OrgNodeError::OrgNotOnChain)?;
-        let verified = verify_envelope_against_chain(&local_trie, &envelope, &ctx, Some(chain_state))?;
-        // The key Organisation information carries must be the private half
-        // of the chain's key (LLR-ba2ejp, RC-9cefcn) — checked before the
-        // own-Persona rule and before anything is written.
-        check_carried_key(org_id, &carried_key, &chain_state)?;
-        let new_root = verified.trie.root_hash().map_err(OrgNodeError::Trie)?;
-        let outcome = |kind, acknowledgements| ReceiveOutcome {
-            org_id,
-            epoch: verified.epoch,
-            root: new_root,
-            kind,
-            acknowledgements,
-        };
-
-        // The check passed a first admission, and only a first admission,
-        // with the expectation it matched.
-        if let Some(expectation) = expectation {
-            // A first admission commits only into a store that declared the
-            // expectation and whose unbound Persona's Device the record lists
-            // (LLR-3f5h7b, REQ-kt877x, LLR-rdda86); the refusal writes nothing.
-            let members = verified.trie.members();
-            let ours = self.stores.iter().enumerate().find_map(|(index, store)| {
-                let data = store.data();
-                if data.persona.org_id.is_some() || !data.expected_admissions.contains(&expectation) {
-                    return None;
-                }
-                members
-                    .iter()
-                    .find(|member| member.has_p2p_device(&data.persona.device_key))
-                    .map(|member| (index, *member.id()))
-            });
-            let Some((index, member_id)) = ours else {
-                return Err(OrgNodeError::AdmissionNotOurs { org_id });
-            };
-            let ((), write) = self.change(index, rng, |data| {
-                data.orgs.push(OrgRecord {
-                    org_id,
-                    root_hash: new_root,
-                    // The chain's key, never a value from the Wire message
-                    // (LLR-xq9nrq).
-                    org_pub_key: chain_state.org_pub_key,
-                    epoch: verified.epoch,
-                    last_seq: verified.seq_guard.last_seen(),
-                    trie_members: members.iter().map(snapshot_of).collect(),
-                    // A first-admission record: only `commit_genesis` keeps a
-                    // proxy account (LLR-3v5nu9).
-                    proxy_account: None,
-                    org_private_key: carried_key,
-                    // The Change set of the update that admitted this node
-                    // (REQ-uv3v5w, LLR-d9778a).
-                    kept_change_set: Some(envelope.delta_bytes.clone()),
-                });
-                // Clear the expectation the committed first admission
-                // matched, and only that one (LLR-q8emds).
-                data.expected_admissions.retain(|e| *e != expectation);
-                discard_orphans(data, org_id, new_root);
-                bind_persona(data, org_id, member_id);
-                Ok(())
-            })?;
-            return Ok((outcome(ReceiveKind::Admitted, Vec::new()), StoreChange::Sealed(write)));
-        }
-
-        let index = self.record_index(org_id)?;
-        if !still_member(self.stores[index].data(), org_id, &verified.trie) {
-            // The node's own removal, on this path as on every other, through
-            // the one removal step (LLR-b27jr6, LLR-jd82t6): nothing is
-            // committed, nothing bound.
-            let (successor, acknowledgements) =
-                removal_step(self.stores[index].data(), org_id, &chain_state, device_secrets)?;
-            let change = self.adopt(index, rng, Successor::Removed(successor))?;
-            return Ok((outcome(ReceiveKind::Removed, acknowledgements), change));
-        }
-        let ((), write) = self.change(index, rng, |data| {
-            commit_received(data, org_id, &verified, &envelope, carried_key, &chain_state)?;
-            // The Persona marked Active is the store's, whose Device the
-            // verified record lists (LLR-e5c9ud, LLR-eyc4ud).
-            let members = verified.trie.members();
-            let member_id =
-                members.iter().find(|member| member.has_p2p_device(&data.persona.device_key)).map(|member| *member.id());
-            if let Some(member_id) = member_id {
-                bind_persona(data, org_id, member_id);
-            }
-            Ok(())
-        })?;
-        Ok((outcome(ReceiveKind::Updated, Vec::new()), StoreChange::Sealed(write)))
-    }
-
-    // ----------------------------------------------------------
-    // Story 5: revoke_member builds the removal; commit_update records it
-    // once the chain carries it and returns every recipient's body.
-    // ----------------------------------------------------------
-
-    /// Build the removal of `member_id` from `org_id` and keep it: no chain
-    /// operation, no endpoint, no send, the record unchanged (LLR-6dc598).
-    pub fn revoke_member<R: RngCore + CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        org_id: OrgId,
-        member_id: MemberId,
-    ) -> Result<(ProvisionalUpdate, StoreWrite), OrgNodeError> {
-        let index = self.record_index(org_id)?;
-        let rec = self.find_org(org_id)?.clone();
-        let (new_trie, delta) = trie_from_snapshots(&rec.trie_members)?
-            .delete_member(&member_id)
-            .map_err(OrgNodeError::Trie)?
-            .recalculate()
-            .map_err(OrgNodeError::Trie)?;
-        self.keep_change_set(index, rng, &rec, &new_trie, &delta)
-    }
-
-    // ----------------------------------------------------------
-    // Query helpers.
-    // ----------------------------------------------------------
-
-    /// One record per store, in store order (LLR-rdda86).
+    /// One record per Active store, in store order (LLR-f9x3vf). `data()`
+    /// refuses only a removed store, and a removed store keeps no Persona
+    /// record (LLR-2d5a7m), so there is none to list and the refusal is
+    /// skipped. Its acknowledgements still to deliver are read by its
+    /// DevicePublicKey through `kept_acknowledgements` (LLR-75sn9g), not
+    /// through this list.
     pub fn list_personas(&self) -> Vec<&PersonaRecord> {
-        self.stores.iter().map(|store| &store.data().persona).collect()
+        self.stores.iter().filter_map(|store| store.data().ok()).map(|data| &data.persona).collect()
     }
 
-    /// Every Organisation record the stores hold, in store order.
+    /// `list_personas`'s records as key-free views (LLR-8ru6mv): copies of
+    /// every public field, no member seed; changes nothing.
+    pub fn persona_records(&self) -> Vec<PersonaRecordView> {
+        self.list_personas().into_iter().map(PersonaRecord::view).collect()
+    }
+
+    /// Every current record the stores hold, in store order. A removed
+    /// store, the only one `data()` refuses, holds no record (LLR-2d5a7m),
+    /// so skipping the refusal leaves none out.
     pub fn list_orgs(&self) -> Vec<&OrgRecord> {
-        self.stores.iter().flat_map(|store| store.data().orgs.iter()).collect()
+        self.stores.iter().filter_map(|store| store.data().ok()).filter_map(|data| data.record.as_ref()).collect()
     }
 
-    /// The store data of `persona_id`, read only, for tests that call the
-    /// pure functions (test builds only).
+    /// The first admissions the stores expect, in store order. A removed
+    /// store, the only one `data()` refuses, holds no expectation
+    /// (LLR-2d5a7m), so skipping the refusal leaves none out.
+    pub fn expected_admissions(&self) -> Vec<ExpectedAdmission> {
+        self.stores.iter().filter_map(|store| store.data().ok()).flat_map(|data| data.expected_admissions.iter().copied()).collect()
+    }
+
+    /// The store data of `device_key`'s Persona, read only, refusing an
+    /// unknown key with `PersonaNotHeld` through the lookup every per-store
+    /// operation shares (LLR-f9x3vf), and a store in the removed form with
+    /// `OrganisationRemoved` (LLR-myfk8w; test builds only).
     #[cfg(feature = "test-support")]
-    pub fn store_data(&self, persona_id: &PersonaId) -> Option<&StoreData> {
-        self.stores.iter().map(PersonaStore::data).find(|data| &data.persona.persona_id == persona_id)
+    pub fn store_data(&self, device_key: &DevicePublicKey) -> Result<&StoreData, OrgNodeError> {
+        self.stores[self.store_index(device_key)?].data()
     }
 
-    /// Reconcile `org_id`'s record with `chain_state`, the state org-io read
-    /// for it: refuse an unheld Organisation with `OrgNotHeld` before the
-    /// state is looked at, whatever it is, then `None` with `OrgNotOnChain`,
-    /// then call `reconcile::reconcile` over the store holding the record,
-    /// with `device_secrets` called only by a commit that removes this node,
-    /// and adopt a successor, returning its store change (LLR-gr8x3r,
-    /// LLR-fm38ww). org-io's reconcile calls it.
-    pub fn reconcile<R: RngCore + CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        org_id: OrgId,
-        chain_state: Option<OrgState>,
-        device_secrets: impl FnOnce(&[DevicePublicKey]) -> Vec<DeviceSecret>,
-    ) -> Result<(crate::reconcile::Reconciled, Option<StoreChange>), OrgNodeError> {
-        use crate::reconcile::Reconciled;
-        // Held check first, whatever state is given.
-        let index = self.record_index(org_id).map_err(|_| OrgNodeError::OrgNotHeld { org_id })?;
-        let state = chain_state.ok_or(OrgNodeError::OrgNotOnChain)?;
-        let reconciled = crate::reconcile::reconcile(self.stores[index].data(), org_id, state, device_secrets)?;
-        let change = match &reconciled {
-            Reconciled::Committed { store, .. } => Some(self.adopt(index, rng, Successor::Kept(store.clone()))?),
-            Reconciled::Removed { store, .. } => Some(self.adopt(index, rng, Successor::Removed(store.clone()))?),
-            Reconciled::InStep | Reconciled::Behind { .. } => None,
-        };
-        Ok((reconciled, change))
-    }
-
-    /// Record, in `persona_id`'s store, that the app expects a first
-    /// admission to `org_id`, at most once, and return that store's write
-    /// (LLR-9zfnmb). An Organisation another Persona of this node holds or
-    /// expects is refused, writing nothing (LLR-yexf5m).
-    pub fn expect_admission<R: RngCore + CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        persona_id: &PersonaId,
-        org_id: OrgId,
-    ) -> Result<StoreWrite, OrgNodeError> {
-        let index = self.persona_index(persona_id)?;
-        self.ensure_no_other_membership(persona_id, org_id)?;
-        self.record_expectation(index, rng, org_id)
+    /// The store content of `device_key` in either form, `None` for an
+    /// unknown key (test builds only).
+    #[cfg(feature = "test-support")]
+    pub fn store_content(&self, device_key: &DevicePublicKey) -> Option<&StoreContent> {
+        self.store_index(device_key).ok().map(|index| self.stores[index].content())
     }
 
     // ----------------------------------------------------------
-    // The Invite and the Invite reply (SDD-xshv5b).
+    // The Invite (SDD-n2x3gb).
     // ----------------------------------------------------------
 
-    /// An Invite for `org_id` from the Persona bound to it, carrying that
-    /// Persona's Device public key and a fresh 32-byte identifier, which its
-    /// store keeps as outstanding; returns the Invite and that store's write
-    /// (LLR-nr8df3). An Organisation no Persona is bound to is refused
-    /// (`OrgNotOnChain`), writing nothing.
+    /// An Invite from the store of `device_key` (LLR-h9f5c9): a store with
+    /// no current record is refused (`OrgNotHeld`, or `FoundingNotWritten`
+    /// for a founding not yet written), as are issuer addresses
+    /// `EndpointAddresses::parse` refuses (`InvalidField
+    /// invite.issuer_addresses`), nothing written; otherwise a fresh 32-byte
+    /// `InviteId` is drawn, `OutstandingInvite { org_id, invite_id,
+    /// invitee_name }` appended, and the Invite returned with the stored
+    /// Organisation name and the Persona's DevicePublicKey as its issuer,
+    /// with the store's one change.
     pub fn build_invite<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
-        org_id: OrgId,
-        org_name: &str,
-        invitee_name: &str,
-    ) -> Result<(Invite, StoreWrite), OrgNodeError> {
-        let index = self.bound_index(org_id).ok_or(OrgNodeError::OrgNotOnChain)?;
+        device_key: &DevicePublicKey,
+        invitee_name: String,
+        issuer_addresses: Vec<String>,
+    ) -> Result<(Invite, StoreChange), OrgNodeError> {
+        let index = self.store_index(device_key)?;
+        let data = self.stores[index].data()?;
+        let org_id = current_record(data)?.org_id;
+        let issuer_addresses = parse_field("invite.issuer_addresses", EndpointAddresses::parse(issuer_addresses))?;
         let mut bytes = [0u8; 32];
         rng.fill_bytes(&mut bytes);
         let invite_id = InviteId::new(bytes);
-        let ((), write) = self.change(index, rng, |data| {
-            data.outstanding_invites.push((org_id, invite_id));
-            Ok(())
-        })?;
         let invite = Invite {
-            org_name: org_name.into(),
+            org_name: data.org_name.clone(),
             org_id,
-            invitee_name: invitee_name.into(),
-            inviter_device_keys: vec![self.stores[index].device_key()],
+            invitee_name: invitee_name.clone(),
+            issuer: data.persona.device_key,
+            issuer_addresses,
             invite_id,
         };
-        Ok((invite, write))
-    }
-
-    /// The reply to `invite` from `persona_id`, carrying the Invite's
-    /// Organisation and identifier and the Persona's member key, Device
-    /// public key, handle, name and surname; records the expectation of that
-    /// Organisation in the Persona's store at most once and returns that
-    /// store's write (LLR-7q9g9z). Refused, writing nothing and building no
-    /// reply: an unknown Persona; a Persona bound to an Organisation
-    /// (`PersonaAlreadyBound`); an Organisation another Persona of this node
-    /// holds or expects (`OrganisationHeldByAnotherPersona`, LLR-yexf5m).
-    pub fn build_reply<R: RngCore + CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        invite: &Invite,
-        persona_id: &PersonaId,
-    ) -> Result<(InviteReply, StoreWrite), OrgNodeError> {
-        let index = self.persona_index(persona_id)?;
-        self.ensure_unbound(persona_id)?;
-        self.ensure_no_other_membership(persona_id, invite.org_id)?;
-        let persona = &self.stores[index].data().persona;
-        let reply = InviteReply {
-            org_id: invite.org_id,
-            invite_id: invite.invite_id,
-            member_key: persona.member_seed.x25519_keypair().member_key()?,
-            device_key: persona.device_key,
-            handle: persona.handle.clone(),
-            name: persona.name.clone(),
-            surname: persona.surname.clone(),
-        };
-        let write = self.record_expectation(index, rng, invite.org_id)?;
-        Ok((reply, write))
-    }
-
-    /// Accept `reply` only for `selected` (`ReplyForAnotherOrganisation`)
-    /// and only when its (Organisation, invite identifier) pair is
-    /// outstanding in a store (`InviteNotOutstanding`); an identifier
-    /// outstanding for another Organisation is not (LLR-d55brn).
-    pub fn check_reply(&self, reply: &InviteReply, selected: OrgId) -> Result<(), OrgNodeError> {
-        if reply.org_id != selected {
-            return Err(OrgNodeError::ReplyForAnotherOrganisation);
-        }
-        self.outstanding_index(reply.org_id, reply.invite_id).map(|_| ())
-    }
-
-    /// Remove exactly the pair (`org_id`, `invite_id`) from the store that
-    /// holds it and return that store's write; refused
-    /// (`InviteNotOutstanding`), writing nothing, when no store does
-    /// (LLR-d55brn).
-    pub fn settle<R: RngCore + CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        org_id: OrgId,
-        invite_id: InviteId,
-    ) -> Result<StoreWrite, OrgNodeError> {
-        let index = self.outstanding_index(org_id, invite_id)?;
         let ((), write) = self.change(index, rng, |data| {
-            data.outstanding_invites.retain(|pair| *pair != (org_id, invite_id));
+            data.outstanding_invites.push(OutstandingInvite { org_id, invite_id, invitee_name });
             Ok(())
         })?;
-        Ok(write)
+        Ok((invite, StoreChange::Sealed(write)))
     }
 
-    /// The first admissions the stores declared they expect, in store order.
-    pub fn expected_admissions(&self) -> Vec<ExpectedAdmission> {
-        self.stores.iter().flat_map(|store| store.data().expected_admissions.iter().copied()).collect()
+    /// The admission request of this store's provisional Member, for the
+    /// Invite's issuer, carrying the sending Device's own addresses last
+    /// (LLR-g32hjn, LLR-h4gwns): an unknown store is `PersonaNotHeld`, a
+    /// store with no provisional Member `NoProvisionalMember`, addresses
+    /// `EndpointAddresses::parse` refuses `InvalidField request.addresses`.
+    /// Changes nothing, so a retry with the same addresses sends the same
+    /// bytes.
+    pub fn build_admission_request(
+        &self,
+        device_key: &DevicePublicKey,
+        sender_addresses: Vec<String>,
+    ) -> Result<OutgoingMessage, OrgNodeError> {
+        let index = self.store_index(device_key)?;
+        let member = self.stores[index].data()?.member.as_ref().ok_or(OrgNodeError::NoProvisionalMember)?;
+        parse_field("request.addresses", EndpointAddresses::parse(sender_addresses.clone()))?;
+        let body = encode_message(&WireMessage::AdmissionRequest {
+            org_id: member.org_id,
+            invite_id: member.invite_id,
+            name: member.name.clone(),
+            surname: member.surname.clone(),
+            preferred_handles: member.preferred_handles.clone(),
+            member_key: member.member_key,
+            device_key: member.device_key,
+            addresses: sender_addresses,
+        })?;
+        Ok(OutgoingMessage { recipient: member.issuer, body })
+    }
+
+    /// One organisation request per Device the current record lists other
+    /// than this Persona's, in record order; in a provisional Member's
+    /// store, one for the Invite's issuer (LLR-vyank2). The caller's
+    /// addresses travel last (LLR-h4gwns); addresses
+    /// `EndpointAddresses::parse` refuses are `InvalidField
+    /// request.addresses`. A store with neither is `OrgNotHeld`, or
+    /// `FoundingNotWritten` for a founding store whose proxy is not yet
+    /// recorded. Changes nothing.
+    pub fn build_organisation_request(
+        &self,
+        device_key: &DevicePublicKey,
+        sender_addresses: Vec<String>,
+    ) -> Result<Vec<OutgoingMessage>, OrgNodeError> {
+        let index = self.store_index(device_key)?;
+        let data = self.stores[index].data()?;
+        let (org_id, recipients): (OrgId, Vec<DevicePublicKey>) = match (&data.record, &data.member) {
+            (Some(record), _) => (
+                record.org_id,
+                record.devices_other_than(data.persona.device_key).collect(),
+            ),
+            (None, Some(member)) => (member.org_id, vec![member.issuer]),
+            (None, None) => {
+                return Err(match data.persona.org_id {
+                    Some(org_id) => OrgNodeError::OrgNotHeld { org_id },
+                    None => OrgNodeError::FoundingNotWritten,
+                })
+            }
+        };
+        parse_field("request.addresses", EndpointAddresses::parse(sender_addresses.clone()))?;
+        let body = encode_message(&WireMessage::OrganisationRequest { org_id, addresses: sender_addresses })?;
+        Ok(recipients.into_iter().map(|recipient| OutgoingMessage { recipient, body: body.clone() }).collect())
+    }
+
+    /// Cancel the invite `invite_id`: remove its kept admission request,
+    /// its outstanding pair and any `Admit` naming it, in one sealed
+    /// change, so a later request carrying it is refused as not
+    /// outstanding (LLR-ag8hjd). An invite id with no kept request is
+    /// refused with `NoAdmissionRequestKept`, changing nothing.
+    pub fn cancel_invite<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        device_key: &DevicePublicKey,
+        invite_id: InviteId,
+    ) -> Result<StoreChange, OrgNodeError> {
+        let index = self.store_index(device_key)?;
+        let org_id = self.stores[index]
+            .data()?
+            .kept_request(invite_id)
+            .map(|request| request.org_id)
+            .ok_or(OrgNodeError::NoAdmissionRequestKept { invite_id })?;
+        let ((), write) = self.change(index, rng, |data| {
+            data.kept_admission_requests.retain(|request| request.invite_id != invite_id);
+            data.outstanding_invites
+                .retain(|outstanding| !(outstanding.org_id == org_id && outstanding.invite_id == invite_id));
+            data.provisional_changes.retain(|change| !change.admits(invite_id));
+            Ok(())
+        })?;
+        Ok(StoreChange::Sealed(write))
     }
 
     // ----------------------------------------------------------
     // The stores as org-io's files hold them.
     // ----------------------------------------------------------
 
-    /// Put `store` in place of the held store with its Device key, or add it
-    /// when none is held: org-io's reload of a Persona from its file after a
-    /// failed write or removal. One store per Device key is kept (LLR-rdda86);
-    /// nothing is sealed, no other store changes and no
-    /// store is removed.
-    pub fn restore_store(&mut self, store: PersonaStore) {
+    /// Put `store` in place of the held store with its DevicePublicKey, or add it
+    /// when none is held: org-io's reload of a Persona from its file. One
+    /// store per DevicePublicKey is kept (LLR-f9x3vf); nothing is sealed, no other
+    /// store changes and no store is removed. A replaced store's behind
+    /// marker, which no file holds, is kept (LLR-zk7fx2).
+    pub fn restore_store(&mut self, mut store: PersonaStore) {
         match self.stores.iter().position(|held| held.device_key() == store.device_key()) {
-            Some(index) => self.stores[index] = store,
+            Some(index) => {
+                if let (Ok(held), Ok(restored)) = (self.stores[index].data(), store.data_mut()) {
+                    restored.behind = held.behind;
+                }
+                self.stores[index] = store;
+            }
             None => self.stores.push(store),
         }
     }
 
     /// Remove the store of `device_key` from the in-memory service, returning
-    /// whether one was held. org-io calls it in two local-IO cases only: a
-    /// refused keychain write for a new Persona, and a failed reload after a
-    /// failed store write. It touches no file and no keychain item; this is
-    /// the second exempt removal place of LLR-jd82t6.
+    /// whether one was held: org-io's local-IO exception (LLR-9jn3z8). It
+    /// touches no file and no keychain item.
     pub fn drop_store(&mut self, device_key: &DevicePublicKey) -> bool {
         let before = self.stores.len();
         self.stores.retain(|held| &held.device_key() != device_key);
         self.stores.len() != before
     }
 
+    /// Verify the store `device_key` names against `chain`, the
+    /// Organisation state org-io read at a finalised block (LLR-rr558z):
+    /// a founding with no proxy recorded is `FoundingNotWritten`, no state
+    /// `OrgNotOnChain`, and otherwise exactly one `Verified`. Against a
+    /// state not below the record's epoch, first the received provisional organisations that can never
+    /// be adopted are discarded and those one epoch ahead stamped, aged
+    /// by `ahead_limit` (LLR-4tsgfh), and the outcome judged on what is
+    /// left. `InStep`, `Behind` and `Inconsistent` call `device_secrets`
+    /// never and return a store change only when that discard or stamp
+    /// changed the store; the behind marker, which is not sealed, changes
+    /// too (LLR-qvp7mq, LLR-zk7fx2). After the `Inconsistent`
+    /// checks a kept notice `revocation::accept` takes, or a match not
+    /// listing the Persona's Device, is its own removal: `Removed`, with
+    /// the removed store sealed (LLR-jhy6t6, LLR-5tvn7g).
+    pub fn verify<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        device_key: &DevicePublicKey,
+        chain: Option<OrgState>,
+        verified_at: VerificationTime,
+        ahead_limit: AheadLimit,
+        device_secrets: impl FnOnce(&[DevicePublicKey]) -> Vec<DeviceSecret>,
+    ) -> Result<(Verified, Option<StoreChange>), OrgNodeError> {
+        let index = self.store_index(device_key)?;
+        let data = self.stores[index].data()?;
+        if data.founding.as_ref().is_some_and(|founding| founding.proxy.is_none()) {
+            return Err(OrgNodeError::FoundingNotWritten);
+        }
+        let chain = chain.ok_or(OrgNodeError::OrgNotOnChain)?;
+        let discarded = crate::verify_org::discard_unadoptable(data, &chain, verified_at, ahead_limit);
+        let pruned_changed = discarded.is_some();
+        let pruned = discarded.unwrap_or_else(|| data.clone());
+        let data = &pruned;
+        let judgement = crate::verify_org::judge(data, &chain);
+        // After the Inconsistent checks, a kept notice accepted against the chain is this
+        // Persona's removal (LLR-jhy6t6).
+        let inconsistent = matches!(judgement, Judgement::Done(Verified::Inconsistent { .. }));
+        if !inconsistent && crate::verify_org::accepted_notice(data, &chain) {
+            return self.remove_own(index, rng, &chain, None, verified_at, device_secrets);
+        }
+        // A match not listing this Persona's Device is its removal (LLR-jhy6t6).
+        if let Judgement::Adopt(matched) = judgement {
+            let proposal = &data.provisional_organisations[matched];
+            let own = data.persona.device_key;
+            if !proposal.members.iter().any(|member| member.device_keys.contains(&own)) {
+                let members = proposal.members.clone();
+                return self.remove_own(index, rng, &chain, Some(members), verified_at, device_secrets);
+            }
+        }
+        let (next, verified) = match judgement {
+            Judgement::Done(verified) => {
+                let change = if pruned_changed {
+                    let write = self.stores[index].seal_data(&pruned, rng)?;
+                    let behind = self.stores[index].data()?.behind;
+                    *self.stores[index].data_mut()? = StoreData { behind, ..pruned };
+                    Some(StoreChange::Sealed(write))
+                } else {
+                    None
+                };
+                update_behind_marker(self.stores[index].data_mut()?, &verified);
+                return Ok((verified, change));
+            }
+            Judgement::Adopt(matched) => crate::verify_org::adopt(data, current_record(data)?, matched),
+            Judgement::AdoptFirst(matched) => crate::verify_org::adopt_first(data, matched, &chain)?,
+            Judgement::AdoptFounding => crate::verify_org::adopt_founding(data)?,
+        };
+        // Sealed before the outcome is returned (LLR-34c5y3).
+        let write = self.stores[index].seal_data(&next, rng)?;
+        *self.stores[index].data_mut()? = next;
+        Ok((verified, Some(StoreChange::Sealed(write))))
+    }
+
+    // ----------------------------------------------------------
+    // The Admin's provisional changes (SDD-hwax8v).
+    // ----------------------------------------------------------
+
+    /// Record the admission of the request kept for `invite_id`
+    /// (LLR-bwtx3h): the first of its preferred Handles, in ranked order,
+    /// that neither a member of the current record nor another `Admit`
+    /// holds, else the parsed `chosen`; appends `Admit { invite_id,
+    /// handle }` and changes nothing else (LLR-b2hgd4). Refused, recording
+    /// nothing, as LLR-mq7n6u states.
+    pub fn record_admission<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        device_key: &DevicePublicKey,
+        invite_id: InviteId,
+        chosen: Option<&str>,
+    ) -> Result<StoreChange, OrgNodeError> {
+        let index = self.store_index(device_key)?;
+        let ((), write) = self.change(index, rng, |data| {
+            let handle = admission_handle(data, invite_id, chosen)?;
+            data.provisional_changes.push(ProvisionalChange::Admit { invite_id, handle });
+            ensure_within_bound(data)
+        })?;
+        Ok(StoreChange::Sealed(write))
+    }
+
+    /// Record the revocation of `member_id` (LLR-f3hru6): appends
+    /// `Revoke { member_id }`; refuses a MemberId the record does not
+    /// hold, one a `Revoke` already names, a store with no record, the
+    /// behind marker set and the bound, recording nothing.
+    pub fn record_revocation<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        device_key: &DevicePublicKey,
+        member_id: MemberId,
+    ) -> Result<StoreChange, OrgNodeError> {
+        let index = self.store_index(device_key)?;
+        let ((), write) = self.change(index, rng, |data| {
+            let record = current_record(data)?;
+            ensure_not_behind(data, record)?;
+            if !record.trie_members.iter().any(|member| member.id == member_id) {
+                return Err(OrgNodeError::MemberNotHeld { member_id });
+            }
+            let named = |change: &ProvisionalChange| {
+                matches!(change, ProvisionalChange::Revoke { member_id: revoked } if *revoked == member_id)
+            };
+            if data.provisional_changes.iter().any(named) {
+                return Err(OrgNodeError::RevocationAlreadyRecorded { member_id });
+            }
+            data.provisional_changes.push(ProvisionalChange::Revoke { member_id });
+            ensure_within_bound(data)
+        })?;
+        Ok(StoreChange::Sealed(write))
+    }
+
+    /// Calculate the next epoch from every provisional change, in recorded
+    /// order, and keep it as one `Own` provisional organisation for the
+    /// record's epoch plus one (LLR-va2yqz); the changes stay held and the
+    /// record is unchanged. Refused, keeping nothing, as LLR-n6ssue and LLR-qghs95
+    /// state. The proposal is built before `change`, whose seal draws from
+    /// the same random source after it.
+    pub fn propose_updated_organisation<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        device_key: &DevicePublicKey,
+    ) -> Result<StoreChange, OrgNodeError> {
+        let index = self.store_index(device_key)?;
+        let proposal = proposal_of(self.stores[index].data()?, rng)?;
+        let ((), write) = self.change(index, rng, |data| {
+            data.provisional_organisations.push(proposal);
+            ensure_within_bound(data)
+        })?;
+        Ok(StoreChange::Sealed(write))
+    }
+
+    // ----------------------------------------------------------
+    // The messages for the current epoch (SDD-qzv5mn).
+    // ----------------------------------------------------------
+
+    /// The messages of the epoch the store holds as current (LLR-degg8t):
+    /// refused for a store with no record (`OrgNotHeld`); none when the
+    /// record keeps no Change set; otherwise one Organisation-information
+    /// body (the kept Change set under the record's epoch, the kept base
+    /// snapshot, the record's private key) for each Device the record
+    /// lists other than this Persona's, in record order, then one
+    /// revocation notice for each Device the base lists and the record
+    /// does not. Changes nothing; equal stores give equal results.
+    pub fn messages_for_current_epoch(&self, device_key: &DevicePublicKey) -> Result<Vec<OutgoingMessage>, OrgNodeError> {
+        let data = self.stores[self.store_index(device_key)?].data()?;
+        let record = current_record(data)?;
+        let (Some(change_set), Some(base_snapshot)) = (&record.kept_change_set, &record.kept_base_snapshot) else {
+            return Ok(Vec::new());
+        };
+        let information = encode_message(&WireMessage::OrgInformation {
+            envelope: Envelope { org_id: record.org_id, parent_seq: record.last_seq, delta_bytes: change_set.clone() },
+            record_snapshot: base_snapshot.clone(),
+            org_private_key: record.org_private_key.clone(),
+        })?;
+        let own = data.persona.device_key;
+        let mut outgoing: Vec<OutgoingMessage> = record
+            .devices_other_than(own)
+            .map(|recipient| OutgoingMessage { recipient, body: information.clone() })
+            .collect();
+        let base = OrgRecord { trie_members: decode_record_snapshot(base_snapshot)?, ..record.clone() };
+        let trie = trie_from_snapshots(&record.trie_members)?;
+        for notice in crate::revocation::notices_for(&base, record, &trie)? {
+            let recipient = notice.device;
+            outgoing.push(OutgoingMessage { recipient, body: encode_message(&WireMessage::Revocation(notice))? });
+        }
+        Ok(outgoing)
+    }
+
+    // ----------------------------------------------------------
+    // Read-only views (LLR-8ru6mv): no private key, no seed, no secret.
+    // ----------------------------------------------------------
+
+    /// The store's provisional changes, in recorded order, by reference
+    /// (LLR-8ru6mv).
+    pub fn provisional_changes(&self, device_key: &DevicePublicKey) -> Result<&[ProvisionalChange], OrgNodeError> {
+        Ok(&self.stores[self.store_index(device_key)?].data()?.provisional_changes)
+    }
+
+    /// Each provisional organisation's public values, with no private key
+    /// (LLR-8ru6mv).
+    pub fn provisional_organisations(
+        &self,
+        device_key: &DevicePublicKey,
+    ) -> Result<Vec<ProvisionalOrganisationView>, OrgNodeError> {
+        let data = self.stores[self.store_index(device_key)?].data()?;
+        let record_epoch = data.record.as_ref().map(|record| record.epoch);
+        Ok(data
+            .provisional_organisations
+            .iter()
+            .map(|held| {
+                let base_epoch = Epoch::new(held.epoch.get().saturating_sub(1));
+                ProvisionalOrganisationView {
+                    epoch: held.epoch,
+                    base_epoch,
+                    root: held.root,
+                    org_pub_key: held.org_pub_key,
+                    origin: held.origin,
+                    current_proposal: matches!(held.origin, Origin::Own)
+                        && record_epoch == Some(base_epoch)
+                        && held.applied == data.provisional_changes,
+                }
+            })
+            .collect())
+    }
+
+    /// The kept admission requests, in kept order, each with the invitee
+    /// name of the outstanding invite whose identifier it carries
+    /// (LLR-8ru6mv). A request is kept only for an outstanding invite and
+    /// both go together (LLR-6gkxpg, LLR-rzqs2u, LLR-ag8hjd), so the empty
+    /// name is never returned in practice.
+    pub fn admission_requests(
+        &self,
+        device_key: &DevicePublicKey,
+    ) -> Result<Vec<(&KeptAdmissionRequest, &str)>, OrgNodeError> {
+        let data = self.stores[self.store_index(device_key)?].data()?;
+        Ok(data
+            .kept_admission_requests
+            .iter()
+            .map(|request| {
+                let name = data
+                    .outstanding_invites
+                    .iter()
+                    .find(|invite| invite.org_id == request.org_id && invite.invite_id == request.invite_id)
+                    .map_or("", |invite| invite.invitee_name.as_str());
+                (request, name)
+            })
+            .collect())
+    }
+
+    /// A copy of the public values of `device_key`'s store (LLR-8ru6mv):
+    /// the Persona's DevicePublicKey and binding, the Organisation name, the
+    /// current record's values, the provisional founding's with its proxy,
+    /// and the Organisation a provisional Member asked to join. It copies
+    /// no seed, secret or private key and changes nothing; an unknown key
+    /// is `PersonaNotHeld`.
+    pub fn persona_view(&self, device_key: &DevicePublicKey) -> Result<PersonaView, OrgNodeError> {
+        let data = self.stores[self.store_index(device_key)?].data()?;
+        Ok(PersonaView {
+            device_key: data.persona.device_key,
+            org_id: data.persona.org_id,
+            org_name: data.org_name.clone(),
+            record: data.record.as_ref().map(|record| RecordView {
+                org_id: record.org_id,
+                root_hash: record.root_hash,
+                org_pub_key: record.org_pub_key,
+                epoch: record.epoch,
+                members: record.trie_members.clone(),
+            }),
+            founding: data.founding.as_ref().map(|founding| FoundingView {
+                epoch: founding.epoch,
+                root: founding.root,
+                org_pub_key: founding.org_pub_key,
+                proxy: founding.proxy,
+            }),
+            member_of: data.member.as_ref().map(|member| member.org_id),
+        })
+    }
+
+    /// The addresses this store keeps for `peer` (LLR-pgy2rb): its
+    /// address-book entry; else a kept request's from it; else, in a
+    /// provisional Member's store whose Invite it issued, the Invite's
+    /// issuer addresses; else none. Changes nothing.
+    pub fn addresses_for(
+        &self,
+        device_key: &DevicePublicKey,
+        peer: DevicePublicKey,
+    ) -> Result<Option<&EndpointAddresses>, OrgNodeError> {
+        let data = self.stores[self.store_index(device_key)?].data()?;
+        if let Some((_, addresses)) = data.address_book.iter().find(|(device, _)| *device == peer) {
+            return Ok(Some(addresses));
+        }
+        if let Some(request) = data.kept_admission_requests.iter().find(|request| request.from == peer) {
+            return Ok(Some(&request.addresses));
+        }
+        Ok(data.member.as_ref().filter(|member| member.issuer == peer).map(|member| &member.issuer_addresses))
+    }
+
+    // ----------------------------------------------------------
+    // The kept acknowledgements of a removed store (SDD-z4m57w).
+    // ----------------------------------------------------------
+
+    /// The recipient `recipient` accepted its acknowledgement: remove it, with that key and its addresses,
+    /// and return how many are still kept and the store sealed (LLR-85kves). An Active store, or a
+    /// recipient no kept acknowledgement names, is refused with `AcknowledgementNotKept`. The answer
+    /// itself is not judged here; org-io received it.
+    pub fn acknowledgement_accepted<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        device_key: &DevicePublicKey,
+        recipient: DevicePublicKey,
+    ) -> Result<(usize, StoreChange), OrgNodeError> {
+        let index = self.store_index(device_key)?;
+        let StoreContent::Removed(removed) = self.stores[index].content() else {
+            return Err(OrgNodeError::AcknowledgementNotKept { recipient: Box::new(recipient) });
+        };
+        let mut next = removed.clone();
+        if !next.remove_acknowledgement(&recipient) {
+            return Err(OrgNodeError::AcknowledgementNotKept { recipient: Box::new(recipient) });
+        }
+        let left = next.acknowledgements.len();
+        let content = StoreContent::Removed(next);
+        let write = self.stores[index].seal_content(&content, rng)?;
+        self.stores[index].replace_content(content);
+        Ok((left, StoreChange::Sealed(write)))
+    }
+
+    /// The acknowledgements a removed store keeps, as messages to their recipients with the recipients'
+    /// addresses; `None` for an Active store (LLR-75sn9g). Changes nothing.
+    pub fn kept_acknowledgements(&self, device_key: &DevicePublicKey) -> Result<Option<KeptAcknowledgements>, OrgNodeError> {
+        let index = self.store_index(device_key)?;
+        let StoreContent::Removed(removed) = self.stores[index].content() else {
+            return Ok(None);
+        };
+        let acknowledgements = removed
+            .acknowledgements
+            .iter()
+            .map(|kept| {
+                let body = encode_message(&WireMessage::Acknowledgement(kept.ack.clone()))?;
+                Ok((OutgoingMessage { recipient: kept.recipient, body }, kept.recipient_addresses.clone()))
+            })
+            .collect::<Result<Vec<_>, OrgNodeError>>()?;
+        Ok(Some(KeptAcknowledgements { org_id: removed.org_id, verified_at: removed.verified_at, acknowledgements }))
+    }
+
     // ----------------------------------------------------------
     // Private helpers.
     // ----------------------------------------------------------
 
-    /// The index of `persona_id`'s store.
+    /// The index of the store of `device_key`'s Persona, else
+    /// `PersonaNotHeld` (LLR-f9x3vf): the lookup of every per-store operation.
+    fn store_index(&self, device_key: &DevicePublicKey) -> Result<usize, OrgNodeError> {
+        self.stores
+            .iter()
+            .position(|store| &store.device_key() == device_key)
+            .ok_or_else(|| OrgNodeError::PersonaNotHeld { device_key: Box::new(*device_key) })
+    }
+
+    /// The index of `persona_id`'s store, else `PersonaIdNotHeld`. A removed
+    /// store, the only one `data()` refuses, keeps no Persona identifier
+    /// (LLR-2d5a7m), so no `persona_id` can name it and skipping the
+    /// refusal finds every store that does.
     fn persona_index(&self, persona_id: &PersonaId) -> Result<usize, OrgNodeError> {
         self.stores
             .iter()
-            .position(|store| &store.data().persona.persona_id == persona_id)
-            .ok_or_else(|| OrgNodeError::Chain(format!("persona not found: {}", persona_id.as_str())))
+            .position(|store| store.data().ok().is_some_and(|data| &data.persona.persona_id == persona_id))
+            .ok_or_else(|| OrgNodeError::PersonaIdNotHeld { persona_id: persona_id.clone() })
     }
 
-    fn find_persona(&self, persona_id: &PersonaId) -> Result<&PersonaRecord, OrgNodeError> {
-        Ok(&self.stores[self.persona_index(persona_id)?].data().persona)
+    /// The index of the store holding the current record of `org_id`. A
+    /// removed store, the only one `data()` refuses, holds no record
+    /// (LLR-2d5a7m), so skipping the refusal finds every store that does.
+    fn record_index(&self, org_id: OrgId) -> Option<usize> {
+        self.stores.iter().position(|store| {
+            store.data().ok().is_some_and(|data| data.record.as_ref().is_some_and(|record| record.org_id == org_id))
+        })
     }
 
-    /// The index of the first store holding a record of `org_id`: the store
-    /// of the Persona bound to it (`OrgNotOnChain` when none does).
-    fn record_index(&self, org_id: OrgId) -> Result<usize, OrgNodeError> {
-        self.stores
-            .iter()
-            .position(|store| store.data().orgs.iter().any(|record| record.org_id == org_id))
-            .ok_or(OrgNodeError::OrgNotOnChain)
-    }
-
-    /// The index of the first store whose Persona is bound to `org_id`.
-    fn bound_index(&self, org_id: OrgId) -> Option<usize> {
-        self.stores.iter().position(|store| store.data().persona.org_id == Some(org_id))
-    }
-
-    fn find_org(&self, org_id: OrgId) -> Result<&OrgRecord, OrgNodeError> {
-        find_record(self.stores[self.record_index(org_id)?].data(), org_id)
-    }
-
-    /// Refuse a Persona already bound to an Organisation (LLR-6z5xya,
-    /// LLR-eyc4ud, REQ-yp75u9).
-    fn ensure_unbound(&self, persona_id: &PersonaId) -> Result<(), OrgNodeError> {
-        match self.find_persona(persona_id)?.org_id {
-            Some(_) => Err(OrgNodeError::PersonaAlreadyBound { persona_id: persona_id.clone() }),
-            None => Ok(()),
+    /// Add the new store `data` keyed from `secret`, sealed with a fresh
+    /// nonce: refused (`DuplicatePersonaStore`) when a store with its Device
+    /// key is held, adding nothing (LLR-f9x3vf).
+    fn add_store<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        secret: &DeviceSecret,
+        data: StoreData,
+    ) -> Result<StoreChange, OrgNodeError> {
+        if self.store_index(&data.persona.device_key).is_ok() {
+            return Err(OrgNodeError::DuplicatePersonaStore);
         }
+        let store = PersonaStore::create(secret, data)?;
+        let write = store.seal(rng)?;
+        self.stores.push(store);
+        Ok(StoreChange::Sealed(write))
     }
 
-    /// Refuse `org_id` when a store of a Persona other than `persona_id`
-    /// holds its record or expects its admission (LLR-yexf5m, REQ-uy7kfq).
-    fn ensure_no_other_membership(&self, persona_id: &PersonaId, org_id: OrgId) -> Result<(), OrgNodeError> {
-        let held_by_another = self.stores.iter().map(PersonaStore::data).any(|data| {
-            &data.persona.persona_id != persona_id
-                && (data.orgs.iter().any(|record| record.org_id == org_id)
-                    || data.expected_admissions.iter().any(|expectation| expectation.org_id == org_id))
-        });
-        match held_by_another {
-            true => Err(OrgNodeError::OrganisationHeldByAnotherPersona { org_id }),
-            false => Ok(()),
-        }
-    }
-
-    /// Record the expectation of `org_id` in the store at `index`, at most
-    /// once (LLR-9zfnmb, LLR-7q9g9z).
-    fn record_expectation<R: RngCore + CryptoRng>(
+    /// Replace the store at `index` with its removed form, sealed, and return
+    /// it as the one `StoreChange::Sealed` (LLR-2d5a7m). No other store is
+    /// read or changed (LLR-f9x3vf).
+    fn seal_removal<R: RngCore + CryptoRng>(
         &mut self,
         index: usize,
         rng: &mut R,
-        org_id: OrgId,
-    ) -> Result<StoreWrite, OrgNodeError> {
-        let expectation = ExpectedAdmission { org_id };
-        let ((), write) = self.change(index, rng, |data| {
-            if !data.expected_admissions.contains(&expectation) {
-                data.expected_admissions.push(expectation);
-            }
-            Ok(())
-        })?;
-        Ok(write)
+        acknowledgements: Vec<KeptAcknowledgement>,
+        verified_at: VerificationTime,
+    ) -> Result<StoreChange, OrgNodeError> {
+        let data = self.stores[index].data()?.clone();
+        let content = StoreContent::Removed(data.into_removed(acknowledgements, verified_at)?);
+        let write = self.stores[index].seal_content(&content, rng)?;
+        self.stores[index].replace_content(content);
+        Ok(StoreChange::Sealed(write))
     }
 
-    /// The index of the store holding (`org_id`, `invite_id`) as
-    /// outstanding, else `InviteNotOutstanding` (LLR-d55brn).
-    fn outstanding_index(&self, org_id: OrgId, invite_id: InviteId) -> Result<usize, OrgNodeError> {
-        self.stores
-            .iter()
-            .position(|store| store.data().outstanding_invites.contains(&(org_id, invite_id)))
-            .ok_or(OrgNodeError::InviteNotOutstanding)
+    /// This Persona's own removal (LLR-jhy6t6, LLR-5tvn7g, LLR-vq5d5n): choose the recipients among
+    /// the record's other Devices and, when there is at least one, call `device_secrets` once for the
+    /// Persona's key, sign one acknowledgement and keep it for each recipient with its address-book
+    /// entry. Then seal the removed store. With no secret it refuses `DeviceSecretNotSupplied`, changing
+    /// nothing. Every secret is dropped before return.
+    fn remove_own<R: RngCore + CryptoRng>(
+        &mut self,
+        index: usize,
+        rng: &mut R,
+        chain: &OrgState,
+        matched: Option<Vec<MemberSnapshot>>,
+        verified_at: VerificationTime,
+        device_secrets: impl FnOnce(&[DevicePublicKey]) -> Vec<DeviceSecret>,
+    ) -> Result<(Verified, Option<StoreChange>), OrgNodeError> {
+        let data = self.stores[index].data()?;
+        let record = data.record.as_ref().ok_or(OrgNodeError::OrgNotOnChain)?;
+        let org_id = record.org_id;
+        let own = data.persona.device_key;
+        let recipients = crate::removal::recipients(&record.trie_members, &own, matched.as_deref());
+        let mut acknowledgements = Vec::with_capacity(recipients.len());
+        if !recipients.is_empty() {
+            let secrets = device_secrets(&[own]);
+            let secret = secrets
+                .iter()
+                .find(|secret| secret.device_key() == own)
+                .ok_or(OrgNodeError::DeviceSecretNotSupplied { org_id })?;
+            let ack = crate::revocation::sign_acknowledgement(&data.persona, org_id, chain, secret)?;
+            drop(secrets);
+            for recipient in recipients {
+                let recipient_addresses =
+                    data.address_book.iter().find(|(key, _)| *key == recipient).map(|(_, addresses)| addresses.clone());
+                acknowledgements.push(KeptAcknowledgement { ack: ack.clone(), recipient, recipient_addresses });
+            }
+        }
+        let kept = acknowledgements.len();
+        let change = self.seal_removal(index, rng, acknowledgements, verified_at)?;
+        Ok((Verified::Removed { org_id, acknowledgements_kept: kept }, Some(change)))
     }
 
     /// Make `change` to a copy of the data of the store at `index`, seal
     /// the copy, and only then adopt it: a refusal, of the change or of the
-    /// seal, leaves the store as it was and returns no write (LLR-bvt5up,
-    /// PR-jav8zn).
+    /// seal, leaves the store as it was and returns no write.
     fn change<T, R: RngCore + CryptoRng>(
         &mut self,
         index: usize,
         rng: &mut R,
         change: impl FnOnce(&mut StoreData) -> Result<T, OrgNodeError>,
     ) -> Result<(T, StoreWrite), OrgNodeError> {
-        let mut data = self.stores[index].data().clone();
+        let mut data = self.stores[index].data()?.clone();
         let result = change(&mut data)?;
         let write = self.stores[index].seal_data(&data, rng)?;
-        *self.stores[index].data_mut() = data;
+        *self.stores[index].data_mut()? = data;
         Ok((result, write))
     }
+}
 
-    /// Adopt a commit step's successor for the store at `index`: sealed and
-    /// kept, or — when its Persona was forgotten with the Organisation —
-    /// the store removed (LLR-pba7yu).
-    fn adopt<R: RngCore + CryptoRng>(
-        &mut self,
-        index: usize,
-        rng: &mut R,
-        successor: Successor,
-    ) -> Result<StoreChange, OrgNodeError> {
-        match successor {
-            Successor::Kept(data) | Successor::Removed(Some(data)) => {
-                let write = self.stores[index].seal_data(&data, rng)?;
-                *self.stores[index].data_mut() = data;
-                Ok(StoreChange::Sealed(write))
-            }
-            Successor::Removed(None) => {
-                let forgotten = self.stores.remove(index);
-                Ok(StoreChange::Forgotten { device_key: forgotten.device_key() })
-            }
-        }
+/// The Organisation `store` is bound to, read from its content in either
+/// form: a removed store stays bound to its Organisation (LLR-w2uyyh).
+fn bound_org_of(store: &PersonaStore) -> Option<OrgId> {
+    match store.content() {
+        StoreContent::Active(data) => data.persona.org_id,
+        StoreContent::Removed(removed) => Some(removed.org_id),
     }
 }
 
-/// `org_id`'s record in `data`, else `OrgNotOnChain`.
-fn find_record(data: &StoreData, org_id: OrgId) -> Result<&OrgRecord, OrgNodeError> {
-    data.orgs.iter().find(|record| record.org_id == org_id).ok_or(OrgNodeError::OrgNotOnChain)
-}
-
-/// Bind the store's Persona to `org_id` as `member_id`, Active.
-fn bind_persona(data: &mut StoreData, org_id: OrgId, member_id: MemberId) {
-    data.persona.status = PersonaStatus::Active;
-    data.persona.org_id = Some(org_id);
-    data.persona.member_id = Some(member_id);
-}
-
-/// After a commit to `org_id` at `root`, drop every provisional update for
-/// that Organisation built on another base (LLR-mkj4bz).
-fn discard_orphans(data: &mut StoreData, org_id: OrgId, root: RootHash) {
-    data.provisional_updates.retain(|provisional| provisional.org_id != Some(org_id) || provisional.base_root == Some(root));
-}
-
-/// Write a verified update to a held record — root, epoch, mark and
-/// members together (LLR-cja9zv), and the Organisation key pair of the
-/// update, replacing the one it held, no earlier one kept (LLR-6s785x,
-/// LLR-ckk5nz, LLR-4kh9w9) — keep the verified Envelope's `change_set`,
-/// replacing any earlier one (LLR-d9778a), and drop the provisional
-/// updates it orphans (LLR-mkj4bz).
-fn commit_held(
-    data: &mut StoreData,
-    org_id: OrgId,
-    verified: &VerifiedUpdate,
-    change_set: &[u8],
-    org_private_key: OrgPrivateKey,
-    org_pub_key: OrgPublicKey,
-) -> Result<(), OrgNodeError> {
-    let root = verified.trie.root_hash().map_err(OrgNodeError::Trie)?;
-    let snapshots: Vec<MemberSnapshot> = verified.trie.members().iter().map(snapshot_of).collect();
-    let rec = data.orgs.iter_mut().find(|record| record.org_id == org_id).ok_or(OrgNodeError::OrgNotOnChain)?;
-    rec.root_hash = root;
-    rec.epoch = verified.epoch;
-    rec.last_seq = verified.seq_guard.last_seen();
-    rec.trie_members = snapshots;
-    rec.org_private_key = org_private_key;
-    rec.org_pub_key = org_pub_key;
-    rec.kept_change_set = Some(change_set.to_vec());
-    discard_orphans(data, org_id, root);
-    Ok(())
-}
-
-/// Commit received Organisation information that leaves this node listed
-/// in its held record (LLR-jsx922); a revocation never reaches this, it
-/// is decided by `revocation::accept` (LLR-pt32fx). The record takes
-/// the key the message carried and the chain's public key, a pair
-/// (REQ-ju6vn2, LLR-ckk5nz, LLR-4kh9w9), and keeps the received
-/// Envelope's Change set (LLR-d9778a).
-fn commit_received(
-    data: &mut StoreData,
-    org_id: OrgId,
-    verified: &VerifiedUpdate,
-    envelope: &Envelope,
-    carried_key: OrgPrivateKey,
-    chain_state: &OrgState,
-) -> Result<(), OrgNodeError> {
-    commit_held(data, org_id, verified, &envelope.delta_bytes, carried_key, chain_state.org_pub_key)
-}
-
-/// Refuse an Organisation private key whose X25519 public half is not the
-/// Organisation public key the chain state read carries (LLR-ba2ejp,
-/// RC-9cefcn).
-fn check_carried_key(org_id: OrgId, key: &OrgPrivateKey, state: &OrgState) -> Result<(), OrgNodeError> {
-    if key.x25519_keypair().org_public_key()? == state.org_pub_key {
-        Ok(())
-    } else {
-        Err(OrgNodeError::OrgKeyMismatch { org_id })
+/// The behind marker after `verified` (LLR-zk7fx2): set on `Behind`,
+/// cleared on `InStep`, left as it was otherwise.
+fn update_behind_marker(data: &mut StoreData, verified: &Verified) {
+    match verified {
+        Verified::Behind { chain_epoch } => data.behind = Some(*chain_epoch),
+        Verified::InStep => data.behind = None,
+        Verified::Inconsistent { .. } | Verified::Adopted { .. } | Verified::Removed { .. } => {}
     }
 }
 
-// ============================================================
-// Outcomes.
-// ============================================================
-
-/// What a committed received message did (LLR-6qjmhf): a first admission
-/// (also a founder's genesis commit), an update that keeps this node
-/// listed, this node's own removal by an update, or a revocation notice
-/// accepted.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ReceiveKind {
-    Admitted,
-    Updated,
-    Removed,
-    Revoked,
+/// The current record of `data`'s store, else `OrgNotHeld` naming the
+/// Persona's Organisation, or `FoundingNotWritten` for a founding store whose
+/// Organisation identifier is not yet recorded.
+pub(crate) fn current_record(data: &StoreData) -> Result<&OrgRecord, OrgNodeError> {
+    match (&data.record, data.persona.org_id) {
+        (Some(record), _) => Ok(record),
+        (None, Some(org_id)) => Err(OrgNodeError::OrgNotHeld { org_id }),
+        (None, None) => Err(OrgNodeError::FoundingNotWritten),
+    }
 }
 
-/// Outcome of `commit_checked` (LLR-6qjmhf) and of `commit_genesis`: the
-/// Organisation, the epoch and root of the chain state it was decided
-/// against, what it did, and the acknowledgements this node signed when it
-/// was removed or revoked (else empty).
-#[derive(Debug)]
-pub struct ReceiveOutcome {
-    pub org_id: OrgId,
-    pub epoch: Epoch,
-    pub root: RootHash,
-    pub kind: ReceiveKind,
-    pub acknowledgements: Vec<Acknowledgement>,
+/// Refuses while the behind marker is set (LLR-zk7fx2).
+fn ensure_not_behind(data: &StoreData, record: &OrgRecord) -> Result<(), OrgNodeError> {
+    match data.behind {
+        Some(chain_epoch) => Err(OrgNodeError::OrganisationBehind { org_id: record.org_id, chain_epoch }),
+        None => Ok(()),
+    }
 }
 
-/// One recipient's body of a committed update (LLR-gdfqn9): the Device it
-/// goes to and the encoded Wire message. Not `Clone`: an
-/// Organisation-information body carries the Organisation private key
-/// (REQ-y7tsft); its `Debug` renders the recipient and the body's length
-/// only.
+/// The record snapshot a base snapshot keeps: the members, postcard-encoded.
+fn encode_record_snapshot(snapshots: &[MemberSnapshot]) -> Result<Vec<u8>, OrgNodeError> {
+    postcard::to_allocvec(snapshots).map_err(|error| OrgNodeError::Chain(format!("record snapshot encode: {error}")))
+}
+
+/// The `Own` provisional organisation of the store's current record and
+/// provisional changes (LLR-va2yqz): the trie rebuilt, every change
+/// applied in recorded order (an `Admit` under a MemberId drawn from
+/// `rng` with the kept request's values), the root calculated once, the
+/// Change set encoded, then one Organisation key pair drawn and checked
+/// distinct from the record's key and every key of the result (LLR-qghs95).
+fn proposal_of<R: RngCore + CryptoRng>(data: &StoreData, rng: &mut R) -> Result<ProvisionalOrganisation, OrgNodeError> {
+    let record = current_record(data)?;
+    ensure_not_behind(data, record)?;
+    if data.provisional_changes.is_empty() {
+        return Err(OrgNodeError::NoProvisionalChange);
+    }
+    let mut trie = trie_from_snapshots(&record.trie_members)?;
+    for change in &data.provisional_changes {
+        trie = match change {
+            ProvisionalChange::Admit { invite_id, handle } => {
+                let request =
+                    data.kept_request(*invite_id).ok_or(OrgNodeError::NoAdmissionRequestKept { invite_id: *invite_id })?;
+                let leaf = MemberLeaf::new(
+                    fresh_member_id(rng),
+                    handle.clone(),
+                    request.member_key,
+                    request.name.clone(),
+                    request.surname.clone(),
+                    vec![request.device_key],
+                )
+                .map_err(OrgNodeError::Trie)?;
+                trie.add_member(leaf).map_err(OrgNodeError::Trie)?
+            }
+            ProvisionalChange::Revoke { member_id } => trie.delete_member(member_id).map_err(OrgNodeError::Trie)?,
+        };
+    }
+    let (next, delta) = trie.recalculate().map_err(OrgNodeError::Trie)?;
+    let root = next.root_hash().map_err(OrgNodeError::Trie)?;
+    let epoch = Epoch::new(record.epoch.get() + 1);
+    let change_set = Envelope::build(record.org_id, SequenceNumber::new(epoch.get()), &delta)?.delta_bytes;
+    let members = next.members();
+    let org_key = X25519Keypair::generate(rng);
+    let org_pub_key = org_key.org_public_key()?;
+    if org_pub_key == record.org_pub_key {
+        return Err(OrgNodeError::DuplicateOrgPublicKey);
+    }
+    org_pub_key.ensure_distinct_from(&members)?;
+    Ok(ProvisionalOrganisation {
+        epoch,
+        base_root: record.root_hash,
+        members: members.iter().map(snapshot_of).collect(),
+        root,
+        org_pub_key,
+        org_private_key: org_key.org_private_key(),
+        change_set: Some(change_set),
+        base_snapshot: Some(encode_record_snapshot(&record.trie_members)?),
+        origin: Origin::Own,
+        applied: data.provisional_changes.clone(),
+        first_ahead_at: None,
+    })
+}
+
+/// The Handle an admission of the request kept for `invite_id` is given
+/// (LLR-bwtx3h), or the refusal LLR-mq7n6u states.
+fn admission_handle(data: &StoreData, invite_id: InviteId, chosen: Option<&str>) -> Result<Handle, OrgNodeError> {
+    let record = current_record(data)?;
+    ensure_not_behind(data, record)?;
+    let request = data.kept_request(invite_id).ok_or(OrgNodeError::NoAdmissionRequestKept { invite_id })?;
+    if data.provisional_changes.iter().any(|change| change.admits(invite_id)) {
+        return Err(OrgNodeError::AdmissionAlreadyRecorded { invite_id });
+    }
+    let taken = |handle: &Handle| {
+        record.trie_members.iter().any(|member| &member.handle == handle)
+            || data
+                .provisional_changes
+                .iter()
+                .any(|change| matches!(change, ProvisionalChange::Admit { handle: given, .. } if given == handle))
+    };
+    if let Some(free) = request.preferred_handles.iter().find(|handle| !taken(handle)) {
+        return Ok(free.clone());
+    }
+    let chosen = parse_field("admission.handle", Handle::parse(chosen.ok_or(OrgNodeError::NoFreeHandle)?))?;
+    if taken(&chosen) {
+        return Err(OrgNodeError::HandleTaken { handle: chosen });
+    }
+    Ok(chosen)
+}
+
+/// One recipient's body (LLR-rsjs8e): the Device it goes to and the encoded
+/// Wire message. Not `Clone`: an Organisation-information body carries the
+/// Organisation private key (REQ-y7tsft); its `Debug` renders the recipient
+/// and the body's length only.
 pub struct OutgoingMessage {
     pub recipient: DevicePublicKey,
     pub body: Vec<u8>,
+}
+
+/// What a removed store keeps for org-io's delivery (LLR-75sn9g): the Organisation, the verification time
+/// for the 7-day deadline, and each acknowledgement as a message to its recipient with that recipient's
+/// kept addresses, in kept order. Not `Clone`.
+#[derive(Debug)]
+pub struct KeptAcknowledgements {
+    pub org_id: OrgId,
+    pub verified_at: VerificationTime,
+    pub acknowledgements: Vec<(OutgoingMessage, Option<EndpointAddresses>)>,
 }
 
 impl std::fmt::Debug for OutgoingMessage {
@@ -1251,280 +1567,38 @@ impl std::fmt::Debug for OutgoingMessage {
     }
 }
 
-/// What `commit_update` (and a reconciled commit) returns (LLR-cmdrp9,
-/// LLR-gdfqn9): the Organisation, the committed epoch and root, the sending
-/// Persona, every recipient's body built inside the commit, and the
-/// acknowledgements this node signed when the commit removed it
-/// (LLR-b27jr6; else empty, and then there are no bodies). Not `Clone`.
-#[derive(Debug)]
-pub struct CommitOutcome {
-    pub org_id: OrgId,
-    pub epoch: Epoch,
-    pub root: RootHash,
-    pub sender: PersonaId,
-    pub outgoing: Vec<OutgoingMessage>,
-    pub acknowledgements: Vec<Acknowledgement>,
-}
-
-// ============================================================
-// What the check decided.
-// ============================================================
-
-/// What `check_received` decided (LLR-zetn7a): a message to decide against
-/// the chain state of the Organisation it names, or an acknowledgement
-/// decided against the store alone.
-// One value per received message, moved once from the check to the commit:
-// the checked message's size costs nothing worth a box.
+/// What `check_received` decided (LLR-94rzrk). Every outcome but a kept
+/// one, an accepted admission request and an organisation request that
+/// changed the sender's addresses comes with no `StoreChange`.
+// One value per received message, moved once to org-io.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum Checked {
-    /// Read the chain for `org_id()`, then call `commit_checked`.
-    ReadChain(CheckedMessage),
-    /// An acknowledgement `check_acknowledgement` accepted (LLR-3aysup,
-    /// LLR-5azhry); no chain read, nothing written.
+    /// Organisation information kept as a received provisional organisation
+    /// for `epoch` (LLR-76bhw9).
+    ProvisionalOrganisationKept { epoch: Epoch },
+    /// Organisation information whose identity is already held (LLR-s3vq6d).
+    AlreadyHeld,
+    /// A revocation notice kept for verification (LLR-r4qtqe).
+    RevocationNoticeKept,
+    /// An admission request, with what was decided (LLR-6gkxpg).
+    AdmissionRequest { outcome: AdmissionRequestOutcome },
+    /// An organisation request answered (LLR-7kdhst, LLR-j338wq).
+    OrganisationRequest { answer: OutgoingMessage },
+    /// An organisation answer kept for `epoch` (LLR-kd7u2r).
+    OrganisationAnswerKept { epoch: Epoch },
+    /// An acknowledgement `check_acknowledgement` accepted (LLR-5wg8cu).
     Acknowledged(VerifiedAcknowledgement),
 }
 
-/// A message that passed `check_received`; opaque but for the Organisation
-/// it names, and made only there (no public field, no other constructor).
-///
-/// It holds values taken from the store at check time (the record's trie
-/// and marks). org-io's receive step releases the service between the check
-/// and the commit for the one chain read, so a store change
-/// may fall between them; the commit refuses the message when the record's
-/// marks moved since the check (`RecordMovedSinceCheck`, PR-erskh4), and
-/// otherwise judges these values against the chain state read after the
-/// check.
-pub struct CheckedMessage {
-    kind: CheckedKind,
-    record_at_check: Option<RecordMarks>,
-}
-
-/// The marks of a held Organisation record that a check reads and a commit
-/// changes: its epoch, root and sequence guard (PR-erskh4).
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct RecordMarks {
-    epoch: Epoch,
-    root: RootHash,
-    last_seq: SequenceNumber,
-}
-
-// One checked message per received message, moved once to the commit.
-#[allow(clippy::large_enum_variant)]
-enum CheckedKind {
-    /// `check_notice` and the sender rule passed.
-    Revocation { notice: RevocationNotice },
-    /// The sender rule (held record) or the expectation gate (first
-    /// admission) passed, the snapshot decoded, `check_chain_free` passed.
-    /// `expectation` is the one a first admission matched, `None` for a held
-    /// record.
-    OrgInformation {
-        envelope: Envelope,
-        carried_key: OrgPrivateKey,
-        local_trie: Trie,
-        ctx: VerifyContext,
-        expectation: Option<ExpectedAdmission>,
-    },
-}
-
-impl CheckedKind {
-    /// The Organisation the checked message names.
-    fn org_id(&self) -> OrgId {
-        match self {
-            CheckedKind::Revocation { notice } => notice.org_id,
-            CheckedKind::OrgInformation { envelope, .. } => envelope.org_id,
-        }
-    }
-}
-
-impl CheckedMessage {
-    /// The Organisation whose chain state `commit_checked` needs.
-    pub fn org_id(&self) -> OrgId {
-        self.kind.org_id()
-    }
-}
-
-/// Names the Organisation and the message kind only: the checked message
-/// holds the carried Organisation private key and the record's trie,
-/// neither printed.
-impl std::fmt::Debug for CheckedMessage {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let kind = match &self.kind {
-            CheckedKind::Revocation { .. } => "Revocation",
-            CheckedKind::OrgInformation { .. } => "OrgInformation",
-        };
-        formatter.debug_struct("CheckedMessage").field("org_id", &self.org_id()).field("kind", &kind).finish()
-    }
-}
-
-// ============================================================
-// The commit step and the removal step, over store values.
-// ============================================================
-
-/// What a commit leaves of the store it was decided over: the committed
-/// successor (this node still listed), or the removal step's —
-/// `forget_organisation`'s result, `None` when the store's Persona went with
-/// the Organisation.
-pub(crate) enum Successor {
-    Kept(StoreData),
-    Removed(Option<StoreData>),
-}
-
-/// What `commit_step` produced: the successor store and the outcome; a
-/// removal's outcome holds the acknowledgements it signed.
-pub(crate) struct Committed {
-    pub(crate) successor: Successor,
-    pub(crate) outcome: CommitOutcome,
-}
-
-/// Commit `update`, this node's own provisional update for `org_id`,
-/// against `chain`, the state read for it: the Envelope built from the
-/// update, verified against `store`'s record and `chain` (LLR-cmdrp9,
-/// LLR-6s785x); then the record takes the update's key pair (REQ-jy6ybw)
-/// and every recipient's body is built with that key, the notices of
-/// exactly this update among them (`outgoing_bodies`; LLR-gdfqn9,
-/// LLR-a8z7r5), or, when the store's Persona bound to `org_id` is no longer
-/// listed, the one removal step with the secrets `device_secrets` yields for
-/// the Device keys it names, called on that path alone so a commit that
-/// keeps this node listed never obtains a device secret (LLR-b27jr6, LLR-jd82t6, LLR-uw7nmv). `commit_update`
-/// and `reconcile` both run it (LLR-fm38ww). A refusal returns the error
-/// alone; `store` is borrowed and unchanged.
-pub(crate) fn commit_step(
-    store: &StoreData,
-    org_id: OrgId,
-    update: &ProvisionalUpdate,
-    chain: &OrgState,
-    device_secrets: impl FnOnce(&[DevicePublicKey]) -> Vec<DeviceSecret>,
-) -> Result<Committed, OrgNodeError> {
-    let rec = find_record(store, org_id)?;
-    let ProvisionalChange::ChangeSet { change_set, org_private_key } = update.change.clone() else {
-        return Err(OrgNodeError::NoProvisionalUpdate);
-    };
-    let envelope = Envelope { org_id, parent_seq: update.seq, delta_bytes: change_set };
-    let ctx = VerifyContext {
-        expected_org_id: org_id,
-        seq_guard: SeqGuard::from_last_seen(rec.last_seq),
-        last_committed_epoch: rec.epoch,
-    };
-    let local = trie_from_snapshots(&rec.trie_members)?;
-    let verified = verify_envelope_against_chain(&local, &envelope, &ctx, Some(*chain))?;
-    let root = verified.trie.root_hash().map_err(OrgNodeError::Trie)?;
-    let (successor, outgoing, acknowledgements) = if still_member(store, org_id, &verified.trie) {
-        let outgoing = outgoing_bodies(store, rec, &verified.trie, envelope.clone(), &org_private_key)?;
-        let mut successor = store.clone();
-        commit_held(&mut successor, org_id, &verified, &envelope.delta_bytes, org_private_key, update.org_pub_key)?;
-        (Successor::Kept(successor), outgoing, Vec::new())
-    } else {
-        // This node was removed: it forgets the Organisation and sends
-        // nothing (LLR-b27jr6).
-        let (successor, acknowledgements) = removal_step(store, org_id, chain, device_secrets)?;
-        (Successor::Removed(successor), Vec::new(), acknowledgements)
-    };
-    let outcome = CommitOutcome {
-        org_id,
-        epoch: verified.epoch,
-        root,
-        sender: store.persona.persona_id.clone(),
-        outgoing,
-        acknowledgements,
-    };
-    Ok(Committed { successor, outcome })
-}
-
-/// Every recipient's body of a commit that keeps this node listed, built
-/// from the record as committed (`committed_trie`) and with `org_private_key`,
-/// the key the commit stores (LLR-gdfqn9, LLR-6ymd6d; PR-gnh3j2): one
-/// Organisation-information body — `envelope`, `previous` as it stood
-/// before the commit (LLR-bg3vsw) and that key (REQ-szq3ud) — for each
-/// Device the committed record lists other than the sending Persona's own,
-/// in record order; then one revocation body, the notice of exactly this
-/// update (LLR-a8z7r5, LLR-kr5t6f), for each Device `previous` listed and
-/// the committed record does not (REQ-3dsweu, LLR-8hdu9x). No body carries
-/// an invite identifier (LLR-48jakr). Each is `encode_message`'s output.
-fn outgoing_bodies(
-    store: &StoreData,
-    previous: &OrgRecord,
-    committed_trie: &Trie,
-    envelope: Envelope,
-    org_private_key: &OrgPrivateKey,
-) -> Result<Vec<OutgoingMessage>, OrgNodeError> {
-    let committed =
-        OrgRecord { trie_members: committed_trie.members().iter().map(snapshot_of).collect(), ..previous.clone() };
-    let information = encode_message(&WireMessage::OrgInformation {
-        envelope,
-        record_snapshot: encode_record_snapshot(&previous.trie_members)?,
-        org_private_key: org_private_key.clone(),
-    })?;
-    let own_device = store.persona.device_key;
-    let mut outgoing: Vec<OutgoingMessage> = committed
-        .trie_members
-        .iter()
-        .flat_map(|member| member.device_keys.iter().copied())
-        .filter(|device| *device != own_device)
-        .map(|recipient| OutgoingMessage { recipient, body: information.clone() })
-        .collect();
-    for notice in crate::revocation::notices_for(previous, &committed, committed_trie)? {
-        let recipient = notice.device;
-        outgoing.push(OutgoingMessage { recipient, body: encode_message(&WireMessage::Revocation(notice))? });
-    }
-    Ok(outgoing)
-}
-
-/// The one removal step of every commit path (LLR-jd82t6): a commit removed
-/// this node from `org_id`, so it signs one acknowledgement per Persona
-/// bound to it against `chain`, the state the commit was decided against,
-/// with the secrets `device_secrets` yields for those Personas' Device keys,
-/// then returns `forget_organisation(org_id)` with the acknowledgements
-/// (LLR-b27jr6, LLR-6p4pj2, LLR-hby4jr). A signing refusal returns the error
-/// alone.
-fn removal_step(
-    store: &StoreData,
-    org_id: OrgId,
-    chain: &OrgState,
-    device_secrets: impl FnOnce(&[DevicePublicKey]) -> Vec<DeviceSecret>,
-) -> Result<(Option<StoreData>, Vec<Acknowledgement>), OrgNodeError> {
-    let secrets = device_secrets(&crate::revocation::bound_devices(store, org_id));
-    let acknowledgements = crate::revocation::sign_acknowledgements(store, org_id, chain, secrets)?;
-    Ok((store.forget_organisation(org_id), acknowledgements))
-}
-
-/// The member-sender rule (owner ruling R1 of 2026-10-07): `sender` must be
-/// in some member snapshot's `device_keys` of `record`, else
-/// `SenderNotListed`. Called for Organisation information about a held
-/// Organisation (LLR-2r2fha) and for a revocation (LLR-kzgjz8), never for a
-/// first admission or an acknowledgement.
-fn sender_listed(record: &OrgRecord, org_id: OrgId, sender: &DevicePublicKey) -> Result<(), OrgNodeError> {
-    if record.trie_members.iter().any(|member| member.device_keys.contains(sender)) {
-        Ok(())
-    } else {
-        Err(OrgNodeError::SenderNotListed { org_id })
-    }
-}
-
-/// Whether the store's Persona is bound to `org_id` and has its device in
-/// `trie`.
-fn still_member(store: &StoreData, org_id: OrgId, trie: &Trie) -> bool {
-    let persona = &store.persona;
-    persona.org_id == Some(org_id) && trie.members().iter().any(|member| member.has_p2p_device(&persona.device_key))
-}
-
-// ============================================================
-// Utility helpers.
-// ============================================================
-
-/// A Persona identifier from its Member key: the first 16 bytes, in hex.
-fn persona_id_for(member_key: &PersonPublicKey) -> PersonaId {
-    use std::fmt::Write as _;
-    PersonaId::new(member_key.as_bytes().iter().take(16).fold(String::new(), |mut s, b| {
-        let _ = write!(s, "{b:02x}");
-        s
-    }))
-}
-
-/// A fresh `MemberId`: 32 bytes from the caller's cryptographic random
-/// source, never derived from a key (REQ-d9g6nt).
-fn fresh_member_id<R: RngCore + CryptoRng>(rng: &mut R) -> MemberId {
-    let mut id = [0u8; 32];
-    rng.fill_bytes(&mut id);
-    MemberId::new(id)
+/// What an admission request decided (LLR-6gkxpg).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdmissionRequestOutcome {
+    /// The first request for its invite: kept.
+    Accepted,
+    /// A repeat from the Device whose request is kept: nothing changed.
+    AlreadyReceived,
+    /// A request for an invite whose kept request came from another Device:
+    /// nothing changed.
+    InviteUsedByAnotherDevice,
 }

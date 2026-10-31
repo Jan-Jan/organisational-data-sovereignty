@@ -75,17 +75,18 @@ jobs:
       # the targets added since 2026-10-05 had not been copied here.
       - run: |
           cargo test -p org-node --features app,test-support --lib \
-            --test service_stories --test fuzz_envelope_decode --test fuzz_verify_against_chain \
-            --test fuzz_first_admission_base --test fuzz_wire_decode --test verify_against_chain \
-            --test wire_frame_bound --test store_at_rest --test admission_sender \
-            --test value_types --test key_custody --test envelope_binding \
-            --test service_lifecycle --test encoding_golden --test node_value_types \
-            --test persona_records --test secret_redaction --test organisation_key \
-            --test receive_chain_reads --test expected_admission --test absences \
-            --test provisional_store --test commit_paths --test revocation --test reconcile \
-            --test commit_workflow_errors --test sealed_store --test fuzz_unseal \
-            --test receive_path --test outgoing_bodies --test invitation \
-            --test fuzz_invitation_parse --test stale_check
+            --test service_stories --test fuzz_envelope_decode --test fuzz_first_admission_base \
+            --test fuzz_wire_decode --test wire_frame_bound --test store_at_rest \
+            --test admission_sender --test value_types --test key_custody \
+            --test envelope_binding --test service_lifecycle --test encoding_golden \
+            --test node_value_types --test persona_records --test secret_redaction \
+            --test organisation_key --test receive_chain_reads --test absences \
+            --test provisional_store --test revocation --test commit_workflow_errors \
+            --test sealed_store --test fuzz_unseal --test receive_path \
+            --test outgoing_bodies --test invitation --test fuzz_invitation_parse \
+            --test epoch_store --test person_store --test proposals \
+            --test verification --test organisation_request --test own_removal \
+            --test fuzz_check_received
       # person's verify_commands test entry: every target, none excluded.
       - run: cargo test -p person
       # sparse-merkle-tree's verify_commands test entries.
@@ -100,14 +101,15 @@ jobs:
       - run: |
           cargo test -p org-io --features test-support --lib \
             --test key_custody_config --test fuzz_seed_parse --test signatory_key \
-            --test absences --test chain_read_rule --test receive_order \
-            --test submit_flow --test signatory_rule --test app_boundary --test open \
-            --test keychain --test store_files --test transport_handshake \
+            --test absences --test chain_read_rule --test signatory_rule \
+            --test app_boundary --test open --test keychain \
+            --test keychain_contract --test store_files --test transport_handshake \
             --test transport_networked --test endpoints --test preflight_transport \
             --test receive_step --test acknowledgement_inbound --test send_fanout \
-            --test peer_addr --test fuzz_peer_addr --test invitation_exchange \
-            --test node_stories --test publish_path --test startup_reconcile \
-            --test expectations_met
+            --test invitation_exchange --test expectations_met --test rng_source \
+            --test person --test persona_creation --test propose \
+            --test chain_write --test verification --test requests \
+            --test acknowledgements
       - run: |
           cargo test -p org-io --features test-support,dev-seed \
             --test key_custody_config --test signatory_key --test dev_seed_env

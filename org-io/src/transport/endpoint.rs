@@ -27,7 +27,6 @@ use org_node::wire::{WireMessage, decode_message};
 #[cfg(feature = "test-support")]
 use super::frame::encode_frame;
 use super::frame::{MAX_STREAM_READ, body_of, frame_body};
-use super::peer_addr::PeerAddr;
 use super::{ALPN, TransportError, TransportMode, Verdict};
 use crate::keychain;
 
@@ -40,6 +39,10 @@ pub enum BindPlan {
     Loopback,
     /// [`TransportMode::Networked`].
     Networked,
+    /// Relay disabled, no address lookup, the default (wildcard) sockets:
+    /// Networked mode's direct sockets only (LLR-cqr26z). Loopback mode's
+    /// plan is already direct.
+    Direct,
     /// A Networked-style endpoint whose ONLY relay is the `RelayMap` and
     /// whose peer-address resolution comes from the `MemoryLookup`, with
     /// direct UDP paths filtered out so traffic is forced through the relay.
@@ -148,6 +151,7 @@ impl OrgEndpoint {
             // and a DNS address lookup via iroh.link: together these let two
             // endpoints on different networks find each other by EndpointId.
             BindPlan::Networked => iroh::Endpoint::builder(presets::N0),
+            BindPlan::Direct => iroh::Endpoint::builder(presets::Minimal).relay_mode(RelayMode::Disabled),
             #[cfg(feature = "test-support")]
             BindPlan::Relay(relay_map, lookup) => iroh::Endpoint::builder(presets::Minimal)
                 .relay_mode(RelayMode::Custom(relay_map))
@@ -207,6 +211,30 @@ impl OrgEndpoint {
         self.inner.bound_sockets()
     }
 
+    /// The addresses this endpoint holds in `mode`, as the kept address text
+    /// `"<64 lower-case hex endpoint id>@<socket>"` (LLR-v9dkrv, LLR-4k43dm,
+    /// LLR-34tfm8): its bound loopback sockets in Loopback mode; in Networked
+    /// mode the direct addresses iroh currently knows for it, possibly none.
+    /// The endpoint id is the DevicePublicKey. No relay URL and no iroh type
+    /// leaves the transport.
+    pub fn addresses(&self, mode: TransportMode) -> Vec<String> {
+        let id = hex::encode(self.inner.id().as_bytes());
+        let sockets: Vec<std::net::SocketAddr> = match mode {
+            TransportMode::Loopback => self.bound_sockets(),
+            TransportMode::Networked => self
+                .inner
+                .addr()
+                .addrs
+                .iter()
+                .filter_map(|address| match address {
+                    iroh::TransportAddr::Ip(socket) => Some(*socket),
+                    _ => None,
+                })
+                .collect(),
+        };
+        sockets.into_iter().map(|socket| format!("{id}@{socket}")).collect()
+    }
+
     /// Whether the endpoint has closed or started closing: it accepts and
     /// dials nothing more (LLR-d2pzzk as amended 2026-10-15). iroh exposes
     /// the start of a close only as the future `Endpoint::closed`, which
@@ -215,6 +243,12 @@ impl OrgEndpoint {
     pub fn is_closed(&self) -> bool {
         let closing = std::pin::pin!(self.inner.closed());
         self.inner.is_closed() || closing.poll(&mut Context::from_waker(Waker::noop())).is_ready()
+    }
+
+    /// Close the endpoint: it accepts and dials nothing more, and its
+    /// accept task ends (LLR-cqr26z, LLR-vj2nkb).
+    pub async fn close(&self) {
+        self.inner.close().await;
     }
 
     /// Wait until the endpoint is online (`Endpoint::online`).
@@ -240,33 +274,48 @@ impl OrgEndpoint {
     }
 
     /// Send one already encoded body to `peer`, framed with its length
-    /// prefix (org-node's commit builds the bodies; they are sent
-    /// unchanged). A body over the bound is refused before dialling.
+    /// prefix, reading no verdict: the receiving side's tests send a raw
+    /// body with this. A body over the bound is refused before dialling.
+    /// Test builds only.
+    #[cfg(feature = "test-support")]
     pub async fn send_body(&self, peer: impl Into<EndpointAddr>, body: &[u8]) -> Result<(), TransportError> {
         let framed = frame_body(body)?;
         self.send_framed(peer.into(), &framed).await
     }
 
-    /// `send_body` to the Device `device`, dialled purely by the endpoint
-    /// identity equal to its Device public key (Networked: iroh's relay and
-    /// address lookup resolve the path). Bytes that are no endpoint identity
-    /// are `TransportError::Malformed`, refused before dialling.
-    pub async fn send_body_to_device(&self, device: &DevicePublicKey, body: &[u8]) -> Result<(), TransportError> {
-        match EndpointId::from_bytes(device.as_bytes()) {
-            Ok(id) => self.send_body(id, body).await,
-            Err(_) => Err(TransportError::Malformed),
+    /// Dial `recipient` — by the endpoint identity equal to its Device key,
+    /// at `sockets` (Loopback: only those; Networked: a hint ahead of
+    /// discovery) — send one framed body, finish the stream, and read back
+    /// what the receiver writes, at most two bytes, within
+    /// `VERDICT_TIME_LIMIT` (LLR-fwz3tb): an empty vector for silence or a
+    /// timeout. The connection is closed after the read.
+    pub async fn send_for_verdict(
+        &self,
+        recipient: &DevicePublicKey,
+        sockets: &[std::net::SocketAddr],
+        body: &[u8],
+    ) -> Result<Vec<u8>, TransportError> {
+        let stream_error = |error: &dyn std::fmt::Display| TransportError::Stream(error.to_string());
+        let id = EndpointId::from_bytes(recipient.as_bytes()).map_err(|_| TransportError::Malformed)?;
+        let addr = EndpointAddr::from_parts(id, sockets.iter().copied().map(iroh::TransportAddr::Ip));
+        let framed = frame_body(body)?;
+        let conn = self.inner.connect(addr, ALPN).await.map_err(|error| TransportError::Connect(error.to_string()))?;
+        let (mut send, mut recv) = conn.open_bi().await.map_err(|error| stream_error(&error))?;
+        send.write_all(&framed).await.map_err(|error| stream_error(&error))?;
+        send.finish().map_err(|error| stream_error(&error))?;
+        let read = tokio::time::timeout(super::VERDICT_TIME_LIMIT, recv.read_to_end(2)).await;
+        conn.close(0u32.into(), b"done");
+        match read {
+            Err(_elapsed) => Ok(Vec::new()),
+            Ok(read) => read.map_err(|error| stream_error(&error)),
         }
-    }
-
-    /// `send_body` at the full address `peer` (Loopback: the address the
-    /// caller holds for the peer).
-    pub async fn send_body_at(&self, peer: &PeerAddr, body: &[u8]) -> Result<(), TransportError> {
-        self.send_body(peer.endpoint_addr().clone(), body).await
     }
 
     /// Connect to `addr`, open one bidirectional stream, write `framed`, wait
     /// for the peer to acknowledge all of it, and close the connection (code
-    /// 0) so the remote's `Connection::closed()` resolves promptly.
+    /// 0) so the remote's `Connection::closed()` resolves promptly. Test
+    /// builds only.
+    #[cfg(feature = "test-support")]
     async fn send_framed(&self, addr: EndpointAddr, framed: &[u8]) -> Result<(), TransportError> {
         let stream_error = |error: &dyn std::fmt::Display| TransportError::Stream(error.to_string());
         let conn = self.inner.connect(addr, ALPN).await.map_err(|error| TransportError::Connect(error.to_string()))?;

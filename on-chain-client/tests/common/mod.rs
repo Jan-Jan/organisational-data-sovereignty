@@ -1,6 +1,4 @@
-//! Test harness shared by integration tests in `tests/`. Per Stage 2
-//! Task 6 (the "Task-5-enabling subset" — `multisig` and `swap_proxy`
-//! land in Task 7 alongside Scenarios B + invariant).
+//! Test harness shared by integration tests in `tests/`.
 //!
 //! What's here:
 //!
@@ -11,8 +9,8 @@
 //! - [`chopsticks_reorg`]: `induce_reorg` driving chopsticks's dev_*
 //!   JSON-RPC extensions.
 //! - [`submit`]: subxt-based single-account submitter for `OrgRegistry.
-//!   update(...)`. Single-account is sufficient for Task 5's Scenario A /
-//!   C gates; multisig + proxy lands in Task 7.
+//!   update(...)`, for the scenarios where an account acts as its own
+//!   admin.
 
 #![allow(dead_code)] // each integration test only uses a subset of helpers
 

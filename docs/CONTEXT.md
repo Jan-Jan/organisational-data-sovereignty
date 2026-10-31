@@ -348,6 +348,140 @@ local storage, while org-node takes values and returns values. (Added
 2026-10-08, change `worktree-org-io-create`;
 `docs/adr/2026-10-06-org-io-unit.md`.)
 
+**Provisional change**:
+An admission or a revocation an Admin has proposed against an Organisation's
+current Membership record, with no Membership root calculated and no key
+drawn. (Added 2026-10-15, change `worktree-org-io-domain-api`.)
+_Avoid_: pending change, draft
+
+**Provisional organisation**:
+A Membership record for an Organisation's next epoch, with its Membership
+root and a fresh Organisation key pair, not yet verified against the chain —
+proposed from the provisional changes, or received from another Device.
+Several may exist for one epoch; at most one is adopted. (Added 2026-10-15,
+change `worktree-org-io-domain-api`.)
+_Avoid_: provisional update, pending org, draft org
+
+**Provisional founding**:
+A provisional organisation for epoch 1 of an Organisation not yet on the
+chain, held with its pure proxy's address once the founding write has
+created it. (Added 2026-10-15, change `worktree-org-io-domain-api`.)
+_Avoid_: genesis update
+
+**Provisional Member**:
+A Member as a joining device holds them before admission: a name, a surname,
+preferred Handles, and keys drawn for one Organisation, from one Invite.
+(Added 2026-10-15, change `worktree-org-io-domain-api`.)
+_Avoid_: Persona, applicant
+
+**Admission request**:
+The message a provisional Member's Device sends the Device that issued its
+Invite, over iroh, to ask for admission, carrying the Invite's identifiers and the Member's
+details and public keys. (Added 2026-10-15, change
+`worktree-org-io-domain-api`.)
+_Avoid_: Invite reply, join request
+
+**Organisation name**:
+A free-text label for an Organisation, kept on each device that holds it,
+carried only by an Invite, and verified by nothing. (Added 2026-10-15, change
+`worktree-org-io-domain-api`.)
+_Avoid_: org title
+
+**Verification** (of an Organisation):
+Reading its Organisation state at a Finalised block and judging it against
+the current record and the provisional organisations, with one outcome: in
+step, adopted, removed, behind, inconsistent or unverified. (Added
+2026-10-15, change `worktree-org-io-domain-api`.)
+_Avoid_: reconcile, sync, refresh
+
+**Verification interval**:
+How often a running app verifies every Organisation it holds, besides at
+start and on request; configurable, 10 minutes by default. An Organisation
+verification reports behind is requested from its Members at each interval
+until it is in step or adopted. (Added 2026-10-16, change
+`worktree-org-io-domain-api`.)
+_Avoid_: poll interval, sync period
+
+**Ahead limit**:
+How long, in seconds, a Verification keeps a Provisional organisation
+received from another Device for the epoch after the chain's, counted from
+the first Verification that found it there; a Verification later than that
+discards it. The app sets it to twice its Verification interval and hands
+it to org-io, which passes it on to org-node at each Verification; org-node
+holds no default. (Added 2026-10-30, change `worktree-org-io-domain-api`,
+merge review MR4 finding-7.)
+_Avoid_: timeout, expiry, TTL
+
+**Organisation request**:
+The message a Device sends to ask Devices of an Organisation for its current
+record — answered with the full record to a Device the answerer's record
+lists, and with the revocation notice alone to a Device it holds as revoked
+— carrying the sender's endpoint addresses for the answer. (Added
+2026-10-16, change `worktree-org-io-domain-api`.)
+_Avoid_: pull request, sync request
+
+**Deprecated** (of a chain write):
+A write whose outcome is no longer decided because the Organisation's epoch
+on the chain has moved to or past the epoch it expected with another root.
+(Added 2026-10-15, change `worktree-org-io-domain-api`; distinct from Not
+executed since 2026-10-28, owner ruling A5.)
+_Avoid_: overtaken, failed
+
+**Not executed** (of a chain write):
+An Unknown write whose window has passed while the finalised chain is still
+at the epoch it was based on, so it can no longer execute and may be proposed
+again against the same base. Distinct from Deprecated, where another Admin's
+epoch won. (Added 2026-10-28, change `worktree-org-io-domain-api`, owner
+ruling A5.)
+_Avoid_: expired, failed, timed out
+
+**Unanswered proxy creation**:
+A founding write's creation of its pure proxy that did not answer before its
+bound elapsed. Not an Unknown write: no proxy is known, so nothing is
+recorded or stored, the write is reported refused, and the next write of
+that founding creates a pure proxy again; a proxy the chain did create is
+left with its deposit only. (Added 2026-10-28, change
+`worktree-org-io-domain-api`, ARCHITECTURE conformance review round 4;
+owner decision on PR-8ghk9s, 2026-10-24.)
+_Avoid_: timed-out proxy creation, proxy timeout, unknown proxy write
+
+*The four terms below were added 2026-10-28 (change
+`worktree-org-io-domain-api`, ARCHITECTURE conformance review round 1, A6):*
+the change put them in org-io's public interface and the app's notices.
+
+**Revocation notice**:
+The message a Member's Device sends a Device its Organisation's newly
+adopted epoch removed — with each send of that epoch, or as the whole answer
+to that Device's Organisation request — naming the Organisation, the
+removed Member and Device, with a proof that the Device is absent from the
+new Membership root. The removed Device keeps it (a **kept revocation
+notice**), and only its own Verification against the chain acts on it.
+_Avoid_: revocation message, kick notice, removal notice
+
+**Unknown write** (outcome unknown):
+A chain write whose outcome org-io could not learn before its bound
+elapsed: it may yet execute. org-io records one per held Organisation or
+founding, refuses a second write of that target while it is recorded, and
+settles it only by a Verification: adopted, not executed, deprecated, or
+still unknown.
+_Avoid_: pending write, failed write, timed-out write
+
+**Removal acknowledgement**:
+The message a removed Device signs for the epoch and Membership root that
+removed it, kept by org-node in the removed store for each Device of the
+Organisation it is to reach, and sent there by org-io until the recipient
+accepts it or 7 days after the removal's Verification. Not a **Verdict**:
+the recipient answers each one with a Verdict. Its delivery's state is the
+acknowledgement report.
+_Avoid_: ack, receipt, delivery confirmation
+
+**Kept admission request**:
+An Admission request the Device that issued its Invite has received and
+keeps in the Organisation's store, at most one per Invite, the first kept,
+shown beside the invitee name typed for that Invite. Listed to the app for an
+Admin to confirm against the person invited and admit.
+_Avoid_: pending request, join request, applicant
+
 *The six terms below were added 2026-10-15 (change
 `worktree-org-io-transport`, ARCHITECTURE conformance review finding-4):*
 org-io's stage S4 put them in the public interface between org-node, org-io
@@ -375,19 +509,91 @@ item's content.
 _Avoid_: keystore, credential, wallet
 
 **SealedStore**:
-A Persona store (org-node's glossary) encrypted for disk: the bytes org-node
-hands org-io to write and takes back to open it. Opened only with the
-Persona's Device seed.
+A Persona store (org-node's glossary) or the Person store encrypted for disk:
+the bytes org-node hands org-io to write and takes back to open it. Opened
+only with the Device seed of the Persona or Person it belongs to; a Persona
+store's bytes never open as a Person store, nor the reverse.
 _Avoid_: encrypted store, store blob
 
 **Store file**:
 The file in the data directory that holds one Persona's SealedStore, named by
-that Persona's DevicePublicKey. One per Persona.
+that Persona's DevicePublicKey. One per Persona. The Person's own SealedStore
+is in the Person file, which is not a Store file (2026-10-28).
 _Avoid_: database, persona store file, store blob
 
 **Verdict**:
 The one byte a device's receive side writes back after a message: whether the
-message was acted on (accepted) or not (refused). A sender reads a refusal,
-or silence, as its cue to try another address.
-_Avoid_: acknowledgement, ack (an acknowledgement is a signed message about a
-committed update, a different thing)
+message was acted on (accepted) or not (refused), and, for an admission
+request, which of two further answers it got: already received (the receiver
+already keeps a request from this sender for that Invite, and changed
+nothing) or invite used by another Device (the receiver keeps a request for
+that Invite from a different Device, and changed nothing). A sender reads a
+refusal, or silence, as its cue to try another address. (The two admission
+answers added 2026-10-28, round 2 review AR2-7.)
+_Avoid_: acknowledgement, ack (a Removal acknowledgement is a signed message
+a removed Device sends, which a Verdict answers: a different thing; reworded
+2026-10-28, A6)
+
+*The two terms below were added 2026-10-28 (change
+`worktree-org-io-domain-api`, ARCHITECTURE conformance review round 2,
+AR2-9):* org-node's Person store and org-io's Person file are in the public
+interface between org-node, org-io and the app.
+
+**Person store**:
+The user's own Person, kept apart from every Persona: the Person's name,
+surname, DevicePublicKey and PersonPublicKey, and the secret seed of the
+Person's key pair. One per device. Sealed for disk as a SealedStore with the
+Person's own Device seed, and never opened as a Persona store.
+_Avoid_: profile, person record, user store
+
+**Person file**:
+The file in the data directory that holds the Person store's SealedStore,
+named by the Person's DevicePublicKey. At most one per data directory: more
+than one is a corruption, and none of them is opened.
+_Avoid_: Store file (which holds a Persona's), profile file
+
+*The five terms below were added 2026-10-28 (change
+`worktree-org-io-domain-api`, ARCHITECTURE conformance review round 3,
+AR3-9):* the change put them in the public interface between org-node,
+org-io and the app.
+
+**Discarded change**:
+A Provisional change that a Verification's adoption left out, because the
+adopted epoch's Membership record does not contain it: an admission or a
+revocation, reported with that adoption so the Admin is shown it and may
+propose it again. Once discarded it is no longer held as a Provisional
+change.
+_Avoid_: dropped change, lost change, rejected change, left-out change
+
+**Founder**:
+The Device that proposed a Provisional founding, named by its
+DevicePublicKey. Until the founding write gives the Organisation its
+identifier, the founding is written and verified by this key.
+_Avoid_: creator, owner, genesis device
+
+**Held target**:
+What one chain write or one Verification is for: a held Organisation, named
+by its identifier, or a Provisional founding, named by its Founder's
+DevicePublicKey. org-io's type is `HeldTarget`.
+_Avoid_: write target, target org
+
+**Removed store**:
+What a Persona store becomes once that Persona's own Verification found it
+removed: the Organisation identifier, the Verification time, and the Removal
+acknowledgements still to be delivered, each with its recipient's
+DevicePublicKey and the addresses held for it; nothing else of the
+Organisation is kept. org-io deletes it, with the Persona's Store file and
+Keychain item, once no acknowledgement is left to deliver or 7 days after
+the Verification time. org-node's type is `RemovedStore`.
+_Avoid_: tombstone, dead store, removal record
+
+**Verification time**:
+The time a Verification was made, in whole seconds since the Unix epoch,
+which org-io supplies because org-node reads no clock. It is kept in a
+Removed store, where it starts the 7 days the Removal acknowledgements are
+sent for, and as the stamp that starts a received Provisional
+organisation's Ahead limit. org-node's type is `VerificationTime`.
+*Amended 2026-10-30 (change `worktree-org-io-domain-api`, merge review MR4
+finding-7):* it said the time was kept only in a Removed store; LLR-4tsgfh
+also keeps it as the stamp the Ahead limit counts from.
+_Avoid_: timestamp, removal time

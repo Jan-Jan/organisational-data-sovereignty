@@ -1,27 +1,32 @@
 /**
- * LLR-8krgzj: the webview's admitMember passes admit_member exactly the org
- * id, the reply and the peer address — no Organisation secret.
- * (`Admit.svelte` passing no fourth argument is enforced by `npm run check`:
- * svelte-check refuses a call with more arguments than the function takes.)
+ * LLR-gmb4p8: the webview's proposeAdmission passes propose_admission
+ * exactly the org id, the invite id, the handle and the confirmation — no
+ * Organisation secret, reply or peer address.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { invoke } = vi.hoisted(() => ({ invoke: vi.fn(async () => '00'.repeat(32)) }));
-vi.mock('@tauri-apps/api/core', () => ({ invoke }));
-vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
+// The faked Tauri boundary every webview test uses, under backend.json's contract:
+// its propose_admission answer is the fixture's `recorded`.
+vi.mock('@tauri-apps/api/core', async () => ({ invoke: (await import('./fake-tauri')).tauri.invoke }));
+vi.mock('@tauri-apps/api/event', async () => ({ listen: (await import('./fake-tauri')).tauri.listen }));
 
-import { admitMember } from '../src/lib/api';
+import { tauri } from './fake-tauri';
+import { proposeAdmission } from '../src/lib/api';
 
-describe('admitMember', () => {
-	// verifies: LLR-8krgzj
-	it('invokes admit_member with the org id, the reply and the peer address alone', async () => {
-		await admitMember('01'.repeat(20), 'reply', 'addr');
-		expect(invoke).toHaveBeenCalledWith('admit_member', {
+beforeEach(() => tauri.reset());
+
+describe('proposeAdmission', () => {
+	// verifies: LLR-gmb4p8
+	it('invokes propose_admission with the org id, the invite id, the handle and the confirmation alone', async () => {
+		tauri.answer('propose_admission', null);
+		await proposeAdmission('01'.repeat(20), '02'.repeat(32), 'bob', true);
+		expect(tauri.invoke).toHaveBeenCalledWith('propose_admission', {
 			orgId: '01'.repeat(20),
-			replyBlob: 'reply',
-			peerAddrBlob: 'addr'
+			inviteId: '02'.repeat(32),
+			handle: 'bob',
+			confirmed: true
 		});
-		expect(admitMember.length).toBe(3);
+		expect(proposeAdmission.length).toBe(4);
 	});
 });

@@ -114,17 +114,18 @@ compiled for the layout the previous runtime used, returning a well-typed but
 wrong Organisation state or event with no error anywhere.
 affects: RC-d7r82e
 opened: 2026-09-10
-status: open
+status: accepted
+disposition: ruled on 2026-10-28 — owner ruling 2026-10-28, re-confirmed 2026-10-29 on the corrected premise: the defect is real and stays as written; its fix belongs to a separate on-chain-client change, not worktree-org-io-domain-api, whose comment sweep edited doc comments in src/client.rs but not the defect
 
-Where: `on-chain-client/src/client.rs:129-147` resolves the decoder at `:138`
-from the version read at `:137` and stores it at `:144`; the doc-comment that
-states the obligation nothing enforces is at `:111-113`. There is no
+Where: `on-chain-client/src/client.rs:128-146` resolves the decoder at `:137`
+from the version read at `:136` and stores it at `:143`; the doc-comment that
+states the obligation nothing enforces is at `:110-112`. There is no
 reconstruction trigger, no periodic re-check and no error a caller could notice.
 
 **The information needed for the check is already in hand**, which is what makes
 this a defect rather than a design limit. `get_org_state` resolves a block on
-every call (`:175-186`) and the resulting block object carries `spec_version()`
-— the same accessor `from_client` used at `:137` — and it is never compared
+every call (`:174-185`) and the resulting block object carries `spec_version()`
+— the same accessor `from_client` used at `:136` — and it is never compared
 against the pinned version. The comparison is one `if`.
 
 Observable symptom, as a test would show it: on a chopsticks fork, construct a
@@ -152,6 +153,12 @@ subscription, and return `UnsupportedRuntime` rather than decode. Widening
 question and reduces how often the loud failure fires; it does not remove the
 need for the check.
 
+*Note, 2026-10-30 (merge review round 1 of `worktree-org-io-domain-api`):*
+that change's comment sweep removed one doc-comment line near the top of
+`src/client.rs`, so every `client.rs` line cited in this report moved up by
+one; the citations above are corrected to the current file. The code they
+cite is not changed by that sweep.
+
 ## The module named for verification contains nothing
 
 **PR-h4mb8y**: `on-chain-client/src/verify.rs` is seven lines of doc-comment and
@@ -162,7 +169,8 @@ for verification performs none, and a consumer written from the module's own
 description calls a function that does not exist.
 affects: RC-5e3bdk
 opened: 2026-09-10
-status: open
+status: accepted
+disposition: ruled on 2026-10-28 — owner ruling 2026-10-28, re-confirmed 2026-10-29 on the corrected premise: the defect is real and stays as written; its fix belongs to a separate on-chain-client change, not worktree-org-io-domain-api, whose comment sweep replaced src/verify.rs's header but not the defect: the module still holds no code
 
 Where: `on-chain-client/src/verify.rs:1-7` is the whole file; the module is
 declared at `on-chain-client/src/lib.rs:28`. The header's own last paragraph
@@ -203,6 +211,17 @@ the design, where a reader will not mistake it for shipped code. Either closes
 the report. What is not acceptable is a module whose header describes in the
 present tense a verification it does not perform.
 
+*Note, 2026-10-30 (merge review round 1 of `worktree-org-io-domain-api`):*
+the header quoted above ("Lands in Stage 2 Task 5 … placeholder") no longer
+exists. That change's comment sweep replaced `src/verify.rs`'s header; the
+module is now "reserved for a verifier" and states that it holds no code and
+that the crate does not depend on `org-members`; the file is now five lines
+of doc-comment (`src/verify.rs:1-5`), not seven. The module still holds no
+code, so the defect stands: the design still assigns the comparison to this
+unit and the unit does not perform it. The remaining fix, implementing the
+module or deleting it and moving its promise into the design, stays for the
+separate on-chain-client change the disposition names.
+
 ## The best lane's first backfill span is unbounded
 
 **PR-uq5r97**: the best-block lane seeds its scan from the latest finalised
@@ -212,16 +231,17 @@ the finalised head to the new best head, at one `at_block` round-trip per height
 — before any event of interest is delivered.
 affects: RC-kemv75
 opened: 2026-09-10
-status: open
+status: accepted
+disposition: ruled on 2026-10-28 — owner ruling 2026-10-28, re-confirmed 2026-10-29 on the corrected premise: the defect is real and stays as written; its fix belongs to a separate on-chain-client change, not worktree-org-io-domain-api, whose comment sweep edited doc comments in src/client.rs but not the defect
 
-Where: `on-chain-client/src/client.rs:348-356` captures the seed from
+Where: `on-chain-client/src/client.rs:392-400` captures the seed from
 `at_current_block()`, which subxt documents as the latest finalised block
 (`subxt-0.50.1/src/client/online_client.rs:269`); the seeding comment explains
 why a seed is needed at all — `chain_subscribe_new_heads` pushes only future
-heads and does not replay the current one (`:330-339`); and the loop that pays
-for it is `for number in from..=to` at `:399`, whose span comes from
-`scan_step`'s `from` (`:557-560`). **The code admits it**, in a `NOTE` at
-`:391-398`: "this span is unbounded … a long-lived watcher on a live chain may
+heads and does not replay the current one (`:374-383`); and the loop that pays
+for it is `for number in from..=to` at `:443`, whose span comes from
+`scan_step`'s `from` (`:601-604`). **The code admits it**, in a `NOTE` at
+`:435-442`: "this span is unbounded … a long-lived watcher on a live chain may
 want a cap + resync strategy before relying on this lane."
 
 Observable symptom: on a chain with a finality lag of L blocks, the first
@@ -241,13 +261,20 @@ first seconds or minutes replaying history is a subscription that has not yet
 delivered the membership change the consumer is waiting for, and the cost scales
 with the chain's lag rather than with anything the consumer controls. The
 duplicate delivery is separately harmless — the lane is documented as
-best-effort and consumers are told to de-duplicate (`:279-283`) — and is not
+best-effort and consumers are told to de-duplicate (`:323-327`) — and is not
 what this report is about.
 
 The fix, in outline (not-minted control 7): cap the span, and resync by an
 explicit `get_org_state` read rather than by replay when the cap is exceeded.
 The seed's hash must stay the finalised hash for the dedup and reorg comparisons
-to behave (`:337-339`), so the cap belongs on the span and not on the seed.
+to behave (`:382-383`), so the cap belongs on the span and not on the seed.
+
+*Note, 2026-10-30 (merge review round 1 of `worktree-org-io-domain-api`):*
+the `client.rs` line citations above are corrected to the current file. That
+change's comment sweep removed one doc-comment line near the top of
+`src/client.rs`, and the citations, written against the file of 2026-09-10,
+had already drifted by more than that line. Each passage cited reads as
+quoted.
 
 ## A reorganisation deeper than the notification gap is undetectable
 
@@ -259,15 +286,16 @@ that fills the gap cannot supply one either, so a consumer that acted on a block
 the chain then discarded across such a gap is never told.
 affects: RC-kemv75
 opened: 2026-09-10
-status: open
+status: accepted
+disposition: ruled on 2026-10-28 — owner ruling 2026-10-28, re-confirmed 2026-10-29 on the corrected premise: the defect is real and stays as written; its fix belongs to a separate on-chain-client change, not worktree-org-io-domain-api, whose comment sweep edited doc comments in src/client.rs but not the defect
 
-Where: the reorg predicate is `on-chain-client/src/client.rs:551-556`, inside
-`internals::scan_step`. **The code admits it**, in the `subscribe` doc-comment
-at `:322-328`: "For jumps `n > last.number + 1` the intermediates come from
+Where: the reorg predicate is `on-chain-client/src/client.rs:595-600`, inside
+`internals::scan_step`. **The code admits it**, in the `best_lane` doc-comment
+at `:366-372`: "For jumps `n > last.number + 1` the intermediates come from
 canonical backfill and no reorg signal is derivable — acceptable for the
 manual-mining scenarios." And the backfill genuinely cannot help: looking a
 height up by number "ALWAYS resolves the canonical best block at that height —
-so it can never observe a discarded sibling" (`:306-309`).
+so it can never observe a discarded sibling" (`:351-353`).
 
 Observable symptom, as a test would show it: with the lane at height 10, deliver
 a head at height 13 whose ancestry does not include the block previously at 11
@@ -303,3 +331,29 @@ already processed is reached, and report every processed head not on that path
 as discarded. That makes the detectable depth a property of what the lane
 remembers rather than of how often it was notified. It costs one header fetch
 per step of the walk, which is the same currency the backfill already spends.
+
+*Note, 2026-10-30 (merge review round 1 of `worktree-org-io-domain-api`):*
+the `client.rs` line citations in "Where" are corrected to the current file.
+That change's comment sweep removed one doc-comment line near the top of
+`src/client.rs`, and the citations, written against the file of 2026-09-10,
+had already drifted by more than that line. The sentence quoted there sits
+in `best_lane`'s doc-comment, not `subscribe`'s; the text said `subscribe`.
+Each passage cited reads as quoted.
+
+## CI does not run the writer set of the verify commands
+
+**PR-hj4wwd**: CI does not run on-chain-client's second `verify_commands` line, the writer set (`cargo test --manifest-path on-chain-client/Cargo.toml --features test-support,write --test write_manifest --test write_pure --test write_compose --test write_events --test signatory_set_decode --test fuzz_signatory_set`), so a change that breaks the chain writer's pure half or the signatory-set decode passes CI and is caught only by the local gate.
+affects: REQ-aat4yt, REQ-6jefu2, LLR-24mwew
+opened: 2026-10-31
+status: open
+
+Where: `.github/workflows/rust.yml`. Its step under the comment
+"on-chain-client's verify_commands entry" runs only the first of the two
+lines in `on-chain-client/.guardrails/config.yaml` `verify_commands`. No
+step names `--features test-support,write` or any of the six writer
+targets, and the `clippy` job stays on `--lib`. The second line predates
+change `worktree-org-io-domain-api`: it came with the chain writer, and that
+change neither added nor altered it. Found while writing that change's
+verification record (merge-change step 5, 2026-10-31). Expected: CI runs
+every `verify_commands` line of the unit, the writer set included, as it
+does for org-node's and org-io's lines.

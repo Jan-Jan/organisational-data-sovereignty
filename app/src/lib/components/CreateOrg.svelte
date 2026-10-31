@@ -1,45 +1,55 @@
 <script lang="ts">
 	/**
-	 * Story 1: create persona + create organisation.
-	 * Persona form → create_persona → create_organisation; shows org_id + epoch.
-	 * It offers no choice of Persona: it founds with the one it has just
-	 * created, which is bound to no Organisation (LLR-pms47e).
+	 * Story 1: propose the Person and found an Organisation.
+	 * Form → propose_person (LLR-k57uqv; passed over when a Person is held
+	 * already) → propose_founding_organisation (LLR-6ff735). Shows the new
+	 * Persona and its founder's Device key, and hands the founder to the
+	 * founding-writes list, where "Write to chain" writes it (LLR-rhc555).
+	 * Nothing is written to the chain here. Whether a refused Person stops
+	 * the founding is decided by `personRefusalStep` (SDD-g5wmxt,
+	 * LLR-d8u93q); this component makes the IPC calls.
 	 */
-	import { createPersona, createOrganisation } from '$lib/api';
+	import { proposePerson, proposeFoundingOrganisation, type PersonDto } from '$lib/api';
+	import { personRefusalStep, type FoundingProposals } from '$lib/founding';
 
 	interface Props {
 		notifyReload?: () => void;
+		/** LLR-rhc555: receives the founder of each founding proposed here. */
+		onProposed?: (founder: string) => void;
 	}
-	let { notifyReload }: Props = $props();
+	let { notifyReload, onProposed }: Props = $props();
 
 	let handle = $state('');
 	let name = $state('');
 	let surname = $state('');
+	let orgName = $state('');
 	let busy = $state(false);
-	let step = $state<'idle' | 'persona-done' | 'org-done'>('idle');
-	let personaId = $state('');
-	let orgId = $state('');
+	let proposed = $state<FoundingProposals | null>(null);
 	let err = $state('');
 
 	async function run() {
-		if (!handle.trim() || !name.trim()) {
-			err = 'Handle and name are required.';
-			return;
-		}
 		busy = true;
 		err = '';
 		try {
-			// Step 1: create persona
-			personaId = await createPersona(handle.trim(), name.trim(), surname.trim());
-			step = 'persona-done';
-
-			// Step 2: create organisation
-			orgId = await createOrganisation(personaId);
-			step = 'org-done';
+			// LLR-k57uqv: the Person first; a Person held already is passed over.
+			let person: PersonDto | null = null;
+			try {
+				person = await proposePerson(name.trim(), surname.trim());
+			} catch (refusal) {
+				const step = personRefusalStep(refusal);
+				if (!step.proceed) {
+					err = step.message;
+					return;
+				}
+			}
+			// LLR-6ff735: then the founding.
+			const founding = await proposeFoundingOrganisation(name.trim(), surname.trim(), handle.trim(), orgName.trim());
+			proposed = { person, founding };
+			onProposed?.(founding.founder);
 			notifyReload?.();
-		} catch (e) {
-			err = String(e);
-			step = 'idle';
+		} catch (refusal) {
+			// org-io's refusal of the founding, naming the field (LLR-6ff735).
+			err = String(refusal);
 		} finally {
 			busy = false;
 		}
@@ -49,24 +59,24 @@
 		handle = '';
 		name = '';
 		surname = '';
-		personaId = '';
-		orgId = '';
-		step = 'idle';
+		orgName = '';
+		proposed = null;
 		err = '';
 	}
 </script>
 
 <section class="panel">
-	<h2>Story 1: Create Persona + Organisation</h2>
-	<p class="hint">Creates a persona then submits a genesis org to the chain.</p>
+	<h2>Story 1: Propose Person + founding</h2>
+	<p class="hint">Proposes your Person (if none is held yet) and a founding; write it to the chain from Personas / Orgs.</p>
 
-	{#if step === 'org-done'}
-		<div class="result-box ok">
-			<p>Organisation created on chain.</p>
-			<p>Persona ID: <code>{personaId}</code></p>
-			<p>Org ID: <code>{orgId}</code></p>
+	{#if proposed}
+		<div class="result-box">
+			<p>Founding proposed: provisional until it is written to the chain.</p>
+			{#if proposed.person}<p>Person proposed: <code>{proposed.person.device_public_key}</code></p>{/if}
+			<p>Persona ID: <code>{proposed.founding.persona_id}</code></p>
+			<p>Founder's DevicePublicKey: <code>{proposed.founding.founder}</code></p>
 		</div>
-		<button onclick={reset}>Create another</button>
+		<button onclick={reset}>Propose another</button>
 	{:else}
 		<form onsubmit={(e) => { e.preventDefault(); run(); }}>
 			<label>
@@ -81,17 +91,17 @@
 				Surname
 				<input type="text" bind:value={surname} placeholder="Smith" disabled={busy} />
 			</label>
-
-			{#if step === 'persona-done'}
-				<p class="progress">Persona created: <code>…{personaId.slice(-12)}</code>. Creating org…</p>
-			{/if}
+			<label>
+				Organisation name
+				<input type="text" bind:value={orgName} placeholder="Acme" disabled={busy} />
+			</label>
 
 			{#if err}
 				<p class="err">{err}</p>
 			{/if}
 
 			<button type="submit" disabled={busy}>
-				{busy ? 'Working…' : 'Create Persona + Org'}
+				{busy ? 'Proposing…' : 'Propose Person + founding'}
 			</button>
 		</form>
 	{/if}
@@ -111,6 +121,5 @@
 	.result-box { background: #0d2f1d; border: 1px solid #1b5e20; border-radius: 4px; padding: 0.75rem; margin-bottom: 0.5rem; }
 	.result-box p { margin: 0.2rem 0; font-size: 0.85rem; color: #ccc; }
 	code { font-family: monospace; font-size: 0.8rem; color: #81c784; word-break: break-all; }
-	.progress { color: #ff9800; font-size: 0.8rem; }
 	.err { color: #f44336; font-size: 0.85rem; }
 </style>

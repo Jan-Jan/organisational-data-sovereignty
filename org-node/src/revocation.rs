@@ -1,5 +1,6 @@
-//! SDD-uck4tz: the revocation a revoked Device receives, the decision it acts
-//! on, and its acknowledgement. Pure functions over values (LLR-xgefn8).
+//! Revocation notices (SDD-gatf4h): the revocation a revoked Device receives
+//! and the decision it acts on; and the removal acknowledgement's signature
+//! (SDD-8zzmav). Pure functions over values (LLR-g2jeqd).
 use org_members::{AbsenceProof, DevicePublicKey, MemberId, RootHash};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -18,7 +19,7 @@ use crate::verify::Trie;
 #[cfg(feature = "app")]
 use org_members::hasher::Blake3Hasher;
 
-/// The signing domain of an acknowledgement (LLR-gbe9bt).
+/// The signing domain of an acknowledgement (LLR-bs6yxf).
 pub const ACK_DOMAIN: &[u8] = b"ods/org-node/revocation-acknowledgement/v1";
 
 /// What a revoked Device receives (REQ-ps2gy2): its identity and an absence
@@ -54,7 +55,7 @@ impl<'de> Deserialize<'de> for Signature64 {
 }
 
 /// A revoked Device's signed statement that it acted on its revocation
-/// (REQ-y99c9w). Not evidence of erasure (RC-eydn8t).
+/// (REQ-h29c8e). Not evidence of erasure (RC-eydn8t).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Acknowledgement {
     pub org_id: OrgId,
@@ -67,7 +68,7 @@ pub struct Acknowledgement {
 
 impl Acknowledgement {
     /// The bytes the Device signs: [`ACK_DOMAIN`], then the postcard encoding
-    /// of `(org_id, member_id, device, epoch, root)`. LLR-gbe9bt.
+    /// of `(org_id, member_id, device, epoch, root)`. LLR-bs6yxf.
     pub fn signed_bytes(&self) -> Vec<u8> {
         let mut bytes = ACK_DOMAIN.to_vec();
         if let Ok(tuple) = postcard::to_allocvec(&(self.org_id, self.member_id, self.device, self.epoch, self.root)) {
@@ -100,36 +101,13 @@ pub fn notices_for(
     Ok(notices)
 }
 
-/// A notice `accept` took: the store without the Organisation and the
-/// acknowledgements signed before it was forgotten (LLR-r8qhky). The store
-/// is `forget_organisation`'s result, `None` when the store's
-/// one Persona went with the Organisation (the caller then removes the
-/// store, `StoreChange::Forgotten`).
-#[cfg(feature = "app")]
-pub struct Accepted {
-    pub store: Option<StoreData>,
-    pub acknowledgements: Vec<Acknowledgement>,
-}
-
-/// The Device keys of the Personas of `store` bound to `org_id`: what a
-/// signing path asks its caller's `device_secrets` closure for (LLR-uw7nmv,
-/// LLR-hby4jr).
-#[cfg(feature = "app")]
-pub(crate) fn bound_devices(store: &StoreData, org_id: OrgId) -> Vec<DevicePublicKey> {
-    if store.persona.org_id == Some(org_id) {
-        vec![store.persona.device_key]
-    } else {
-        Vec::new()
-    }
-}
-
 /// The Persona a notice is for, decided with no Organisation state: the
 /// store must hold the Organisation, and a Persona bound to it must be the
 /// notice's Member on the notice's Device. LLR-r7zm39.
 #[cfg(feature = "app")]
 pub fn check_notice<'a>(store: &'a StoreData, notice: &RevocationNotice) -> Result<&'a PersonaRecord, OrgNodeError> {
     let org_id = notice.org_id;
-    if !store.orgs.iter().any(|record| record.org_id == org_id) {
+    if store.record.as_ref().is_none_or(|record| record.org_id != org_id) {
         return Err(OrgNodeError::RevocationNotHeld { org_id });
     }
     let persona = &store.persona;
@@ -141,104 +119,54 @@ pub fn check_notice<'a>(store: &'a StoreData, notice: &RevocationNotice) -> Resu
     }
 }
 
-/// The index, among `stores`, of the store whose Persona a notice is for:
-/// the first that `check_notice` accepts; else the last
-/// `RevocationNotForThisDevice` refusal, or `RevocationNotHeld` when no
-/// store holds the Organisation. LLR-r7zm39, LLR-38e2kn. It is here, not in
-/// the service, so that the unheld refusal is raised in this file only
-/// (PR-q8r32t).
+/// Decides a kept notice against the chain state the caller read (LLR-rhsfw9's refusals, in order;
+/// LLR-jhy6t6): `check_notice`; no state (`OrgNotOnChain`); a state older than the record
+/// (`StaleChainState`); at the record's epoch with another root (`ChainStateConflict`); a proof that
+/// does not hold under the chain's root (`RevocationProofRefused`). Asks for no secret and changes nothing.
 #[cfg(feature = "app")]
-pub(crate) fn notice_store<'a>(
-    stores: impl Iterator<Item = &'a StoreData>,
-    notice: &RevocationNotice,
-) -> Result<usize, OrgNodeError> {
-    let mut refusal = OrgNodeError::RevocationNotHeld { org_id: notice.org_id };
-    for (index, store) in stores.enumerate() {
-        match check_notice(store, notice) {
-            Ok(_) => return Ok(index),
-            Err(error @ OrgNodeError::RevocationNotForThisDevice { .. }) => refusal = error,
-            Err(_) => {}
-        }
-    }
-    Err(refusal)
-}
-
-/// Decides a notice against the Organisation state the caller read: the
-/// state must exist, be no older than the record, hold the record's root
-/// when at the record's epoch, and the notice's proof
-/// must show the Device absent under its root. On success the secret source
-/// is called, with the Device keys of the bound Personas, the
-/// acknowledgements are signed, then the Organisation is forgotten; on any
-/// refusal the error alone is returned and the secret source is never
-/// called. LLR-tx8ruv, LLR-r8qhky, LLR-uw7nmv.
-#[cfg(feature = "app")]
-pub fn accept(
-    store: &StoreData,
-    notice: &RevocationNotice,
-    chain: Option<OrgState>,
-    device_secrets: impl FnOnce(&[DevicePublicKey]) -> Vec<DeviceSecret>,
-) -> Result<Accepted, OrgNodeError> {
+pub fn accept(store: &StoreData, notice: &RevocationNotice, chain: Option<OrgState>) -> Result<(), OrgNodeError> {
     check_notice(store, notice)?;
     let org_id = notice.org_id;
     let chain = chain.ok_or(OrgNodeError::OrgNotOnChain)?;
-    let record = store
-        .orgs
-        .iter()
-        .find(|record| record.org_id == org_id)
-        .ok_or(OrgNodeError::RevocationNotHeld { org_id })?;
+    let record = store.record.as_ref().ok_or(OrgNodeError::RevocationNotHeld { org_id })?;
     if chain.epoch < record.epoch {
         return Err(OrgNodeError::StaleChainState { org_id, chain_epoch: chain.epoch, record_epoch: record.epoch });
     }
     // At the record's own epoch the chain must hold the record's root, as
-    // `reconcile` requires (owner ruling R3: false deletion extremely unlikely).
+    // `verify` requires (owner ruling R3: false deletion extremely unlikely).
     if chain.epoch == record.epoch && chain.root_hash != record.root_hash {
         return Err(OrgNodeError::ChainStateConflict { org_id });
     }
     notice
         .proof
         .verify::<Blake3Hasher>(&chain.root_hash, &notice.member_id, &notice.device)
-        .map_err(|cause| OrgNodeError::RevocationProofRefused { org_id, cause })?;
-    // Every refusal check has passed: only now are the device secrets read.
-    let acknowledgements = sign_acknowledgements(store, org_id, &chain, device_secrets(&bound_devices(store, org_id)))?;
-    Ok(Accepted { store: store.forget_organisation(org_id), acknowledgements })
+        .map_err(|cause| OrgNodeError::RevocationProofRefused { org_id, cause })
 }
 
-/// One acknowledgement per Persona bound to `org_id`, in store order (every
-/// binding — `commit_genesis` and a first admission — sets the MemberId with
-/// the Organisation, so the `member_id` filter below skips no bound Persona;
-/// PR-eqs4fs), naming `verified`'s epoch and root and signed with the
-/// secret in `device_secrets` whose Device key is that Persona's. Refuses
-/// with `DeviceSecretNotSupplied` when such a Persona has no secret there.
-/// The secrets are moved in and dropped, zeroised, on return. LLR-hby4jr.
-/// A store holds one Persona, so at most one acknowledgement.
+/// This Persona's one acknowledgement of its own removal from `org_id`, naming `chain`'s epoch and root,
+/// signed with `secret` (LLR-5tvn7g, LLR-bs6yxf; Ed25519, deterministic). `secret` must be the Persona's
+/// (`DeviceSecretNotSupplied`).
 #[cfg(feature = "app")]
-pub fn sign_acknowledgements(
-    store: &StoreData,
+pub fn sign_acknowledgement(
+    persona: &PersonaRecord,
     org_id: OrgId,
-    verified: &OrgState,
-    device_secrets: Vec<DeviceSecret>,
-) -> Result<Vec<Acknowledgement>, OrgNodeError> {
-    let persona = &store.persona;
-    if persona.org_id != Some(org_id) {
-        return Ok(Vec::new());
+    chain: &OrgState,
+    secret: &DeviceSecret,
+) -> Result<Acknowledgement, OrgNodeError> {
+    let member_id = persona.member_id.ok_or(OrgNodeError::OrgNotHeld { org_id })?;
+    if secret.device_key() != persona.device_key {
+        return Err(OrgNodeError::DeviceSecretNotSupplied { org_id });
     }
-    let Some(member_id) = persona.member_id else { return Ok(Vec::new()) };
-    let device = persona.device_key;
-    let keypair = device_secrets
-        .iter()
-        .find(|secret| secret.device_key() == device)
-        .map(DeviceSecret::signing_keypair)
-        .ok_or(OrgNodeError::DeviceSecretNotSupplied { org_id })?;
     let mut acknowledgement = Acknowledgement {
         org_id,
         member_id,
-        device,
-        epoch: verified.epoch,
-        root: verified.root_hash,
+        device: persona.device_key,
+        epoch: chain.epoch,
+        root: chain.root_hash,
         signature: Signature64([0; 64]),
     };
-    acknowledgement.signature = Signature64(keypair.sign(&acknowledgement.signed_bytes()).to_bytes());
-    Ok(vec![acknowledgement])
+    acknowledgement.signature = Signature64(secret.signing_keypair().sign(&acknowledgement.signed_bytes()).to_bytes());
+    Ok(acknowledgement)
 }
 
 /// An acknowledgement `check_acknowledgement` accepted. Only that function
@@ -269,9 +197,9 @@ pub fn check_acknowledgement(
 ) -> Result<VerifiedAcknowledgement, OrgNodeError> {
     let org_id = ack.org_id;
     let record = store
-        .orgs
-        .iter()
-        .find(|record| record.org_id == org_id)
+        .record
+        .as_ref()
+        .filter(|record| record.org_id == org_id)
         .ok_or(OrgNodeError::AcknowledgementNotHeld { org_id })?;
     if sender != ack.device {
         return Err(OrgNodeError::AcknowledgementNotFromItsDevice { org_id });

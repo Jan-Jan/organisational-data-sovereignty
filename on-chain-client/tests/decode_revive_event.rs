@@ -41,12 +41,11 @@
 //! order rather than by asking the decoder to encode anything, so a round
 //! trip through it is a cross-check and not a tautology.
 //!
-//! Relocated out of the `#[cfg(test)]` module in
+//! These cases live here, not in a `#[cfg(test)]` module in
 //! `on-chain-client/src/decode/v_paseo_ah.rs`, which no gate reads
-//! (`test_paths` for this unit is `on-chain-client/tests`), and joined by the
-//! abnormal-input cases class C asks for. The relocated assertions are kept
-//! verbatim where they stand alone and are absorbed, position for position,
-//! where a sweep now covers them — noted at each such test.
+//! (`test_paths` for this unit is `on-chain-client/tests`), with the
+//! abnormal-input cases class C asks for. Where a sweep covers a single
+//! case, it covers it position for position, as noted at each such test.
 //!
 //! **What this file does NOT establish.** It says nothing about *which
 //! contract* emitted a log. A log decoded here is well-formed, not
@@ -57,9 +56,7 @@
 //! target that holds the decision itself, `log_is_ours`, with its boundaries.
 //! `tests/contract_address_filter.rs` is the *decoder's* half (REQ-5upq6n,
 //! that the address is reported byte for byte) and its own header explicitly
-//! disclaims carrying REQ-9vwcwc; this line pointed there until review round
-//! 2's finding 6, which sent a reader to the file that says it does not
-//! verify the thing.
+//! disclaims carrying REQ-9vwcwc.
 
 use on_chain_client::decode::dispatch::{PASEO_AH_SPEC_VERSION, for_runtime};
 use on_chain_client::decode::{DecodeError, Decoder};
@@ -129,9 +126,8 @@ fn assert_error_names(err: &DecodeError, expected: usize, actual: usize) {
 
 // verifies: REQ-52uc8f, REQ-wnjz9j, LLR-e6skvu
 //
-// The ABI-drift guard, relocated from `src`'s
-// `event_signatures_match_solidity_abi` and re-expressed as behaviour rather
-// than as equality against a constant the test can no longer see. The
+// The ABI-drift guard, expressed as behaviour rather than as equality
+// against a constant a test outside the crate cannot see. The
 // decoder's compiled-in signature hashes are private to the crate, so the
 // question is asked of the decoder instead: a log whose first topic is the
 // keccak of the contract's canonical signature string must decode, and a log
@@ -236,7 +232,7 @@ fn the_recognised_signature_hashes_are_the_keccak_of_the_canonical_solidity_stri
 
 // verifies: REQ-88fp2h, REQ-twdu84, REQ-axcxf7, LLR-6tjhgk, LLR-u2e389
 //
-// REQ-wnjz9j is deliberately NOT among those IDs (review round 1, finding 9).
+// REQ-wnjz9j is deliberately NOT among those IDs.
 // It states only a refusal — an unknown signature yields no event — so it has
 // no accepting side these two could fail on: a decoder that returned `Err` for
 // every unknown signature would leave them green. Its three dedicated cases
@@ -245,8 +241,7 @@ fn the_recognised_signature_hashes_are_the_keccak_of_the_canonical_solidity_stri
 // The normal case for all three shape checks at once: a well-formed
 // `GenesisInitialized` — known signature, two topics, sixty-four bytes of
 // data, zero padding in the indexed address — decodes, and every field comes
-// back where the ABI put it. Relocated from `src`'s
-// `parse_genesis_event_round_trip`. Distinctive, non-repeating values, so a
+// back where the ABI put it. Distinctive, non-repeating values, so a
 // decoder reading the right number of bytes from the wrong offset cannot
 // produce this answer by accident. It is also REQ-axcxf7's normal case: the
 // fixture is the canonical encoding of exactly the three `ContractEmitted`
@@ -281,8 +276,7 @@ fn genesis_initialized_round_trips_every_field() {
 // verifies: REQ-88fp2h, REQ-twdu84, REQ-axcxf7, LLR-6tjhgk, LLR-u2e389
 //
 // The same for `RootUpdated`, which has one more indexed field (the epoch)
-// and one more non-indexed slot (the previous root). Relocated from `src`'s
-// `parse_root_updated_event_round_trip`. It carries REQ-axcxf7's normal case
+// and one more non-indexed slot (the previous root). It carries REQ-axcxf7's normal case
 // at the longer of the two payload shapes: three topics and ninety-six data
 // bytes, framed exactly as declared, are accepted — so the exact-consumption
 // check is not merely tuned to the two-topic fixture the refusals use.
@@ -323,8 +317,7 @@ fn root_updated_round_trips_every_field() {
 // here and is refused by the caller on the emitting address (HAZ-werm85,
 // REQ-9vwcwc, gated in tests/log_ownership.rs — not in
 // tests/contract_address_filter.rs, which gates only the decoder's half and
-// disclaims REQ-9vwcwc in its own header). Relocated from `src`'s
-// `parse_event_with_unknown_signature_returns_none`.
+// disclaims REQ-9vwcwc in its own header).
 #[test]
 fn an_unknown_first_topic_yields_nothing() {
     let bytes = encode_contract_emitted(CONTRACT, Vec::new(), vec![[0xff; 32]]);
@@ -336,7 +329,6 @@ fn an_unknown_first_topic_yields_nothing() {
 // No topics at all yields nothing. pallet-revive emits `ContractEmitted` with
 // an empty topic list when a contract calls `log0(data)`; there is no
 // signature to match, so there is nothing to decode and nothing to report.
-// Relocated from `src`'s `parse_event_empty_topics_returns_none`.
 #[test]
 fn no_topics_at_all_yields_nothing() {
     let bytes = encode_contract_emitted(CONTRACT, vec![0xde, 0xad], Vec::new());
@@ -351,8 +343,7 @@ fn no_topics_at_all_yields_nothing() {
 //
 // One topic short of `GenesisInitialized`'s two: the signature matched but the
 // indexed admin is missing, so there is no admin to attribute the root to.
-// Relocated from `src`'s `parse_genesis_wrong_topic_count_rejected`, and
-// extended to assert the error names both counts.
+// The error names both counts.
 #[test]
 fn genesis_with_one_topic_is_rejected() {
     let bytes = encode_contract_emitted(CONTRACT, vec![0u8; 64], vec![sig_genesis()]);
@@ -449,8 +440,8 @@ fn root_updated_with_four_topics_is_rejected() {
 //
 // `GenesisInitialized`'s data is exactly two ABI words. Both neighbours of 64
 // are refused — one byte short and one byte long, which is where an `<`
-// instead of a `!=` hides — and so is the far-off length the relocated
-// `src` test used (32 bytes, i.e. one word instead of two). The error names
+// instead of a `!=` hides — and so is a far-off length (32 bytes, i.e. one
+// word instead of two). The error names
 // both lengths in every case.
 #[test]
 fn genesis_data_of_any_length_but_sixty_four_is_rejected() {
@@ -520,9 +511,7 @@ const DISTINCT_ADMIN: [u8; 20] = [
 // ABI this decoder decodes. Every one of the twelve positions is swept, one at
 // a time, for both event shapes — the two share `unpack_address_topic`, and
 // the sweep is what pins the guarded window to bytes 0..12 rather than to any
-// eleven-byte subrange of it. The relocated `src` test
-// (`parse_event_with_corrupted_address_topic_rejected`) asserted exactly this
-// for position 5, and is absorbed here at that position.
+// eleven-byte subrange of it.
 #[test]
 fn a_non_zero_byte_at_each_padding_position_of_the_address_topic_is_rejected() {
     for pos in 0..12usize {
@@ -606,8 +595,7 @@ fn all_twelve_padding_bytes_zero_is_accepted_and_the_address_is_the_low_twenty_b
 // check catches it — and an unread tail means the bytes were not the variant
 // they were taken for. The error names the number of bytes left over, since
 // that is the only clue an operator gets about what the extra bytes were.
-// Relocated from `src`'s `parse_event_trailing_bytes_rejected`, extended
-// across a run of trailing lengths and to assert the count is reported.
+// Swept across a run of trailing lengths, the count reported in each.
 #[test]
 fn any_trailing_bytes_after_a_well_formed_payload_are_rejected() {
     let well_formed = encode_contract_emitted(
@@ -674,8 +662,7 @@ fn a_payload_that_ends_inside_its_topics_is_rejected() {
 // REQ-axcxf7's second clause, literally: a payload that ends **inside a
 // field's own length prefix**. Neither cut above lands there — 86 stops
 // exactly where `topics`' prefix begins, with zero bytes of it present, and
-// 150 stops inside a topic's contents — so until review round 2's finding 12
-// the clause was stated and not exercised.
+// 150 stops inside a topic's contents — so neither exercises the clause.
 //
 // The cut that does it is 21. `data` is 64 bytes, and SCALE's single-byte
 // compact mode only reaches 63, so 64 encodes two bytes wide:

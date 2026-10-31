@@ -1,8 +1,7 @@
 <script lang="ts">
 	/**
 	 * REQ-645jq9: the transport mode the backend is actually running is shown
-	 * here, because it changes what the operator must supply elsewhere (the peer
-	 * address in Revoke) and was previously invisible.
+	 * here, from the connection status.
 	 *
 	 * REQ-e4ah9h / REQ-bvx4nh: `chain_ws` and `contract_h160` come from the
 	 * configuration the backend built at startup, not from the environment, and

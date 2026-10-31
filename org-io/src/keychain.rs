@@ -6,7 +6,7 @@
 //! A read builds a fresh `DeviceSecret` from the item's bytes, moved into
 //! `Zeroizing` in the same expression and consumed by
 //! `DeviceSecret::from_keychain_bytes`; a write lends the seed to the item
-//! through `DeviceSecret::lend_to_keychain` and nothing else (LLR-n9dnm4).
+//! through `DeviceSecret::lend_to_keychain` and nothing else (LLR-6sfub6).
 //! A refusal names the Device key and, when unexplained, the keychain
 //! error's variant name only, never a byte of the item (LLR-8erfbu).
 //!
@@ -23,7 +23,7 @@
 )]
 
 use org_node::store::PersonaStore;
-use org_node::{DevicePublicKey, DeviceSecret, OrgNodeError, SealedStore};
+use org_node::{DevicePublicKey, DeviceSecret, OrgNodeError, PersonStore, SealedStore};
 
 /// The keychain item's service name; the user is the Device key's hex.
 const SERVICE: &str = "ods-device-seed";
@@ -70,9 +70,18 @@ pub(crate) fn read_device_secret(device_key: &DevicePublicKey) -> Result<DeviceS
     backend::read_device_secret(device_key)
 }
 
-/// Write `secret` into the item of `device_key` (LLR-n9dnm4).
+/// Write `secret` into the item of `device_key` (LLR-6sfub6).
 pub(crate) fn write_device_secret(device_key: &DevicePublicKey, secret: &DeviceSecret) -> Result<(), KeychainError> {
     backend::write_device_secret(device_key, secret)
+}
+
+/// Delete `device_key`'s keychain item (LLR-vj2nkb): called only from
+/// `retention.rs`. An item already missing counts as deleted.
+pub(crate) fn delete_device_secret(device_key: &DevicePublicKey) -> Result<(), KeychainError> {
+    match backend::delete_device_secret(device_key) {
+        Err(KeychainError::ItemMissing { .. }) => Ok(()),
+        deleted => deleted,
+    }
 }
 
 /// Lend the 32-byte seed of `device_key`'s item to `build`, once, and drop
@@ -135,6 +144,10 @@ mod backend {
         secret.lend_to_keychain(|seed| entry.set_secret(seed)).map_err(|error| refusal(device_key, &error))
     }
 
+    pub(super) fn delete_device_secret(device_key: &DevicePublicKey) -> Result<(), KeychainError> {
+        entry(device_key)?.delete_credential().map_err(|error| refusal(device_key, &error))
+    }
+
     pub(super) fn with_endpoint_seed<R>(
         device_key: &DevicePublicKey,
         build: impl FnOnce(&[u8; 32]) -> R,
@@ -158,6 +171,10 @@ mod backend {
     }
 
     pub(super) fn write_device_secret(device_key: &DevicePublicKey, _secret: &DeviceSecret) -> Result<(), KeychainError> {
+        Err(KeychainError::Unavailable { device_key: *device_key, reason: "NoNativeBackend" })
+    }
+
+    pub(super) fn delete_device_secret(device_key: &DevicePublicKey) -> Result<(), KeychainError> {
         Err(KeychainError::Unavailable { device_key: *device_key, reason: "NoNativeBackend" })
     }
 
@@ -189,14 +206,9 @@ impl Keychain {
     }
 
     /// The secrets a signing path asks for (org-node's `device_secrets`
-    /// closure): those of `device_keys` the keychain gives; one it refuses is
-    /// left out, and org-node refuses the signing step for want of it.
-    pub(crate) fn for_signing(&self, device_keys: &[DevicePublicKey]) -> Vec<DeviceSecret> {
-        self.for_signing_noting_refusal(device_keys, &mut None)
-    }
-
-    /// `for_signing`, keeping the first refusal in `refused`, so the caller
-    /// can report the keychain's refusal rather than org-node's want of the
+    /// closure): those of `device_keys` the keychain gives, one it refuses
+    /// left out, keeping the first refusal in `refused`, so the caller can
+    /// report the keychain's refusal rather than org-node's want of the
     /// secret (REQ-6d9xv6).
     pub(crate) fn for_signing_noting_refusal(
         &self,
@@ -222,12 +234,12 @@ impl Keychain {
         let secret = read_device_secret(&device_key).map_err(UnsealFailure::Keychain)?;
         PersonaStore::unseal(sealed, device_key, secret).map_err(UnsealFailure::Store)
     }
-}
 
-impl crate::LocalStore {
-    /// The secrets org-node's signing paths ask for (`Keychain::for_signing`).
-    pub(crate) fn device_secrets_for_signing(&self, device_keys: &[DevicePublicKey]) -> Vec<DeviceSecret> {
-        self.keychain.for_signing(device_keys)
+    /// `sealed`, the Person file of `device_key`, opened with the secret its
+    /// item holds (LLR-z7kbf9), as `unseal` opens a Persona's.
+    pub(crate) fn unseal_person(&self, sealed: &SealedStore, device_key: DevicePublicKey) -> Result<PersonStore, UnsealFailure> {
+        let secret = read_device_secret(&device_key).map_err(UnsealFailure::Keychain)?;
+        PersonStore::unseal(sealed, device_key, secret).map_err(UnsealFailure::Store)
     }
 }
 

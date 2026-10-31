@@ -14,10 +14,10 @@
 //! was asked for, since that number is what a caller logs and what tells
 //! an operator which runtime it has to add support for.
 //!
-//! Relocated from the `#[cfg(test)]` module in
+//! These cases live here, not in a `#[cfg(test)]` module in
 //! `on-chain-client/src/decode/dispatch.rs`, which no gate reads
-//! (`test_paths` is `on-chain-client/tests`), and extended with the
-//! neighbour cases class C requires.
+//! (`test_paths` is `on-chain-client/tests`), with the neighbour cases class
+//! C requires.
 
 use on_chain_client::decode::dispatch::{PASEO_AH_SPEC_VERSION, for_runtime};
 use on_chain_client::decode::DecodeError;

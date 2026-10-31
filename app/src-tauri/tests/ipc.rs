@@ -1,17 +1,11 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! The commands driven across the REAL Tauri IPC boundary.
 //!
 //! Carries: REQ-645jq9 (the transport mode crosses the boundary and is named
 //! `transport_mode` on the wire), REQ-sjkp8z (the org-id boundary check is
-//! reached by the real handler under the real argument name), REQ-vgr7s2 (an
-//! empty peer address is genuinely accepted — the backend half of HAZ-n97v5g).
-//! Since 2026-10-05 each test is annotated with the low-level requirements of
-//! `app/docs/architecture/` that refine these; the annotations name them.
-//!
-//! NOT REQ-he8ejb. That requirement is about a check made BEFORE ANY COMMAND IS
-//! INVOKED, and nothing in this file can observe one: every test here invokes a
-//! command. The member-id tests below verify the handler's own
-//! defence-in-depth check (LLR-6pmrma, derived); REQ-he8ejb is verified in
-//! app/tests/revoke.validate.test.ts.
+//! reached by the real handler under the real argument name), REQ-vb5pag
+//! (the Person, founding and Invite commands). Each test is annotated with
+//! the low-level requirement of `app/docs/architecture/` it verifies.
 //!
 //! Everything here uses `tauri::test::mock_builder`, the same
 //! `generate_handler!` list as `lib.rs`, and the same camelCase argument names
@@ -27,16 +21,20 @@
 //! No test here sets an environment variable: `AppState::for_test` takes every
 //! input as a parameter, exactly so that these tests cannot race each other.
 
+use std::path::PathBuf;
+use std::sync::Arc;
+
 use ods_poc_lib::commands;
 use ods_poc_lib::policy::{ChainEndpoint, TransportModeName};
 use ods_poc_lib::state::AppState;
-use org_io::node::{InviteId, InviteReply, OrgId, OrgNodeError};
+use org_io::node::{DevicePublicKey, InviteId, MemberId, OrgId};
 use org_io::test_support::FakeChain;
+use org_io::{Delivery, HeldTarget, OrgIo, Verified, WriteReport};
 
 use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
 use tauri::test::MockRuntime;
 use tauri::webview::InvokeRequest;
-use tauri::WebviewWindow;
+use tauri::{Manager, WebviewWindow};
 
 /// A live mock application with a real `AppState` over a fresh store.
 ///
@@ -58,7 +56,7 @@ fn harness_with(transport: TransportModeName, chain: Option<ChainEndpoint>) -> H
 /// and need not exist yet.
 fn harness_at(
     dir: tempfile::TempDir,
-    data_dir: std::path::PathBuf,
+    data_dir: PathBuf,
     transport: TransportModeName,
     chain: Option<ChainEndpoint>,
 ) -> Harness {
@@ -66,14 +64,18 @@ fn harness_at(
     harness_of(dir, state)
 }
 
-/// A harness over org-io's substitute chain, in Loopback mode, where
-/// Organisations can be founded (S4, task T15: for the invitation commands,
-/// whose outstanding Invites live in the founding Persona's store).
-fn harness_over_chain() -> Harness {
+/// A harness over org-io's substitute chain `chain`, in Loopback mode,
+/// where Organisations can be founded, written and verified.
+fn harness_over(chain: &FakeChain) -> Harness {
     let dir = tempfile::tempdir().expect("tempdir");
-    let state = AppState::for_test_over(dir.path().to_path_buf(), &FakeChain::new(), TransportModeName::Loopback)
+    let state = AppState::for_test_over(dir.path().to_path_buf(), chain, TransportModeName::Loopback)
         .expect("AppState::for_test_over");
     harness_of(dir, state)
+}
+
+/// `harness_over` a fresh substitute chain.
+fn harness_over_chain() -> Harness {
+    harness_over(&FakeChain::new())
 }
 
 /// A live mock application managing `state`, whose store lies in `dir`.
@@ -84,19 +86,23 @@ fn harness_of(dir: tempfile::TempDir, state: AppState) -> Harness {
     let app = mock_builder()
         .manage(state)
         .invoke_handler(tauri::generate_handler![
-            commands::create_persona,
-            commands::create_organisation,
-            commands::export_invite,
-            commands::import_invite,
-            commands::produce_invite_reply,
-            commands::import_invite_reply,
-            commands::admit_member,
-            commands::revoke_member,
+            commands::propose_person,
+            commands::propose_founding_organisation,
+            commands::issue_invite,
+            commands::read_invite,
+            commands::propose_member,
+            commands::request_admission,
+            commands::propose_admission,
+            commands::propose_revocation,
+            commands::cancel_invite,
+            commands::propose_updated_organisation,
+            commands::write_organisation_to_chain,
+            commands::verify_organisation,
+            commands::list_admission_requests,
             commands::list_personas,
             commands::list_orgs,
             commands::connection_status,
             commands::start_receiver,
-            commands::reconcile_organisations,
         ])
         .build(mock_context(noop_assets()))
         .expect("build mock app");
@@ -141,44 +147,71 @@ fn request(cmd: &str, body: tauri::ipc::InvokeBody) -> InvokeRequest {
 
 /// Invoke `cmd` with a JSON argument object and return the raw result.
 fn invoke(
-    h: &Harness,
+    harness: &Harness,
     cmd: &str,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, serde_json::Value> {
-    get_ipc_response(&h.webview, request(cmd, tauri::ipc::InvokeBody::Json(args)))
-        .map(|b| b.deserialize::<serde_json::Value>().expect("response is JSON"))
+    get_ipc_response(&harness.webview, request(cmd, tauri::ipc::InvokeBody::Json(args)))
+        .map(|response| response.deserialize::<serde_json::Value>().expect("response is JSON"))
 }
 
 /// Invoke `cmd` and require it to have failed, returning the error message.
-fn invoke_err(h: &Harness, cmd: &str, args: serde_json::Value) -> String {
-    match invoke(h, cmd, args) {
-        Ok(v) => panic!("{cmd} unexpectedly succeeded: {v}"),
-        Err(e) => e.as_str().map(str::to_string).unwrap_or_else(|| e.to_string()),
+fn invoke_err(harness: &Harness, cmd: &str, args: serde_json::Value) -> String {
+    match invoke(harness, cmd, args) {
+        Ok(answer) => panic!("{cmd} unexpectedly succeeded: {answer}"),
+        Err(refusal) => refusal.as_str().map(str::to_string).unwrap_or_else(|| refusal.to_string()),
     }
 }
 
-fn org_id_40() -> String {
-    "aa".repeat(20)
+/// The harness's shared org-io handle: for a test's set-up through org-io
+/// itself, and to read back what a command left in org-io.
+fn org_io_of(harness: &Harness) -> Arc<OrgIo> {
+    Arc::clone(&harness._app.state::<AppState>().org_io)
 }
 
-fn member_id_64() -> String {
-    "bb".repeat(32)
+/// Run one of the handle's futures to completion from a test thread.
+fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    tauri::async_runtime::block_on(future)
 }
 
-/// `revoke_member`'s arguments with a well-formed org id.
-fn revoke_args(member_id_hex: &str, peer_addr_blob: &str) -> serde_json::Value {
-    serde_json::json!({
-        "orgId": org_id_40(),
-        "memberIdHex": member_id_hex,
-        "peerAddrBlob": peer_addr_blob
-    })
+/// `propose_founding_organisation` over IPC for "Alice Smith" with
+/// `handle` and `org_name`; the new Persona's id.
+fn propose_founding(harness: &Harness, handle: &str, org_name: &str) -> String {
+    let proposed = invoke(
+        harness,
+        "propose_founding_organisation",
+        serde_json::json!({ "name": "Alice", "surname": "Smith", "handle": handle, "orgName": org_name }),
+    )
+    .expect("propose_founding_organisation");
+    proposed["persona_id"].as_str().expect("a Persona id").to_string()
 }
 
-/// The refusal a well-formed call on an Organisation ends in on this fresh
-/// store: no record of it is found. Taken from the error type, so an upstream
-/// rewording moves both sides together.
-fn refused_for_an_unknown_org() -> String {
-    OrgNodeError::OrgNotOnChain.to_string()
+/// The Device key org-io lists for the Persona `persona_id`.
+fn device_key_of(harness: &Harness, persona_id: &str) -> DevicePublicKey {
+    block_on(org_io_of(harness).personas())
+        .into_iter()
+        .find(|persona| persona.persona_id.as_str() == persona_id)
+        .map(|persona| persona.device_key)
+        .expect("org-io lists the Persona")
+}
+
+/// An Organisation "Acme" founded by the Persona `alice`: proposed over
+/// IPC, then written and verified through the handle over the harness's
+/// substitute chain. Its id as hex, and the founder's Device key.
+fn founded_org(harness: &Harness) -> (String, DevicePublicKey) {
+    let persona_id = propose_founding(harness, "alice", "Acme");
+    let founder = device_key_of(harness, &persona_id);
+    let io = org_io_of(harness);
+    let written = block_on(io.write_organisation_to_chain(HeldTarget::Founding(founder)));
+    assert!(matches!(written, Ok(WriteReport::Included { .. })), "the founding is written: {written:?}");
+    let verified = block_on(io.verify_organisation(HeldTarget::Founding(founder)));
+    assert!(matches!(verified, Verified::Adopted { .. }), "the founding is adopted: {verified:?}");
+    let org_id = block_on(io.personas())
+        .into_iter()
+        .find(|persona| persona.device_key == founder)
+        .and_then(|persona| persona.org_id)
+        .expect("an adopted founding's Persona holds its org id");
+    (hex::encode(org_id.as_bytes()), founder)
 }
 
 // ---------------------------------------------------------------------------
@@ -190,8 +223,8 @@ fn refused_for_an_unknown_org() -> String {
 fn connection_status_reports_transport_mode_over_ipc() {
     // Loopback, because Networked is what a hard-coded literal would return and
     // the test must be able to tell the two apart.
-    let h = harness_with(TransportModeName::Loopback, None);
-    let status = invoke(&h, "connection_status", serde_json::json!({})).expect("connection_status");
+    let harness = harness_with(TransportModeName::Loopback, None);
+    let status = invoke(&harness, "connection_status", serde_json::json!({})).expect("connection_status");
     assert_eq!(
         status.get("transport_mode"),
         Some(&serde_json::Value::String("loopback".into())),
@@ -199,11 +232,11 @@ fn connection_status_reports_transport_mode_over_ipc() {
     );
 }
 
-// verifies: LLR-8tzbzn, LLR-4wcyqy
+// verifies: LLR-8tzbzn, LLR-kk8gc7
 #[test]
 fn connection_status_is_registered_under_its_name() {
-    let h = harness();
-    let status = invoke(&h, "connection_status", serde_json::json!({}))
+    let harness = harness();
+    let status = invoke(&harness, "connection_status", serde_json::json!({}))
         .expect("connection_status must be registered under exactly this name");
     // The field names api.ts declares. A renamed field is a silently undefined
     // value in the UI, not a build error, so the wire shape is asserted here.
@@ -222,168 +255,17 @@ fn connection_status_is_registered_under_its_name() {
 }
 
 // ---------------------------------------------------------------------------
-// REQ-sjkp8z — the org-id boundary check is reached by the real handler
-// ---------------------------------------------------------------------------
-
-/// Malformed org ids: under width, over width, and the right width but not hex.
-fn malformed_org_ids() -> [String; 3] {
-    ["a".repeat(39), "a".repeat(42), "zz".repeat(20)]
-}
-
-/// The parser's own refusal of `org_id`, so the tests below require the
-/// handler's refusal to be the parser's and no other.
-fn parser_refusal(org_id: &str) -> String {
-    ods_poc_lib::parsing::parse_org_id(org_id).expect_err("a malformed org id is refused")
-}
-
-// verifies: LLR-vzf8j2
-#[test]
-fn revoke_member_refuses_a_malformed_org_id_with_the_parsers_message() {
-    // The member id is well-formed and the peer address absent, so if the org
-    // id were not refused the call would end in the unknown-org refusal.
-    let h = harness();
-    for bad in malformed_org_ids() {
-        let err = invoke_err(
-            &h,
-            "revoke_member",
-            serde_json::json!({ "orgId": bad, "memberIdHex": member_id_64(), "peerAddrBlob": "" }),
-        );
-        assert_eq!(err, parser_refusal(&bad), "{bad}");
-    }
-}
-
-// verifies: LLR-vzf8j2
-#[test]
-fn revoke_member_does_not_refuse_a_well_formed_org_id() {
-    let h = harness();
-    for org_id in [org_id_40(), format!("0x{}", org_id_40())] {
-        let err = invoke_err(
-            &h,
-            "revoke_member",
-            serde_json::json!({ "orgId": org_id, "memberIdHex": member_id_64(), "peerAddrBlob": "" }),
-        );
-        assert_eq!(err, refused_for_an_unknown_org(), "{org_id}");
-    }
-}
-
-// ---------------------------------------------------------------------------
-// The Rust-side member-id checks — defence in depth, behind the frontend's
-//
-// These two carried `verifies: REQ-he8ejb` and could not bear it. REQ-he8ejb
-// requires the member id to be checked BEFORE ANY COMMAND IS INVOKED; both
-// tests below assert on the HANDLER's check, which by definition runs after the
-// command was invoked, so deleting the frontend check — the behaviour the
-// requirement actually names — leaves both green. REQ-he8ejb is verified in
-// app/tests/revoke.validate.test.ts, against `validateRevokeInput`, which is
-// where the pre-invocation decision lives.
-//
-// The tests stay: the handler's own width and prefix checks are worth keeping
-// and worth gating. Since 2026-10-05 they verify LLR-6pmrma, a derived
-// low-level requirement of the handler itself, not REQ-he8ejb.
-// ---------------------------------------------------------------------------
-
-// verifies: LLR-6pmrma
-#[test]
-fn revoke_member_rejects_a_short_member_id() {
-    let h = harness();
-    let err = invoke_err(&h, "revoke_member", revoke_args(&"bb".repeat(31), ""));
-    assert_eq!(
-        err, "member_id must be 32 bytes (64 hex chars)",
-        "the backend must refuse an under-width member id on its own account, \
-         not rely on the form having checked"
-    );
-}
-
-// verifies: LLR-6pmrma
-// The doubled-prefix defect it guards is real and the handler's refusal is
-// worth keeping; it is not, however, the pre-invocation check REQ-he8ejb
-// requires.
-#[test]
-fn revoke_member_rejects_a_doubled_zero_x_prefix_on_the_member_id() {
-    let h = harness();
-    // `0x0x` + 64 hex characters. A REPEATED strip eats both prefixes and
-    // hands 64 clean hex characters to the width check, so malformed input is
-    // silently normalised into a valid member id and the revocation proceeds
-    // against it. One optional strip leaves `0x` + 64 characters, which the
-    // hex decode refuses — and the refusal must come from THIS handler, at
-    // the IPC boundary, not from something further in.
-    let err = invoke_err(
-        &h,
-        "revoke_member",
-        revoke_args(&format!("0x0x{}", member_id_64()), ""),
-    );
-    assert!(
-        err.contains("member_id hex"),
-        "exactly one `0x` prefix is permitted on a member id; a doubled prefix \
-         is malformed input and must be refused at the boundary rather than \
-         normalised into a valid id, got: {err}"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// REQ-vgr7s2 — an empty peer address is not a ground for refusal (HAZ-n97v5g)
-// ---------------------------------------------------------------------------
-
-// *2026-10-13 (S4, task T12):* the blank-address item this test also
-// verified moved to org-io with the parse (org-io's `tests/peer_addr.rs`
-// verifies it there); its ID left this line, which keeps the other.
-// verifies: LLR-6pmrma
-#[test]
-fn revoke_member_is_not_refused_for_an_empty_peer_addr() {
-    let h = harness_with(TransportModeName::Networked, None);
-    let err = invoke_err(&h, "revoke_member", revoke_args(&member_id_64(), ""));
-    // What this test establishes: the empty peer address is not the reason the
-    // command fails. It CANNOT establish that the revocation succeeds, and the
-    // name must not claim it does — `invoke_err` panics if the command returns
-    // Ok, so this test positively REQUIRES the call to fail. It fails because
-    // the harness store is fresh: there is no organisation under `org_id_40()`
-    // and no member `bb…bb` in it, and a real success would need an org, a
-    // member, a chain and a reachable peer, none of which this repository can
-    // stand up. So the failure is a given; the only question this test asks is
-    // WHAT it failed for, and the assertion below pins that to "not the
-    // address".
-    //
-    // REQ-vgr7s2's acceptance clause — an empty peer address in Networked
-    // transport is accepted — is established on the frontend side, in
-    // app/tests/revoke.validate.test.ts, where `validateRevokeInput` genuinely
-    // returns `{ ok: true }`. That is where the decision actually lives; this
-    // test guards the Rust side against a redundant non-empty check creeping
-    // back in behind it (HAZ-n97v5g).
-    //
-    // The assertion is POSITIVE, and that is the point. It used to read
-    // `!err.to_lowercase().contains("peer_addr")`, which was keyed to one
-    // spelling of one diagnostic: the original defect's message was
-    // `Peer addr blob (hex) is required.`, and lowercased that does not contain
-    // `peer_addr` — so reintroducing the exact defect this test exists to catch
-    // left it green. Naming the reason the call MUST fail for instead makes any
-    // earlier refusal, however worded, a failure.
-    //
-    // That reason is the store: this harness is fresh, so there is no
-    // organisation under `org_id_40()` and `OrgService::revoke_member`'s first
-    // act — `find_org` — reports `OrgNotOnChain`. Reaching it proves the call
-    // got past org-id parsing, past member-id parsing and past address
-    // handling, into the service.
-    assert_eq!(
-        err,
-        refused_for_an_unknown_org(),
-        "an empty peer address must not be the ground of refusal in Networked \
-         transport: the call must reach the service and fail there, because the \
-         harness store holds no such organisation, got: {err}"
-    );
-}
-
-// ---------------------------------------------------------------------------
 // Robustness
 // ---------------------------------------------------------------------------
 
-// verifies: LLR-8tzbzn, LLR-4wcyqy
+// verifies: LLR-8tzbzn, LLR-kk8gc7
 // It holds the precondition every REQ above depends on: that the handler list
 // is CLOSED, so a command renamed in lib.rs but not in api.ts is an error the
 // frontend can see rather than a silent undefined.
 #[test]
 fn unknown_command_is_rejected() {
-    let h = harness();
-    let res = invoke(&h, "connectionStatus", serde_json::json!({}));
+    let harness = harness();
+    let res = invoke(&harness, "connectionStatus", serde_json::json!({}));
     assert!(
         res.is_err(),
         "the handler list must be closed: an unregistered command is an error, \
@@ -398,13 +280,14 @@ fn handler_list(source: &str) -> std::collections::BTreeSet<String> {
     source[start..end]
         .split(',')
         .map(str::trim)
-        .filter(|s| !s.is_empty())
+        .filter(|command| !command.is_empty())
         .map(String::from)
         .collect()
 }
 
 /// `source` with every `//` comment cut off its line. It does not parse block
-/// comments or string literals; lib.rs has neither around its handler.
+/// comments or string literals; the files it reads have neither around what
+/// they check.
 fn without_line_comments(source: &str) -> String {
     source
         .lines()
@@ -413,16 +296,12 @@ fn without_line_comments(source: &str) -> String {
         .join("\n")
 }
 
-// verifies: LLR-4wcyqy
+// verifies: LLR-kk8gc7
 // The harness registers its own copy of the handler list; this test gates the
 // product's copy against it. It reads both files as text and edits neither.
 #[test]
 fn product_registers_the_same_commands_as_the_harness() {
-    let read = |rel: &str| {
-        std::fs::read_to_string(format!("{}/{rel}", env!("CARGO_MANIFEST_DIR")))
-            .unwrap_or_else(|e| panic!("read {rel}: {e}"))
-    };
-    let lib = read("src/lib.rs");
+    let lib = read_source("src/lib.rs");
     // `Builder::invoke_handler` replaces any earlier handler, so a second call
     // would silently narrow what the product registers. Exactly one list, in
     // exactly one call, keeps the comparison below about the list that wins.
@@ -430,21 +309,20 @@ fn product_registers_the_same_commands_as_the_harness() {
     assert_eq!(code.matches("generate_handler!").count(), 1, "lib.rs must have exactly one generate_handler!");
     assert_eq!(code.matches(".invoke_handler(").count(), 1, "lib.rs must call invoke_handler exactly once");
     let product = handler_list(&lib);
-    let harness = handler_list(&read("tests/ipc.rs"));
-    // *Amended 2026-10-13 (task T15d, owner ruling of that day):* sixteen is
-    // thirteen; the three discard and listing commands left.
-    assert_eq!(harness.len(), 13, "the harness registers thirteen commands: {harness:?}");
+    let harness = handler_list(&read_source("tests/ipc.rs"));
+    // LLR-kk8gc7's seventeen commands.
+    assert_eq!(harness.len(), 17, "the harness registers seventeen commands: {harness:?}");
     assert_eq!(product, harness, "lib.rs and the ipc harness register different commands");
 }
 
-// verifies: LLR-4wcyqy
+// verifies: LLR-kk8gc7
 // It holds the other precondition: that the managed state is reachable from a
 // handler at all, so a failure above is a failure of the behaviour under test
 // and not of this suite's wiring.
 #[test]
 fn list_personas_returns_an_empty_list_on_a_fresh_store() {
-    let h = harness();
-    let personas = invoke(&h, "list_personas", serde_json::json!({})).expect("list_personas");
+    let harness = harness();
+    let personas = invoke(&harness, "list_personas", serde_json::json!({})).expect("list_personas");
     assert_eq!(
         personas,
         serde_json::json!([]),
@@ -454,142 +332,104 @@ fn list_personas_returns_an_empty_list_on_a_fresh_store() {
 }
 
 // ---------------------------------------------------------------------------
-// Persona details are parsed at this boundary. The requirement for parsed
-// Persona details is org-node's and is not exported to this unit; it is
-// verified there (org-node/tests/persona_records.rs). These tests verify
-// LLR-p7dfxb, this handler's own derived low-level requirement.
+// The Person (LLR-k57uqv)
 // ---------------------------------------------------------------------------
 
-// verifies: LLR-p7dfxb
-// The handler parses the handle, name and surname before org-node sees them,
-// and stores the parsed (NFC) form.
+// verifies: LLR-k57uqv
 #[test]
-fn create_persona_stores_the_parsed_details() {
-    let h = harness();
-    invoke(
-        &h,
-        "create_persona",
-        serde_json::json!({ "handle": "jose\u{0301}", "name": "Jose\u{0301}", "surname": "Smith" }),
+fn propose_person_returns_the_device_key_names_and_provisional() {
+    // A `handle` the caller still sends is not read: the Person has none.
+    let harness = harness();
+    let person = invoke(
+        &harness,
+        "propose_person",
+        serde_json::json!({ "name": "Ada", "surname": "Lovelace", "handle": "ada" }),
     )
-    .expect("create_persona");
-    let personas = invoke(&h, "list_personas", serde_json::json!({})).expect("list_personas");
-    assert_eq!(personas[0]["handle"], "jos\u{e9}");
-    assert_eq!(personas[0]["name"], "Jos\u{e9}");
+    .expect("propose_person");
+    let mut keys: Vec<&str> =
+        person.as_object().expect("an object").keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["device_public_key", "name", "status", "surname"], "no Handle crosses back: {person}");
+    assert_eq!(person["name"], "Ada");
+    assert_eq!(person["surname"], "Lovelace");
+    assert_eq!(person["status"], "provisional");
+    let held = block_on(org_io_of(&harness).person()).expect("org-io holds the Person");
+    assert_eq!(person["device_public_key"], serde_json::json!(hex::encode(held.device_key.as_bytes())));
+    assert_eq!(person["device_public_key"].as_str().map(str::len), Some(64));
+    // A Person is no Persona.
+    assert_eq!(invoke(&harness, "list_personas", serde_json::json!({})).expect("list_personas"), serde_json::json!([]));
 }
 
-// verifies: LLR-p7dfxb
-// An invalid field is refused at the boundary, named, and nothing is created.
+// verifies: LLR-k57uqv
+// The name and surname are stored in their parsed (NFC) form.
 #[test]
-fn create_persona_refuses_an_invalid_field_naming_it_and_creates_nothing() {
-    let h = harness();
+fn propose_person_stores_the_parsed_details() {
+    let harness = harness();
+    let person = invoke(&harness, "propose_person", serde_json::json!({ "name": "Jose\u{0301}", "surname": "Smith" }))
+        .expect("propose_person");
+    assert_eq!(person["name"], "Jos\u{e9}");
+    let held = block_on(org_io_of(&harness).person()).expect("org-io holds the Person");
+    assert_eq!(held.name.to_string(), "Jos\u{e9}");
+    assert_eq!(held.surname.to_string(), "Smith");
+}
+
+// verifies: LLR-k57uqv
+// An invalid field is refused, named, and nothing is created: no Person is
+// held and no Person file is written.
+#[test]
+fn propose_person_refuses_an_invalid_field_naming_it_and_creates_nothing() {
+    let harness = harness();
     let long = "a".repeat(129);
-    let cases = [
-        ("Alice", "Alice", "Smith", "handle:"),
-        ("alice", long.as_str(), "Smith", "name:"),
-        ("alice", "Alice", long.as_str(), "surname:"),
-    ];
-    for (handle, name, surname, field) in cases {
-        let err = invoke_err(
-            &h,
-            "create_persona",
-            serde_json::json!({ "handle": handle, "name": name, "surname": surname }),
-        );
+    for (name, surname, field) in [(long.as_str(), "Smith", "name:"), ("Alice", long.as_str(), "surname:")] {
+        let refusal = invoke(&harness, "propose_person", serde_json::json!({ "name": name, "surname": surname }))
+            .expect_err("an invalid field is refused");
+        assert_eq!(refusal["kind"], "refused", "{refusal}");
+        let err = refusal["message"].as_str().expect("org-io's text");
         assert!(err.starts_with(field), "the refusal must name the field ({field}): {err}");
     }
-    let personas = invoke(&h, "list_personas", serde_json::json!({})).expect("list_personas");
-    assert_eq!(personas.as_array().map(Vec::len), Some(0), "a refused persona is not created");
+    assert!(block_on(org_io_of(&harness).person()).is_none(), "a refused Person is not held");
+    let person_files =
+        org_io::store_file::list_person_stores(harness._dir.path()).expect("org-io lists the data directory's Person files");
+    assert!(person_files.is_empty(), "no Person file is written: {person_files:?}");
+}
+
+// verifies: LLR-k57uqv
+// A refusal crosses IPC as a kind and org-io's text, so the creation form branches on the kind, not
+// on how org-io words it. A second Person is `person_already_held`; a
+// refused field is `refused`, its text naming the field.
+#[test]
+fn a_second_person_is_refused_by_its_kind_beside_org_ios_text() {
+    let harness = harness();
+    let held = invoke(&harness, "propose_person", serde_json::json!({ "name": "Ada", "surname": "Lovelace" }))
+        .expect("the first Person is proposed");
+    let refusal = invoke(&harness, "propose_person", serde_json::json!({ "name": "Bob", "surname": "Builder" }))
+        .expect_err("a second Person is refused");
+    let device = held["device_public_key"].as_str().expect("the held Person's Device key");
+    assert_eq!(
+        refusal,
+        serde_json::json!({
+            "kind": "person_already_held",
+            "message": format!("a Person is held already ({device}); nothing created"),
+        })
+    );
 }
 
 // ---------------------------------------------------------------------------
-// Added 2026-10-05 by the app architecture change (T3), so that each low-level
-// requirement of the command surface has a normal and an abnormal case.
-//
-// The store is fresh, so `revoke_member` fails on any well-formed input: the
-// handler's first act after parsing is to look the Organisation's record up,
-// and it reports `OrgNotOnChain` before the parsed arguments are used. A normal-case
-// test of their argument parsing therefore observes one thing only: that the
-// handler did NOT refuse the argument, because the call ended in that refusal
-// and no other. It cannot observe what the handler passed on.
+// The directory the store was opened in (LLR-vqkr5t)
 // ---------------------------------------------------------------------------
-
-// *2026-10-13 (S4, task T12):* the peer-address cases left this file with
-// the parse, for org-io's `tests/peer_addr.rs` (moved with their items under
-// ruling A), and with them the encoded-address helpers they used.
-// *2026-10-15 (S4, TEST review finding-4):* the three peer-address items
-// moved back to this unit, since they state what the commands do with the
-// text; their tests are written again here, at the IPC seam (below).
-
-/// The hexadecimal of a well-formed peer address: a postcard-encoded
-/// endpoint address whose identity is the Ed25519 base point (`58 66…66`,
-/// a valid point) and which lists no transport address (`00`, an empty
-/// set). The app names no iroh type, so the address is spelled as bytes.
-fn encoded_peer_addr() -> String {
-    format!("58{}00", "66".repeat(31))
-}
-
-// verifies: LLR-ty85xv
-#[test]
-fn revoke_member_treats_a_blank_or_whitespace_only_peer_addr_as_absent() {
-    // Whitespace, which a form field easily carries, is an absent address,
-    // not a malformed one: the call reaches the service and fails there.
-    let h = harness();
-    for blank in ["", "   ", "\n", "\t \r\n"] {
-        let err = invoke_err(&h, "revoke_member", revoke_args(&member_id_64(), blank));
-        assert_eq!(err, refused_for_an_unknown_org(), "{blank:?} is not a ground of refusal");
-    }
-}
-
-// verifies: LLR-n6twt7
-#[test]
-fn revoke_member_does_not_refuse_an_encoded_endpoint_addr() {
-    let h = harness();
-    let addr = encoded_peer_addr();
-    for text in [addr.clone(), format!("0x{addr}")] {
-        let err = invoke_err(&h, "revoke_member", revoke_args(&member_id_64(), &text));
-        assert_eq!(err, refused_for_an_unknown_org(), "a decodable address is accepted: {text:?}");
-    }
-}
-
-// verifies: LLR-n6twt7
-#[test]
-fn revoke_member_refuses_a_peer_addr_that_is_not_hex() {
-    let h = harness();
-    for bad in ["zz", "abc", "not hex at all"] {
-        let err = invoke_err(&h, "revoke_member", revoke_args(&member_id_64(), bad));
-        assert!(err.starts_with("peer_addr_blob hex:"), "{bad:?}: {err}");
-    }
-}
-
-// Abnormal input: well-formed hex whose bytes are not an endpoint address.
-// Dropping the address instead of refusing would revoke over discovery when
-// the operator supplied a dial address.
-// verifies: LLR-n6twt7
-#[test]
-fn revoke_member_refuses_a_peer_addr_that_is_not_an_endpoint_addr() {
-    let h = harness();
-    for bad in ["00", "ff", "deadbeef"] {
-        let err = invoke_err(&h, "revoke_member", revoke_args(&member_id_64(), bad));
-        assert!(err.starts_with("peer_addr decode:"), "{bad:?}: {err}");
-    }
-}
 
 // verifies: LLR-vqkr5t
 #[test]
 fn connection_status_reports_the_directory_the_store_was_opened_in() {
-    let h = harness();
-    let status = invoke(&h, "connection_status", serde_json::json!({})).expect("connection_status");
+    let harness = harness();
+    let status = invoke(&harness, "connection_status", serde_json::json!({})).expect("connection_status");
     assert_eq!(
         status["data_dir"],
-        serde_json::json!(h._dir.path().display().to_string()),
+        serde_json::json!(harness._dir.path().display().to_string()),
         "the reported directory is the one the store was opened in: {status}"
     );
 }
 
-// *2026-10-14 (S4, task T17):* this test also cited the item that states
-// "create the data directory and open the store in it", which moved to
-// org-io in task T9 (org-io's architecture draft, the store files) and
-// cannot be cited from this unit; the ID was dropped and the test is
-// unchanged. It still verifies the reported directory.
 // verifies: LLR-vqkr5t
 #[test]
 fn connection_status_reports_a_data_dir_it_had_to_create_verbatim() {
@@ -599,38 +439,23 @@ fn connection_status_reports_a_data_dir_it_had_to_create_verbatim() {
     let dir = tempfile::tempdir().expect("tempdir");
     let data_dir = dir.path().join("odd dir Ωμέγα").join("nested");
     assert!(!data_dir.exists());
-    let h = harness_at(dir, data_dir.clone(), TransportModeName::Networked, None);
+    let harness = harness_at(dir, data_dir.clone(), TransportModeName::Networked, None);
     assert!(data_dir.is_dir(), "the data directory is created");
-    let status = invoke(&h, "connection_status", serde_json::json!({})).expect("connection_status");
+    let status = invoke(&harness, "connection_status", serde_json::json!({})).expect("connection_status");
     assert_eq!(status["data_dir"], serde_json::json!(data_dir.display().to_string()));
 }
 
-// verifies: LLR-6pmrma
-#[test]
-fn revoke_member_accepts_a_zero_x_prefixed_member_id() {
-    let h = harness();
-    let member = format!("0x{}", member_id_64());
-    let err = invoke_err(&h, "revoke_member", revoke_args(&member, ""));
-    assert_eq!(err, refused_for_an_unknown_org(), "one `0x` prefix is accepted");
-}
-
-// *2026-10-13 (S4, task T12):* the revocation's four peer-address cases
-// (blank is absent; an encoded address is accepted; not hex, and not an
-// address, refused) moved to org-io's `tests/peer_addr.rs` with the parse.
-// *2026-10-15 (S4, TEST review finding-4):* written again above, over IPC.
+// ---------------------------------------------------------------------------
+// The Persona fields (LLR-pguhw5), over a founding's new Persona
+// ---------------------------------------------------------------------------
 
 // verifies: LLR-pguhw5
 #[test]
 fn list_personas_reports_exactly_the_persona_fields() {
     // No field beyond these six crosses IPC: in particular no seed.
-    let h = harness();
-    invoke(
-        &h,
-        "create_persona",
-        serde_json::json!({ "handle": "dave", "name": "Dave", "surname": "Jones" }),
-    )
-    .expect("create_persona");
-    let personas = invoke(&h, "list_personas", serde_json::json!({})).expect("list_personas");
+    let harness = harness();
+    propose_founding(&harness, "dave", "Acme");
+    let personas = invoke(&harness, "list_personas", serde_json::json!({})).expect("list_personas");
     let mut keys: Vec<&str> = personas[0]
         .as_object()
         .expect("a persona is an object")
@@ -644,361 +469,749 @@ fn list_personas_reports_exactly_the_persona_fields() {
 // verifies: LLR-pguhw5
 #[test]
 fn a_persona_in_no_organisation_reports_a_null_org_id() {
-    // Boundary value: the persona belongs to no organisation. The field is
-    // present and null, not an empty string or a placeholder identifier.
-    let h = harness();
-    invoke(
-        &h,
-        "create_persona",
-        serde_json::json!({ "handle": "erin", "name": "Erin", "surname": "Jones" }),
-    )
-    .expect("create_persona");
-    let personas = invoke(&h, "list_personas", serde_json::json!({})).expect("list_personas");
+    // Boundary value: a provisional founding's Persona belongs to no
+    // Organisation until its proxy exists. The field is present and null,
+    // not an empty string or a placeholder identifier.
+    let harness = harness();
+    propose_founding(&harness, "erin", "Acme");
+    let personas = invoke(&harness, "list_personas", serde_json::json!({})).expect("list_personas");
     assert!(personas[0].get("org_id").is_some(), "{personas}");
     assert_eq!(personas[0]["org_id"], serde_json::Value::Null, "{personas}");
 }
 
 // ---------------------------------------------------------------------------
-// The invitation commands (T15 of docs/plans/2026-10-05-chain-authority.md):
-// the Invite and its reply are the app's, parsed in `crate::invitation`.
-// *2026-10-14 (S4, task T15):* org-io runs the exchange and org-node parses
-// the Blobs (`org_io::node::InviteReply`); the refusals below are taken from
-// org-node's typed errors, annotations unchanged.
-//
-// `admit_member` parses the org id, then the peer address, and only then
-// the reply. Its normal-case tests hand it the reply `"x"`, which is not a
-// Blob, so a call that got past every argument ends in the reply parser's
-// refusal and no other.
+// The app holds and passes no randomness (LLR-vj5s28)
 // ---------------------------------------------------------------------------
 
-/// `export_invite`'s arguments.
-fn export_args(org_id: &str) -> serde_json::Value {
-    serde_json::json!({ "orgId": org_id, "orgName": "Acme", "inviteeName": "Bob" })
-}
-
-/// `admit_member`'s arguments, with the reply `"x"`.
-fn admit_args(org_id: &str, peer_addr_blob: &str) -> serde_json::Value {
-    serde_json::json!({ "orgId": org_id, "replyBlob": "x", "peerAddrBlob": peer_addr_blob })
-}
-
-/// The refusal `admit_member` ends in once every argument before the reply
-/// was accepted: the reply parser's own message for `"x"`.
-fn refused_for_the_reply() -> String {
-    InviteReply::parse("x").expect_err("\"x\" is not a reply").to_string()
-}
-
-// verifies: LLR-vzf8j2
-#[test]
-fn export_invite_rejects_a_short_org_id() {
-    let h = harness();
-    // 39 characters: one short of the required width.
-    let bad = "a".repeat(39);
-    let err = invoke_err(&h, "export_invite", export_args(&bad));
-    assert_eq!(err, parser_refusal(&bad), "refused by the real handler under `orgId`");
-    assert!(err.contains("40 hex chars"), "refused for its WIDTH, got: {err}");
-}
-
-// verifies: LLR-vzf8j2
-#[test]
-fn export_invite_rejects_a_non_hex_org_id() {
-    let h = harness();
-    let bad = "zz".repeat(20);
-    let err = invoke_err(&h, "export_invite", export_args(&bad));
-    assert_eq!(err, parser_refusal(&bad));
-    assert!(err.contains("hex"), "refused for its ALPHABET, got: {err}");
-}
-
-// verifies: LLR-vzf8j2
-#[test]
-fn export_invite_does_not_refuse_a_well_formed_org_id() {
-    // The fresh store holds no Persona bound to it, so the call is refused
-    // there, after the parser. *2026-10-14 (S4, task T15):* org-node's
-    // `build_invite` refuses it, with its typed error for an Organisation
-    // it holds no record of.
-    let h = harness();
-    for org_id in [org_id_40(), format!("0x{}", org_id_40())] {
-        let err = invoke_err(&h, "export_invite", export_args(&org_id));
-        assert_eq!(err, refused_for_an_unknown_org(), "{org_id}");
-    }
-}
-
-// verifies: LLR-vzf8j2
-#[test]
-fn admit_member_refuses_a_malformed_org_id_with_the_parsers_message() {
-    let h = harness();
-    for bad in malformed_org_ids() {
-        let err = invoke_err(&h, "admit_member", admit_args(&bad, ""));
-        assert_eq!(err, parser_refusal(&bad), "{bad}");
-    }
-}
-
-// verifies: LLR-vzf8j2
-#[test]
-fn admit_member_does_not_refuse_a_well_formed_org_id() {
-    let h = harness();
-    for org_id in [org_id_40(), format!("0x{}", org_id_40())] {
-        let err = invoke_err(&h, "admit_member", admit_args(&org_id, ""));
-        assert_eq!(err, refused_for_the_reply(), "{org_id}");
-    }
-}
-
-// LLR-8krgzj as amended: `admit_member` takes no Organisation secret — an
-// `orgSecretHex` a caller still sends is not read, whatever it holds — and a
-// blank peer address is the absent one (the admission's peer-address item).
-// *2026-10-13 (S4, task T12):* that item moved to org-io with the parse
-// (org-io's `tests/peer_addr.rs` verifies it there); its ID left this line,
-// which keeps the other.
-// verifies: LLR-8krgzj
-#[test]
-fn admit_member_takes_no_organisation_secret() {
-    let h = harness();
-    for stale in [serde_json::json!("zz".repeat(32)), serde_json::json!("aa"), serde_json::Value::Null] {
-        let mut args = admit_args(&org_id_40(), "");
-        args["orgSecretHex"] = stale.clone();
-        let err = invoke_err(&h, "admit_member", args);
-        assert_eq!(err, refused_for_the_reply(), "{stale}");
-    }
-}
-
-// *2026-10-13 (S4, task T12):* the admission's three peer-address cases
-// moved to org-io's `tests/peer_addr.rs` with the parse.
-// *2026-10-15 (S4, TEST review finding-4):* the admission's peer-address
-// item moved back to this unit; its cases are written again here, over IPC.
-// A call whose peer address was accepted ends in the reply parser's refusal
-// of `"x"`.
-
-// verifies: LLR-ctrfz4
-#[test]
-fn admit_member_does_not_refuse_a_blank_or_decodable_peer_addr() {
-    let h = harness();
-    let addr = encoded_peer_addr();
-    for peer in [String::new(), "   ".to_string(), "\n".to_string(), addr.clone(), format!("0x{addr}")] {
-        let err = invoke_err(&h, "admit_member", admit_args(&org_id_40(), &peer));
-        assert_eq!(err, refused_for_the_reply(), "{peer:?} is not a ground of refusal");
-    }
-}
-
-// verifies: LLR-ctrfz4
-#[test]
-fn admit_member_refuses_a_peer_addr_that_is_not_hex() {
-    let h = harness();
-    for bad in ["zz", "abc", "not hex at all"] {
-        let err = invoke_err(&h, "admit_member", admit_args(&org_id_40(), bad));
-        assert!(err.starts_with("peer_addr_blob hex:"), "{bad:?}: {err}");
-    }
-}
-
-// verifies: LLR-ctrfz4
-#[test]
-fn admit_member_refuses_a_peer_addr_that_is_not_an_endpoint_addr() {
-    let h = harness();
-    for bad in ["00", "ff", "deadbeef"] {
-        let err = invoke_err(&h, "admit_member", admit_args(&org_id_40(), bad));
-        assert!(err.starts_with("peer_addr decode:"), "{bad:?}: {err}");
-    }
-}
-
-/// `create_persona` over IPC; the new Persona's id.
-fn create_persona(h: &Harness, handle: &str, name: &str, surname: &str) -> String {
-    let id = invoke(h, "create_persona", serde_json::json!({ "handle": handle, "name": name, "surname": surname }))
-        .expect("create_persona");
-    id.as_str().expect("a Persona id").to_string()
-}
-
-/// A harness over the substitute chain where the Persona `alice` founded an
-/// Organisation and issued one Invite to it, and the reply to that Invite
-/// from the Persona `bob` (Bob Builder) of a second app. Returns the
-/// inviter's harness, the Organisation's id in hex and the reply's Blob.
-///
-/// *2026-10-14 (S4, task T15):* the outstanding pairs live in the founding
-/// Persona's sealed store (org-io's exchange), not in an
-/// `outstanding_invites.json` a test could write, so the Invite is issued
-/// and replied to over IPC. The inviter runs in Loopback mode, so a send
-/// with no peer address is refused at once rather than dialled.
-fn harness_with_outstanding_invite() -> (Harness, String, String) {
-    let h = harness_over_chain();
-    let alice = create_persona(&h, "alice", "Alice", "Smith");
-    let org_id = invoke(&h, "create_organisation", serde_json::json!({ "personaId": alice }))
-        .expect("create_organisation");
-    let org_id = org_id.as_str().expect("an org id").to_string();
-    let invite = invoke(&h, "export_invite", export_args(&org_id)).expect("export_invite");
-    let joiner = harness();
-    let bob = create_persona(&joiner, "bob", "Bob", "Builder");
-    let reply = invoke(
-        &joiner,
-        "produce_invite_reply",
-        serde_json::json!({ "inviteBlob": invite, "personaId": bob, "confirmed": true }),
-    )
-    .expect("produce_invite_reply");
-    let reply = reply.as_str().expect("a reply Blob").to_string();
-    (h, org_id, reply)
-}
-
-// verifies: LLR-pmus9f
-#[test]
-fn import_invite_reply_reports_the_reply_it_parses() {
-    let (h, org_id, blob) = harness_with_outstanding_invite();
-    let parsed = InviteReply::parse(&blob).expect("the reply parses");
-    let personas = invoke(&h, "list_personas", serde_json::json!({})).expect("list_personas");
-    let orgs = invoke(&h, "list_orgs", serde_json::json!({})).expect("list_orgs");
-    let dto = invoke(&h, "import_invite_reply", serde_json::json!({ "blob": blob })).expect("import_invite_reply");
-    assert_eq!(
-        dto,
-        serde_json::json!({
-            "org_id": org_id,
-            "handle": "bob",
-            "name": "Bob",
-            "surname": "Builder",
-            "member_key": hex::encode(parsed.member_key.as_bytes()),
-            "device_key": hex::encode(parsed.device_key.as_bytes()),
-        })
-    );
-    // It stores nothing: the same Personas and Organisations, and the same
-    // reply parses again (its invite is still outstanding).
-    assert_eq!(invoke(&h, "list_personas", serde_json::json!({})).expect("list_personas"), personas);
-    assert_eq!(invoke(&h, "list_orgs", serde_json::json!({})).expect("list_orgs"), orgs);
-    invoke(&h, "import_invite_reply", serde_json::json!({ "blob": blob })).expect("still outstanding");
-}
-
-// verifies: LLR-pmus9f
-#[test]
-fn import_invite_reply_refuses_a_malformed_blob_or_an_unknown_invite() {
-    let (h, _, blob) = harness_with_outstanding_invite();
-    // Not Base64 at all, and a reply cut short.
-    let malformed = ["not base64 !".to_string(), blob[..blob.len() / 2].to_string()];
-    for bad in malformed {
-        let err = invoke_err(&h, "import_invite_reply", serde_json::json!({ "blob": bad }));
-        let parser = InviteReply::parse(&bad).expect_err("refused by the parser");
-        assert!(matches!(parser, OrgNodeError::InvalidField { .. }), "names the field: {parser:?}");
-        assert_eq!(err, parser.to_string(), "the parse's own message");
-    }
-    let unknown = InviteReply { invite_id: InviteId::new([4; 32]), ..InviteReply::parse(&blob).expect("parses") }
-        .encode()
-        .expect("encodes");
-    let err = invoke_err(&h, "import_invite_reply", serde_json::json!({ "blob": unknown }));
-    assert_eq!(err, OrgNodeError::InviteNotOutstanding.to_string());
-    // The outstanding invite id, under an Organisation it was not issued for
-    // (review round 2, finding-1).
-    let elsewhere = InviteReply { org_id: OrgId::new([2; 20]), ..InviteReply::parse(&blob).expect("parses") }
-        .encode()
-        .expect("encodes");
-    let err = invoke_err(&h, "import_invite_reply", serde_json::json!({ "blob": elsewhere }));
-    assert_eq!(err, OrgNodeError::InviteNotOutstanding.to_string());
-}
-
-// S4, task T15: the app hands the reply to org-io's exchange and reports
-// what org-io returned. The harness's chain is a substitute and its
-// endpoints are not reachable, so the admission commits and its send fails:
-// the command reports both, and the Member is admitted.
-// verifies: REQ-m8sgjk
-#[test]
-fn admit_member_hands_the_reply_to_org_io_and_reports_a_committed_admission_whose_send_failed() {
-    let (h, org_id, reply) = harness_with_outstanding_invite();
-    let err = invoke_err(
-        &h,
-        "admit_member",
-        serde_json::json!({ "orgId": org_id, "replyBlob": reply, "peerAddrBlob": "" }),
-    );
-    assert!(err.starts_with("the update was committed, but sending it failed: "), "{err}");
-    let orgs = invoke(&h, "list_orgs", serde_json::json!({})).expect("list_orgs");
-    assert_eq!(orgs[0]["member_count"], 2, "the reply's Persona is admitted beside the founder: {orgs}");
-    // The Invite is settled: the same reply names no outstanding Invite now.
-    let again = invoke_err(&h, "import_invite_reply", serde_json::json!({ "blob": reply }));
-    assert_eq!(again, OrgNodeError::InviteNotOutstanding.to_string());
-}
-
-// *2026-10-14 (S4, task T15):* the confirmation item this test verified
-// moved to org-io with the exchange (task T13; org-io's
-// `tests/invitation_exchange.rs` verifies it there), so its only ID left
-// this test, which keeps running over IPC (the T9 precedent).
-// *Pointed at the app's item 2026-10-15 (S4 TEST review round 2, finding-2;
-// the upgraded guardrails rule on moved IDs):* the old item is org-io's now
-// and not exported, so it is not cited here. The app's requirement that
-// states what this checks is REQ-ab2mfz's last clause — the reply is
-// produced only once the user has confirmed — at the app's IPC seam. No app
-// LLR states the IPC refusal (LLR-n2u4uf is the webview's gate), so the REQ
-// is cited directly.
-// verifies: REQ-ab2mfz
-#[test]
-fn produce_invite_reply_refuses_without_confirmation_over_ipc() {
-    let h = harness();
-    let err = invoke_err(
-        &h,
-        "produce_invite_reply",
-        serde_json::json!({ "inviteBlob": "x", "personaId": "p", "confirmed": false }),
-    );
-    assert!(err.starts_with("confirm first"), "{err}");
-}
-
-// ---------------------------------------------------------------------------
-// S4, task T15: the app names no iroh type and no Blob format. org-io runs
-// the invitation exchange, the fan-out and the peer-address parse, so the
-// app's manifest lists none of the crates those need.
-// ---------------------------------------------------------------------------
-
-/// The crate names of the `[dependencies]` table of `manifest`.
+/// The crate names of every dependency table of `manifest`: `[dependencies]`,
+/// `[dev-dependencies]`, `[build-dependencies]`, their `target.*` forms and
+/// their dotted one-crate tables (`[dependencies.rand]`).
 fn dependency_names(manifest: &str) -> Vec<String> {
+    const TABLES: [&str; 3] = ["dependencies", "dev-dependencies", "build-dependencies"];
     let mut names = vec![];
-    let mut in_dependencies = false;
+    let mut in_table = false;
     for line in manifest.lines().map(str::trim) {
         if line.starts_with('[') {
-            in_dependencies = line == "[dependencies]";
+            let header = line.trim_matches(|bracket| bracket == '[' || bracket == ']');
+            in_table = false;
+            for table in TABLES {
+                if header == table || header.ends_with(&format!(".{table}")) {
+                    in_table = true;
+                }
+                if let Some(name) = header.strip_prefix(&format!("{table}.")) {
+                    names.push(name.to_string());
+                }
+            }
             continue;
         }
-        if !in_dependencies || line.is_empty() || line.starts_with('#') {
+        if !in_table || line.is_empty() || line.starts_with('#') {
             continue;
         }
         if let Some((name, _)) = line.split_once('=') {
-            names.push(name.trim().to_string());
+            names.push(name.trim().trim_matches('"').to_string());
         }
     }
     names
 }
 
-// verifies: LLR-vzf8j2
+// verifies: LLR-vj5s28
 #[test]
-fn the_app_manifest_names_no_iroh_base64_or_postcard() {
+fn the_app_manifest_names_no_rand_rand_core_or_getrandom() {
     let manifest = std::fs::read_to_string(format!("{}/Cargo.toml", env!("CARGO_MANIFEST_DIR"))).expect("read Cargo.toml");
     let names = dependency_names(&manifest);
     assert!(names.iter().any(|name| name == "org-io"), "the [dependencies] table was read: {names:?}");
+    assert!(names.iter().any(|name| name == "tempfile"), "the [dev-dependencies] table was read: {names:?}");
     let named: Vec<&String> =
-        names.iter().filter(|name| ["iroh", "base64", "postcard"].contains(&name.as_str())).collect();
-    assert!(named.is_empty(), "the app's [dependencies] name {named:?}; org-io holds the transport and the Blob format");
+        names.iter().filter(|name| ["rand", "rand_core", "getrandom"].contains(&name.as_str())).collect();
+    assert!(named.is_empty(), "the app's manifest names {named:?}; org-io holds the one random source");
+}
+
+/// The unit's sources under `src-tauri/src`, as (path, text).
+fn app_sources() -> Vec<(PathBuf, String)> {
+    let mut pending = vec![PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src")];
+    let mut sources = Vec::new();
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).expect("read src dir") {
+            let path = entry.expect("dir entry").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                let text = std::fs::read_to_string(&path).expect("read source");
+                sources.push((path, text));
+            }
+        }
+    }
+    sources
+}
+
+// verifies: LLR-vj5s28
+#[test]
+fn no_app_source_names_a_generator_or_passes_an_rng() {
+    let sources = app_sources();
+    assert!(sources.iter().any(|(path, _)| path.ends_with("commands.rs")), "the sources were read");
+    let mut found = vec![];
+    for (path, text) in &sources {
+        let code = without_line_comments(text);
+        for name in ["OsRng", "RngCore", "CryptoRng", "rand::", "rand_core", "getrandom"] {
+            if code.contains(name) {
+                found.push(format!("{} names {name}", path.display()));
+            }
+        }
+    }
+    assert!(found.is_empty(), "the app names a generator: {found:#?}");
 }
 
 // ---------------------------------------------------------------------------
-// REQ-363366 — reconcile (S3b-io T15b; the discard removed by T15d)
+// The founding and the Invite (LLR-6ff735, LLR-y3zykm, LLR-b7ywy4)
+// ---------------------------------------------------------------------------
+
+// verifies: LLR-6ff735
+#[test]
+fn propose_founding_organisation_returns_the_new_personas_id_and_leaves_none_on_refusal() {
+    let harness = harness();
+    let founding = invoke(
+        &harness,
+        "propose_founding_organisation",
+        serde_json::json!({ "name": "Alice", "surname": "Smith", "handle": "alice", "orgName": "Acme" }),
+    )
+    .expect("propose_founding_organisation");
+    assert_eq!(founding["status"], "provisional_founding", "{founding}");
+    let personas = invoke(&harness, "list_personas", serde_json::json!({})).expect("list_personas");
+    assert_eq!(personas.as_array().map(Vec::len), Some(1), "{personas}");
+    assert_eq!(founding["persona_id"], personas[0]["persona_id"], "the id org-io lists for the founder's Device key");
+    // The founder's Device key, 64 hex: the key the founding's write takes
+    // (LLR-6ff735).
+    let persona_id = founding["persona_id"].as_str().expect("a Persona id");
+    assert_eq!(founding["founder"], serde_json::json!(hex::encode(device_key_of(&harness, persona_id).as_bytes())), "{founding}");
+    // A second founding is a new Persona, never the first again.
+    let second = propose_founding(&harness, "bob", "Beta");
+    assert_ne!(serde_json::json!(second), founding["persona_id"]);
+
+    let before = invoke(&harness, "list_personas", serde_json::json!({})).expect("list_personas");
+    let long = "a".repeat(129);
+    for (name, surname, handle, field) in [
+        ("Carol", "Jones", "Carol", "handle:"),
+        (long.as_str(), "Jones", "carol", "name:"),
+        ("Carol", long.as_str(), "carol", "surname:"),
+    ] {
+        let err = invoke_err(
+            &harness,
+            "propose_founding_organisation",
+            serde_json::json!({ "name": name, "surname": surname, "handle": handle, "orgName": "Gamma" }),
+        );
+        assert!(err.starts_with(field), "the refusal names the field ({field}): {err}");
+    }
+    assert_eq!(
+        invoke(&harness, "list_personas", serde_json::json!({})).expect("list_personas"),
+        before,
+        "a refused founding leaves no new Persona"
+    );
+}
+
+// verifies: LLR-y3zykm
+#[test]
+fn issue_invite_returns_org_ios_blob_unchanged_and_takes_no_name_or_address() {
+    let harness = harness_over_chain();
+    let (org_id, founder) = founded_org(&harness);
+    // An Organisation name and a peer address the caller still sends are not
+    // read: the Invite carries the stored name and the issuing Device's
+    // addresses.
+    let blob = invoke(
+        &harness,
+        "issue_invite",
+        serde_json::json!({ "orgId": org_id, "inviteeName": "Bob", "orgName": "Not Acme", "peerAddrBlob": "zz" }),
+    )
+    .expect("issue_invite");
+    let blob = blob.as_str().expect("the Blob as text").to_string();
+    let read = block_on(org_io_of(&harness).read_invite(&blob)).expect("org-io parses the Blob it built");
+    assert_eq!(read.org_name.to_string(), "Acme", "the stored Organisation name");
+    assert_eq!(read.invitee_name.to_string(), "Bob");
+    assert_eq!(hex::encode(read.org_id.as_bytes()), org_id);
+    assert_eq!(read.issuer, founder, "org-io supplies the issuing Device");
+}
+
+// verifies: LLR-y3zykm
+// Abnormal. An Organisation this
+// node does not hold is refused with org-io's text, unchanged, and no Blob;
+// an empty invitee name is org-io's to refuse or take, and either way the
+// command passes it on unchanged.
+#[test]
+fn issue_invite_for_an_organisation_not_held_is_org_ios_refusal_as_its_text() {
+    let harness = harness_over_chain();
+    let (org_id, _) = founded_org(&harness);
+    let elsewhere = OrgId::new([0x5a; 20]);
+    let expected = block_on(org_io_of(&harness).issue_invite(elsewhere, "Bob"))
+        .expect_err("org-io holds no such Organisation")
+        .to_string();
+    let err = invoke_err(
+        &harness,
+        "issue_invite",
+        serde_json::json!({ "orgId": hex::encode(elsewhere.as_bytes()), "inviteeName": "Bob" }),
+    );
+    assert_eq!(err, expected);
+    let held = OrgId::new(hex::decode(&org_id).expect("hex").try_into().expect("20 bytes"));
+    let direct = block_on(org_io_of(&harness).issue_invite(held, "")).map(|_| ()).map_err(|error| error.to_string());
+    let over_ipc = invoke(&harness, "issue_invite", serde_json::json!({ "orgId": org_id, "inviteeName": "" }));
+    match (direct, over_ipc) {
+        (Err(direct), Err(over_ipc)) => assert_eq!(over_ipc, serde_json::json!(direct)),
+        (Ok(()), Ok(blob)) => assert!(blob.is_string(), "{blob}"),
+        (direct, over_ipc) => panic!("org-io {direct:?}, the command {over_ipc:?}"),
+    }
+}
+
+// verifies: LLR-b7ywy4
+#[test]
+fn read_invite_returns_the_public_fields_and_stores_nothing() {
+    let inviter = harness_over_chain();
+    let (org_id, founder) = founded_org(&inviter);
+    let blob = invoke(&inviter, "issue_invite", serde_json::json!({ "orgId": org_id, "inviteeName": "Bob" }))
+        .expect("issue_invite");
+    let blob = blob.as_str().expect("the Blob as text").to_string();
+
+    let invitee = harness();
+    let personas = invoke(&invitee, "list_personas", serde_json::json!({})).expect("list_personas");
+    let orgs = invoke(&invitee, "list_orgs", serde_json::json!({})).expect("list_orgs");
+    let dto = invoke(&invitee, "read_invite", serde_json::json!({ "blob": blob })).expect("read_invite");
+    assert_eq!(
+        dto,
+        serde_json::json!({
+            "org_name": "Acme",
+            "org_id": org_id,
+            "invitee_name": "Bob",
+            "issuer_device_key": hex::encode(founder.as_bytes()),
+        })
+    );
+    assert_eq!(invoke(&invitee, "list_personas", serde_json::json!({})).expect("list_personas"), personas);
+    assert_eq!(invoke(&invitee, "list_orgs", serde_json::json!({})).expect("list_orgs"), orgs);
+
+    // A Blob that does not parse is refused with org-io's own message.
+    let io = org_io_of(&invitee);
+    let cut = blob[..blob.len() / 2].to_string();
+    for bad in ["x".to_string(), cut] {
+        let err = invoke_err(&invitee, "read_invite", serde_json::json!({ "blob": bad }));
+        let expected = block_on(io.read_invite(&bad)).expect_err("org-io refuses it").to_string();
+        assert_eq!(err, expected, "{bad:?}");
+        assert!(err.contains("invite"), "the message names the field: {err}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The Member's commands (LLR-rg9vc7, LLR-q2k9z8, LLR-8cz828)
+// ---------------------------------------------------------------------------
+
+/// An inviter that founded "Acme" over the substitute chain and is
+/// receiving, an Invite it issued to "Bob Builder", and an invitee (Loopback,
+/// no chain) holding a provisional Member proposed from that Invite with
+/// `handles`. `proposed` is `propose_member`'s answer.
+struct Exchange {
+    inviter: Harness,
+    org_id: String,
+    blob: String,
+    invitee: Harness,
+    proposed: serde_json::Value,
+}
+
+fn exchange(handles: &[&str]) -> Exchange {
+    exchange_over(&FakeChain::new(), handles)
+}
+
+/// `exchange`, the inviter over `chain`.
+fn exchange_over(chain: &FakeChain, handles: &[&str]) -> Exchange {
+    let inviter = harness_over(chain);
+    let (org_id, _) = founded_org(&inviter);
+    invoke(&inviter, "start_receiver", serde_json::json!({})).expect("start_receiver");
+    let blob = invoke(&inviter, "issue_invite", serde_json::json!({ "orgId": org_id, "inviteeName": "Bob Builder" }))
+        .expect("issue_invite");
+    let blob = blob.as_str().expect("the Blob as text").to_string();
+    let invitee = harness_with(TransportModeName::Loopback, None);
+    let proposed = invoke(
+        &invitee,
+        "propose_member",
+        serde_json::json!({ "inviteBlob": blob, "name": "Bob", "surname": "Builder", "preferredHandles": handles }),
+    )
+    .expect("propose_member");
+    Exchange { inviter, org_id, blob, invitee, proposed }
+}
+
+/// The inviter's kept admission requests once there are `n` of them, or
+/// whatever is kept after five seconds.
+fn kept_requests(inviter: &Harness, n: usize) -> Vec<org_io::KeptAdmissionRequestSummary> {
+    let io = org_io_of(inviter);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let kept = block_on(io.admission_requests());
+        if kept.len() >= n || std::time::Instant::now() >= deadline {
+            return kept;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+// verifies: LLR-rg9vc7
+#[test]
+fn propose_member_hands_the_handles_in_order_and_sends_nothing() {
+    let ex = exchange(&["bob", "builder", "bobb"]);
+    assert_eq!(ex.proposed["status"], "provisional_member", "{}", ex.proposed);
+    let personas = invoke(&ex.invitee, "list_personas", serde_json::json!({})).expect("list_personas");
+    assert_eq!(personas.as_array().map(Vec::len), Some(1), "{personas}");
+    assert_eq!(personas[0]["persona_id"], ex.proposed["persona_id"], "the Persona listed with the new Device key");
+    assert_eq!(personas[0]["org_id"], serde_json::json!(ex.org_id), "the Invite's Organisation");
+    // It sends nothing: the inviter, receiving, keeps no request.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    assert!(kept_requests(&ex.inviter, 0).is_empty(), "propose_member sent nothing");
+    // The request the Persona later sends carries the Handles in the order given.
+    let outcome = invoke(
+        &ex.invitee,
+        "request_admission",
+        serde_json::json!({ "personaId": ex.proposed["persona_id"], "confirmed": true }),
+    )
+    .expect("request_admission");
+    assert_eq!(outcome, serde_json::json!({ "result": "delivered" }));
+    let kept = kept_requests(&ex.inviter, 1);
+    assert_eq!(kept.len(), 1, "one kept request");
+    let handles: Vec<String> = kept[0].preferred_handles.iter().map(ToString::to_string).collect();
+    assert_eq!(handles, ["bob", "builder", "bobb"]);
+
+    // A refused list is org-io's message, and leaves no new Persona.
+    let io = org_io_of(&ex.invitee);
+    for bad in [vec![], vec!["aa", "bb", "cc", "dd"], vec!["bob", "bob"]] {
+        let err = invoke_err(
+            &ex.invitee,
+            "propose_member",
+            serde_json::json!({ "inviteBlob": ex.blob, "name": "Bob", "surname": "Builder", "preferredHandles": bad }),
+        );
+        let expected = block_on(io.propose_member(&ex.blob, "Bob", "Builder", &bad))
+            .expect_err("org-io refuses it")
+            .to_string();
+        assert_eq!(err, expected, "{bad:?}");
+    }
+    let err = invoke_err(
+        &ex.invitee,
+        "propose_member",
+        serde_json::json!({ "inviteBlob": "x", "name": "Bob", "surname": "Builder", "preferredHandles": ["bob"] }),
+    );
+    assert_eq!(err, block_on(io.propose_member("x", "Bob", "Builder", &["bob"])).expect_err("not a Blob").to_string());
+    assert_eq!(invoke(&ex.invitee, "list_personas", serde_json::json!({})).expect("list_personas"), personas);
+}
+
+// verifies: LLR-q2k9z8
+#[test]
+fn request_admission_unconfirmed_is_refused_and_asks_org_io_nothing() {
+    let ex = exchange(&["bob"]);
+    let err = invoke_err(
+        &ex.invitee,
+        "request_admission",
+        serde_json::json!({ "personaId": ex.proposed["persona_id"], "confirmed": false }),
+    );
+    assert_eq!(err, "the user has not confirmed the admission request");
+    std::thread::sleep(std::time::Duration::from_millis(1000));
+    assert!(kept_requests(&ex.inviter, 0).is_empty(), "nothing was sent");
+}
+
+// verifies: LLR-q2k9z8
+#[test]
+fn request_admission_for_an_unknown_persona_is_refused() {
+    let harness = harness();
+    let err = invoke_err(&harness, "request_admission", serde_json::json!({ "personaId": "nobody", "confirmed": true }));
+    assert_eq!(err, "no Persona nobody is held here");
+    // A Persona that belongs to no Organisation yet (a founding with no
+    // proxy) names none to request admission to.
+    let founder = propose_founding(&harness, "alice", "Acme");
+    let err = invoke_err(&harness, "request_admission", serde_json::json!({ "personaId": founder, "confirmed": true }));
+    assert_eq!(err, format!("Persona {founder} belongs to no Organisation"));
+}
+
+// verifies: LLR-q2k9z8
+#[test]
+fn request_admission_refuses_without_confirmation_over_ipc() {
+    // Refused before the Persona is looked up: an unknown one is refused
+    // for the missing confirmation, not for being unknown.
+    let harness = harness();
+    let err = invoke_err(&harness, "request_admission", serde_json::json!({ "personaId": "p", "confirmed": false }));
+    assert_eq!(err, "the user has not confirmed the admission request");
+}
+
+// verifies: LLR-8cz828
+#[test]
+fn request_admission_tags_each_outcome_and_never_reports_an_used_invite_as_refused() {
+    // Every outcome over the real exchange: delivered, then already
+    // received, then used by
+    // another Device, then refused once the request's Device is a Member,
+    // then not delivered once the inviter is gone.
+    let ex = exchange(&["bob"]);
+    let member = ex.proposed["persona_id"].clone();
+    let ask = |harness: &Harness, persona: &serde_json::Value| {
+        invoke(harness, "request_admission", serde_json::json!({ "personaId": persona, "confirmed": true }))
+            .expect("request_admission")
+    };
+    assert_eq!(ask(&ex.invitee, &member), serde_json::json!({ "result": "delivered" }));
+    assert_eq!(kept_requests(&ex.inviter, 1).len(), 1);
+    assert_eq!(ask(&ex.invitee, &member), serde_json::json!({ "result": "already_received" }));
+    let other = harness_with(TransportModeName::Loopback, None);
+    let other_member = invoke(
+        &other,
+        "propose_member",
+        serde_json::json!({ "inviteBlob": ex.blob, "name": "Eve", "surname": "Other", "preferredHandles": ["eve"] }),
+    )
+    .expect("propose_member")["persona_id"]
+        .clone();
+    let used = ask(&other, &other_member);
+    assert_eq!(used, serde_json::json!({ "result": "invite_used_by_another_device" }));
+    assert_ne!(used["result"], "refused");
+    assert_ne!(used["result"], "not_delivered");
+
+    // Admitted, Bob's Device asks again: the receiving Device refuses it.
+    let invite_id = hex::encode(kept_requests(&ex.inviter, 1)[0].invite_id.as_bytes());
+    invoke(&ex.inviter, "propose_admission", admission_args(&ex.org_id, &invite_id, serde_json::Value::Null, true))
+        .expect("propose_admission");
+    adopt_next_epoch(&ex.inviter, &ex.org_id);
+    assert_eq!(ask(&ex.invitee, &member), serde_json::json!({ "result": "refused" }));
+
+    // The inviter's endpoint closed: not delivered, with org-io's reason.
+    let inviter_io = org_io_of(&ex.inviter);
+    let inviter_persona = block_on(inviter_io.personas())[0].persona_id.clone();
+    block_on(async {
+        inviter_io.endpoint_for_test(&inviter_persona).await.expect("bound").inner().close().await;
+    });
+    let gone = ask(&ex.invitee, &member);
+    assert_eq!(gone["result"], "not_delivered", "{gone}");
+    let reason = gone["reason"].as_str().expect("a reason");
+    let org_id = ods_poc_lib::parsing::parse_org_id(&ex.org_id).expect("an org id");
+    match block_on(org_io_of(&ex.invitee).request_admission(org_id)) {
+        Ok(Delivery::NotDelivered { reason: direct }) => assert_eq!(reason, direct.to_string(), "org-io's text unchanged"),
+        other => panic!("org-io reports the closed inviter as not delivered: {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The Admin's commands (LLR-cr9nmw, LLR-gmb4p8, LLR-7n4hgr, LLR-vqz4s6,
+// LLR-r8jeu8)
+// ---------------------------------------------------------------------------
+
+/// `exchange(handles)` whose provisional Member sent its admission request
+/// and the inviter kept it; the kept request's invite id as hex.
+fn requested(handles: &[&str]) -> (Exchange, String) {
+    requested_over(&FakeChain::new(), handles)
+}
+
+/// `requested`, the inviter over `chain`.
+fn requested_over(chain: &FakeChain, handles: &[&str]) -> (Exchange, String) {
+    let ex = exchange_over(chain, handles);
+    let outcome = invoke(
+        &ex.invitee,
+        "request_admission",
+        serde_json::json!({ "personaId": ex.proposed["persona_id"], "confirmed": true }),
+    )
+    .expect("request_admission");
+    assert_eq!(outcome, serde_json::json!({ "result": "delivered" }));
+    let kept = kept_requests(&ex.inviter, 1);
+    assert_eq!(kept.len(), 1, "the inviter keeps the request");
+    let invite_id = hex::encode(kept[0].invite_id.as_bytes());
+    (ex, invite_id)
+}
+
+/// The inviter's next epoch, proposed from its provisional changes, written
+/// and verified through the handle over its substitute chain; the record
+/// adopted.
+fn adopt_next_epoch(harness: &Harness, org_id: &str) -> org_io::OrgSummary {
+    let io = org_io_of(harness);
+    let org = ods_poc_lib::parsing::parse_org_id(org_id).expect("an org id");
+    block_on(io.propose_updated_organisation(org)).expect("the next epoch is proposed");
+    let written = block_on(io.write_organisation_to_chain(HeldTarget::Organisation(org)));
+    assert!(matches!(written, Ok(WriteReport::Included { .. })), "{written:?}");
+    let verified = block_on(io.verify_organisation(HeldTarget::Organisation(org)));
+    assert!(matches!(verified, Verified::Adopted { .. }), "{verified:?}");
+    block_on(io.organisation(org)).expect("the Organisation is held")
+}
+
+/// `propose_admission`'s arguments.
+fn admission_args(org_id: &str, invite_id: &str, handle: serde_json::Value, confirmed: bool) -> serde_json::Value {
+    serde_json::json!({ "orgId": org_id, "inviteId": invite_id, "handle": handle, "confirmed": confirmed })
+}
+
+// verifies: LLR-cr9nmw
+#[test]
+fn propose_admission_unconfirmed_is_refused_and_records_nothing() {
+    let (ex, invite_id) = requested(&["bob"]);
+    let err = invoke_err(&ex.inviter, "propose_admission", admission_args(&ex.org_id, &invite_id, serde_json::Value::Null, false));
+    assert_eq!(err, "the Admin has not confirmed the admission");
+    let org = ods_poc_lib::parsing::parse_org_id(&ex.org_id).expect("an org id");
+    let nothing = block_on(org_io_of(&ex.inviter).propose_updated_organisation(org));
+    assert!(nothing.is_err(), "no provisional change was recorded: {nothing:?}");
+    // Confirmed, the admission is recorded, and its epoch admits the Member.
+    invoke(&ex.inviter, "propose_admission", admission_args(&ex.org_id, &invite_id, serde_json::Value::Null, true))
+        .expect("propose_admission");
+    assert_eq!(adopt_next_epoch(&ex.inviter, &ex.org_id).members.len(), 2);
+}
+
+// verifies: LLR-gmb4p8
+#[test]
+fn a_blank_handle_is_handed_on_as_none_and_another_unchanged() {
+    // Every case over the exchange. A blank Handle lets org-io choose the first preferred one free; a
+    // chosen one, handed on when no preferred one is free (the founder holds
+    // `alice`), is the Member's Handle unchanged.
+    let cases: [(&[&str], serde_json::Value, &str); 6] = [
+        (&["bob", "builder"], serde_json::Value::Null, "bob"),
+        (&["bob", "builder"], serde_json::json!(""), "bob"),
+        (&["bob", "builder"], serde_json::json!("   "), "bob"),
+        (&["bob", "builder"], serde_json::json!("\t\n"), "bob"),
+        (&["alice", "bob"], serde_json::json!(" "), "bob"),
+        (&["alice"], serde_json::json!("builder"), "builder"),
+    ];
+    for (preferred, handle, member_handle) in cases {
+        let (ex, invite_id) = requested(preferred);
+        invoke(&ex.inviter, "propose_admission", admission_args(&ex.org_id, &invite_id, handle.clone(), true))
+            .expect("propose_admission");
+        let adopted = adopt_next_epoch(&ex.inviter, &ex.org_id);
+        let handles: Vec<String> = adopted.members.iter().map(|member| member.handle.to_string()).collect();
+        assert!(handles.contains(&member_handle.to_string()), "{handle} admits {member_handle}: {handles:?}");
+    }
+    // Abnormal: none chosen and none of the preferred free is org-io's
+    // refusal, as its text; a non-blank Handle is handed on unchanged, so
+    // one org-io cannot parse is refused by org-io, not trimmed here.
+    for (preferred, handle) in [(&["alice"][..], serde_json::json!("  ")), (&["alice"][..], serde_json::json!(" bob "))] {
+        let (ex, invite_id) = requested(preferred);
+        let err = invoke_err(&ex.inviter, "propose_admission", admission_args(&ex.org_id, &invite_id, handle.clone(), true));
+        let org = ods_poc_lib::parsing::parse_org_id(&ex.org_id).expect("an org id");
+        let invite = InviteId::new(hex::decode(&invite_id).expect("hex").try_into().expect("32 bytes"));
+        let chosen = handle.as_str().filter(|text| !text.trim().is_empty());
+        let expected = block_on(org_io_of(&ex.inviter).propose_admission(org, invite, chosen))
+            .expect_err("org-io refuses it")
+            .to_string();
+        assert_eq!(err, expected, "{handle}");
+    }
+}
+
+// verifies: LLR-gmb4p8
+#[test]
+fn propose_admission_takes_no_organisation_secret_reply_or_peer_address() {
+    // Whatever a caller sends under other names is not read: the
+    // call ends in org-io's refusal for the four values alone.
+    let harness = harness();
+    let expected = block_on(org_io_of(&harness).propose_admission(OrgId::new([0xaa; 20]), InviteId::new([0xcc; 32]), None))
+        .expect_err("no Organisation is held")
+        .to_string();
+    for stale in [serde_json::json!("zz".repeat(32)), serde_json::json!("aa"), serde_json::Value::Null] {
+        let mut args = admission_args(&"aa".repeat(20), &"cc".repeat(32), serde_json::Value::Null, true);
+        args["orgSecretHex"] = stale.clone();
+        args["replyBlob"] = stale.clone();
+        args["peerAddrBlob"] = stale.clone();
+        assert_eq!(invoke_err(&harness, "propose_admission", args), expected, "{stale}");
+    }
+}
+
+// verifies: LLR-7n4hgr
+#[test]
+fn propose_revocation_parses_the_member_id_and_takes_no_peer_address() {
+    let (ex, invite_id) = requested(&["bob"]);
+    invoke(&ex.inviter, "propose_admission", admission_args(&ex.org_id, &invite_id, serde_json::Value::Null, true))
+        .expect("propose_admission");
+    let adopted = adopt_next_epoch(&ex.inviter, &ex.org_id);
+    let bob = adopted.members.iter().find(|member| member.handle.to_string() == "bob").expect("Bob is a Member").id;
+    let org = ods_poc_lib::parsing::parse_org_id(&ex.org_id).expect("an org id");
+    let io = org_io_of(&ex.inviter);
+    // A Member id the record does not hold: org-io's refusal, for exactly
+    // the id the text names, whatever its prefix or case; no address read.
+    let expected = block_on(io.propose_revocation(org, MemberId::new([0xbb; 32])))
+        .expect_err("not a Member")
+        .to_string();
+    for member in ["bb".repeat(32), format!("0x{}", "bb".repeat(32)), "BB".repeat(32)] {
+        let err = invoke_err(
+            &ex.inviter,
+            "propose_revocation",
+            serde_json::json!({ "orgId": ex.org_id, "memberId": member, "peerAddrBlob": "zz" }),
+        );
+        assert_eq!(err, expected, "{member}");
+    }
+    // Bob's id: recorded, and the next epoch can be proposed from it.
+    let recorded = invoke(
+        &ex.inviter,
+        "propose_revocation",
+        serde_json::json!({ "orgId": ex.org_id, "memberId": hex::encode(bob.as_bytes()) }),
+    );
+    assert_eq!(recorded, Ok(serde_json::Value::Null));
+    assert!(block_on(io.propose_updated_organisation(org)).is_ok(), "the revocation is a provisional change");
+}
+
+// verifies: LLR-7n4hgr
+#[test]
+fn propose_revocation_rejects_a_short_member_id() {
+    let harness = harness();
+    let err = invoke_err(
+        &harness,
+        "propose_revocation",
+        serde_json::json!({ "orgId": "aa".repeat(20), "memberId": "bb".repeat(31) }),
+    );
+    assert_eq!(
+        err, "member_id must be 32 bytes (64 hex chars)",
+        "the backend refuses an under-width member id on its own account"
+    );
+}
+
+// verifies: LLR-7n4hgr
+// `0x0x` + 64 hex characters: one strip leaves `0x` + 64, which the hex
+// decode refuses, at this boundary.
+#[test]
+fn propose_revocation_rejects_a_doubled_zero_x_prefix_on_the_member_id() {
+    let harness = harness();
+    let err = invoke_err(
+        &harness,
+        "propose_revocation",
+        serde_json::json!({ "orgId": "aa".repeat(20), "memberId": format!("0x0x{}", "bb".repeat(32)) }),
+    );
+    assert!(err.starts_with("member_id hex"), "exactly one `0x` prefix is permitted: {err}");
+}
+
+// verifies: LLR-7n4hgr
+#[test]
+fn propose_revocation_accepts_a_zero_x_prefixed_member_id() {
+    let harness = harness();
+    let expected = block_on(org_io_of(&harness).propose_revocation(OrgId::new([0xaa; 20]), MemberId::new([0xbb; 32])))
+        .expect_err("no Organisation is held")
+        .to_string();
+    let err = invoke_err(
+        &harness,
+        "propose_revocation",
+        serde_json::json!({ "orgId": "aa".repeat(20), "memberId": format!("0x{}", "bb".repeat(32)) }),
+    );
+    assert_eq!(err, expected, "one `0x` prefix is accepted and the call reaches org-io");
+}
+
+// verifies: LLR-vqz4s6
+#[test]
+fn cancel_invite_calls_org_io_once_and_returns_its_refusal_as_text() {
+    let (ex, invite_id) = requested(&["bob"]);
+    let org = ods_poc_lib::parsing::parse_org_id(&ex.org_id).expect("an org id");
+    let io = org_io_of(&ex.inviter);
+    let cancel = |invite: &str| invoke(&ex.inviter, "cancel_invite", serde_json::json!({ "orgId": ex.org_id, "inviteId": invite }));
+    // An invite with no kept request: org-io's refusal, as its text.
+    let expected = block_on(io.cancel_invite(org, InviteId::new([0xdd; 32]))).expect_err("no kept request").to_string();
+    assert_eq!(cancel(&"dd".repeat(32)), Err(serde_json::json!(expected)));
+    // The kept request's invite: cancelled, nothing returned, the request gone.
+    assert_eq!(cancel(&invite_id), Ok(serde_json::Value::Null));
+    assert!(block_on(io.admission_requests()).is_empty(), "the kept request is removed");
+    // Once: cancelling again is org-io's refusal.
+    let invite = ods_poc_lib::parsing::parse_invite_id(&invite_id).expect("an invite id");
+    let again = block_on(io.cancel_invite(org, invite)).expect_err("already cancelled").to_string();
+    assert_eq!(cancel(&invite_id), Err(serde_json::json!(again)));
+}
+
+// verifies: LLR-r8jeu8
+#[test]
+fn an_invite_id_that_is_not_hex_or_not_32_bytes_is_refused_before_org_io() {
+    let harness = harness();
+    for cmd in ["propose_admission", "cancel_invite"] {
+        let args = |invite: &str| admission_args(&"aa".repeat(20), invite, serde_json::Value::Null, true);
+        for not_hex in ["zz".repeat(32), format!("0x0x{}", "cc".repeat(32))] {
+            let err = invoke_err(&harness, cmd, args(&not_hex));
+            assert!(err.starts_with("invite_id hex"), "{cmd} {not_hex}: {err}");
+        }
+        for wrong_width in ["cc".repeat(31), "cc".repeat(33), String::new()] {
+            let err = invoke_err(&harness, cmd, args(&wrong_width));
+            assert_eq!(err, "invite_id must be 32 bytes (64 hex chars)", "{cmd} {wrong_width:?}");
+        }
+        // Well formed, with or without one `0x`: the call reaches org-io.
+        for well_formed in ["cc".repeat(32), format!("0x{}", "cc".repeat(32))] {
+            let err = invoke_err(&harness, cmd, args(&well_formed));
+            assert!(!err.starts_with("invite_id"), "{cmd} {well_formed}: refused by the parser: {err}");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Proposing the updated Organisation and writing it (LLR-2u3cga,
+// LLR-rhc555)
+// ---------------------------------------------------------------------------
+
+// verifies: LLR-2u3cga
+#[test]
+fn propose_updated_organisation_returns_epoch_root_and_key_as_hex_and_writes_no_chain() {
+    let chain = FakeChain::new();
+    let (ex, invite_id) = requested_over(&chain, &["bob"]);
+    let org = ods_poc_lib::parsing::parse_org_id(&ex.org_id).expect("an org id");
+    let io = org_io_of(&ex.inviter);
+    // No provisional change yet: org-io's refusal, as its text.
+    let refusal = block_on(io.propose_updated_organisation(org)).expect_err("no provisional change").to_string();
+    assert_eq!(invoke_err(&ex.inviter, "propose_updated_organisation", serde_json::json!({ "orgId": ex.org_id })), refusal);
+
+    invoke(&ex.inviter, "propose_admission", admission_args(&ex.org_id, &invite_id, serde_json::Value::Null, true))
+        .expect("propose_admission");
+    let writes = chain.update_writes();
+    let proposed = invoke(&ex.inviter, "propose_updated_organisation", serde_json::json!({ "orgId": ex.org_id }))
+        .expect("propose_updated_organisation");
+    let mut keys: Vec<&str> = proposed.as_object().expect("an object").keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["epoch", "org_public_key", "root"], "{proposed}");
+    assert_eq!(proposed["epoch"], 2);
+    assert_eq!(proposed["root"].as_str().map(str::len), Some(64));
+    assert_eq!(proposed["org_public_key"].as_str().map(str::len), Some(64));
+    assert_eq!(chain.update_writes(), writes, "no chain write");
+    assert_eq!(block_on(io.organisation(org)).expect("held").epoch.get(), 1, "the record is unchanged");
+
+    // What it reported is org-io's proposal: the epoch written and adopted
+    // from it carries that root and key.
+    let written = block_on(io.write_organisation_to_chain(HeldTarget::Organisation(org)));
+    assert!(matches!(written, Ok(WriteReport::Included { .. })), "{written:?}");
+    let verified = block_on(io.verify_organisation(HeldTarget::Organisation(org)));
+    assert!(matches!(verified, Verified::Adopted { .. }), "{verified:?}");
+    let record = block_on(io.organisation(org)).expect("held");
+    assert_eq!(record.epoch.get(), 2);
+    assert_eq!(serde_json::json!(hex::encode(record.root_hash.as_bytes())), proposed["root"]);
+    assert_eq!(serde_json::json!(hex::encode(record.org_pub_key.as_bytes())), proposed["org_public_key"]);
+}
+
+/// `write_organisation_to_chain`'s refusal of both or neither target.
+const EXACTLY_ONE_TARGET: &str = "write_organisation_to_chain takes exactly one of org_id or founder";
+
+// verifies: LLR-rhc555
+#[test]
+fn write_organisation_to_chain_takes_exactly_one_of_org_id_or_founder() {
+    let harness = harness();
+    let founder = hex::encode(device_key_of(&harness, &propose_founding(&harness, "alice", "Acme")).as_bytes());
+    for args in [serde_json::json!({}), serde_json::json!({ "orgId": "aa".repeat(20), "founder": founder })] {
+        assert_eq!(invoke_err(&harness, "write_organisation_to_chain", args.clone()), EXACTLY_ONE_TARGET, "{args}");
+    }
+    // Exactly one: the call reaches org-io, whatever it then reports.
+    for args in [serde_json::json!({ "orgId": "aa".repeat(20) }), serde_json::json!({ "founder": founder })] {
+        let outcome = invoke(&harness, "write_organisation_to_chain", args.clone());
+        assert_ne!(outcome, Err(serde_json::json!(EXACTLY_ONE_TARGET)), "{args}");
+    }
+    // A founder that is not 32 bytes of hex is refused at the edge.
+    let not_hex = invoke_err(&harness, "write_organisation_to_chain", serde_json::json!({ "founder": "zz".repeat(32) }));
+    assert!(not_hex.starts_with("founder hex"), "{not_hex}");
+    assert_eq!(
+        invoke_err(&harness, "write_organisation_to_chain", serde_json::json!({ "founder": "aa".repeat(31) })),
+        "founder must be 32 bytes (64 hex chars)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Verification over IPC (LLR-jf63e4, LLR-g8wfy9)
 // ---------------------------------------------------------------------------
 
 /// Seed the store the harness will open in `data_dir` with an Organisation
-/// founded over a substitute chain; its id as hex. org-io over `FakeChain`
-/// writes it, and is dropped before the harness opens the same file with the
-/// chain not configured. *Reconciled with S4, 2026-10-14:* the handle is
-/// `OrgIo::open_for_test` over the data directory, writing one sealed store
-/// file per Persona with its secret in the shared in-memory keychain (S4,
-/// tasks T9 and T15), in place of a passphrase store the app no longer
-/// names.
+/// founded, written and verified over a substitute chain; its id as hex.
+/// The seeding handle is dropped before the harness opens the same files
+/// with the chain not configured.
 fn seed_store(data_dir: &std::path::Path) -> String {
-    use org_io::node::{Handle, Name, Surname};
-    use org_io::test_support::{FakeChain, MemoryKeychain};
-    use org_io::transport::TransportMode;
-    use rand::rngs::OsRng;
-
-    MemoryKeychain::shared().install();
-    let runtime = tokio::runtime::Runtime::new().expect("runtime");
-    runtime.block_on(async {
-        let chain = FakeChain::new();
-        let io = org_io::OrgIo::open_for_test(data_dir, TransportMode::Networked, &chain).expect("open");
-        let alice = io
-            .create_persona(&mut OsRng, Handle::parse("alice").unwrap(), Name::parse("Test").unwrap(), Surname::parse("User").unwrap())
-            .await
-            .expect("persona");
-        let org = io.found_organisation(&mut OsRng, &alice).await.expect("founded");
-        hex::encode(org.as_bytes())
-    })
+    org_io::test_support::MemoryKeychain::shared().install();
+    let chain = FakeChain::new();
+    let io = OrgIo::open_for_test(data_dir, org_io::transport::TransportMode::Networked, &chain).expect("open");
+    let founder = block_on(io.propose_founding_organisation("Test", "User", "alice", "Acme")).expect("proposed").founder;
+    let written = block_on(io.write_organisation_to_chain(HeldTarget::Founding(founder)));
+    assert!(matches!(written, Ok(WriteReport::Included { .. })), "{written:?}");
+    let verified = block_on(io.verify_organisation(HeldTarget::Founding(founder)));
+    assert!(matches!(verified, Verified::Adopted { .. }), "{verified:?}");
+    let org_id = block_on(io.personas())
+        .into_iter()
+        .find(|persona| persona.device_key == founder)
+        .and_then(|persona| persona.org_id)
+        .expect("the founding's org id");
+    hex::encode(org_id.as_bytes())
 }
 
-/// A harness over a seeded store, and the seeded Organisation's id as hex.
+/// A harness over a seeded store, chain not configured, and the seeded
+/// Organisation's id as hex.
 fn seeded_harness() -> (Harness, String) {
     let dir = tempfile::tempdir().expect("tempdir");
     let data_dir = dir.path().to_path_buf();
@@ -1006,35 +1219,727 @@ fn seeded_harness() -> (Harness, String) {
     (harness_at(dir, data_dir, TransportModeName::Networked, None), org_id)
 }
 
-// verifies: LLR-ekz4zn, LLR-8axx7h
+// verifies: LLR-g8wfy9
 #[test]
-fn reconcile_organisations_with_the_chain_not_configured_reports_every_organisation_unverified() {
-    let (h, org_id) = seeded_harness();
-    let results = invoke(&h, "reconcile_organisations", serde_json::json!({})).expect("reconcile_organisations");
+fn list_orgs_carries_each_verification_status_or_not_checked() {
+    let chain = FakeChain::new();
+    let harness = harness_over(&chain);
+    let (org_id, _) = founded_org(&harness);
+    let status = |harness: &Harness| invoke(harness, "list_orgs", serde_json::json!({})).expect("list_orgs")[0]["verification"].clone();
+    // The founding was verified by its founder's key; the Organisation's own
+    // target has not been verified on this handle.
+    assert_eq!(status(&harness), serde_json::json!({ "status": "not_checked" }));
+    invoke(&harness, "verify_organisation", serde_json::json!({ "orgId": org_id })).expect("verify_organisation");
+    assert_eq!(status(&harness), serde_json::json!({ "status": "in_step", "epoch": 1 }));
+    chain.epoch_ahead.store(true, std::sync::atomic::Ordering::SeqCst);
+    let behind = invoke(&harness, "verify_organisation", serde_json::json!({ "orgId": org_id })).expect("verify_organisation");
+    assert_eq!(status(&harness), serde_json::json!({ "status": "behind", "chain_epoch": behind[0]["chain_epoch"] }));
+    chain.epoch_ahead.store(false, std::sync::atomic::Ordering::SeqCst);
+    chain.read_failing.store(true, std::sync::atomic::Ordering::SeqCst);
+    let unverified = invoke(&harness, "verify_organisation", serde_json::json!({ "orgId": org_id })).expect("verify_organisation");
+    assert_eq!(status(&harness), serde_json::json!({ "status": "unverified", "reason": unverified[0]["reason"] }));
+    // The other fields are unchanged.
+    let org = &invoke(&harness, "list_orgs", serde_json::json!({})).expect("list_orgs")[0];
+    assert_eq!(org["org_id"], serde_json::json!(org_id));
+    assert_eq!(org["epoch"], 1);
+    assert_eq!(org["member_count"], 1);
+}
+
+// verifies: LLR-jf63e4, LLR-g8wfy9
+#[test]
+fn verify_organisation_with_the_chain_not_configured_reports_every_organisation_unverified() {
+    let (harness, org_id) = seeded_harness();
+    let results = invoke(&harness, "verify_organisation", serde_json::json!({})).expect("verify_organisation");
     let results = results.as_array().expect("a list");
     assert_eq!(results.len(), 1, "one result per held Organisation: {results:?}");
     assert_eq!(results[0]["result"], "unverified", "{results:?}");
     assert_eq!(results[0]["org_id"], org_id.as_str());
     let reason = results[0]["reason"].as_str().expect("a reason");
     assert!(!reason.is_empty());
-    let orgs = invoke(&h, "list_orgs", serde_json::json!({})).expect("list_orgs");
+    let orgs = invoke(&harness, "list_orgs", serde_json::json!({})).expect("list_orgs");
     assert_eq!(orgs[0]["verification"], serde_json::json!({ "status": "unverified", "reason": reason }));
 }
 
-// verifies: LLR-ekz4zn
+// verifies: LLR-jf63e4
 #[test]
-fn reconcile_organisations_on_an_empty_store_reports_nothing() {
-    let h = harness();
-    let results = invoke(&h, "reconcile_organisations", serde_json::json!({})).expect("reconcile_organisations");
+fn verify_organisation_on_an_empty_store_reports_nothing() {
+    let harness = harness();
+    let results = invoke(&harness, "verify_organisation", serde_json::json!({})).expect("verify_organisation");
     assert_eq!(results, serde_json::json!([]));
 }
 
-// verifies: LLR-8axx7h
+// verifies: LLR-g8wfy9
 #[test]
 fn list_orgs_reports_not_checked_before_any_reconcile() {
-    let (h, org_id) = seeded_harness();
-    let orgs = invoke(&h, "list_orgs", serde_json::json!({})).expect("list_orgs");
+    let (harness, org_id) = seeded_harness();
+    let orgs = invoke(&harness, "list_orgs", serde_json::json!({})).expect("list_orgs");
     assert_eq!(orgs[0]["org_id"], org_id.as_str());
     assert_eq!(orgs[0]["verification"], serde_json::json!({ "status": "not_checked" }));
 }
 
+// ---------------------------------------------------------------------------
+// The kept admission requests, the handler set, the org-id parse
+// (LLR-y7nc6x, LLR-kk8gc7, LLR-97hujy)
+// ---------------------------------------------------------------------------
+
+/// A source file of this crate, read as text.
+fn read_source(rel: &str) -> String {
+    std::fs::read_to_string(format!("{}/{rel}", env!("CARGO_MANIFEST_DIR"))).unwrap_or_else(|error| panic!("read {rel}: {error}"))
+}
+
+/// Malformed org ids: under width, over width, and the right width but not hex.
+fn malformed_org_ids() -> [String; 3] {
+    ["a".repeat(39), "a".repeat(42), "zz".repeat(20)]
+}
+
+/// The parser's own refusal of `org_id`, so the tests below require the
+/// handler's refusal to be the parser's and no other.
+fn parser_refusal(org_id: &str) -> String {
+    ods_poc_lib::parsing::parse_org_id(org_id).expect_err("a malformed org id is refused")
+}
+
+/// LLR-kk8gc7's seventeen commands.
+const SEVENTEEN: [&str; 17] = [
+    "propose_person",
+    "propose_founding_organisation",
+    "issue_invite",
+    "read_invite",
+    "propose_member",
+    "request_admission",
+    "propose_admission",
+    "propose_revocation",
+    "cancel_invite",
+    "propose_updated_organisation",
+    "write_organisation_to_chain",
+    "verify_organisation",
+    "list_admission_requests",
+    "list_personas",
+    "list_orgs",
+    "connection_status",
+    "start_receiver",
+];
+
+// verifies: LLR-y7nc6x
+#[test]
+fn list_admission_requests_returns_each_kept_request_with_the_events_fields_and_changes_nothing() {
+    let fresh = harness();
+    assert_eq!(invoke(&fresh, "list_admission_requests", serde_json::json!({})).expect("list"), serde_json::json!([]));
+
+    let (ex, invite_id) = requested(&["bob", "builder"]);
+    let member_device = device_key_of(&ex.invitee, ex.proposed["persona_id"].as_str().expect("an id"));
+    let personas = invoke(&ex.inviter, "list_personas", serde_json::json!({})).expect("list_personas");
+    let orgs = invoke(&ex.inviter, "list_orgs", serde_json::json!({})).expect("list_orgs");
+    let listed = invoke(&ex.inviter, "list_admission_requests", serde_json::json!({})).expect("list_admission_requests");
+    assert_eq!(
+        listed,
+        serde_json::json!([{
+            "org_id": ex.org_id,
+            "invite_id": invite_id,
+            "invitee_name": "Bob Builder",
+            "name": "Bob",
+            "surname": "Builder",
+            "preferred_handles": ["bob", "builder"],
+            "device_public_key": hex::encode(member_device.as_bytes()),
+        }])
+    );
+    // It changes nothing: the same list again, the same Personas and Organisations.
+    assert_eq!(invoke(&ex.inviter, "list_admission_requests", serde_json::json!({})).expect("again"), listed);
+    assert_eq!(invoke(&ex.inviter, "list_personas", serde_json::json!({})).expect("list_personas"), personas);
+    assert_eq!(invoke(&ex.inviter, "list_orgs", serde_json::json!({})).expect("list_orgs"), orgs);
+}
+
+// verifies: LLR-kk8gc7
+#[test]
+fn the_harness_registers_exactly_the_seventeen_commands_and_refuses_the_old_names() {
+    let expected: std::collections::BTreeSet<String> = SEVENTEEN.iter().map(|name| format!("commands::{name}")).collect();
+    assert_eq!(handler_list(&read_source("tests/ipc.rs")), expected, "the IPC suite's list");
+    assert_eq!(handler_list(&read_source("src/lib.rs")), expected, "the product's list");
+    let harness = harness();
+    let unknown = invoke_err(&harness, "no_such_command", serde_json::json!({}));
+    for old in [
+        "send_organisation",
+        "request_organisation",
+        "reconcile_organisations",
+        "produce_invite_reply",
+        "import_invite_reply",
+        "admit_member",
+        "revoke_member",
+        "create_persona",
+        "create_organisation",
+        "export_invite",
+        "import_invite",
+    ] {
+        let refused = invoke_err(&harness, old, serde_json::json!({}));
+        assert_eq!(refused, unknown.replace("no_such_command", old), "{old} is refused as unregistered");
+    }
+    // The argument-free ones answer.
+    for name in ["list_personas", "list_orgs", "connection_status", "list_admission_requests"] {
+        invoke(&harness, name, serde_json::json!({})).unwrap_or_else(|refusal| panic!("{name} is registered: {refusal}"));
+    }
+}
+
+// verifies: LLR-97hujy
+#[test]
+fn every_org_id_taking_command_parses_it_first_with_the_parsers_message() {
+    // Every other argument is malformed too, so a refusal that is the
+    // parser's message for the org id shows it was parsed first.
+    let harness = harness();
+    for bad in malformed_org_ids() {
+        let refusal = parser_refusal(&bad);
+        for (cmd, args) in [
+            ("issue_invite", serde_json::json!({ "orgId": bad, "inviteeName": "Bob" })),
+            ("propose_admission", serde_json::json!({ "orgId": bad, "inviteId": "zz", "handle": null, "confirmed": false })),
+            ("propose_revocation", serde_json::json!({ "orgId": bad, "memberId": "zz" })),
+            ("cancel_invite", serde_json::json!({ "orgId": bad, "inviteId": "zz" })),
+            ("propose_updated_organisation", serde_json::json!({ "orgId": bad })),
+            ("write_organisation_to_chain", serde_json::json!({ "orgId": bad, "founder": "zz" })),
+            ("verify_organisation", serde_json::json!({ "orgId": bad })),
+        ] {
+            assert_eq!(invoke_err(&harness, cmd, args), refusal, "{cmd} {bad}");
+        }
+    }
+}
+
+// verifies: LLR-97hujy
+#[test]
+fn propose_revocation_refuses_a_malformed_org_id_with_the_parsers_message() {
+    let harness = harness();
+    for bad in malformed_org_ids() {
+        let err = invoke_err(&harness, "propose_revocation", serde_json::json!({ "orgId": bad, "memberId": "bb".repeat(32) }));
+        assert_eq!(err, parser_refusal(&bad), "{bad}");
+    }
+}
+
+// verifies: LLR-97hujy
+#[test]
+fn propose_revocation_does_not_refuse_a_well_formed_org_id() {
+    let harness = harness();
+    let expected = block_on(org_io_of(&harness).propose_revocation(OrgId::new([0xaa; 20]), MemberId::new([0xbb; 32])))
+        .expect_err("no Organisation is held")
+        .to_string();
+    for org_id in ["aa".repeat(20), format!("0x{}", "aa".repeat(20))] {
+        let err = invoke_err(&harness, "propose_revocation", serde_json::json!({ "orgId": org_id, "memberId": "bb".repeat(32) }));
+        assert_eq!(err, expected, "{org_id}: org-io's refusal, not the parser's");
+    }
+}
+
+// verifies: LLR-97hujy
+#[test]
+fn issue_invite_rejects_a_short_org_id() {
+    let harness = harness();
+    // 39 characters: one short of the required width.
+    let bad = "a".repeat(39);
+    let err = invoke_err(&harness, "issue_invite", serde_json::json!({ "orgId": bad, "inviteeName": "Bob" }));
+    assert_eq!(err, parser_refusal(&bad), "refused by the real handler under `orgId`");
+    assert!(err.contains("40 hex chars"), "refused for its WIDTH, got: {err}");
+}
+
+// verifies: LLR-97hujy
+#[test]
+fn issue_invite_rejects_a_non_hex_org_id() {
+    let harness = harness();
+    let bad = "zz".repeat(20);
+    let err = invoke_err(&harness, "issue_invite", serde_json::json!({ "orgId": bad, "inviteeName": "Bob" }));
+    assert_eq!(err, parser_refusal(&bad));
+    assert!(err.contains("hex"), "refused for its ALPHABET, got: {err}");
+}
+
+// verifies: LLR-97hujy
+#[test]
+fn issue_invite_does_not_refuse_a_well_formed_org_id() {
+    // The fresh store holds no Persona of it, so org-io refuses, after the parser.
+    let harness = harness();
+    let expected = block_on(org_io_of(&harness).issue_invite(OrgId::new([0xaa; 20]), "Bob"))
+        .expect_err("no Organisation is held")
+        .to_string();
+    for org_id in ["aa".repeat(20), format!("0x{}", "aa".repeat(20))] {
+        let err = invoke_err(&harness, "issue_invite", serde_json::json!({ "orgId": org_id, "inviteeName": "Bob" }));
+        assert_eq!(err, expected, "{org_id}");
+    }
+}
+
+// verifies: LLR-97hujy
+#[test]
+fn propose_admission_refuses_a_malformed_org_id_with_the_parsers_message() {
+    let harness = harness();
+    for bad in malformed_org_ids() {
+        let err = invoke_err(&harness, "propose_admission", admission_args(&bad, &"cc".repeat(32), serde_json::Value::Null, true));
+        assert_eq!(err, parser_refusal(&bad), "{bad}");
+    }
+}
+
+// verifies: LLR-97hujy
+#[test]
+fn propose_admission_does_not_refuse_a_well_formed_org_id() {
+    let harness = harness();
+    let expected = block_on(org_io_of(&harness).propose_admission(OrgId::new([0xaa; 20]), InviteId::new([0xcc; 32]), None))
+        .expect_err("no Organisation is held")
+        .to_string();
+    for org_id in ["aa".repeat(20), format!("0x{}", "aa".repeat(20))] {
+        let err = invoke_err(&harness, "propose_admission", admission_args(&org_id, &"cc".repeat(32), serde_json::Value::Null, true));
+        assert_eq!(err, expected, "{org_id}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The contract of the faked Tauri boundary. The rendered webview tests answer, refuse
+// and emit through `app/tests/fake-tauri.ts`, which holds every value to
+// the shape of an entry of `app/tests/contract/backend.json`. Each entry is
+// held here to the shape of what the real command answers or refuses, or
+// of the payload the real event mapping emits, under the same rule as
+// `shapeMismatch` in `app/tests/contract.ts`.
+// ---------------------------------------------------------------------------
+
+const BACKEND: &str = include_str!("../../tests/contract/backend.json");
+
+/// The entries of backend.json: (group, command or event, variant) and the value.
+fn backend_entries() -> Vec<((String, String, String), serde_json::Value)> {
+    let backend: serde_json::Value = serde_json::from_str(BACKEND).expect("backend.json is JSON");
+    let mut entries = Vec::new();
+    for group in ["answers", "refusals", "events"] {
+        for (name, variants) in backend[group].as_object().expect("a group of names") {
+            for (variant, value) in variants.as_object().expect("a name's variants") {
+                entries.push(((group.to_string(), name.clone(), variant.clone()), value.clone()));
+            }
+        }
+    }
+    entries
+}
+
+/// The fixture's value for `group`/`name`/`variant`.
+fn backend_entry(group: &str, name: &str, variant: &str) -> serde_json::Value {
+    backend_entries()
+        .into_iter()
+        .find(|((entry_group, entry_name, entry_variant), _)| entry_group == group && entry_name == name && entry_variant == variant)
+        .map(|(_, value)| value)
+        .unwrap_or_else(|| panic!("backend.json holds no {group} {name}.{variant}"))
+}
+
+const TAG_KEYS: [&str; 5] = ["result", "status", "kind", "transport_mode", "write"];
+
+fn is_hex_id(text: &str) -> bool {
+    (text.len() == 40 || text.len() == 64) && text.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// Where `actual` departs from the shape of `expected`, or `None`: the rule
+/// of backend.json's `about`, the same as `shapeMismatch` in contract.ts.
+fn shape_mismatch(expected: &serde_json::Value, actual: &serde_json::Value, path: &str, key: &str) -> Option<String> {
+    use serde_json::Value;
+    match (expected, actual) {
+        (Value::Null, Value::Null) => None,
+        (Value::Bool(want), Value::Bool(got)) => (want != got).then(|| format!("{path}: {got} for {want}")),
+        (Value::Number(_), Value::Number(_)) => None,
+        (Value::String(want), Value::String(got)) => {
+            if TAG_KEYS.contains(&key) && want != got {
+                Some(format!("{path}: tag {got} for {want}"))
+            } else if is_hex_id(want) && !(is_hex_id(got) && got.len() == want.len()) {
+                Some(format!("{path}: {got} is not {} hexadecimal characters", want.len()))
+            } else {
+                None
+            }
+        }
+        (Value::Array(want), Value::Array(got)) => {
+            if want.is_empty() && !got.is_empty() {
+                return Some(format!("{path}: elements where none are expected"));
+            }
+            got.iter().enumerate().find_map(|(index, item)| {
+                let at = format!("{path}[{index}]");
+                (!want.iter().any(|other| shape_mismatch(other, item, &at, key).is_none()))
+                    .then(|| format!("{at}: no element of that shape is expected"))
+            })
+        }
+        (Value::Object(want), Value::Object(got)) => {
+            let want_keys: std::collections::BTreeSet<&String> = want.keys().collect();
+            let got_keys: std::collections::BTreeSet<&String> = got.keys().collect();
+            if want_keys != got_keys {
+                return Some(format!("{path}: keys {got_keys:?} for {want_keys:?}"));
+            }
+            want.iter().find_map(|(name, inner)| shape_mismatch(inner, &got[name], &format!("{path}.{name}"), name))
+        }
+        _ => Some(format!("{path}: {actual} for {expected}")),
+    }
+}
+
+/// backend.json's `group`/`name`/`variant` has the shape of `real`, what
+/// the real command or event gave: the fake answers nothing the backend
+/// does not.
+fn assert_backend_holds(group: &str, name: &str, variant: &str, real: &serde_json::Value) {
+    let fixture = backend_entry(group, name, variant);
+    if let Some(mismatch) = shape_mismatch(real, &fixture, "$", "") {
+        panic!("backend.json {group} {name}.{variant} is not what the backend gives ({mismatch}):\n fixture {fixture}\n real    {real}");
+    }
+}
+
+/// Every entry of backend.json, as the tests below drive it: an entry with
+/// no real producer here would be a fake answer nothing checks.
+const BACKEND_PRODUCED: [(&str, &str, &str); 39] = [
+    ("answers", "connection_status", "loopback_no_chain"),
+    ("answers", "list_personas", "none"),
+    ("answers", "list_personas", "provisional_member"),
+    ("answers", "list_personas", "founder"),
+    ("answers", "list_orgs", "none"),
+    ("answers", "verify_organisation", "none_held"),
+    ("answers", "verify_organisation", "in_step"),
+    ("answers", "verify_organisation", "founding_with_proxy"),
+    ("answers", "verify_organisation", "founding_no_proxy"),
+    ("answers", "list_admission_requests", "none_kept"),
+    ("answers", "list_admission_requests", "one_kept"),
+    ("answers", "propose_person", "provisional"),
+    ("answers", "propose_founding_organisation", "provisional_founding"),
+    ("answers", "read_invite", "invite"),
+    ("answers", "propose_member", "provisional_member"),
+    ("answers", "request_admission", "delivered"),
+    ("answers", "request_admission", "already_received"),
+    ("answers", "request_admission", "invite_used_by_another_device"),
+    ("answers", "request_admission", "refused"),
+    ("answers", "request_admission", "not_delivered"),
+    ("answers", "propose_admission", "recorded"),
+    ("answers", "propose_revocation", "recorded"),
+    ("answers", "write_organisation_to_chain", "included_founding"),
+    ("answers", "write_organisation_to_chain", "refused"),
+    ("refusals", "propose_person", "person_already_held"),
+    ("refusals", "propose_person", "refused"),
+    ("refusals", "*", "text"),
+    ("events", "verification-result", "adopted_own_update"),
+    ("events", "verification-result", "adopted_with_discarded"),
+    ("events", "admission-requested", "kept"),
+    ("answers", "list_orgs", "one_not_checked"),
+    ("answers", "propose_updated_organisation", "proposed"),
+    ("answers", "write_organisation_to_chain", "included_update"),
+    ("answers", "cancel_invite", "cancelled"),
+    ("answers", "verify_organisation", "adopted_reported"),
+    ("events", "verification-result", "adopted_sends_reported"),
+    ("events", "verification-result", "adopted_send_refused"),
+    ("events", "verification-result", "behind_request_refused"),
+    ("answers", "write_organisation_to_chain", "unknown"),
+];
+
+// verifies: LLR-kk8gc7
+// The fixture names only commands the surface registers and only entries
+// the tests below drive.
+#[test]
+fn every_backend_entry_has_a_real_producer_here() {
+    let mut fixture: Vec<(String, String, String)> = backend_entries().into_iter().map(|(at, _)| at).collect();
+    fixture.sort();
+    let mut produced: Vec<(String, String, String)> = BACKEND_PRODUCED
+        .iter()
+        .map(|(group, name, variant)| (group.to_string(), name.to_string(), variant.to_string()))
+        .collect();
+    produced.sort();
+    assert_eq!(fixture, produced, "backend.json and the producers here name the same entries");
+    let registered = handler_list(&read_source("src/lib.rs"));
+    for (group, name, _) in &fixture {
+        if group != "events" && name != "*" {
+            assert!(registered.contains(&format!("commands::{name}")), "backend.json answers {name}, which the surface does not register");
+        }
+    }
+}
+
+// verifies: LLR-8tzbzn, LLR-jf63e4, LLR-y7nc6x, LLR-k57uqv, LLR-6ff735, LLR-pguhw5
+// A fresh store's answers, the Person's and the founding's, and the refusals.
+#[test]
+fn a_fresh_stores_answers_and_refusals_have_the_fakes_shapes() {
+    let loopback = harness_with(TransportModeName::Loopback, None);
+    let status = invoke(&loopback, "connection_status", serde_json::json!({})).expect("connection_status");
+    assert_backend_holds("answers", "connection_status", "loopback_no_chain", &status);
+    for (command, variant) in [
+        ("list_personas", "none"),
+        ("list_orgs", "none"),
+        ("verify_organisation", "none_held"),
+        ("list_admission_requests", "none_kept"),
+    ] {
+        let answer = invoke(&loopback, command, serde_json::json!({})).expect(command);
+        assert_backend_holds("answers", command, variant, &answer);
+    }
+    let field = invoke(&loopback, "propose_person", serde_json::json!({ "name": "a".repeat(129), "surname": "Smith" }))
+        .expect_err("an over-long name is refused");
+    assert_backend_holds("refusals", "propose_person", "refused", &field);
+    let text = invoke(&loopback, "issue_invite", serde_json::json!({ "orgId": "zz", "inviteeName": "Bob" }))
+        .expect_err("a malformed org id is refused");
+    assert_backend_holds("refusals", "*", "text", &text);
+
+    let harness = harness();
+    let person = invoke(&harness, "propose_person", serde_json::json!({ "name": "Alice", "surname": "Smith" })).expect("propose_person");
+    assert_backend_holds("answers", "propose_person", "provisional", &person);
+    let held = invoke(&harness, "propose_person", serde_json::json!({ "name": "Alice", "surname": "Smith" }))
+        .expect_err("a second Person is refused");
+    assert_backend_holds("refusals", "propose_person", "person_already_held", &held);
+    let founding = invoke(
+        &harness,
+        "propose_founding_organisation",
+        serde_json::json!({ "name": "Alice", "surname": "Smith", "handle": "alice", "orgName": "Acme" }),
+    )
+    .expect("propose_founding_organisation");
+    assert_backend_holds("answers", "propose_founding_organisation", "provisional_founding", &founding);
+    // The founder is listed with the Handle the founding gave.
+    let listed = invoke(&harness, "list_personas", serde_json::json!({})).expect("list_personas");
+    assert_backend_holds("answers", "list_personas", "founder", &listed);
+    // No chain: the founding, with no proxy, is unverified, named by its founder.
+    let verified = invoke(&harness, "verify_organisation", serde_json::json!({})).expect("verify_organisation");
+    assert_backend_holds("answers", "verify_organisation", "founding_no_proxy", &verified);
+}
+
+// verifies: LLR-jf63e4, LLR-rhc555, LLR-k4rhbs
+// A founding written over the substitute chain, then verified; a refused write.
+#[test]
+fn the_writes_and_verifications_have_the_fakes_shapes() {
+    let harness = harness_over_chain();
+    let persona_id = propose_founding(&harness, "alice", "Acme");
+    let founder = hex::encode(device_key_of(&harness, &persona_id).as_bytes());
+    let written = invoke(&harness, "write_organisation_to_chain", serde_json::json!({ "founder": founder }))
+        .expect("write_organisation_to_chain");
+    assert_backend_holds("answers", "write_organisation_to_chain", "included_founding", &written);
+    let verified = invoke(&harness, "verify_organisation", serde_json::json!({})).expect("verify_organisation");
+    assert_backend_holds("answers", "verify_organisation", "in_step", &verified);
+
+    let chain = FakeChain::new();
+    chain.found_at_failing.store(true, std::sync::atomic::Ordering::SeqCst);
+    let refusing = harness_over(&chain);
+    let persona_id = propose_founding(&refusing, "alice", "Acme");
+    let founder = hex::encode(device_key_of(&refusing, &persona_id).as_bytes());
+    let refused = invoke(&refusing, "write_organisation_to_chain", serde_json::json!({ "founder": founder }))
+        .expect("write_organisation_to_chain");
+    assert_backend_holds("answers", "write_organisation_to_chain", "refused", &refused);
+    // The refused write recorded the proxy: the founding is entered by its Organisation id and its founder.
+    let verified = invoke(&refusing, "verify_organisation", serde_json::json!({})).expect("verify_organisation");
+    assert_backend_holds("answers", "verify_organisation", "founding_with_proxy", &verified);
+}
+
+// verifies: LLR-tbtrb3, LLR-k4rhbs
+// A write whose outcome is unknown: the chain never answers, so org-io's
+// bound passes (on a paused clock) and the write may yet execute. The real
+// command is called directly, not over IPC, because the IPC path runs on
+// Tauri's own runtime, whose clock cannot be paused; its answer is
+// serialised as IPC serialises it.
+#[tokio::test(start_paused = true)]
+async fn an_unknown_write_has_the_fakes_shape() {
+    use std::sync::atomic::Ordering;
+    let chain = FakeChain::new();
+    let harness = harness_over(&chain);
+    let io = org_io_of(&harness);
+    let founder = io.propose_founding_organisation("Alice", "Smith", "alice", "Acme").await.expect("proposed").founder;
+    // The proxy is stored by a write whose genesis is refused, as org-io's
+    // founding-unknown tests do; then every write hangs.
+    chain.found_at_failing.store(true, Ordering::SeqCst);
+    let first = io.write_organisation_to_chain(HeldTarget::Founding(founder)).await;
+    assert!(matches!(first, Ok(WriteReport::Refused { .. })), "the proxy stored, the genesis not: {first:?}");
+    chain.found_at_failing.store(false, Ordering::SeqCst);
+    chain.write_hanging.store(true, Ordering::SeqCst);
+    let written = commands::write_organisation_to_chain(harness._app.state(), None, Some(hex::encode(founder.as_bytes())))
+        .await
+        .expect("write_organisation_to_chain");
+    let unknown = serde_json::to_value(&written).expect("serialises");
+    assert_eq!(unknown["result"], "unknown", "{unknown}");
+    assert_backend_holds("answers", "write_organisation_to_chain", "unknown", &unknown);
+}
+
+// verifies: LLR-pguhw5, LLR-b7ywy4, LLR-rg9vc7, LLR-8cz828, LLR-y7nc6x, LLR-cr9nmw, LLR-7n4hgr, LLR-dp45mm, LLR-8grnbb
+// The invitee's and the Admin's answers over the real exchange, and the two
+// events the receiver loop and a verification emit, captured as the webview
+// would receive them.
+#[test]
+fn the_exchanges_answers_and_events_have_the_fakes_shapes() {
+    use tauri::Listener;
+    let ex = exchange(&["bob", "builder"]);
+    let (sender, arrived) = std::sync::mpsc::channel::<String>();
+    ex.inviter._app.listen_any("admission-requested", move |event| {
+        // A send fails only once the test has dropped `arrived`, after its
+        // last read: an event after that is not this test's to check.
+        let _ = sender.send(event.payload().to_string());
+    });
+    let invite = invoke(&ex.invitee, "read_invite", serde_json::json!({ "blob": ex.blob })).expect("read_invite");
+    assert_backend_holds("answers", "read_invite", "invite", &invite);
+    assert_backend_holds("answers", "propose_member", "provisional_member", &ex.proposed);
+    // The provisional Member is listed with no Handle yet: `handle` null.
+    let listed = invoke(&ex.invitee, "list_personas", serde_json::json!({})).expect("list_personas");
+    assert_backend_holds("answers", "list_personas", "provisional_member", &listed);
+
+    let member = ex.proposed["persona_id"].clone();
+    let ask = |harness: &Harness, persona: &serde_json::Value| {
+        invoke(harness, "request_admission", serde_json::json!({ "personaId": persona, "confirmed": true })).expect("request_admission")
+    };
+    assert_backend_holds("answers", "request_admission", "delivered", &ask(&ex.invitee, &member));
+    let event = arrived.recv_timeout(std::time::Duration::from_secs(5)).expect("admission-requested emitted");
+    let event: serde_json::Value = serde_json::from_str(&event).expect("a JSON payload");
+    assert_backend_holds("events", "admission-requested", "kept", &event);
+    assert_backend_holds("answers", "request_admission", "already_received", &ask(&ex.invitee, &member));
+    let listed = invoke(&ex.inviter, "list_admission_requests", serde_json::json!({})).expect("list_admission_requests");
+    assert_backend_holds("answers", "list_admission_requests", "one_kept", &listed);
+
+    let other = harness_with(TransportModeName::Loopback, None);
+    let other_member = invoke(
+        &other,
+        "propose_member",
+        serde_json::json!({ "inviteBlob": ex.blob, "name": "Eve", "surname": "Other", "preferredHandles": ["eve"] }),
+    )
+    .expect("propose_member")["persona_id"]
+        .clone();
+    assert_backend_holds("answers", "request_admission", "invite_used_by_another_device", &ask(&other, &other_member));
+
+    // The Admin admits Bob; the own adoption of that epoch is announced with its sends.
+    let invite_id = hex::encode(kept_requests(&ex.inviter, 1)[0].invite_id.as_bytes());
+    let recorded = invoke(&ex.inviter, "propose_admission", admission_args(&ex.org_id, &invite_id, serde_json::Value::Null, true))
+        .expect("propose_admission");
+    assert_backend_holds("answers", "propose_admission", "recorded", &recorded);
+    let io = org_io_of(&ex.inviter);
+    let org = ods_poc_lib::parsing::parse_org_id(&ex.org_id).expect("an org id");
+    block_on(io.propose_updated_organisation(org)).expect("the next epoch is proposed");
+    let written = block_on(io.write_organisation_to_chain(HeldTarget::Organisation(org)));
+    assert!(matches!(written, Ok(WriteReport::Included { .. })), "{written:?}");
+    let announced: Vec<ods_poc_lib::events::Emission> =
+        block_on(commands::verification_outcomes(&io, Some(HeldTarget::Organisation(org))))
+            .iter()
+            .flat_map(ods_poc_lib::events::emissions_for)
+            .collect();
+    let result = announced.iter().find(|emission| emission.name == "verification-result").expect("a verification-result");
+    assert_backend_holds("events", "verification-result", "adopted_own_update", &result.payload);
+
+    // Bob, now a Member, asks again: refused by the receiving Device.
+    assert_backend_holds("answers", "request_admission", "refused", &ask(&ex.invitee, &member));
+
+    let bob = block_on(io.organisation(org))
+        .expect("held")
+        .members
+        .iter()
+        .find(|listed| listed.handle.to_string() == "bob")
+        .expect("Bob is a Member")
+        .id;
+    let revoked = invoke(
+        &ex.inviter,
+        "propose_revocation",
+        serde_json::json!({ "orgId": ex.org_id, "memberId": hex::encode(bob.as_bytes()) }),
+    )
+    .expect("propose_revocation");
+    assert_backend_holds("answers", "propose_revocation", "recorded", &revoked);
+
+    // The inviter's endpoint closed: not delivered.
+    let inviter_persona = block_on(io.personas())[0].persona_id.clone();
+    block_on(async {
+        io.endpoint_for_test(&inviter_persona).await.expect("bound").inner().close().await;
+    });
+    assert_backend_holds("answers", "request_admission", "not_delivered", &ask(&other, &other_member));
+}
+
+// verifies: LLR-8grnbb, LLR-n64wvr
+// An adoption another Admin built that left out an admission and a
+// revocation (org-io's `Verified`, which the substitute chain does not
+// produce for this node), through the app's real entry and event mapping.
+#[test]
+fn an_adoption_with_discarded_changes_is_announced_in_the_fakes_shape() {
+    use org_io::node::{Epoch, Handle, Name, Surname};
+    use org_io::verify::DiscardedChangeSummary;
+    let org = OrgId::new([0xab; 20]);
+    let verified = Verified::Adopted {
+        epoch: Epoch::new(3),
+        own: false,
+        discarded: vec![
+            DiscardedChangeSummary::Admission {
+                invite_id: InviteId::new([0x1c; 32]),
+                name: Some(Name::parse("Bob").unwrap()),
+                surname: Some(Surname::parse("Builder").unwrap()),
+                handle: Handle::parse("bob").unwrap(),
+            },
+            DiscardedChangeSummary::Revocation { member_id: MemberId::new([0x2d; 32]), handle: Some(Handle::parse("carol").unwrap()) },
+        ],
+    };
+    let entry = ods_poc_lib::entry::entry_for(&ods_poc_lib::entry::EntryOrg::Id(org), &verified);
+    let announced: Vec<ods_poc_lib::events::Emission> = ods_poc_lib::events::outcomes_for_verification(&entry, None)
+        .iter()
+        .flat_map(ods_poc_lib::events::emissions_for)
+        .collect();
+    let result = announced.iter().find(|emission| emission.name == "verification-result").expect("a verification-result");
+    assert_backend_holds("events", "verification-result", "adopted_with_discarded", &result.payload);
+}
+
+// verifies: LLR-2u3cga, LLR-vqz4s6, LLR-rhc555, LLR-k4rhbs, LLR-g8wfy9
+// The Admin's epoch commands over the real exchange: a held Organisation
+// listed, the next epoch proposed from a recorded admission and written by
+// its Organisation identifier, and a kept request's invite cancelled.
+#[test]
+fn the_epoch_commands_answers_have_the_fakes_shapes() {
+    let (harness, _) = seeded_harness();
+    let orgs = invoke(&harness, "list_orgs", serde_json::json!({})).expect("list_orgs");
+    assert_backend_holds("answers", "list_orgs", "one_not_checked", &orgs);
+
+    let chain = FakeChain::new();
+    let (ex, invite_id) = requested_over(&chain, &["bob"]);
+    invoke(&ex.inviter, "propose_admission", admission_args(&ex.org_id, &invite_id, serde_json::Value::Null, true))
+        .expect("propose_admission");
+    let proposed = invoke(&ex.inviter, "propose_updated_organisation", serde_json::json!({ "orgId": ex.org_id }))
+        .expect("propose_updated_organisation");
+    assert_backend_holds("answers", "propose_updated_organisation", "proposed", &proposed);
+    let written = invoke(&ex.inviter, "write_organisation_to_chain", serde_json::json!({ "orgId": ex.org_id }))
+        .expect("write_organisation_to_chain");
+    assert_backend_holds("answers", "write_organisation_to_chain", "included_update", &written);
+
+    let (other, other_invite) = requested(&["carol"]);
+    let cancelled = invoke(&other.inviter, "cancel_invite", serde_json::json!({ "orgId": other.org_id, "inviteId": other_invite }))
+        .expect("cancel_invite");
+    assert_backend_holds("answers", "cancel_invite", "cancelled", &cancelled);
+}
+
+/// The ed25519 base point's canonical encoding: a valid Device public key.
+const BASE_POINT: [u8; 32] = [
+    0x58, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+    0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+];
+
+// verifies: LLR-8grnbb, LLR-k4rxyt, LLR-rywe8f, LLR-jf63e4
+// The outcomes of a send and a request as a verification reports them,
+// each Device's or the refusal of the whole, through the app's real entry
+// mapping (`entry_for`, `attach_report`): as a `verification-result` event
+// and as `verify_organisation`'s answer, which is these entries serialised.
+// The substitute chain produces neither a discarded change nor a refusal
+// of a whole send for this node (verification.rs, LLR-k4rxyt).
+#[test]
+fn the_send_and_request_reports_have_the_fakes_shapes() {
+    use ods_poc_lib::entry::{attach_report, entry_for, EntryOrg, VerificationEntryDto};
+    use ods_poc_lib::follow_up::VerificationFollowUp;
+    use org_io::node::{Epoch, Handle, Name, Surname};
+    use org_io::verify::DiscardedChangeSummary;
+    use org_io::SendReport;
+    let org = OrgId::new([0xab; 20]);
+    let named = EntryOrg::Id(org);
+    let device = DevicePublicKey::parse(&BASE_POINT).unwrap();
+    let report = || SendReport { per_device: vec![(device, Delivery::Delivered), (device, Delivery::Refused)] };
+    let event = |entry: &VerificationEntryDto| {
+        ods_poc_lib::events::outcomes_for_verification(entry, None)
+            .iter()
+            .flat_map(ods_poc_lib::events::emissions_for)
+            .find(|emission| emission.name == "verification-result")
+            .expect("a verification-result")
+            .payload
+    };
+    let own = || entry_for(&named, &Verified::Adopted { epoch: Epoch::new(3), discarded: vec![], own: true });
+
+    let mut reported = own();
+    attach_report(&mut reported, VerificationFollowUp::Send(org), Ok(report()));
+    assert_backend_holds("events", "verification-result", "adopted_sends_reported", &event(&reported));
+
+    let mut refused = own();
+    attach_report(&mut refused, VerificationFollowUp::Send(org), Err("Organisation abab is not held here".to_string()));
+    assert_backend_holds("events", "verification-result", "adopted_send_refused", &event(&refused));
+
+    let mut behind = entry_for(&named, &Verified::Behind { chain_epoch: Epoch::new(4) });
+    attach_report(&mut behind, VerificationFollowUp::Request(org), Err("no endpoint is bound".to_string()));
+    assert_backend_holds("events", "verification-result", "behind_request_refused", &event(&behind));
+
+    let discarded = entry_for(
+        &named,
+        &Verified::Adopted {
+            epoch: Epoch::new(3),
+            own: false,
+            discarded: vec![
+                DiscardedChangeSummary::Admission {
+                    invite_id: InviteId::new([0x1c; 32]),
+                    name: Some(Name::parse("Bob").unwrap()),
+                    surname: Some(Surname::parse("Builder").unwrap()),
+                    handle: Handle::parse("bob").unwrap(),
+                },
+                DiscardedChangeSummary::Revocation { member_id: MemberId::new([0x2d; 32]), handle: Some(Handle::parse("carol").unwrap()) },
+            ],
+        },
+    );
+    let answer = serde_json::to_value(vec![discarded, reported]).expect("the entries serialise");
+    assert_backend_holds("answers", "verify_organisation", "adopted_reported", &answer);
+}

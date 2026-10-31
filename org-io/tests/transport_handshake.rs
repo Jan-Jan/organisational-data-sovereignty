@@ -1,25 +1,20 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Two real iroh endpoints on loopback. A sends an admit envelope to B; B
-//! authenticates A's device key from the connection and verifies against a
-//! chain state passed as a value. Offline (no relay/internet — loopback
+//! authenticates A's device key from the connection and runs the chain-free
+//! checks on what it received. Offline (no relay/internet — loopback
 //! direct connect only).
 //!
-//! *Moved 2026-10-13 from org-node's `tests/transport_handshake.rs` (S4,
-//! task T10), with the framing test of its `tests/wire_frame_bound.rs`:*
-//! every endpoint is bound from a keychain item, org-io's in-memory one
-//! (`bind_from_keychain`), where org-node bound from a key pair; the
-//! assertions are unchanged. The trie fixtures are org-node's
-//! (`test_fixtures`), where the original built them inline from
-//! org-members.
+//! Every endpoint is bound from a keychain item, org-io's in-memory one
+//! (`bind_from_keychain`). The trie fixtures are org-node's
+//! (`test_fixtures`). The transport's framing test is here too.
 use std::time::Duration;
 
-use org_node::chain::OrgState;
 use org_node::ids::OrgId;
 use org_node::sequence::SeqGuard;
 use org_node::test_fixtures::{admin_device, admit_member_delta, genesis_trie, ADMIN_DEVICE_SEED};
-use org_node::verify::{verify_envelope_against_chain, VerifyContext};
+use org_node::verify::{check_chain_free, VerifyContext};
 use org_node::wire::{decode_message, WireMessage};
-use org_node::{Envelope, Epoch, MemberSeed, OrgPrivateKey, SequenceNumber};
+use org_node::{Envelope, MemberSeed, OrgPrivateKey, SequenceNumber};
 use org_io::test_support::MemoryKeychain;
 use org_io::transport::{encode_frame, BindPlan, OrgEndpoint, TransportError, ALPN, MAX_FRAME};
 
@@ -69,21 +64,16 @@ async fn delivers_and_verifies_admit_over_iroh() {
     // 2. The WireMessage arrived intact.
     assert_eq!(got, msg, "received WireMessage must equal sent WireMessage");
 
-    // 3. B verifies the received envelope against the chain state holding
-    //    the new root at epoch 2 (an independent on-chain read, as a value).
-    let chain_state = Some(OrgState {
-        root_hash: new_root,
-        org_pub_key: OrgPrivateKey::from([9u8; 32]).x25519_keypair().org_public_key().unwrap(),
-        epoch: Epoch::new(2),
-    });
-    let ctx = VerifyContext {
-        expected_org_id: org,
-        seq_guard: SeqGuard::from_last_seen(SequenceNumber::new(1)),
-        last_committed_epoch: Epoch::new(1),
-    };
-    let out = verify_envelope_against_chain(&genesis, &env, &ctx, chain_state).expect("verify_envelope_against_chain must succeed");
-    assert_eq!(out.trie.root_hash().unwrap(), new_root, "committed root must equal the expected new root");
-    assert_eq!(out.epoch, Epoch::new(2), "committed epoch must be 2");
+    // 3. B checks the received envelope as its receive path does, with no
+    //    chain state (the chain-free checks), and its Change set reaches the
+    //    new root. (`verify_envelope_against_chain`, which this step called,
+    //    was deleted by merge review MR1-N1 of change
+    //    worktree-org-io-domain-api; adoption against the chain is
+    //    org-node's `verify`, tested in org-node and org-io's verification.)
+    let ctx = VerifyContext { expected_org_id: org, seq_guard: SeqGuard::from_last_seen(SequenceNumber::new(1)) };
+    check_chain_free(&genesis, &env, &ctx).expect("the chain-free checks must pass");
+    let reached = genesis.apply_delta(&env.decode_delta().unwrap()).unwrap().root_hash();
+    assert_eq!(reached, new_root, "the Change set must reach the expected new root");
 }
 
 /// Assert the whole of what Loopback mode claims, for one endpoint.
@@ -92,10 +82,9 @@ async fn delivers_and_verifies_admit_over_iroh() {
 /// **the obvious assertion here does not discriminate.** `node_addr_for_dial()`
 /// is `bound_sockets().map(TransportAddr::Ip)`, so matching its entries against
 /// `TransportAddr::Relay` can never fire whatever the relay configuration is:
-/// an arm that cannot execute asserts nothing. That was caught by review round
-/// 2, which swapped `presets::Minimal` + `RelayMode::Disabled` for
-/// `presets::N0` — full n0 relay, Pkarr publishing, DNS lookup — and watched
-/// both tests stay green.
+/// an arm that cannot execute asserts nothing: swapping `presets::Minimal` +
+/// `RelayMode::Disabled` for `presets::N0` — full n0 relay, Pkarr publishing,
+/// DNS lookup — would leave both tests green.
 ///
 /// So the two off-machine escape routes are checked where they are actually
 /// observable:
@@ -103,7 +92,7 @@ async fn delivers_and_verifies_admit_over_iroh() {
 /// - **Address publication** — `address_lookup()` is empty. `presets::N0`
 ///   installs a Pkarr publisher and a DNS lookup, which would publish this
 ///   endpoint's address to `iroh.link`; `presets::Minimal` installs neither.
-///   Synchronous, no network, and it reddens on the round-2 mutation.
+///   Synchronous, no network, and it reddens on the `presets::N0` swap.
 /// - **Relay home** — `addr()` carries no relay URL.
 ///
 /// What this still does not cover is recorded as a gap in the verification
@@ -154,8 +143,8 @@ async fn loopback_mode_binds_and_advertises_loopback_only() {
     assert_confined_to_this_machine(&ep, "the endpoint");
 
     // LLR-wx77j5's other half: the identity reported is the endpoint's own,
-    // and the sockets are the ones it bound. Added 2026-10-05 by review round
-    // 8, which measured that reporting another identity left this test green.
+    // and the sockets are the ones it bound: reporting another identity would
+    // otherwise leave this test green.
     let dial = ep.node_addr_for_dial();
     assert_eq!(dial.id, ep.inner().id(), "node_addr_for_dial must report this endpoint's identity");
     assert_eq!(dial.id.as_bytes(), device_key.as_bytes());
@@ -229,9 +218,6 @@ async fn endpoint_id_equals_device_key() {
 // stream, rather than growing a buffer to whatever the peer chooses to write.
 // The bytes below are deliberately not a valid frame — what is under test is
 // the read limit, which is reached before anything is decoded.
-// *Moved 2026-10-13 (S4, task T10):* the annotation also named org-node's
-// requirement on the Wire message's bound, which org-io cannot cite;
-// LLR-k2y6nn is org-io's now, under REQ-szt6ea.
 // verifies: LLR-k2y6nn
 #[tokio::test(flavor = "multi_thread")]
 async fn a_stream_longer_than_the_read_bound_is_refused_rather_than_buffered() {
@@ -310,12 +296,9 @@ async fn the_length_prefix_is_not_checked_against_the_body() {
     }
 }
 
-// The transport's framing, `len(u32 LE) ‖ encode_message(msg)`.
-// *Moved 2026-10-13 from org-node's `tests/wire_frame_bound.rs` (S4, task
-// T10):* the annotation also named org-node's requirement on the Wire
-// message's bound and its round-trip item, which org-io cannot cite; both
-// stay verified in org-node by the codec's own tests. LLR-fa7jt8 is
-// org-io's now, under REQ-szt6ea.
+// The transport's framing, `len(u32 LE) ‖ encode_message(msg)`; the Wire
+// message's bound and its round trip are verified in org-node by the
+// codec's own tests.
 // verifies: LLR-fa7jt8
 #[test]
 fn frame_round_trips() {

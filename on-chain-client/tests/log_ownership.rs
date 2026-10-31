@@ -7,30 +7,14 @@
 //! the *decoder's* half: the emitting contract's address is carried out of
 //! `parse_revive_event` in `EmittedEvent` rather than dropped, and reported
 //! byte for byte. The half that actually discards an impostor — comparing
-//! that address against the one the reader was constructed for — used to sit
-//! inline inside `async fn decode_contract_events`, which needs a live chain,
-//! so no gated test reached it. That was measured, not assumed — and the
-//! measurement below is dated: it is the historical reading that motivated
-//! this target, not a description of what the suite does now. **On
-//! 2026-09-10, before review round 1's finding 3 was fixed**, when
-//! `contract_address_filter.rs` still reimplemented the predicate locally
-//! instead of importing it, the comparison could be switched off in
-//! `internals::log_is_ours` and `--test contract_address_filter` still
-//! reported 3 passed. A fix whose decisive line can be deleted with every gate
-//! staying green is the same false-green shape this tooth exists to remove, so
-//! the decision was extracted into `log_is_ours` and is asserted here, where a
-//! mutation of it reds a named case.
-//!
-//! **That reading no longer reproduces, and deliberately so.** Later the same
-//! day, finding 3 deleted the local copy and pointed
-//! `contract_address_filter.rs` at the real
-//! `on_chain_client::test_support::log_is_ours` as well, so it now shares this
-//! target's fate. Re-measured after that fix, on 2026-09-10, with the same
-//! mutation — the contract comparison removed from `internals::log_is_ours` —
-//! `--test contract_address_filter` reports 1 passed, 2 failed, and
-//! `--test log_ownership` reports 4 passed, 3 failed. The 3-passed figure is
-//! kept because it is the evidence for why the extraction happened; read it as
-//! history, and never as current behaviour.
+//! that address against the one the reader was constructed for — is the pure
+//! function `log_is_ours`, apart from `async fn decode_contract_events`, which
+//! needs a live chain: inline there, no gated test would reach it, and its
+//! decisive line could be deleted with every gate staying green. Asserted
+//! here, a mutation of it reds a named case. Measured with the contract
+//! comparison removed from `internals::log_is_ours`: `--test
+//! contract_address_filter` reports 1 passed, 2 failed, and `--test
+//! log_ownership` reports 4 passed, 3 failed.
 //!
 //! What this target covers, and what it does not. It covers the decision:
 //! given a decoded log and the reader's configuration, is this log ours. It
@@ -51,10 +35,9 @@
 //! verifies: REQ-9vwcwc, REQ-nygs7k
 //!
 //! Deliberately carries no `#![cfg(...)]` guard, unlike the chain-dependent
-//! targets beside it (corrected 2026-09-28: this said "the nine
-//! chain-dependent targets". Nine run at no gate; the eight that carry a
-//! crate-level `#![cfg(...)]` guard are exactly the eight that are chain-dependent
-//! — seven need a fork, `smoldot_smoke` live Paseo, `regenerate_corpus` neither): the
+//! targets beside it (the eight that carry a crate-level `#![cfg(...)]` guard
+//! are exactly the eight that are chain-dependent — seven need a fork,
+//! `smoldot_smoke` live Paseo): the
 //! `test-support` feature this target needs is declared as a
 //! `required-features` entry in `Cargo.toml`, so an
 //! explicit `--test log_ownership` with the feature off is refused by cargo
@@ -189,24 +172,16 @@ fn an_address_differing_in_one_byte_at_either_end_is_not_ours() {
 /// the assertion above the rejection pins the fixture so the case cannot pass
 /// vacuously.
 ///
-/// **What no case here gates, and why no case could.** Until review round 3 the
-/// requirement also said the contract comparison is made "before, and
-/// independently of" any other filter, and this comment claimed to gate that.
-/// It never did. Round 3 rewrote `internals::log_is_ours` to test the admin
-/// filter first and return the contract comparison last — the exact inversion
-/// of the stated ordering — and `--test log_ownership` still reported 7 passed,
-/// 0 failed. That is not a gap in the cases: `log_is_ours` is a conjunction of
-/// two pure, total tests, so on every input the two orders return the same
-/// bool, and a caller holding only the result can never tell them apart. The
-/// ordering was therefore unfalsifiable as written, and fix round 8a dropped it
-/// from REQ-9vwcwc and from RC-5e3bdk, keeping the consequence — which is
-/// observable, and reds here. Do not restore an ordering claim to this comment
-/// or to the requirement expecting a test to hold it up; nothing in this file
-/// can.
-///
-/// The second clause used to live in REQ-nygs7k, which bundled it with that
-/// requirement's delivery rule; review round 2 (finding-11) folded it here,
-/// where the contract check and this test already were.
+/// **What no case here gates, and why no case could.** The ORDER of the two
+/// comparisons. `internals::log_is_ours` testing the admin filter first and
+/// the contract comparison last still leaves `--test log_ownership` at 7
+/// passed, 0 failed. That is not a gap in the cases: `log_is_ours` is a
+/// conjunction of two pure, total tests, so on every input the two orders
+/// return the same bool, and a caller holding only the result can never tell
+/// them apart. REQ-9vwcwc and RC-5e3bdk therefore state the consequence, which
+/// is observable and reds here, not an ordering. Do not add an ordering claim
+/// to this comment or to the requirement expecting a test to hold it up;
+/// nothing in this file can.
 #[test]
 fn the_contract_check_dominates_a_matching_admin_filter() {
     let filter = Some(OrgAdmin(WANTED_ADMIN));
@@ -269,11 +244,9 @@ fn with_a_filter_set_a_non_matching_admin_is_not_ours() {
 /// the requirement has nothing to say about it. What it is a case of is
 /// REQ-9vwcwc's delivery rule — a log from the configured contract is
 /// delivered — read across the whole admin space rather than the single admin
-/// `a_log_from_the_configured_contract_with_no_filter_is_ours` uses. It moved
-/// here at review round 2 (finding-11), when the clause about other filters was
-/// folded into REQ-9vwcwc and REQ-nygs7k was reworded to the filter rule alone.
-/// That clause named an ordering when it was folded; review round 3 found the
-/// ordering unfalsifiable and fix round 8a cut it back to the consequence, as
+/// `a_log_from_the_configured_contract_with_no_filter_is_ours` uses.
+/// REQ-nygs7k states the filter rule alone; the clause about other filters is
+/// REQ-9vwcwc's, stated as a consequence and not an ordering, as
 /// `the_contract_check_dominates_a_matching_admin_filter` records.
 #[test]
 fn with_no_filter_any_admin_from_the_configured_contract_is_ours() {

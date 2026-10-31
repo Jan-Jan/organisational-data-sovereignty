@@ -1,26 +1,16 @@
 //! Fuzz target: the record a first admission extends.
 //!
-//! **Two shapes per input, added 2026-10-04.** The original target offered the
-//! fuzz bytes as a postcard-encoded `Vec<MemberSnapshot>`. It called
-//! `first_admission_base` on every input — unguarded, unlike the two targets
-//! review round 2 found dead — but every input that decoded at all decoded to
-//! the **empty** vector, so `VerifyingKey::from_bytes`, `MemberLeaf::new` and
-//! the `"bad member key"` / `"bad device key"` arms were reached by nothing.
-//! Measured by panicking inside `trie_from_snapshots`'s per-snapshot closure
-//! and watching this target pass after 136 796 iterations. Round 2 had called
-//! this target "sound" on the strength of its call being unguarded, without
-//! probing its reach — the same mistake one target over.
+//! **Two shapes per input.** Shape 1 offers the fuzz bytes as a
+//! postcard-encoded `Vec<MemberSnapshot>` and calls `first_admission_base`
+//! on every input; almost every input that decodes at all decodes to the
+//! empty vector, so shape 1 alone does not reach the key parse.
 //!
-//! The second shape builds a **well-formed** `Vec<MemberSnapshot>` whose key
-//! bytes come from the fuzz input, so the key-parsing arms are reached on
-//! every iteration. Those are the abnormal-input arms SDD-rx2yvy's robustness
-//! entry names as untested.
-//!
-//! *Since the org-node type-safety change (merged here 2026-10-05)* the key
-//! parse is the snapshot's decode into its typed record, which refuses with
+//! Shape 2 builds a **well-formed** `Vec<MemberSnapshot>` whose key bytes
+//! come from the fuzz input, so the key parse — the snapshot's decode into
+//! its typed record, which refuses with
 //! `InvalidField { field: "member.member_key" | "member.device_keys", .. }`
-//! (LLR-8bum44); the `"bad member key"` / `"bad device key"` arms no longer
-//! exist. Shape 2 reaches that parse on every iteration.
+//! (LLR-8bum44) — is reached on every iteration. Those are the
+//! abnormal-input arms SDD-rx2yvy's robustness entry names.
 //!
 //! `harness = false` binary: a panic (the bolero failure signal) exits
 //! non-zero and fails `cargo test`. Run a single target with
@@ -31,10 +21,9 @@
 use org_node::service::first_admission_base;
 use serde::Serialize;
 
-/// A member snapshot as it is encoded, with its fields plain. Ported
-/// 2026-10-05 to the org-node type-safety change: `store::MemberSnapshot` now
-/// holds parsed keys (LLR-g76zqd), so it can no longer carry the arbitrary key
-/// bytes shape 2 exists to deliver. This mirror has the same field order and
+/// A member snapshot as it is encoded, with its fields plain.
+/// `store::MemberSnapshot` holds parsed keys (LLR-g76zqd), so it cannot carry
+/// the arbitrary key bytes shape 2 exists to deliver. This mirror has the same field order and
 /// plain types, so it encodes to the bytes a `MemberSnapshot` would
 /// (LLR-ayrdr8), and `first_admission_base` parses them through its own
 /// `Raw…` mirror (LLR-8bum44).
@@ -53,8 +42,8 @@ struct PlainSnapshot {
 fn snapshot_from(bytes: &[u8]) -> PlainSnapshot {
     let take = |offset: usize| {
         let mut out = [0u8; 32];
-        for (i, slot) in out.iter_mut().enumerate() {
-            *slot = bytes[(offset + i) % bytes.len()];
+        for (index, slot) in out.iter_mut().enumerate() {
+            *slot = bytes[(offset + index) % bytes.len()];
         }
         out
     };

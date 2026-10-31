@@ -1,5 +1,5 @@
 //! Envelope: the wire form for a trie change, bound to an Organisation and
-//! a Sequence number. It carries no signature (REQ-ag6kqm): the chain's
+//! a Sequence number. It carries no signature (LLR-8528ud): the chain's
 //! Membership root at a newer epoch decides whether the change is committed.
 use org_members::delta::Delta;
 use serde::{Deserialize, Serialize};

@@ -640,6 +640,15 @@ the current on-chain root, the node deletes every piece of data it holds for
 that Organisation and every Persona bound to it, so that a cooperating device
 stops acting on the Organisation from the moment it learns of its removal.
 mitigates: HAZ-vxabf9
+superseded-by: RC-5jkcxz
+
+*Superseded 2026-10-20 (owner ruling Q4' of 2026-10-16, change
+`worktree-org-io-domain-api`):* the node still deletes at once on a verified
+removal, now also with no user step, but keeps the signed acknowledgements of
+that removal with their recipients' keys and addresses until each is
+accepted or 7 days pass (RC-5jkcxz and RC-45k3zg, with HAZ-vxabf9's residual
+re-estimated, in
+`org-node/docs/risk/2026-10-15-domain-api.md`).
 
 *Amended 2026-10-06 (owner rulings 3 and 4 on the sweep of `fdf4e77`,
 `docs/plans/2026-10-06-org-io-roadmap.md`; change

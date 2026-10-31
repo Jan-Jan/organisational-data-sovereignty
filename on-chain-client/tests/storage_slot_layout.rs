@@ -48,17 +48,15 @@
 //! slot being computed differently from the one the chain keeps, which is
 //! exactly what a layout drift causes. The register carries this residual
 //! there, as its "contract half is confirmed by reading a disclaimed file"
-//! paragraph and not-minted control 9. This line named HAZ-xd4urb until
-//! review round 2's finding 6; that hazard is the uncommitted-observation
-//! and reorg one, and has nothing to do with storage layout.
+//! paragraph and not-minted control 9. (HAZ-xd4urb is the
+//! uncommitted-observation and reorg hazard, and has nothing to do with
+//! storage layout.)
 //!
-//! Relocated out of `src/client.rs`'s `#[cfg(test)]` module, which no gate
-//! reads — `test_paths` for this unit is `on-chain-client/tests` — and joined
-//! by the boundary and abnormal cases class C asks for. That module is deleted
-//! in the same commit as this file, so the two never both exist; it held
-//! nothing but these three tests, and the `use tiny_keccak::{Hasher, Keccak}`
-//! it needed goes with it. `internals` keeps its own separate `tiny_keccak`
-//! import, which `solidity_mapping_slot` still uses.
+//! These cases live here, not in a `#[cfg(test)]` module in `src/client.rs`,
+//! which no gate reads — `test_paths` for this unit is
+//! `on-chain-client/tests` — with the boundary and abnormal cases class C
+//! asks for. `internals` has its own `tiny_keccak` import, which
+//! `solidity_mapping_slot` uses.
 //!
 //! Every keccak expectation is recomputed here with `tiny-keccak` (a
 //! dev-dependency, so the recomputation does not route through anything under
@@ -127,7 +125,7 @@ fn be_add(slot: [u8; 32], offset: u8) -> [u8; 32] {
     out
 }
 
-/// The admin from the relocated reference vector.
+/// The admin of the reference vector.
 const ADMIN_ONES: [u8; 20] = [0x11; 20];
 
 // ---------------------------------------------------------------------------
@@ -136,7 +134,7 @@ const ADMIN_ONES: [u8; 20] = [0x11; 20];
 
 // verifies: REQ-9m2rnd, LLR-vktf8w
 //
-// The relocated reference vector, normal case: a 20-byte admin of all `0x11`
+// The reference vector, normal case: a 20-byte admin of all `0x11`
 // at mapping slot 0. The expectation is `keccak256(0x00 * 12 || 0x11 * 20 ||
 // 0x00 * 32)`, recomputed in this file. The two `assert_ne!`s are what stop
 // the `assert_eq!` from also holding for a plausibly mis-encoded preimage:
@@ -276,7 +274,7 @@ fn the_zero_admin_is_hashed_like_any_other_address() {
 
 // verifies: REQ-xudf25, LLR-bhwsn6
 //
-// Relocated. Offset 0 is the identity: the first struct field lives at `S`
+// Offset 0 is the identity: the first struct field lives at `S`
 // itself, so `get_org_state`'s loop over 0..3 must leave the base key alone on
 // its first pass. The pattern is deliberately not zero, so an implementation
 // that zeroed the slot would be caught.
@@ -292,7 +290,7 @@ fn offset_zero_is_the_identity() {
 
 // verifies: REQ-xudf25, LLR-bhwsn6
 //
-// Relocated. The single-byte carry: `0xfe + 3 = 0x101`, so the low byte
+// The single-byte carry: `0xfe + 3 = 0x101`, so the low byte
 // becomes `0x01` and one carries into byte 30. Expectation written out as a
 // literal array.
 #[test]

@@ -27,90 +27,49 @@ safety_class: C
 
 id_prefixes: REQ HAZ RC SDD LLR PR ADR
 
-# Canonical document locations. Registered 2026-10-06 by the change that
-# creates the unit (worktree-org-io-create, stage S2 of
-# docs/plans/2026-10-06-org-io-roadmap.md).
+# Canonical document locations.
 doc_srs: org-io/docs/requirements
 doc_rmf: org-io/docs/risk
 doc_sad: org-io/docs/architecture
 doc_soup: org-io/docs/architecture/soup.md
 doc_problems: org-io/docs/problems
 
-# The unit was born as a guardrails skeleton; its crate exists since task T1
-# of S2's develop phase (docs/plans/2026-10-06-org-io-create.md). The source
-# scan covers the crate's source, the ledger directories and the unit's
-# AGENTS.md.
+# The source scan covers the crate's source, the ledger directories and the
+# unit's AGENTS.md.
 strict_paths:
   - org-io/src
   - org-io/docs
   - org-io/AGENTS.md
 
 # The crate's integration tests and fuzz targets; the `verifies:` search runs
-# over them. Requirements whose tests land in later tasks are MISSING-TEST
-# until then, which is the true state of a requirement with no code yet.
+# over them.
 test_paths:
   - org-io/tests
 
-# Since T1 of docs/plans/2026-10-06-org-io-create.md, when the crate landed.
-# Later tasks extend the first line with their test targets and features.
-# The chopsticks-dependent target `preflight` is excluded: it spawns a
-# chopsticks fork and needs on-chain/scripts/node_modules (as in org-node,
-# from which it moved at T5).
-# Since T7, the first line runs with `test-support`: `submit_flow` and
-# `receive_order` drive the handle over `test_support::FakeChain`.
-# Since T8, `signatory_rule` (the own-admin check) joins the first line.
-# Since T9, `app_boundary` (the app's manifest names org-io alone) joins it.
-# Since T12, the second line runs with `test-support,dev-seed`, as the plan
-# header's final form gives it.
-# Since review round 3 (2026-10-08), `open` (`OrgIo::open`) joins the first line.
-# Since S4 task T8 (2026-10-13), `keychain` (the keychain module, over
-# `test_support::MemoryKeychain`) joins the first line.
-# Since S4 task T9 (2026-10-13), `store_files` (the store files) joins it.
-# Since S4 task T10 (2026-10-13), the transport's four targets join it:
-# `transport_handshake` and `transport_networked` (moved from org-node),
-# `endpoints` (one endpoint per Persona) and `preflight_transport` (the
-# transport preflight by the keychain path).
-# Since S4 task T11 (2026-10-13), `receive_step` (the lock-free receive step)
-# joins it.
-# Since S4 task T11a (2026-10-13), `acknowledgement_inbound` (a revoked
-# Device's acknowledgement, and the verdict byte) joins it.
-# Since S4 task T12 (2026-10-13), `send_fanout` (the fan-out and the Loopback
-# address check), `peer_addr` (the peer-address parse) and its fuzz target
-# `fuzz_peer_addr` join it.
-# Since S4 task T13 (2026-10-14), `invitation_exchange` (the invitation
-# exchange runner, with the app's moved tests) and `node_stories` (the five
-# stories end to end over two Loopback endpoints) join it.
-# Since S3b-io part 1 (master `68ec432`, merged into S4 2026-10-14),
-# `publish_path` (the unknown-outcome write, its settle, the background
-# discard) and `startup_reconcile` (reconcile at start and on request, the
-# unverified state) join it.
-# Since S4 task T18 (2026-10-14), the final form: a clippy line with no
-# features joins the feature line, so the library and every target that needs
-# no feature are linted as a production build compiles them
-# (`key_custody_config` now declares `required-features = ["test-support"]`).
-# Since S4 task T19 (2026-10-14), `expectations_met` (the six expectations
-# org-io declared on org-node, shown to hold through the handle) joins it.
-# Since the S4 TEST review round 1 (2026-10-15, finding-1),
-# `keychain_contract` (MemoryKeychain's contract test; its OS-keychain run
-# skips unless ODS_REAL_KEYCHAIN_TESTS=1) joins it. Since the S4 review round 2
-# (2026-10-15, finding-8) that OS-keychain run is `#[ignore]`d as well.
+# The first line runs the library and every test target over
+# `test_support` (`FakeChain`, `MemoryKeychain`, Loopback endpoints and the
+# in-process relay); the second runs the targets that need `dev-seed` too;
+# then a build, and clippy with both features and with none, so the library
+# and every target that needs no feature are linted as a production build
+# compiles them. The chopsticks-dependent targets `preflight` and
+# `chain_writer_contract` are excluded: each spawns a chopsticks fork and
+# needs on-chain/scripts/node_modules. `keychain_contract`'s OS-keychain run
+# is `#[ignore]`d and runs only with ODS_REAL_KEYCHAIN_TESTS=1.
 verify_commands:
-  - cargo test -p org-io --features test-support --lib --test key_custody_config --test fuzz_seed_parse --test signatory_key --test absences --test chain_read_rule --test receive_order --test submit_flow --test signatory_rule --test app_boundary --test open --test keychain --test keychain_contract --test store_files --test transport_handshake --test transport_networked --test endpoints --test preflight_transport --test receive_step --test acknowledgement_inbound --test send_fanout --test peer_addr --test fuzz_peer_addr --test invitation_exchange --test node_stories --test publish_path --test startup_reconcile --test expectations_met
+  - cargo test -p org-io --features test-support --lib --test key_custody_config --test fuzz_seed_parse --test signatory_key --test absences --test chain_read_rule --test signatory_rule --test app_boundary --test open --test keychain --test keychain_contract --test store_files --test transport_handshake --test transport_networked --test endpoints --test preflight_transport --test receive_step --test acknowledgement_inbound --test send_fanout --test invitation_exchange --test expectations_met --test rng_source --test person --test persona_creation --test propose --test chain_write --test verification --test requests --test acknowledgements
   - cargo test -p org-io --features test-support,dev-seed --test key_custody_config --test signatory_key --test dev_seed_env
   - cargo build -p org-io
   - cargo clippy -p org-io --all-targets --features test-support,dev-seed -- -D warnings
   - cargo clippy -p org-io --all-targets -- -D warnings
 
 problem_age_days: 30
-# Raised from 10 to 15: owner ruling 2026-10-15 (S4 review round 2), which
-# files the review's larger lows as one open umbrella report.
+# 15, by owner ruling 2026-10-15, which files a review's larger lows as one
+# open umbrella report.
 problem_open_max: 15
 
-# Statement and branch coverage from the first merge (owner ruling,
-# 2026-10-06); floors in the root Makefile (ORG_IO_LINES, ORG_IO_REGIONS,
-# ORG_IO_BRANCHES), set one point below the first measurement (T12,
-# 2026-10-08) and raised to one point below the next (T12b, 2026-10-08:
-# lines 62, regions 59, branches 64).
+# Statement and branch coverage (owner ruling, 2026-10-06); the floors and
+# their measurements are in the root Makefile (ORG_IO_LINES, ORG_IO_REGIONS,
+# ORG_IO_BRANCHES).
 coverage_command:
   - make coverage-org-io
   - make coverage-branch-org-io
@@ -118,13 +77,10 @@ coverage_command:
 expectation_age_days: 90
 expectation_open_max: 10
 
-# Declared 2026-10-06 after the dependency assessments in
-# docs/plans/2026-10-06-org-io-create.md §5. Both providers are class C, so
-# the class floor (MISCLASSED-DEPENDENCY) has nothing to convict and no
-# segregated_from: entry is needed. org-node exports nothing yet: until it
-# exports the requirements org-io relies on, org-io's ledgers name no org-node
-# ID. The edge to person is declared when org-io's code first names a person
-# type.
+# The dependency assessments are in docs/plans/2026-10-06-org-io-create.md
+# §5. Both providers are class C, so the class floor (MISCLASSED-DEPENDENCY)
+# has nothing to convict and no segregated_from: entry is needed. The edge
+# to person is declared when org-io's code first names a person type.
 depends_on:
   - org-node
   - on-chain-client

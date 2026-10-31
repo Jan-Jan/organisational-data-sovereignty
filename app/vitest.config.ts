@@ -1,11 +1,15 @@
+import { sveltekit } from '@sveltejs/kit/vite';
+import { svelteTesting } from '@testing-library/svelte/vite';
 import { defineConfig } from 'vitest/config';
 
-// No sveltekit() plugin and no $lib alias, by choice: these tests import the
-// modules under test by relative path, so the runner needs no SvelteKit
-// machinery and cannot fail for a reason belonging to the framework rather
-// than to the code. When components are rendered here one day (not-minted
-// control 1) this file gains the plugin and a DOM environment.
+// Not-minted control 1 (app/docs/risk/2026-09-14-app-hazards.md §8): the
+// webview's feature tests render components. `sveltekit()` compiles the
+// `.svelte` files and resolves `$lib`; `svelteTesting()` resolves Svelte's
+// browser build under Vitest and unmounts each rendered component after its
+// test. The default environment is `node`, for the pure tests; a test file
+// that renders declares `// @vitest-environment jsdom` in its header.
 export default defineConfig({
+	plugins: [sveltekit(), svelteTesting()],
 	test: {
 		environment: 'node',
 		include: ['tests/**/*.test.ts']

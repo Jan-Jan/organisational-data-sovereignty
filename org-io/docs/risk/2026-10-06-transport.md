@@ -413,6 +413,7 @@ member-sender rule (owner ruling R1; org-node's controls in its
 decides it and only an acknowledgement from a revoked Device can be acted
 on; and it writes on an inbound connection only one verdict byte, accepted
 or refused, never Organisation data. mitigates: HAZ-abm3xs
+superseded-by: RC-6m89tr
 
 Implemented by REQ-ur7z4a (with REQ-fnsjb6, which hands the sender over).
 Verified in develop (plan task T11a) by a normal-case test (a revoked

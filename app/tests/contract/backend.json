@@ -1,0 +1,287 @@
+{
+	"about": "The contract of the faked Tauri boundary (app/tests/fake-tauri.ts). Every answer, refusal and event payload the fake produces must have the shape of one entry here, and app/src-tauri/tests/ipc.rs drives the real command or the real event mapping for every entry and requires the same shape (risk control 1 of app/docs/risk/2026-09-14-app-hazards.md section 8, note of 2026-10-28). Shape: the same keys at every depth; the same value of every `result`, `status`, `kind`, `transport_mode` and `write` and of every boolean; a string of 40 or 64 lowercase hexadecimal characters answered by one of the same length; numbers by numbers, null by null; and in an array each element matching an element of the expected array (none where that array is empty). The fake's values are held to this file; this file is held to the real values the same way.",
+	"answers": {
+		"connection_status": {
+			"loopback_no_chain": {
+				"chain_configured": false,
+				"chain_ws": null,
+				"contract_h160": null,
+				"transport_mode": "loopback",
+				"data_dir": "/tmp/ods"
+			}
+		},
+		"list_personas": {
+			"none": [],
+			"provisional_member": [
+				{
+					"persona_id": "7777777777777777777777777777777777777777777777777777777777777777",
+					"org_id": "abababababababababababababababababababab",
+					"handle": null,
+					"name": "Bob",
+					"surname": "Builder",
+					"status": "Proposed"
+				}
+			],
+			"founder": [
+				{
+					"persona_id": "8888888888888888888888888888888888888888888888888888888888888888",
+					"org_id": null,
+					"handle": "alice",
+					"name": "Alice",
+					"surname": "Smith",
+					"status": "Proposed"
+				}
+			]
+		},
+		"list_orgs": {
+			"none": [],
+			"one_not_checked": [
+				{
+					"org_id": "abababababababababababababababababababab",
+					"epoch": 1,
+					"root_hash": "9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a",
+					"member_count": 1,
+					"verification": { "status": "not_checked" }
+				}
+			]
+		},
+		"verify_organisation": {
+			"none_held": [],
+			"in_step": [{ "result": "in_step", "org_id": "abababababababababababababababababababab", "epoch": 3 }],
+			"founding_with_proxy": [
+				{
+					"result": "unverified",
+					"org_id": "abababababababababababababababababababab",
+					"founder": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+					"reason": "the founding is not written"
+				}
+			],
+			"founding_no_proxy": [
+				{
+					"result": "unverified",
+					"org_id": null,
+					"founder": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+					"reason": "no proxy yet"
+				}
+			],
+			"adopted_reported": [
+				{
+					"result": "adopted",
+					"org_id": "abababababababababababababababababababab",
+					"epoch": 3,
+					"own": false,
+					"discarded": [
+						{
+							"kind": "admission",
+							"invite_id": "1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c",
+							"name": "Bob",
+							"surname": "Builder",
+							"handle": "bob"
+						},
+						{
+							"kind": "revocation",
+							"member_id": "2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d",
+							"handle": "carol"
+						}
+					]
+				},
+				{
+					"result": "adopted",
+					"org_id": "abababababababababababababababababababab",
+					"epoch": 3,
+					"own": true,
+					"discarded": [],
+					"sends": [
+						{ "device": "5866666666666666666666666666666666666666666666666666666666666666", "result": "sent" },
+						{
+							"device": "5866666666666666666666666666666666666666666666666666666666666666",
+							"result": "failed",
+							"reason": "refused by the recipient"
+						}
+					]
+				}
+			]
+		},
+		"list_admission_requests": {
+			"none_kept": [],
+			"one_kept": [
+				{
+					"org_id": "abababababababababababababababababababab",
+					"invite_id": "1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c",
+					"invitee_name": "Bob Builder",
+					"name": "Bob",
+					"surname": "Builder",
+					"preferred_handles": ["bob", "builder"],
+					"device_public_key": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+				}
+			]
+		},
+		"propose_person": {
+			"provisional": {
+				"device_public_key": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+				"name": "Alice",
+				"surname": "Smith",
+				"status": "provisional"
+			}
+		},
+		"propose_founding_organisation": {
+			"provisional_founding": {
+				"persona_id": "abababababababababababababababababababababababababababababababab",
+				"status": "provisional_founding",
+				"founder": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef"
+			}
+		},
+		"read_invite": {
+			"invite": {
+				"org_name": "Acme",
+				"org_id": "abababababababababababababababababababab",
+				"invitee_name": "Bob Builder",
+				"issuer_device_key": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+			}
+		},
+		"propose_member": {
+			"provisional_member": {
+				"persona_id": "7777777777777777777777777777777777777777777777777777777777777777",
+				"status": "provisional_member"
+			}
+		},
+		"request_admission": {
+			"delivered": { "result": "delivered" },
+			"already_received": { "result": "already_received" },
+			"invite_used_by_another_device": { "result": "invite_used_by_another_device" },
+			"refused": { "result": "refused" },
+			"not_delivered": { "result": "not_delivered", "reason": "the Admin Device is offline" }
+		},
+		"propose_admission": {
+			"recorded": null
+		},
+		"propose_revocation": {
+			"recorded": null
+		},
+		"write_organisation_to_chain": {
+			"included_founding": {
+				"result": "included",
+				"epoch": 0,
+				"verification": {
+					"result": "adopted",
+					"org_id": "abababababababababababababababababababab",
+					"founder": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+					"epoch": 0,
+					"own": true,
+					"discarded": [],
+					"sends": []
+				}
+			},
+			"included_update": {
+				"result": "included",
+				"epoch": 2,
+				"verification": {
+					"result": "adopted",
+					"org_id": "abababababababababababababababababababab",
+					"epoch": 2,
+					"own": true,
+					"discarded": [],
+					"sends": []
+				}
+			},
+			"refused": { "result": "refused", "reason": "not yet" },
+			"unknown": { "result": "unknown", "reason": "the write timed out after 90 s and may yet execute on chain" }
+		},
+		"propose_updated_organisation": {
+			"proposed": {
+				"epoch": 2,
+				"root": "9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b",
+				"org_public_key": "9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c"
+			}
+		},
+		"cancel_invite": {
+			"cancelled": null
+		}
+	},
+	"refusals": {
+		"propose_person": {
+			"person_already_held": {
+				"kind": "person_already_held",
+				"message": "a Person is held already (cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd); nothing created"
+			},
+			"refused": { "kind": "refused", "message": "name: must not be empty" }
+		},
+		"*": {
+			"text": "org-io's refusal, as its text"
+		}
+	},
+	"events": {
+		"verification-result": {
+			"adopted_own_update": {
+				"result": "adopted",
+				"org_id": "abababababababababababababababababababab",
+				"epoch": 2,
+				"own": true,
+				"discarded": [],
+				"sends": []
+			},
+			"adopted_with_discarded": {
+				"result": "adopted",
+				"org_id": "abababababababababababababababababababab",
+				"epoch": 3,
+				"own": false,
+				"discarded": [
+					{
+						"kind": "admission",
+						"invite_id": "1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c",
+						"name": "Bob",
+						"surname": "Builder",
+						"handle": "bob"
+					},
+					{
+						"kind": "revocation",
+						"member_id": "2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d",
+						"handle": "carol"
+					}
+				]
+			},
+			"adopted_sends_reported": {
+				"result": "adopted",
+				"org_id": "abababababababababababababababababababab",
+				"epoch": 3,
+				"own": true,
+				"discarded": [],
+				"sends": [
+					{ "device": "5866666666666666666666666666666666666666666666666666666666666666", "result": "sent" },
+					{
+						"device": "5866666666666666666666666666666666666666666666666666666666666666",
+						"result": "failed",
+						"reason": "refused by the recipient"
+					}
+				]
+			},
+			"adopted_send_refused": {
+				"result": "adopted",
+				"org_id": "abababababababababababababababababababab",
+				"epoch": 3,
+				"own": true,
+				"discarded": [],
+				"sends": [],
+				"sends_refused": "Organisation abab is not held here"
+			},
+			"behind_request_refused": {
+				"result": "behind",
+				"org_id": "abababababababababababababababababababab",
+				"chain_epoch": 4,
+				"requests": [],
+				"requests_refused": "no endpoint is bound"
+			}
+		},
+		"admission-requested": {
+			"kept": {
+				"org_id": "abababababababababababababababababababab",
+				"invite_id": "1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c",
+				"invitee_name": "Bob Builder",
+				"name": "Bob",
+				"surname": "Builder",
+				"preferred_handles": ["bob", "builder"],
+				"device_public_key": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+			}
+		}
+	}
+}

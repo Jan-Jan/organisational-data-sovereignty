@@ -129,7 +129,7 @@ fn release_then_concurrent_claims_yield_exactly_one_guard() {
 }
 
 // ---------------------------------------------------------------------------
-// S4, task T16: the receiver loop holds no app lock while it waits
+// The receiver loop holds no app lock while it waits
 // ---------------------------------------------------------------------------
 
 use std::sync::mpsc;
@@ -175,7 +175,7 @@ fn the_receiver_holds_no_app_lock_while_waiting() {
     let app = mock_builder()
         .manage(state)
         .invoke_handler(tauri::generate_handler![
-            commands::create_persona,
+            commands::propose_founding_organisation,
             commands::list_personas,
             commands::start_receiver,
         ])
@@ -183,10 +183,14 @@ fn the_receiver_holds_no_app_lock_while_waiting() {
         .expect("build mock app");
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().expect("build webview");
 
-    invoke(&webview, "create_persona", serde_json::json!({ "handle": "ada", "name": "Ada", "surname": "Lovelace" }))
-        .expect("create_persona");
+    invoke(
+        &webview,
+        "propose_founding_organisation",
+        serde_json::json!({ "name": "Ada", "surname": "Lovelace", "handle": "ada", "orgName": "Engines" }),
+    )
+    .expect("propose_founding_organisation");
     invoke(&webview, "start_receiver", serde_json::json!({})).expect("start_receiver");
-    // Let the loop bind the Persona's endpoint and start waiting.
+    // Give the loop time to bind the Persona's endpoint and start waiting.
     std::thread::sleep(Duration::from_millis(500));
 
     let (listed_tx, listed_rx) = mpsc::channel();
@@ -205,10 +209,10 @@ fn the_receiver_holds_no_app_lock_while_waiting() {
     );
 }
 
-// Abnormal: while the loop waits, a command org-io refuses (founding with a
-// Persona the node does not hold) returns its refusal, and a command that
+// Abnormal: while the loop waits, a command org-io refuses (an Invite for an
+// Organisation no Persona here holds) returns its refusal, and a command that
 // changes the node (a second Persona) completes, each within the bound; the
-// loop is still running after both (S4, task T23).
+// loop is still running after both.
 // verifies: LLR-5wb4vd
 #[test]
 fn a_refused_and_a_mutating_command_complete_while_the_receiver_waits() {
@@ -218,8 +222,8 @@ fn a_refused_and_a_mutating_command_complete_while_the_receiver_waits() {
     let app = mock_builder()
         .manage(state)
         .invoke_handler(tauri::generate_handler![
-            commands::create_persona,
-            commands::create_organisation,
+            commands::propose_founding_organisation,
+            commands::issue_invite,
             commands::list_personas,
             commands::start_receiver,
         ])
@@ -227,26 +231,34 @@ fn a_refused_and_a_mutating_command_complete_while_the_receiver_waits() {
         .expect("build mock app");
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().expect("build webview");
 
-    invoke(&webview, "create_persona", serde_json::json!({ "handle": "ada", "name": "Ada", "surname": "Lovelace" }))
-        .expect("create_persona");
+    invoke(
+        &webview,
+        "propose_founding_organisation",
+        serde_json::json!({ "name": "Ada", "surname": "Lovelace", "handle": "ada", "orgName": "Engines" }),
+    )
+    .expect("propose_founding_organisation");
     invoke(&webview, "start_receiver", serde_json::json!({})).expect("start_receiver");
     std::thread::sleep(Duration::from_millis(500));
 
     let (done_tx, done_rx) = mpsc::channel();
     let commands_webview = webview.clone();
     std::thread::spawn(move || {
-        let refused = invoke(&commands_webview, "create_organisation", serde_json::json!({ "personaId": "nobody" }));
+        let refused = invoke(
+            &commands_webview,
+            "issue_invite",
+            serde_json::json!({ "orgId": "aa".repeat(20), "inviteeName": "Bob" }),
+        );
         let created = invoke(
             &commands_webview,
-            "create_persona",
-            serde_json::json!({ "handle": "grace", "name": "Grace", "surname": "Hopper" }),
+            "propose_founding_organisation",
+            serde_json::json!({ "name": "Grace", "surname": "Hopper", "handle": "grace", "orgName": "Compilers" }),
         );
         let listed = invoke(&commands_webview, "list_personas", serde_json::json!({}));
         let _ = done_tx.send((refused, created, listed));
     });
     let (refused, created, listed) =
         done_rx.recv_timeout(Duration::from_secs(5)).expect("the commands complete while the receiver waits for a message");
-    assert!(refused.is_err(), "a Persona the node does not hold founds nothing: {refused:?}");
+    assert!(refused.is_err(), "an Organisation no Persona holds is issued no Invite: {refused:?}");
     created.expect("the second Persona is created");
     assert_eq!(listed.expect("list_personas").as_array().map(Vec::len), Some(2), "both Personas are listed");
     assert!(
@@ -256,7 +268,7 @@ fn a_refused_and_a_mutating_command_complete_while_the_receiver_waits() {
 }
 
 // ---------------------------------------------------------------------------
-// S4, task T19: the real receive loop stops on a closed endpoint, and restarts
+// The real receive loop stops on a closed endpoint, and restarts
 // ---------------------------------------------------------------------------
 
 /// How long the test waits for the loop to react before concluding.
@@ -303,7 +315,7 @@ fn a_loop_stopped_by_a_closed_endpoint() -> Stopped {
         .expect("AppState::for_test");
     let app = mock_builder()
         .manage(state)
-        .invoke_handler(tauri::generate_handler![commands::create_persona, commands::start_receiver])
+        .invoke_handler(tauri::generate_handler![commands::propose_founding_organisation, commands::start_receiver])
         .build(mock_context(noop_assets()))
         .expect("build mock app");
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().expect("build webview");
@@ -312,8 +324,12 @@ fn a_loop_stopped_by_a_closed_endpoint() -> Stopped {
         let _ = stopped_tx.send(event.payload().to_string());
     });
 
-    invoke(&webview, "create_persona", serde_json::json!({ "handle": "ada", "name": "Ada", "surname": "Lovelace" }))
-        .expect("create_persona");
+    invoke(
+        &webview,
+        "propose_founding_organisation",
+        serde_json::json!({ "name": "Ada", "surname": "Lovelace", "handle": "ada", "orgName": "Engines" }),
+    )
+    .expect("propose_founding_organisation");
     invoke(&webview, "start_receiver", serde_json::json!({})).expect("start_receiver");
     std::thread::sleep(Duration::from_millis(500));
     assert!(slot_reads(&app, true), "the loop is running before the endpoint closes");
@@ -343,10 +359,8 @@ fn a_closed_endpoint_stops_the_loop_announces_it_once_and_releases_the_guard() {
 }
 
 // After that stop, `start_receiver` starts a loop that runs: it holds the
-// slot and announces no stop. Written ignored in S4 task T19 as the
-// reproduction of org-io's problem report on a closed endpoint that was kept
-// and never bound again; un-ignored 2026-10-14 (S4, task T20), when org-io
-// binds a closed endpoint again on the next `start_receiving`.
+// slot and announces no stop, because org-io binds a closed endpoint again
+// on the next `start_receiving`.
 // verifies: LLR-yrb6th
 #[test]
 fn after_a_stop_start_receiver_starts_a_loop_that_runs() {

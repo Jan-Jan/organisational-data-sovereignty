@@ -12,7 +12,7 @@
 //!
 //! Single fixed port (8000). If integration tests start running in
 //! parallel and collide, picking a free port per fork is a trivial
-//! extension; not done yet because the Task 5 / 7 tests are serial.
+//! extension; the fork tests run serially, so one port suffices.
 
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -112,7 +112,7 @@ impl std::error::Error for SpawnError {}
 /// empirical note in the shell sanity script).
 ///
 /// Returns when the fork is ready to serve `chainHead_v1_*`. The caller
-/// is responsible for any deploy step (Task 5 tests use the existing
+/// is responsible for any deploy step (e.g.
 /// `on-chain/scripts/sanity-deploy.mjs`).
 pub async fn spawn_fork() -> Result<ChopsticksHandle, SpawnError> {
     let on_chain_dir = on_chain_dir();

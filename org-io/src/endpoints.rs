@@ -31,6 +31,8 @@ use crate::transport::{
 /// sender, and the responder its verdict goes back through (LLR-unqfj5):
 /// dropped unanswered, nothing is written.
 pub(crate) struct Inbound {
+    /// The DevicePublicKey of the endpoint the body reached: the receiving Persona's store.
+    pub(crate) receiver: DevicePublicKey,
     pub(crate) sender: DevicePublicKey,
     pub(crate) body: Vec<u8>,
     pub(crate) verdict: oneshot::Sender<Verdict>,
@@ -125,9 +127,17 @@ impl Endpoints {
         let mut bound = self.bound.lock().await;
         let entry = Self::bound_or_bind(&mut bound, &self.plan, device_key).await?;
         if self.receiving.load(Ordering::SeqCst) {
-            self.keep_accepting(entry);
+            self.keep_accepting(device_key, entry);
         }
         Ok(entry.endpoint.clone())
+    }
+
+    /// The addresses the endpoint of `device_key` holds in the current mode,
+    /// binding it first if it is not (LLR-v9dkrv, LLR-d2pzzk); a bind that
+    /// fails is returned.
+    pub(crate) async fn addresses(&self, device_key: &DevicePublicKey) -> Result<Vec<String>, TransportError> {
+        let endpoint = self.endpoint(device_key).await?;
+        Ok(endpoint.addresses(self.transport_mode()))
     }
 
     /// An endpoint that reports closed, or closing (`OrgEndpoint::is_closed`),
@@ -170,7 +180,7 @@ impl Endpoints {
         self.receiving.store(true, Ordering::SeqCst);
         for device_key in device_keys {
             let entry = Self::bound_or_bind(&mut bound, &self.plan, device_key).await?;
-            self.keep_accepting(entry);
+            self.keep_accepting(device_key, entry);
         }
         Ok(())
     }
@@ -185,7 +195,7 @@ impl Endpoints {
         let mut bound = self.bound.lock().await;
         if self.receiving.load(Ordering::SeqCst) {
             let entry = Self::bound_or_bind(&mut bound, &self.plan, device_key).await?;
-            self.keep_accepting(entry);
+            self.keep_accepting(device_key, entry);
         }
         Ok(())
     }
@@ -193,12 +203,27 @@ impl Endpoints {
     /// Give `entry` a running accept task unless it has one, counting the
     /// new task into `accepting` before it starts, so the count of running
     /// tasks stays exact. Called under `bound`'s lock.
-    fn keep_accepting(&self, entry: &mut Bound) {
+    fn keep_accepting(&self, device_key: &DevicePublicKey, entry: &mut Bound) {
         if entry.accept_task.as_ref().is_none_or(JoinHandle::is_finished) {
             self.accepting.fetch_add(1, Ordering::SeqCst);
-            let task =
-                accept(entry.endpoint.clone(), self.inbound_sender.clone(), self.accepting.clone(), self.connection_time_limit);
+            let task = accept(
+                entry.endpoint.clone(),
+                *device_key,
+                self.inbound_sender.clone(),
+                self.accepting.clone(),
+                self.connection_time_limit,
+            );
             entry.accept_task = Some(tokio::spawn(task));
+        }
+    }
+
+    /// Close and forget the endpoint of `device_key`, if bound (a removed
+    /// Persona's, before its delivery binds it direct-only; LLR-cqr26z). Its
+    /// accept task sees the closure and counts itself out.
+    pub(crate) async fn close(&self, device_key: &DevicePublicKey) {
+        let entry = self.bound.lock().await.remove(device_key);
+        if let Some(entry) = entry {
+            entry.endpoint.close().await;
         }
     }
 
@@ -259,7 +284,13 @@ impl Drop for Endpoints {
 /// after it. When the channel closes it counts itself out and ends, and its
 /// connections' tasks end with it. Each body's stream send half waits,
 /// apart from the loop, for the receive step's verdict (LLR-unqfj5).
-async fn accept(endpoint: Arc<OrgEndpoint>, inbound: mpsc::Sender<Accepted>, accepting: Arc<AtomicUsize>, limit: Duration) {
+async fn accept(
+    endpoint: Arc<OrgEndpoint>,
+    receiver: DevicePublicKey,
+    inbound: mpsc::Sender<Accepted>,
+    accepting: Arc<AtomicUsize>,
+    limit: Duration,
+) {
     let slots = Arc::new(Semaphore::new(CONNECTIONS_AT_ONCE));
     let mut connections = JoinSet::new();
     loop {
@@ -281,7 +312,7 @@ async fn accept(endpoint: Arc<OrgEndpoint>, inbound: mpsc::Sender<Accepted>, acc
         connections.spawn(async move {
             let received = pending.receive(limit).await;
             // The channel closed: the node is gone, and so is the body.
-            let _ = inbound.send(received.map(|(sender, body, reply)| Inbound { sender, body, verdict: await_verdict(reply) })).await;
+            let _ = inbound.send(received.map(|(sender, body, reply)| Inbound { receiver, sender, body, verdict: await_verdict(reply) })).await;
             drop(slot);
         });
     }

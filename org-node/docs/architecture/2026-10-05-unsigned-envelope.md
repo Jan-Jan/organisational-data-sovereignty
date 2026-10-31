@@ -73,6 +73,15 @@ match, an Envelope whose Sequence number is not the epoch of the Organisation
 state the chain reader returned. A refused Envelope leaves the high-water mark
 where it was. An accepted one advances the mark to that epoch.
 satisfies: REQ-txvtm9
+superseded-by: LLR-76bhw9
+
+*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
+MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
+code that did what this item states, had no product caller and is deleted.
+LLR-76bhw9 states the behaviour now: `SeqNotEpoch` is now the receive path's
+refusal of a number that is not the record's epoch plus one (LLR-76bhw9);
+adoption at the chain's epoch is LLR-8528ud's match. The text above is kept as
+it stood.
 
 *Added 2026-10-05 by review round 1 (finding-1), on the owner's amendment of
 REQ-txvtm9 that day.* `SeqNotEpoch` is a variant of its own, not `StaleSeq`.
@@ -171,6 +180,7 @@ DevicePublicKey of the resulting record (LLR-e2b7gv). The comparison is
 `OrgPublicKey::ensure_distinct_from` over the resulting record's members, and
 for an update the record's current key as well.
 satisfies: REQ-ech45n, REQ-stx9v3
+superseded-by: LLR-9qavm7
 
 *Amended 2026-10-06 (owner ruling on rotation, change
 `worktree-org-node-org-key-pair`).* This constrained `create_organisation`
@@ -203,6 +213,13 @@ record keeps only the current key. The key is the Organisation's, one value
 per epoch shared by every Member; a fresh one is drawn only when a
 provisional update is built (LLR-e2b7gv, LLR-s6qnht).
 satisfies: REQ-ech45n, REQ-ju6vn2, REQ-jy6ybw
+superseded-by: LLR-qw8tyu
+
+*Superseded 2026-10-21 (change `worktree-org-io-domain-api`, design gap G2
+of its plan):* `commit_genesis`, the provisional updates and the commits
+that replaced a record's key are removed; the key's custody in the
+provisional organisations, the provisional founding and the record, its
+replacement by adoption alone and its draw rule are LLR-qw8tyu's.
 
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 This said the key is held only in the creating node's record and that every

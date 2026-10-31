@@ -1,132 +1,143 @@
 #![cfg(all(feature = "app", feature = "test-support"))]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-//! The chain-operations boundary (SDD-ueh4tm: since 2026-10-08 the state
-//! value each chain-judging operation takes, and the test-side
-//! `ChainSlots`), and persona and Organisation genesis (SDD-89es4z). The
-//! endpoint lifecycle's tests moved to org-io with the endpoint (S4, task
-//! T10).
+//! The chain-operations boundary (SDD-ueh4tm: the state value each
+//! chain-judging operation takes, and the test-side `ChainSlots`), and
+//! Persona and Organisation genesis (SDD-89es4z). The endpoint lifecycle's
+//! tests are org-io's, with the endpoint.
 //!
-//! Relocated from the `#[cfg(test)]` module in `org-node/src/service.rs` so
-//! the `verifies:` annotations sit under `test_paths`. The seam cases and the
-//! endpoint-lifecycle cases are new.
-//!
-//! *Adapted 2026-10-08 (S4, task T3):* the service writes no file and keeps
-//! no device seed. "The disk" is the `StoreWrite` an operation returns, and
-//! the endpoint is bound from the `DeviceSecret` `create_persona` returned
-//! (the transitional `bind_endpoint`). Annotations unchanged.
+//! The service writes no file and keeps no device seed: "the disk" is the
+//! `StoreWrite` an operation returns. The two services over one set of slots
+//! found through `support::found_on_chain`.
 
 use org_node::chain::OrgState;
 use org_node::ids::OrgId;
-use org_node::store::{PersonaStatus, PersonaStore, StoreWrite};
-use org_node::DeviceSecret;
-use zeroize::Zeroizing;
 use org_node::test_fixtures::ChainSlots;
-use org_node::OrgService;
 use org_node::{Epoch, OrgPublicKey, RootHash};
 use rand::rngs::OsRng;
 
 mod support;
-use support::{h, nm, sn};
+use support::{found_on_chain, handle, parsed_name, open_store, record_of, parsed_surname, Node};
 
-/// A valid Organisation public key: `OrgPublicKey` is built only through
-/// `parse` (REQ-8jb4ny). Was the bytes `[2u8; 32]` before the merge of
-/// 2026-10-05.
-fn org_key() -> OrgPublicKey {
-    org_node::OrgPrivateKey::from([2u8; 32]).x25519_keypair().org_public_key().unwrap()
-}
+use support::sweep;
 
-/// A service with no Persona.
-fn service() -> OrgService {
-    OrgService::new(vec![]).unwrap()
-}
-
-/// The seed bytes of `secret`, as org-io's keychain would hold them.
-fn bytes_of(secret: &DeviceSecret) -> Vec<u8> {
-    let mut bytes = vec![];
-    secret
-        .lend_to_keychain(|seed| {
-            bytes.extend_from_slice(seed);
-            Ok::<(), std::convert::Infallible>(())
-        })
-        .unwrap();
-    bytes
-}
-
-/// A secret re-made from keychain bytes.
-fn secret_from(bytes: &[u8]) -> DeviceSecret {
-    DeviceSecret::from_keychain_bytes(Zeroizing::new(bytes.to_vec())).unwrap()
-}
-
-/// What `write` sealed, opened with the secret of `bytes`.
-fn reload(write: &StoreWrite, bytes: &[u8]) -> PersonaStore {
-    PersonaStore::unseal(&write.sealed, write.device_key, secret_from(bytes)).unwrap()
-}
-
-// verifies: REQ-hzm4kt, LLR-tev8h8, LLR-s7yu4k, LLR-v82xds
+// A new Persona: `propose_founding` and
+// `propose_member` each draw a member seed and a Device seed apart, keep
+// the member seed and the Device public key and no Device seed, return the
+// Device secret by value, and record the Persona Proposed with no member
+// identifier (the founding's with no Organisation, the provisional
+// Member's bound to its Invite's), its identifier the first sixteen bytes
+// of its member key in lowercase hex; the store survives a reload from the
+// write it returned.
+// verifies: REQ-hzm4kt, LLR-d4gpxm, LLR-6acxu9, LLR-s7yu4k, LLR-t2adzg
 #[test]
 fn a_new_persona_is_proposed_with_an_id_derived_from_its_member_key() {
-    let mut svc = service();
-    let (pid, secret, write) = svc.create_persona(&mut OsRng, h("alice"), nm("Alice"), sn("Smith")).unwrap();
+    use org_node::store::PersonaStatus;
+    use org_node::OrgService;
 
-    assert!(!pid.as_str().is_empty());
-    assert_eq!(svc.list_personas().len(), 1);
-    let rec = &svc.list_personas()[0];
-    assert_eq!(rec.status, PersonaStatus::Proposed);
-    assert_eq!(rec.org_id, None);
-    assert_eq!(rec.member_id, None);
+    let hex16 = |bytes: [u8; 32]| bytes.iter().take(16).map(|byte| format!("{byte:02x}")).collect::<String>();
 
-    // The identifier is derived from the member key, so it is reproducible
-    // from the stored seed rather than drawn independently. On this branch
-    // the member key is the X25519 public key of the member seed (merged
-    // 2026-10-05; master derived it from an ed25519 verifying key).
-    let member_kp = rec.member_seed_for_test().x25519_keypair();
-    let expected: String = member_kp
-        .public_bytes()
-        .iter()
-        .take(16)
-        .map(|b| format!("{b:02x}"))
-        .collect();
-    assert_eq!(pid.as_str(), expected);
+    let mut svc = OrgService::new(vec![]).unwrap();
+    let (device, secret, change) = svc.propose_founding(&mut OsRng, "Alice", "Smith", "alice", "Acme".to_owned()).unwrap();
+    let persona = &support::held_store(&svc, &device).persona;
+    assert_eq!(
+        (persona.status, persona.org_id, persona.member_id),
+        (PersonaStatus::Proposed, None, None),
+        "LLR-t2adzg: a founding's Persona is unbound"
+    );
+    assert_eq!(persona.persona_id.as_str(), hex16(persona.member_seed_for_test().x25519_keypair().public_bytes()));
+    assert_eq!(persona.device_key, device, "the Device public key is kept");
+    assert_eq!(secret.device_key(), device);
+    assert_ne!(
+        persona.member_seed_for_test().expose_secret().as_slice(),
+        support::seed_bytes(&secret).as_slice(),
+        "the two seeds are drawn apart"
+    );
+    let founder = sweep::Side::new(svc, device, secret, change);
+    let reloaded = founder.reopened_service();
+    assert_eq!(support::held_store(&reloaded, &device).persona.handle.as_ref().map(|handle| handle.as_str()), Some("alice"));
 
-    // The member and device keypairs are independent of each other.
-    assert_ne!(rec.member_seed_for_test().expose_secret().as_slice(), bytes_of(&secret).as_slice());
-
-    // It survives a reload from what it wrote.
-    let reopened = reload(&write, &bytes_of(&secret));
-    let svc2 = OrgService::new(vec![reopened]).unwrap();
-    assert_eq!(svc2.list_personas().len(), 1);
-    assert_eq!(svc2.list_personas()[0].handle.as_str(), "alice");
+    let (mut inviter, _) = sweep::founded();
+    let invite = sweep::invite(&mut inviter, "Bob");
+    let bob = sweep::propose_member(&invite, "Bob", &["bob"]);
+    let persona = &support::held_store(&bob.svc, &bob.device).persona;
+    assert_eq!((persona.status, persona.member_id, persona.handle.is_none()), (PersonaStatus::Proposed, None, true));
+    assert_eq!(persona.org_id, Some(invite.org_id), "LLR-t2adzg: a provisional Member's Persona is bound to its Invite's Organisation");
+    assert_eq!(persona.persona_id.as_str(), hex16(persona.member_seed_for_test().x25519_keypair().public_bytes()));
+    assert_ne!(persona.member_seed_for_test().expose_secret().as_slice(), support::seed_bytes(&bob.secret()).as_slice());
+    let reloaded = bob.reopened_service();
+    let reloaded_persona = &support::held_store(&reloaded, &bob.device).persona;
+    assert_eq!(reloaded_persona.persona_id.as_str(), hex16(reloaded_persona.member_seed_for_test().x25519_keypair().public_bytes()));
 }
 
-// Rewritten 2026-10-06 (T9 of docs/plans/2026-10-05-chain-authority.md):
-// creation no longer writes the chain, records or activates anything; it
-// keeps a genesis provisional update. The record, the activation and
-// LLR-q3aj8z moved to `commit_paths`'s
-// `commit_genesis_creates_the_record_once_the_chain_carries_the_root`.
-// verifies: LLR-68yd3j, REQ-xs4ab8
+// LLR-t2adzg: a founding's Persona is recorded Proposed with no Organisation and no
+// member id; recording its proxy binds it and gives it no member id; a
+// provisional Member's Persona is recorded Proposed, bound to its Invite's
+// Organisation, with no member id; only the first adoption in each store
+// sets the member id, to the one the adopted record gives that Persona's
+// Device, and recording an admission, proposing and a later adoption
+// change it in no store.
+// verifies: LLR-t2adzg
 #[test]
-fn creating_an_organisation_writes_only_a_genesis_update() {
-    let chain = ChainSlots::new();
-    let chain_view = chain.clone();
-    let mut svc = service();
+fn only_the_first_adoption_sets_a_personas_member_id() {
+    use org_node::store::PersonaStatus;
+    use org_node::OrgService;
 
-    let (pid, secret, _) = svc.create_persona(&mut OsRng, h("admin"), nm("Admin"), sn("User")).unwrap();
-    let (update, write) = svc.create_organisation(&mut OsRng, &pid).unwrap();
+    // The founding: Proposed, unbound, no member id.
+    let mut svc = OrgService::new(vec![]).unwrap();
+    let (device, secret, change) = svc.propose_founding(&mut OsRng, "Ada", "Lovelace", "ada", "Acme".to_owned()).unwrap();
+    let persona = &support::held_store(&svc, &device).persona;
+    assert_eq!((persona.status, persona.org_id, persona.member_id), (PersonaStatus::Proposed, None, None));
+    let mut founder = sweep::Side::new(svc, device, secret, change);
 
-    assert!(svc.list_orgs().is_empty(), "no record");
-    assert_eq!(svc.list_personas()[0].status, PersonaStatus::Proposed);
-    assert_eq!(svc.list_personas()[0].member_id, None);
-    // No slot: the id the mock's genesis would derive from this root is empty.
-    let mut would_be = [0u8; 20];
-    would_be.copy_from_slice(&update.resulting_root.as_bytes()[..20]);
-    assert!(chain_view.get(&OrgId::new(would_be)).is_none(), "the chain is unchanged");
+    // Its proxy recorded: bound to the Organisation, still no member id.
+    let change =
+        founder.node.svc.record_founding_proxy(&mut OsRng, &founder.device, support::the_org(), support::the_proxy()).unwrap();
+    founder.keep(change);
+    let persona = &support::held_store(&founder.svc, &founder.device).persona;
+    assert_eq!((persona.status, persona.org_id, persona.member_id), (PersonaStatus::Proposed, Some(support::the_org()), None));
 
-    // "…and the store is written before it returns." Read back from the
-    // write it returned, so an update that only ever existed in memory fails
-    // here.
-    let reloaded = reload(&write, &bytes_of(&secret));
-    assert!(reloaded.data().orgs.is_empty(), "no record reaches the disk");
-    assert_eq!(reloaded.data().provisional_updates.len(), 1, "the genesis update must reach the disk");
+    // The founding's adoption, the first in A's store, sets the founder's member id.
+    let founder_id = support::held_store(&founder.svc, &founder.device).founding.as_ref().unwrap().members[0].id;
+    let chain = sweep::founding_state(&founder);
+    sweep::adopt(&mut founder, chain);
+    assert_eq!(support::held_store(&founder.svc, &founder.device).persona.member_id, Some(founder_id), "the first adoption sets it");
+
+    // A provisional Member: Proposed, bound to the Invite's Organisation, no member id.
+    let invite = sweep::invite(&mut founder, "Bob");
+    let mut bob = sweep::propose_member(&invite, "Bob", &["bob"]);
+    let persona = &support::held_store(&bob.svc, &bob.device).persona;
+    assert_eq!((persona.status, persona.org_id, persona.member_id), (PersonaStatus::Proposed, Some(invite.org_id), None));
+
+    // Recording Bob's admission and proposing the next epoch set no member id.
+    sweep::request_admission(&mut founder, &bob);
+    let change = founder.node.svc.record_admission(&mut OsRng, &founder.device, invite.invite_id, None).unwrap();
+    founder.keep(change);
+    let next = sweep::propose_next(&mut founder);
+    assert_eq!(
+        support::held_store(&founder.svc, &founder.device).persona.member_id,
+        Some(founder_id),
+        "recording and proposing change none"
+    );
+    assert_eq!(support::held_store(&bob.svc, &bob.device).persona.member_id, None, "no adoption in Bob's store yet");
+
+    // A's second adoption keeps A's member id; Bob's first adoption sets his.
+    sweep::adopt(&mut founder, next);
+    assert_eq!(support::held_store(&founder.svc, &founder.device).persona.member_id, Some(founder_id), "a later adoption leaves it");
+    let body = sweep::message_for(&founder, &bob.device);
+    sweep::receive_and_adopt(&mut bob, founder.device, &body, next);
+    let admitted = sweep::record_of(&bob)
+        .trie_members
+        .iter()
+        .find(|member| member.device_keys.contains(&bob.device))
+        .expect("Bob's Device is listed")
+        .id;
+    assert_eq!(support::held_store(&bob.svc, &bob.device).persona.member_id, Some(admitted), "Bob's first adoption sets his");
+}
+
+/// A valid Organisation public key: `OrgPublicKey` is built only through
+/// `parse` (REQ-8jb4ny).
+fn org_key() -> OrgPublicKey {
+    org_node::OrgPrivateKey::from([2u8; 32]).x25519_keypair().org_public_key().unwrap()
 }
 
 // verifies: LLR-hg3xzf
@@ -148,9 +159,8 @@ fn clones_of_the_mock_chain_share_one_state() {
 
 // The mock refuses an update whose expected epoch is not the slot's current
 // one, and leaves the slot as it was, as the contract's compare-and-swap does.
-// Disabling the check was green: every story writes the mock chain at the
+// No story reaches this check: every story writes the mock chain at the
 // right epoch.
-// Added 2026-10-05 by review round 8.
 // verifies: LLR-ryzr8m
 #[test]
 fn the_mock_chain_refuses_an_update_at_the_wrong_epoch() {
@@ -161,7 +171,7 @@ fn the_mock_chain_refuses_an_update_at_the_wrong_epoch() {
     for wrong in [Epoch::new(2), Epoch::new(4)] {
         let err = chain.apply_update(org, RootHash::new([9u8; 32]), org_key(), wrong).unwrap_err();
         assert!(
-            matches!(&err, org_node::OrgNodeError::Chain(m) if m.contains("epoch mismatch")),
+            matches!(&err, org_node::OrgNodeError::Chain(message) if message.contains("epoch mismatch")),
             "expected epoch {wrong:?} must be refused, got {err:?}"
         );
         assert_eq!(chain.get(&org).unwrap(), at_three, "a refused update leaves the slot");
@@ -170,27 +180,22 @@ fn the_mock_chain_refuses_an_update_at_the_wrong_epoch() {
     assert_eq!(chain.get(&org).unwrap().epoch, Epoch::new(4), "the right epoch is accepted and advances");
 }
 
-// *Rewritten 2026-10-08 (ruling B, change worktree-org-io-create).* Was
-// `the_seam_is_a_trait_object_a_substitute_can_stand_in_for` (LLR-65py3d,
-// whose annotation moved to `absences.rs`'s
-// `org_node_names_no_chain_library_and_reads_no_chain`): there is no seam.
-// Two services over one `ChainSlots`: one commits its genesis against the
-// state it is given, and the other's view of the same slots holds that state.
+// Two services over one `ChainSlots`: one founds an Organisation and writes
+// its slot (`support::found_on_chain`: `propose_founding`, `record_founding_proxy`
+// and `verify`), and the other's view of the same slots holds that state.
 // verifies: LLR-hg3xzf
 #[test]
 fn two_services_over_one_set_of_chain_slots_see_the_same_state() {
     let chain = ChainSlots::new();
     let other_view = chain.clone();
-    let mut svc = service();
-    let other = service();
-    let (pid, _, _) = svc.create_persona(&mut OsRng, h("s"), nm("S"), sn("T")).unwrap();
-    let (update, _) = svc.create_organisation(&mut OsRng, &pid).unwrap();
-    let org = chain.apply_genesis(update.resulting_root, update.org_pub_key);
-    let (committed, _) =
-        svc.commit_genesis(&mut OsRng, &pid, org, org_node::ChainAccount::new([1; 32]), chain.get(&org)).unwrap();
+    let mut node = Node::new(open_store("lifecycle-two", "a"));
+    let other = Node::new(open_store("lifecycle-two", "b"));
+    let persona_id = node.propose_and_keep_founding(&mut OsRng, handle("s"), parsed_name("S"), parsed_surname("T")).unwrap();
+    let org = found_on_chain(&mut node, &chain, &persona_id);
+    let record = record_of(&node, org);
     assert!(other.list_orgs().is_empty(), "the other service holds no record");
     let seen = other_view.get(&org).expect("the other view sees the slot");
-    assert_eq!((seen.root_hash, seen.epoch), (committed.root, committed.epoch));
+    assert_eq!((seen.root_hash, seen.epoch), (record.root_hash, record.epoch));
 }
 
 // Normal: the stand-in for the genesis write makes a slot at epoch one and
@@ -207,9 +212,3 @@ fn the_mock_genesis_makes_a_slot_at_epoch_one() {
     assert_ne!(first, second);
     assert_eq!(chain.get(&first).unwrap().epoch, Epoch::new(1));
 }
-
-// *Moved 2026-10-13 (S4, task T10 of docs/plans/2026-10-06-org-io-transport.md):*
-// the three endpoint-lifecycle tests that stood here moved to org-io
-// (`org-io/tests/endpoints.rs`) with the endpoint, rewritten onto org-io's
-// endpoints, one per Persona, each bound from its keychain item.
-

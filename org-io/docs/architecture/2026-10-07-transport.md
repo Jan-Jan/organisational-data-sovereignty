@@ -124,6 +124,13 @@ LLR-d2pzzk:* an endpoint that has started closing (iroh's
 (`OrgEndpoint::is_closed`), not only one fully closed, so a closing
 endpoint is not handed out again.
 
+*Note 2026-10-15 (change `worktree-org-io-domain-api`), LLR-d2pzzk and
+LLR-z35vbh:* `CommitOutcome` and `create_persona` are gone. The sending
+Persona is now the one whose store the message came from (LLR-hx5c2y), and
+the Persona created by `propose_founding_organisation` or `propose_member`
+is bound and accepted on while the node receives (LLR-jvx6j9). The rest of
+both items is unchanged.
+
 **LLR-z35vbh**: `OrgIo::start_receiving` binds an endpoint for every Persona
 the node holds and accepts on every one of them: each bound endpoint has one
 running accept task that forwards each received body to the receive step's
@@ -361,7 +368,10 @@ the keychain item (LLR-d5y7ks), and the item's key is the Device key.
 taken from the key authenticated by the QUIC handshake, **never from the Wire
 message body**, so the sender identity a caller cross-checks cannot be chosen
 by the sender.
-satisfies: REQ-bupq5y, REQ-fnsjb6
+satisfies: REQ-bupq5y, REQ-cj9u3y
+
+*Traces amended 2026-10-20 (change worktree-org-io-domain-api): REQ-fnsjb6 →
+REQ-cj9u3y.*
 
 *Moved 2026-10-13 (S4, task T10):* satisfied org-node's custody and sender
 requirements. Since S3a's member-sender rule the key is compared with the
@@ -393,6 +403,12 @@ transport-owned `PeerAddr` (`OrgEndpoint::send_body_at`; the parse is
 SDD-wr8m5n's), and asks an endpoint whether it has a relay home
 (`OrgEndpoint::has_relay_home`), not for its iroh address.
 satisfies: REQ-xuzw32
+superseded-by: LLR-4k43dm
+
+*Superseded 2026-10-21 (change `worktree-org-io-domain-api`, design gap G2
+of its plan):* `PeerAddr`, its parse and the dial at it are removed; every
+send dials a Device key at the addresses org-node keeps for it, and iroh
+stays confined to the transport module (LLR-4k43dm).
 
 *Added 2026-10-15 (S4, ARCHITECTURE conformance review finding-1; owner
 ruling of that day):* iroh is one adapter's dependency, so its failure modes
@@ -503,6 +519,14 @@ Networked-style bind against an in-process relay.
 the framing and the stream read cap (org-node's decomposition), whose
 `satisfies:` lines are re-parented to REQ-szt6ea when they move.
 traces: REQ-qkrj55, REQ-fnsjb6, REQ-8e57wm, REQ-szt6ea, REQ-ur7z4a
+superseded-by: SDD-2fc2cq
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; owner rulings
+R2, R6, R7):* the receive step no longer reads the chain or commits on
+receipt, and two of its traced requirements are superseded (REQ-fnsjb6 by
+REQ-cj9u3y, REQ-ur7z4a by REQ-xd5a2d). SDD-2fc2cq
+(`2026-10-16-domain-api.md`) is the receive step now;
+LLR-szhe7j and the framing items below stay in force beside it.
 
 **LLR-9arvqj**: `OrgIo::next_received(&self) -> Result<ReceiveOutcome,
 ReceiveError>` waits for the next body on the accept channel and reads no
@@ -512,6 +536,11 @@ it again only around `commit_checked` and the store write that follows; every
 other `OrgIo` method that takes the lock completes while `next_received` is
 waiting.
 satisfies: REQ-qkrj55
+superseded-by: LLR-eeh4pq
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`):* there is no
+chain read or `commit_checked` on receipt any more (REQ-cj9u3y); LLR-eeh4pq
+states the lock rule for the check, the store write and the answer's send.
 
 *Note 2026-10-13 (S4, task T11):* as landed, `OrgIo { node:
 tokio::sync::Mutex<OrgService>, .. }`, and every method takes `&self`;
@@ -534,6 +563,11 @@ only when it accepts does it read the chain once, for
 step's typed error and reads no chain after a refusal of `check_received`.
 The connection's authenticated key is not passed to org-node.
 satisfies: REQ-fnsjb6
+superseded-by: LLR-kz9hj4
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; owner rulings
+R2, R3):* the receive step reads no chain and commits nothing; LLR-kz9hj4
+hands each body to org-node's check alone and writes what it returns.
 
 *Amended 2026-10-07 before first merge (reconciled with S3a, `60c7d58`):*
 the last sentence is reversed. `next_received` calls
@@ -594,6 +628,12 @@ can be acted on (`Received::Acknowledged`); its `OrgInformation` or
 (`SenderNotListed`) before any chain read or store write, and bytes that do
 not decode are refused as `MalformedMessage`.
 satisfies: REQ-ur7z4a
+superseded-by: LLR-j467e9
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; owner rulings
+R6, R7; RC-6m89tr):* an unlisted Device may now also send an admission
+request for an invite this store holds as outstanding; LLR-j467e9 states
+the accept path for the new rule, with no chain read on it.
 
 *Note 2026-10-13 (S4, task T11a):* the revocation the tests send from the
 revoked Device names the receiving Member's own Device (a notice carries
@@ -615,6 +655,12 @@ written, `Verdict::Refused` (`0x01`) for any refusal or failure, and
 finishes the stream; when the responder is dropped it writes nothing. No
 other byte is written on an inbound connection by any code in `org-io/src`.
 satisfies: REQ-ur7z4a
+superseded-by: LLR-hhgdk7
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; owner ruling
+R6):* the verdict has four values, `0x02` already received and `0x03`
+refused because the invite was used by another Device joining `0x00` and
+`0x01` (LLR-hhgdk7).
 
 *Ruled 2026-10-08 (owner, plan §16.4 point 1):* one verdict byte,
 accepted or refused, on ack streams, as stated; the item is no longer
@@ -768,6 +814,17 @@ for the acknowledgement delivery (S3b-io). When the removal fails the
 method reports it and not success, and reloads the Persona from its file as
 LLR-murjr6 does.
 satisfies: REQ-g9cu2c
+superseded-by: LLR-vj2nkb
+
+*Superseded 2026-10-20 (change `worktree-org-io-domain-api`; owner ruling
+Q4' of 2026-10-16 and the rulings of 2026-10-20):* on this node's removal
+org-node no longer returns `StoreChange::Forgotten`; it returns a sealed
+store keeping only the acknowledgements, which org-io writes, keeping the
+file (LLR-zcw3xv). The store file and the keychain item are deleted together
+by LLR-vj2nkb, as soon as no acknowledgement is left or 7 days after the
+verification, and at start when either already holds — which settles the
+2026-10-08 ruling below (the item kept until the acknowledgement delivery
+ends), with 7 days in place of the retry limit.
 
 *Added 2026-10-07 (reconciled with S3a, `60c7d58`):* with one store per
 Persona, S3a's `forget_organisation` empties the store it is applied to, so
@@ -857,6 +914,12 @@ writes the keychain item before the store file, and when the keychain write
 fails it drops the new Persona's store from the service, writes no file and
 returns the refusal.
 satisfies: REQ-rz93uz
+superseded-by: LLR-kna4zj
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; owner ruling
+R1):* `create_persona` is gone; a Persona is created by the proposal of a
+founding or a Member, with the same keychain-before-file order
+(LLR-kna4zj), and the Person by `propose_person` (LLR-3cysjk).
 
 *Note 2026-10-13 (S4, task T9):* as landed, `OrgIo::create_persona(rng,
 handle, name, surname) -> Result<PersonaId, CreateError>` replaces S2's
@@ -920,6 +983,14 @@ store.
 and requirements (producing an Invite, producing a reply, refusing a reply
 that is not outstanding, settling), with their low-level items.
 traces: REQ-a2a6rm, REQ-pnr6kh, REQ-prjja8, REQ-tcutr6, REQ-65xqp8
+superseded-by: SDD-6gb59p
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; owner rulings
+R1–R7):* the Invite reply Blob and its import and admission are replaced by
+the admission request over iroh, the admission by a provisional change, and
+four of the traced requirements are superseded. SDD-6gb59p holds the Invite
+operations (issue, read, cancel); the admission request is SDD-dhh3pw's, the
+provisional changes SDD-frsa73's.
 
 *Amended 2026-10-14 (S4, task T13):* the three moved requirements joined
 `traces:` when they arrived from the app with their low-level items, which
@@ -930,6 +1001,7 @@ Result<String, ExchangeError>` calls `build_invite`, writes the returned
 `StoreWrite`, and only then returns the Invite's Blob; a failed write returns
 the failure and no Blob.
 satisfies: REQ-pnr6kh, REQ-a2a6rm
+superseded-by: LLR-95e3jx
 
 **LLR-9cb443**: `OrgIo::produce_reply(invite_blob, persona_id, confirmed:
 bool) -> Result<String, ExchangeError>` refuses with
@@ -937,6 +1009,7 @@ bool) -> Result<String, ExchangeError>` refuses with
 `confirmed`; otherwise parses the Invite, calls `build_reply`, writes the
 returned `StoreWrite`, and only then returns the reply's Blob.
 satisfies: REQ-a2a6rm
+superseded-by: LLR-adgk9z
 
 **LLR-y4dg74**: `OrgIo::admit_reply(org_id, reply_blob, peer_addr) ->
 Result<AdmitReport, ExchangeError>` runs, stopping at the first refusal:
@@ -948,6 +1021,16 @@ state read back, writing its `StoreWrite`; the send of every
 sends reported, and `AdmitReport { member_id, sends }` carries the per-Device
 outcomes; a failure before the chain write submits nothing.
 satisfies: REQ-a2a6rm
+superseded-by: LLR-un47j8
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`), LLR-h9qf3s,
+LLR-9cb443 and LLR-y4dg74:* `issue_invite` takes no random source and no
+typed Organisation name, and the Invite carries the issuing Device's
+addresses (LLR-95e3jx); the reply Blob is replaced by the admission request
+sent over iroh (LLR-adgk9z); and admitting is a provisional change
+(LLR-un47j8) that the app proposes, writes, verifies and sends in separate
+steps (SDD-mk39e5, SDD-t4z8sz, SDD-2bzgtp), the Invite settled by org-node
+on adoption.
 
 *As landed 2026-10-14 (S4, task T13), LLR-h9qf3s, LLR-9cb443 and
 LLR-y4dg74 (clarification):* each operation takes the caller's random source
@@ -991,6 +1074,12 @@ which it adds to the outstanding identifiers before returning. For an
 Organisation no Persona of this device is bound to it refuses, issuing no
 Blob and adding no identifier.
 satisfies: REQ-prjja8
+superseded-by: LLR-95e3jx
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; REQ-ek652a
+supersedes REQ-prjja8):* the Invite carries the stored Organisation name,
+the issuing Device's key with its endpoint addresses, and an identifier from
+the handle's own random source (LLR-95e3jx, LLR-v9dkrv).
 
 Normal: `an_invite_carries_what_the_inviter_typed_and_a_fresh_outstanding_id`.
 Abnormal: `no_invite_is_issued_for_an_organisation_no_persona_here_belongs_to`.
@@ -1014,6 +1103,12 @@ file that is not such a list is refused when opened, naming the file; that
 includes the earlier format, a list of bare invite identifiers, which is not
 migrated (a PoC device deletes the file and issues its Invites again).
 satisfies: REQ-65xqp8, REQ-prjja8
+superseded-by: LLR-95e3jx
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`):* both its
+requirements are superseded; the outstanding pairs in the sealed store, and
+their lifetime to org-node's settle or `cancel_invite`, are LLR-95e3jx's.
+LLR-t4v69b (no `outstanding_invites.json`) stays in force.
 
 *Amended 2026-10-06 (independent review round 2, finding-1).* The file held
 bare invite identifiers, so an identifier was outstanding for every
@@ -1052,6 +1147,13 @@ the Invite's Organisation identifier and invite identifier, and before
 returning declares to org-node, through `expect_admission(org_id)`, the
 first admission to that Organisation it expects.
 satisfies: REQ-tcutr6
+superseded-by: LLR-adgk9z
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; REQ-sjqxg2
+supersedes REQ-tcutr6):* no reply Blob is produced; the provisional Member
+and its expected first admission are made by `propose_member`
+(LLR-6d6wfw), and its admission request sent by `request_admission`
+(LLR-adgk9z). The invitee's confirmation is the app's.
 
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 The declaration was `expect_admission(org_id, invite_id)`. REQ-tcutr6 as
@@ -1084,6 +1186,12 @@ the chain writer. The webview offers, as the Personas to reply as, only those
 `org_id` is null, in the order given; the founding panel offers no choice, and
 founds with the Persona it has just created.
 satisfies: derived
+superseded-by: LLR-kna4zj
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; owner ruling
+R1):* no operation takes an existing Persona to found with or join as;
+each proposal creates a new Persona (LLR-kna4zj), so a bound Persona can
+never be chosen.
 
 Normal: `a_bound_persona_cannot_reply_and_an_unbound_one_on_the_same_device_can`.
 Abnormal: `no_reply_is_produced_and_nothing_declared_for_a_bound_persona`,
@@ -1123,6 +1231,12 @@ org-node no Organisation secret, key or invite identifier, and settles that
 pair once the admission has committed — even when the send that follows
 fails; when the submission fails the pair stays outstanding.
 satisfies: REQ-65xqp8
+superseded-by: LLR-zkybw7
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; REQ-xd5a2d
+supersedes REQ-65xqp8):* no reply is imported; an admission request arrives
+over iroh and org-node's check judges it against the outstanding pair
+(LLR-zkybw7).
 
 Normal: `a_reply_is_acted_on_once_and_only_if_its_invite_is_outstanding`.
 Abnormal: the same test's reply to an Invite this device never issued and its
@@ -1198,6 +1312,11 @@ unchanged), org-node holds no provisional update for the Organisation,
 nothing is written to the chain (the Organisation's on-chain epoch is
 unchanged), and no body is sent to any Device.
 satisfies: derived
+superseded-by: LLR-6kb33y
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`):* there is no
+submission path to stop; a refused revocation is a provisional change not
+recorded, with nothing written, written to the chain or sent (LLR-6kb33y).
 
 Normal: the revocation in
 `each_command_sends_once_to_one_device_and_the_kind_follows_the_record`
@@ -1229,6 +1348,12 @@ refusal for a Member id the record does not hold is org-node's
 recipient. Code: `org-io/src/send.rs`. Moved beside it: org-node's loopback
 dialling items.
 traces: REQ-6skn67, REQ-8trkps
+superseded-by: SDD-2bzgtp
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; REQ-nactq6
+supersedes REQ-6skn67):* there is no committed update to send; SDD-2bzgtp
+is the send path for the adopted current epoch, the admission and
+organisation requests and the answers, reading the verdict back.
 
 *Narrowed 2026-10-15 (S4, ARCHITECTURE conformance review finding-5; owner
 ruling of that day):* it read "sending, and the peer address", with
@@ -1252,6 +1377,7 @@ returns `SendReport { per_device: Vec<(DevicePublicKey, Result<(),
 SendError>)> }` in `outcome.outgoing`'s order; it ignores `peer_addr`, writes
 nothing, and never undoes the commit.
 satisfies: REQ-6skn67
+superseded-by: LLR-pxqdy4
 
 **LLR-r9sh6k**: in Loopback mode `send_committed` refuses with
 `SendError::NoLoopbackAddress`, sending nothing, when `peer_addr` is `None`,
@@ -1260,6 +1386,14 @@ address's endpoint id is the Device key of no recipient; otherwise it sends
 only to that recipient, at that address, and reports every other recipient
 as `SendError::NotAttemptedInLoopback`.
 satisfies: REQ-8trkps
+superseded-by: LLR-34tfm8
+
+*Superseded 2026-10-15 (change `worktree-org-io-domain-api`), LLR-znhmh2
+and LLR-r9sh6k:* `send_committed` and its `CommitOutcome` are gone. The
+fan-out is `send_organisation` of the adopted current epoch (LLR-pxqdy4);
+the Loopback identity check is restated for every send of the send path
+(LLR-34tfm8), the admission request's at the Invite's addresses
+(LLR-qa4nrt).
 
 *As landed 2026-10-13 (S4, task T12), LLR-znhmh2 and LLR-r9sh6k
 (clarification):* `send_committed` is crate-private
@@ -1300,6 +1434,12 @@ go wherever the address points. That is PR-2dmjzj's
 defect, stated here and not endorsed. One of its cures (dial by key in both
 modes) would replace this requirement.
 satisfies: REQ-8trkps
+superseded-by: LLR-34tfm8
+
+*Superseded 2026-10-20 (change `worktree-org-io-domain-api`; owner answer A2
+of 2026-10-16):* no caller passes an address any more; each recipient is
+dialled at the addresses kept for its Device key, in Loopback mode only at
+one whose identity is that key, which LLR-34tfm8 states.
 
 *Amended 2026-10-13 (S4, task T12; narrowing):* `send_committed` dials the
 addressed recipient at the full address the caller passes, not by endpoint
@@ -1325,6 +1465,12 @@ sends nothing, when its caller passes no `EndpointAddr`, rather than attempting
 a peer it cannot name; in Loopback mode with an address it dials that full
 address (LLR-jn5jeh).
 satisfies: REQ-8trkps
+superseded-by: LLR-34tfm8
+
+*Superseded 2026-10-20 (change `worktree-org-io-domain-api`; owner answer A2
+of 2026-10-16):* the refusal when no address is held is now per recipient,
+over the addresses kept for its key (`SendError::NoLoopbackAddress`,
+LLR-34tfm8); no caller passes an address.
 
 *Amended 2026-10-13 (S4, task T12; clarification):* the send is
 `send_committed`, and its typed refusal is `SendError::NoLoopbackAddress`,
@@ -1344,6 +1490,16 @@ epoch (org-node's revocation-order report).
 transport-owned `PeerAddr`. Code: `org-io/src/transport/peer_addr.rs`
 (re-exported as `org_io::peer_addr`).
 traces: REQ-n82q47
+superseded-by: SDD-2bzgtp
+
+*Superseded 2026-10-20 (change `worktree-org-io-domain-api`, consistency
+pass; owner answer A2):* REQ-n82q47, the only requirement it traced, is
+retired, and so is LLR-2b2ghe: addresses now come with the Invite, the
+admission request and the organisation request and are kept per Device key,
+so no peer address is given as text. Where a send's addresses come from is
+now the send path's (SDD-2bzgtp), which dials the addresses org-node keeps
+for the recipient's key. (A design item cannot be retired, so it is
+superseded by the item that now holds what remains of its responsibility.)
 
 *Added 2026-10-15 (S4, ARCHITECTURE conformance review finding-5; owner
 ruling of that day):* split from SDD-v2bq89, which held the parse beside the
@@ -1357,6 +1513,7 @@ is, after at most one `0x`, the hexadecimal of a postcard-encoded
 `PeerAddrError::{Hex, Decode}` naming the field `peer_addr`; it never panics,
 for any input.
 satisfies: REQ-n82q47
+retired: 2026-10-20 — REQ-n82q47 is retired: no operation takes a peer address as text any more; each send goes to the addresses org-node keeps for the recipient's Device key (owner answer A2, change worktree-org-io-domain-api)
 
 *Re-traced 2026-10-15 (S4, ARCHITECTURE conformance review finding-5):* it
 was SDD-v2bq89's; it is SDD-wr8m5n's, the item the parse now is. The

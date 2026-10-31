@@ -11,8 +11,10 @@ use subxt_signer::sr25519::Keypair;
 
 use super::events::{observed_event, outcome_of, ObservedEvent};
 use super::multisig::build_dispatch_tx;
-use super::proxy::{create_pure_call, is_proxied};
+use super::proxy::{create_pure_call, free_balance_of, is_proxied};
+use super::signatory_set::decode_original_account;
 use super::{AccountId, DispatchOutcome, WriteError, WriteOps, WriteWindow, WRITE_MORTALITY_BLOCKS};
+use crate::types::OrgAdmin;
 
 /// Makes the chain advance while a submitted extrinsic waits for finality.
 #[allow(async_fn_in_trait)]
@@ -75,6 +77,27 @@ impl<S: BlockSink> SubxtWriteOps<S> {
             }
         }
     }
+
+    /// The raw value of the single-key storage map entry `pallet.entry` at
+    /// `key`, at the latest finalised block — the block every dispatch waits
+    /// for — or `None` when none is stored. Fetched raw, so an entry's
+    /// metadata default never stands in for an absent value (SDD-3b8zef's
+    /// shell; exercised only against a chain).
+    async fn fetch_finalised(&self, pallet: &str, entry: &str, key: &[u8]) -> Result<Option<Vec<u8>>, WriteError> {
+        let at_block =
+            self.api.at_current_block().await.map_err(|error| WriteError::Subxt(format!("at_current_block: {error}")))?;
+        let storage = at_block.storage();
+        let address = dynamic::storage::<Vec<Value>, Value>(pallet, entry);
+        let key_bytes = storage
+            .entry(address)
+            .and_then(|storage_entry| storage_entry.fetch_key(vec![Value::from_bytes(key)]))
+            .map_err(|error| WriteError::Subxt(format!("{pallet}.{entry} key: {error}")))?;
+        match storage.fetch_raw(key_bytes).await {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(subxt::error::StorageError::NoValueFound) => Ok(None),
+            Err(error) => Err(WriteError::Subxt(format!("{pallet}.{entry}: {error}"))),
+        }
+    }
 }
 
 impl<S: BlockSink> WriteOps for SubxtWriteOps<S> {
@@ -98,6 +121,20 @@ impl<S: BlockSink> WriteOps for SubxtWriteOps<S> {
         let dest = Value::variant("Id", Composite::unnamed(vec![Value::from_bytes(dest.0.as_slice())]));
         let tx = dynamic::tx("Balances", "transfer_keep_alive", vec![dest, Value::u128(amount)]);
         self.submit_and_watch(signatory, &tx, None).await.map(|_| ())
+    }
+
+    async fn free_balance(&self, account: AccountId) -> Result<u128, WriteError> {
+        let account_storage = self.fetch_finalised("System", "Account", account.0.as_slice()).await?;
+        free_balance_of(account_storage.as_deref())
+    }
+
+    async fn mapped_account(&self, admin: OrgAdmin) -> Result<Option<AccountId>, WriteError> {
+        match self.fetch_finalised("Revive", "OriginalAccount", admin.0.as_slice()).await? {
+            None => Ok(None),
+            Some(bytes) => decode_original_account(&bytes)
+                .map(Some)
+                .map_err(|_| WriteError::MalformedStorage("Revive.OriginalAccount")),
+        }
     }
 
     async fn dispatch(

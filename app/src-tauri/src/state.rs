@@ -24,8 +24,8 @@
 //!   `OrgIo::not_configured` (every chain read and write refused) and
 //!   `chain_endpoint` is `None`.
 //!
-//! `chain_endpoint` replaces the former `chain_ready: bool` + environment
-//! re-read. The verdict and the endpoint are now ONE `Option`, so there is no
+//! The verdict and the endpoint are ONE `Option`, `chain_endpoint`, never a
+//! flag beside an environment re-read, so there is no
 //! state in which the app reports "chain not configured" beside an endpoint it
 //! is not talking to (REQ-e4ah9h, REQ-bvx4nh).
 //!
@@ -35,6 +35,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::time::Duration;
 
 use org_io::transport::TransportMode;
 use org_io::{ChainSettings, OrgIo};
@@ -49,7 +50,7 @@ pub use crate::policy::{connection_status_from_state, ConnectionStatus};
 /// command handlers extract it via `State<'_, AppState>`.
 pub struct AppState {
     /// The app's one way in to org-node, the chain and the signatory key's
-    /// effects (REQ-m8sgjk: the app decides when, org-io submits).
+    /// effects (SDD-6pjvhc: the app decides when, org-io does the IO and the judging).
     /// Shared with the receiver loop, which holds its own clone (LLR-5wb4vd).
     pub org_io: Arc<OrgIo>,
     /// The directory the store was actually opened in. Recorded here so that
@@ -66,6 +67,11 @@ pub struct AppState {
     /// REQ-6hgm8r / REQ-3hfggn. `Arc` so a `StartGuard` can be moved into the
     /// spawned receiver task and release the slot when that task ends.
     pub receiver_started: Arc<AtomicBool>,
+    /// REQ-ergn9z: the verification interval `init` decided (LLR-2dpn52),
+    /// which `run`'s setup hands the periodic verification (SDD-tgu7dp).
+    /// Read once by `run`'s setup, which hands it to
+    /// `periodic::run_periodic_verification` (SDD-tgu7dp).
+    pub verification_interval: Duration,
 }
 
 /// `policy::TransportModeName` — this unit's serialisable name for the mode —
@@ -111,6 +117,18 @@ impl AppState {
         let transport_mode =
             policy::transport_mode_from(std::env::var("ODS_TRANSPORT").ok().as_deref());
 
+        // REQ-ergn9z: the interval is decided by `policy`; a refusal is the
+        // startup failure (LLR-rvrc25). Read as the OS holds it, so a value
+        // that is not UTF-8 is refused rather than taken as absent. The chain
+        // settings are built from the interval decided (LLR-hgrez9) by the
+        // same step, which takes what was read and reads nothing itself.
+        let StartupChain { verification_interval, chain } = startup_chain(
+            std::env::var("ODS_CHAIN_WS").ok().as_deref(),
+            std::env::var("ODS_CONTRACT_H160").ok().as_deref(),
+            std::env::var("ODS_COSIGNER_PUB").ok().as_deref(),
+            std::env::var_os("ODS_VERIFICATION_INTERVAL_SECS").as_deref(),
+        )?;
+
         let unconfigured =
             OrgIo::open(&data_dir, transport_mode_for(transport_mode)).map_err(|error| error.to_string())?;
 
@@ -119,7 +137,7 @@ impl AppState {
         // only when the connect succeeded, from the values handed to it, so
         // what is reported is what was built and cannot drift from it
         // (REQ-bvx4nh).
-        let connected = match chain_settings() {
+        let connected = match chain {
             // Connect on Tauri's PERSISTENT async runtime. This must NOT use a
             // temporary `tokio::runtime::Runtime` created here: the RPC client
             // spawns a background task for the WS connection, and if that task
@@ -151,7 +169,7 @@ impl AppState {
             }
         };
 
-        Self::assemble(org_io, data_dir, chain_endpoint, transport_mode)
+        Self::assemble(org_io, data_dir, chain_endpoint, transport_mode, verification_interval)
     }
 
     /// Wire the handle beside the directory its stores were opened in.
@@ -162,6 +180,7 @@ impl AppState {
         data_dir: PathBuf,
         chain_endpoint: Option<policy::ChainEndpoint>,
         transport_mode: policy::TransportModeName,
+        verification_interval: Duration,
     ) -> Result<Self, String> {
         Ok(Self {
             org_io: Arc::new(org_io),
@@ -169,6 +188,7 @@ impl AppState {
             chain_endpoint,
             transport_mode,
             receiver_started: Arc::new(AtomicBool::new(false)),
+            verification_interval,
         })
     }
 
@@ -192,34 +212,123 @@ impl AppState {
         org_io::test_support::MemoryKeychain::shared().install();
         let org_io =
             OrgIo::open(&data_dir, transport_mode_for(transport_mode)).map_err(|error| error.to_string())?;
-        Self::assemble(org_io, data_dir, chain_endpoint, transport_mode)
+        Self::assemble(org_io, data_dir, chain_endpoint, transport_mode, policy::DEFAULT_VERIFICATION_INTERVAL)
     }
 
     /// `for_test`, over org-io's substitute chain `chain` (the read, the
     /// write and the signatory-set reads), for the tests of the commands
-    /// that found an Organisation and run the invitation exchange.
+    /// that write, verify, invite and request over a chain.
     #[cfg(feature = "test-support")]
     pub fn for_test_over(
         data_dir: PathBuf,
         chain: &org_io::test_support::FakeChain,
         transport_mode: policy::TransportModeName,
     ) -> Result<Self, String> {
+        Self::for_test_over_every(data_dir, chain, transport_mode, policy::DEFAULT_VERIFICATION_INTERVAL)
+    }
+
+    /// `for_test_over`, with `verification_interval` as the configured
+    /// interval: the periodic run's, and, doubled, the handle's ahead limit,
+    /// as `init` gives it to `connect` (LLR-hgrez9).
+    #[cfg(feature = "test-support")]
+    pub fn for_test_over_every(
+        data_dir: PathBuf,
+        chain: &org_io::test_support::FakeChain,
+        transport_mode: policy::TransportModeName,
+        verification_interval: Duration,
+    ) -> Result<Self, String> {
         org_io::test_support::MemoryKeychain::shared().install();
+        // The limit is taken from the settings `init` would hand `connect`
+        // for this interval, built by the same function (LLR-hgrez9); the
+        // substitute chain needs no endpoint, so none is recorded.
+        let (settings, _endpoint) = chain_settings(
+            Some(SUBSTITUTE_CHAIN_WS),
+            Some(SUBSTITUTE_CONTRACT_H160),
+            None,
+            verification_interval,
+        )?;
         let org_io = OrgIo::open_for_test(&data_dir, transport_mode_for(transport_mode), chain)
-            .map_err(|error| error.to_string())?;
-        Self::assemble(org_io, data_dir, None, transport_mode)
+            .map_err(|error| error.to_string())?
+            .with_ahead_limit_for_test(settings.ahead_limit);
+        Self::assemble(org_io, data_dir, None, transport_mode, verification_interval)
+    }
+
+    /// The interval and the chain settings `init` decides from these values
+    /// of its four variables, as it read them (LLR-hgrez9): `init`'s own
+    /// step, without the environment.
+    #[cfg(feature = "test-support")]
+    pub fn startup_chain_for_test(
+        ws_url: Option<&str>,
+        contract_h160: Option<&str>,
+        co_signer: Option<&str>,
+        verification_interval: Option<&std::ffi::OsStr>,
+    ) -> Result<StartupChain, String> {
+        startup_chain(ws_url, contract_h160, co_signer, verification_interval)
+    }
+
+    /// The chain settings, and the endpoint they describe, that `init` hands
+    /// `OrgIo::connect` for these variables and this verification interval
+    /// (LLR-hgrez9): `init`'s own function, without the environment.
+    #[cfg(feature = "test-support")]
+    pub fn chain_settings_for_test(
+        ws_url: Option<&str>,
+        contract_h160: Option<&str>,
+        co_signer: Option<&str>,
+        verification_interval: Duration,
+    ) -> Result<(ChainSettings, policy::ChainEndpoint), String> {
+        chain_settings(ws_url, contract_h160, co_signer, verification_interval)
     }
 }
 
-/// The chain settings the app hands `OrgIo::connect`, read from
-/// `ODS_CHAIN_WS`, `ODS_CONTRACT_H160` and the optional `ODS_COSIGNER_PUB`,
-/// with the `ChainEndpoint` they describe (REQ-bvx4nh). Returns `Err` if
-/// either of the first two is absent or the address is malformed. The
-/// co-signer is parsed by org-io; the signing seed is read by org-io.
-fn chain_settings() -> Result<(ChainSettings, policy::ChainEndpoint), String> {
-    let ws_url = std::env::var("ODS_CHAIN_WS").map_err(|_| "ODS_CHAIN_WS not set")?;
-    let h160_hex =
-        std::env::var("ODS_CONTRACT_H160").map_err(|_| "ODS_CONTRACT_H160 not set")?;
+/// The variables the test constructors give `chain_settings` in place of
+/// the environment's: well-formed, and never connected to.
+#[cfg(feature = "test-support")]
+const SUBSTITUTE_CHAIN_WS: &str = "ws://substitute-chain.invalid";
+#[cfg(feature = "test-support")]
+const SUBSTITUTE_CONTRACT_H160: &str = "0x0000000000000000000000000000000000000000";
+
+/// What `init` decides from the chain variables and the verification
+/// interval it read: the interval (REQ-ergn9z), and the chain settings built
+/// from it, or why the chain is not configured.
+pub struct StartupChain {
+    pub verification_interval: Duration,
+    pub chain: Result<(ChainSettings, policy::ChainEndpoint), String>,
+}
+
+/// `init`'s step from `ODS_CHAIN_WS`, `ODS_CONTRACT_H160`,
+/// `ODS_COSIGNER_PUB` and `ODS_VERIFICATION_INTERVAL_SECS` as it read them
+/// to the interval and the settings it connects with: the interval decided
+/// by `policy::verification_interval_from` (a refusal is the startup
+/// failure, LLR-rvrc25), and `chain_settings` given that interval undoubled
+/// (LLR-hgrez9). It reads no environment.
+fn startup_chain(
+    ws_url: Option<&str>,
+    contract_h160: Option<&str>,
+    co_signer: Option<&str>,
+    verification_interval: Option<&std::ffi::OsStr>,
+) -> Result<StartupChain, String> {
+    let verification_interval =
+        policy::verification_interval_from(verification_interval).map_err(|error| error.to_string())?;
+    let chain = chain_settings(ws_url, contract_h160, co_signer, verification_interval);
+    Ok(StartupChain { verification_interval, chain })
+}
+
+/// The chain settings the app hands `OrgIo::connect`, from `ODS_CHAIN_WS`,
+/// `ODS_CONTRACT_H160` and the optional `ODS_COSIGNER_PUB` as `init` read
+/// them, with the `ChainEndpoint` they describe (REQ-bvx4nh), and the ahead
+/// limit, `policy::verification_ahead_limit` of the verification interval
+/// `init` decided: twice it (LLR-hgrez9). The one place the interval is
+/// doubled for org-io, shared by `init` and the test constructors. Returns
+/// `Err` if either of the first two is absent or the address is malformed.
+/// The co-signer is parsed by org-io; the signing seed is read by org-io.
+fn chain_settings(
+    ws_url: Option<&str>,
+    contract_h160: Option<&str>,
+    co_signer: Option<&str>,
+    verification_interval: Duration,
+) -> Result<(ChainSettings, policy::ChainEndpoint), String> {
+    let ws_url = ws_url.ok_or("ODS_CHAIN_WS not set")?.to_owned();
+    let h160_hex = contract_h160.ok_or("ODS_CONTRACT_H160 not set")?.to_owned();
 
     // Parse contract H160 (40 hex chars).
     let h160_str = h160_hex.trim_start_matches("0x");
@@ -241,7 +350,8 @@ fn chain_settings() -> Result<(ChainSettings, policy::ChainEndpoint), String> {
     let settings = ChainSettings {
         ws_url,
         contract_h160,
-        co_signer: std::env::var("ODS_COSIGNER_PUB").ok(),
+        co_signer: co_signer.map(str::to_owned),
+        ahead_limit: policy::verification_ahead_limit(verification_interval),
     };
     Ok((settings, endpoint))
 }

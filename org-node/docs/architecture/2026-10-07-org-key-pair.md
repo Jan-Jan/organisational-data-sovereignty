@@ -201,6 +201,14 @@ of (LLR-38e2kn); and `RevocationNotForThisDevice { org_id: OrgId }`, whose
 DevicePublicKey are not those of a Persona bound to that Organisation
 (LLR-r7zm39).
 satisfies: REQ-c29s93, REQ-bwx7eg, REQ-vxqc5g, REQ-3dsweu, REQ-qrtsc9
+superseded-by: LLR-3sddey
+
+*Superseded 2026-10-20 (change `worktree-org-io-domain-api`, consistency
+pass):* `OrgKeyMismatch` is no longer raised: LLR-ba2ejp, which raised it,
+is superseded by LLR-8528ud, and REQ-bwx7eg by REQ-dwb9bq (a key whose
+public half is not the chain's is no match at verification, not a refusal).
+LLR-3sddey restates the other three variants unchanged and states the
+removal.
 
 *Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3).*
 `RevocationNotForThisDevice` was "for a revocation after whose verified
@@ -233,6 +241,13 @@ Organisation-information message replace it (LLR-6s785x, LLR-ckk5nz). The
 record holds only the current key and keeps no earlier one. Stores written before this change are
 not supported: nothing reads or migrates their layout.
 satisfies: REQ-ju6vn2, REQ-ech45n
+superseded-by: LLR-78jfrd
+
+*Superseded 2026-10-21 (change `worktree-org-io-domain-api`, design gap G2
+of its plan):* `commit_genesis`, `commit_update` and the committed
+Organisation-information message are removed; a record is created by a
+first adoption and its key replaced by an adoption, with the same field and
+encoding (LLR-78jfrd).
 
 ## SDD-rx2yvy — Admission
 
@@ -254,6 +269,7 @@ provisional update, leaving the record unchanged and writing nothing. The
 record's `org_pub_key` and `org_private_key` are not changed by building the
 update.
 satisfies: REQ-stx9v3
+superseded-by: LLR-qghs95
 
 **LLR-6ymd6d**: `send_update(outcome: &CommitOutcome, recipient, peer_addr)`
 looks up the node's record of `outcome.org_id`, refusing with `OrgNotOnChain`
@@ -269,6 +285,7 @@ Organisation private key of the epoch the update reaches, as that record's
 `ProvisionalUpdate` nor `OutgoingUpdate` holds a kind, a key or a recipient,
 and the kind does not depend on which operation built the update.
 satisfies: REQ-3dsweu, REQ-szq3ud
+superseded-by: LLR-degg8t
 
 *Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3;
 REQ-3dsweu as amended there).* This took the `OutgoingUpdate` and sent any
@@ -314,6 +331,7 @@ record keeps no earlier key. When the commit is the node's own removal the
 record is deleted instead (LLR-b27jr6) and no key is kept. On any refusal the
 record's key and Organisation public key are unchanged (LLR-ewkg85).
 satisfies: REQ-jy6ybw
+superseded-by: LLR-34c5y3
 
 **LLR-4kh9w9**: when `receive_and_verify` or
 `receive_and_self_delete_if_revoked` commits an Organisation-information
@@ -326,6 +344,7 @@ is not its own half; a first admission creates the record with it
 or accepted, and an accepted one forgets the Organisation (LLR-pt32fx,
 LLR-r8qhky).
 satisfies: REQ-ju6vn2
+superseded-by: LLR-34c5y3
 
 *Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3).*
 This said an accepted revocation "deletes the record (LLR-6p4pj2,
@@ -340,6 +359,13 @@ a key shorter than 32 bytes, is refused by `receive_and_verify` and
 or expectation is consulted and with no `read_state` call, leaving the store
 unchanged and unwritten.
 satisfies: REQ-c29s93
+superseded-by: LLR-94rzrk
+
+*Superseded 2026-10-21 (change `worktree-org-io-domain-api`, design gap G2
+of its plan):* `receive_one`, `receive_and_verify` and
+`receive_and_self_delete_if_revoked` are removed and REQ-c29s93 is
+superseded by REQ-zxgd46; the refusal is the decode step of
+`check_received`, before anything is consulted or kept (LLR-94rzrk).
 
 *Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
 The decode is the first step of `check_received(sender, body)`, which takes
@@ -363,6 +389,13 @@ admission and to an update to a held record alike, and on a first admission
 it runs before the own-Persona check (LLR-3f5h7b). A `Revocation` carries no
 key and is not checked.
 satisfies: REQ-bwx7eg
+superseded-by: LLR-8528ud
+
+*Superseded 2026-10-20 (change `worktree-org-io-domain-api`, dispatcher's
+resolution C6 of 2026-10-16):* the functions it names are removed; a
+received key is now checked at verification, where a provisional
+organisation's public key is derived from the private key it carries and
+only one equal to the chain's is adopted (LLR-s3vq6d, LLR-8528ud).
 
 *Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
 The check runs in `commit_checked`, against the state org-io read for the
@@ -382,6 +415,14 @@ refuse with `RevocationNotHeld { org_id }`, through `revocation::check_notice`
 `read_state` call, creating no record, clearing no expectation and writing
 nothing; an expectation for that Organisation stays in place.
 satisfies: REQ-vxqc5g
+superseded-by: LLR-95av3e
+
+*Superseded 2026-10-21 (change `worktree-org-io-domain-api`, design gap G2
+of its plan):* `receive_and_verify` and `receive_and_self_delete_if_revoked`
+are removed; `check_received` refuses such a revocation keeping nothing —
+as `RevocationNotHeld` in a store holding another Organisation's record, as
+`OrgNotHeld` in a store holding none — with an expected admission left in
+place (LLR-95av3e).
 
 *Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
 The refusal is `check_received`'s, raised by `revocation::check_notice` (the
@@ -426,6 +467,7 @@ acknowledgements. A revocation never commits an update into a record the
 node keeps, and an Organisation-information message never reaches
 `revocation::accept`.
 satisfies: REQ-3dsweu, REQ-m2xh8q, REQ-b462sh
+superseded-by: LLR-jhy6t6
 
 *Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
 `receive_and_verify` and `receive_and_self_delete_if_revoked` read as the

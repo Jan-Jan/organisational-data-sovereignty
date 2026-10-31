@@ -1,186 +1,126 @@
 #![cfg(all(feature = "app", feature = "test-support"))]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! The provisional updates a Persona store keeps (REQ-xs4ab8, REQ-fwfku9):
-//! identity, persistence and the 1 MiB bound (LLR-95753m, LLR-jq7qh7), where
-//! a genesis update keeps the Organisation private key (LLR-qjz3q4,
-//! REQ-ech45n), and the field-naming parse on open (LLR-8bum44).
+//! The bound on one Organisation's epoch state (REQ-g2537c, LLR-m76r4k):
+//! every keep measures the postcard encoding of `(provisional_changes,
+//! provisional_organisations, kept_revocation_notices)` the store would hold
+//! after it, and refuses past `MAX_PROVISIONAL_BYTES`, keeping nothing.
+//!
+//! Here: the bound over a received provisional organisation's keep. The
+//! keeps of `record_admission`, `record_revocation` and
+//! `propose_updated_organisation` are tested beside those operations, in
+//! proposals.rs.
 
-use org_node::ids::OrgId;
-use org_node::store::{
-    ExpectedAdmission, MemberSnapshot, PersonaStore, ProvisionalChange, ProvisionalUpdate, ProvisionalUpdateParts,
-    StoreData, MAX_PROVISIONAL_BYTES,
-};
-use org_node::service::OrgService;
-use org_node::test_fixtures::{
-    device_key, device_secret, empty_store, member_key, org_public_key, persona_record, store_for_test,
-};
-use org_node::{Handle, Name, OrgNodeError, OrgPrivateKey, PersonaId, RootHash, SequenceNumber, Surname};
-use rand::rngs::OsRng;
+mod support;
+use support::*;
 
-const CHANGE_SET_PRIVATE: [u8; 32] = [0x99; 32];
+use org_node::service::Checked;
+use org_node::store::{Origin, ProvisionalChange, ProvisionalOrganisation, ProvisionalOrganisationParts};
+use org_node::wire::encode_message;
+use org_node::{Epoch, MemberId, OrgNodeError, OrgPrivateKey, PersonaId, RootHash, MAX_PROVISIONAL_BYTES};
 
-fn change_set(org: u8, root: u8, bytes: usize) -> ProvisionalUpdate {
-    ProvisionalUpdate::from(ProvisionalUpdateParts {
-        org_id: Some(OrgId::new([org; 20])),
-        persona_id: PersonaId::new("p-alice".into()),
-        base_root: Some(RootHash::new([0x33; 32])),
-        resulting_root: RootHash::new([root; 32]),
-        seq: SequenceNumber::new(3),
-        org_pub_key: org_public_key(),
-        change: ProvisionalChange::ChangeSet { change_set: vec![0xab; bytes], org_private_key: OrgPrivateKey::from(CHANGE_SET_PRIVATE) },
+/// A provisional organisation for a later epoch whose Change set is `bytes`
+/// long: epoch state that only fills the bound.
+fn filler(bytes: usize) -> ProvisionalOrganisation {
+    ProvisionalOrganisation::from(ProvisionalOrganisationParts {
+        epoch: Epoch::new(9),
+        base_root: RootHash::new([0x91; 32]),
+        members: vec![],
+        root: RootHash::new([0x92; 32]),
+        org_pub_key: org_node::test_fixtures::org_public_key(),
+        org_private_key: OrgPrivateKey::from([0x93; 32]),
+        change_set: Some(vec![0xab; bytes]),
+        base_snapshot: None,
+        origin: Origin::Own,
+        applied: vec![],
+        first_ahead_at: None,
     })
 }
 
-const PRIVATE: [u8; 32] = [0x88; 32];
-
-fn genesis(persona: &str, root: u8) -> ProvisionalUpdate {
-    ProvisionalUpdate::from(ProvisionalUpdateParts {
-        org_id: None,
-        persona_id: PersonaId::new(persona.into()),
-        base_root: None,
-        resulting_root: RootHash::new([root; 32]),
-        seq: SequenceNumber::new(1),
-        org_pub_key: OrgPrivateKey::from(PRIVATE).x25519_keypair().org_public_key().unwrap(),
-        change: ProvisionalChange::Genesis {
-            members: vec![MemberSnapshot {
-                id: org_node::MemberId::new([1; 32]),
-                handle: Handle::parse("alice").unwrap(),
-                name: Name::parse("Alice").unwrap(),
-                surname: Surname::parse("Smith").unwrap(),
-                member_key: member_key(0x21),
-                device_keys: vec![device_key(0x22)],
-            }],
-            org_private_key: OrgPrivateKey::from(PRIVATE),
-        },
-    })
+/// B admitted, holding a filler of `bytes`; the Organisation information A's
+/// Device sends B for epoch 3, encoded; B's Persona and A's Device.
+fn b_with_filler(tag: &str, bytes: usize) -> (Setup, PersonaId, org_node::DevicePublicKey, Vec<u8>) {
+    let mut story = admit_b(setup(tag));
+    let b_persona_id = story.b_persona_id.clone();
+    let mut store_data = story.node_b.store_of(&b_persona_id).clone();
+    store_data.provisional_organisations.push(filler(bytes));
+    story.node_b.put(store_data);
+    let a_device = persona_of(&story.node_a, &story.a_persona_id).device_key;
+    let (message, _) = information_after(&record_of(&story.node_b, story.org_id), 0x70);
+    (story, b_persona_id, a_device, encode_message(&message).unwrap())
 }
 
-/// The device seed of the store's one Persona (S4, task T3: one store per
-/// Persona, keyed from its device secret).
-const DEVICE: u8 = 0x42;
-
-/// A store holding one unbound Persona and nothing else.
-fn empty() -> StoreData {
-    empty_store(persona_record("p-alice", 0x41, DEVICE))
+/// The filler size that makes the store B keeps after `body` measure
+/// exactly `target` bytes: measured once with a small filler, then shifted
+/// (the Change set's length prefix is three bytes either way).
+fn filler_for(tag: &str, target: usize) -> usize {
+    let first = 100_000;
+    let (mut story, b_persona_id, a_device, body) = b_with_filler(tag, first);
+    let (checked, _sealed) = check(&mut story.node_b, &b_persona_id, a_device, &body).unwrap();
+    assert!(matches!(checked, Checked::ProvisionalOrganisationKept { .. }), "fixture: the small filler is kept: {checked:?}");
+    first + (target - fixtures::bound_len(story.node_b.store_of(&b_persona_id)))
 }
 
-fn contains(hay: &[u8], needle: &[u8]) -> usize {
-    hay.windows(needle.len()).filter(|w| *w == needle).count()
-}
-
-// Normal: provisional updates and expected admissions reach the encrypted
-// file and are read back, typed, when it is opened. *Adapted 2026-10-08 (S4,
-// task T3):* "the encrypted file" is the sealed store org-io writes.
-// *Moved 2026-10-15 (S4 TEST review round 1, finding-5; Existing suites 1):*
-// the sealed store is the `StoreWrite` an operation returns (LLR-bvt5up):
-// `expect_admission` records the expectation and hands back the write, where
-// the test had pushed the expectation itself and sealed through the test
-// hook `seal_for_test`. The assertions are unchanged. Mutation checks, that
-// day (each removed): `OrgService::change` sealing the store as it was
-// before the change, and `seal_bytes` appending the plaintext in place of
-// the ciphertext, each failed this test.
-// verifies: REQ-xs4ab8, LLR-95753m, LLR-g76zqd
+// Abnormal: a keep that would bring the epoch state past 1 MiB is refused
+// with `ProvisionalLimit`, keeping nothing and returning no change; the
+// store is exactly as it was.
+// verifies: LLR-m76r4k
 #[test]
-fn provisional_updates_round_trip_through_the_encrypted_file() {
-    let mut store = store_for_test(&device_secret([DEVICE; 32]), empty());
-    store.data_mut().insert_provisional(genesis("p-alice", 0x10)).unwrap();
-    store.data_mut().insert_provisional(change_set(0xbb, 0x66, 4)).unwrap();
-    let persona_id = store.data().persona.persona_id.clone();
-    let mut service = OrgService::new(vec![store]).unwrap();
-    let expectation = ExpectedAdmission { org_id: OrgId::new([0xcc; 20]) };
-    let write = service.expect_admission(&mut OsRng, &persona_id, expectation.org_id).unwrap();
-    let reopened = PersonaStore::unseal(&write.sealed, write.device_key, device_secret([DEVICE; 32])).unwrap();
-    assert_eq!(reopened.data().provisional_updates, vec![genesis("p-alice", 0x10), change_set(0xbb, 0x66, 4)]);
-    assert_eq!(reopened.data().expected_admissions, vec![expectation]);
+fn a_keep_past_one_mebibyte_is_refused_with_provisional_limit_and_changes_nothing() {
+    let (mut story, b_persona_id, a_device, body) = b_with_filler("ps-past", MAX_PROVISIONAL_BYTES);
+    let before = postcard::to_allocvec(story.node_b.store_of(&b_persona_id)).unwrap();
+    assert_eq!(
+        check(&mut story.node_b, &b_persona_id, a_device, &body).err(),
+        Some(OrgNodeError::ProvisionalLimit { limit: MAX_PROVISIONAL_BYTES })
+    );
+    assert_eq!(postcard::to_allocvec(story.node_b.store_of(&b_persona_id)).unwrap(), before, "StoreData exactly as it was");
 }
 
-// Abnormal: the same identity replaces rather than duplicates; different
-// identities — another root, another key, another Persona's genesis — are all kept.
-// verifies: REQ-xs4ab8, LLR-95753m
+// Normal (boundary):
+// a keep that brings the epoch state to exactly 1 MiB is kept; the bound is
+// a constant of its own, equal to the Wire message's.
+// verifies: REQ-g2537c, LLR-m76r4k
 #[test]
-fn an_update_with_the_same_identity_replaces_and_others_are_kept() {
-    let mut data = empty();
-    data.insert_provisional(change_set(0xbb, 0x66, 4)).unwrap();
-    data.insert_provisional(change_set(0xbb, 0x66, 5)).unwrap();
-    assert_eq!(data.provisional_updates, vec![change_set(0xbb, 0x66, 5)], "replaced, not added");
-    data.insert_provisional(change_set(0xbb, 0x67, 4)).unwrap();
-    data.insert_provisional(genesis("p-alice", 0x66)).unwrap();
-    data.insert_provisional(genesis("p-bob", 0x66)).unwrap();
-    // The same root under another key is another update (LLR-95753m).
-    let other_key = ProvisionalUpdate::from(ProvisionalUpdateParts {
-        org_pub_key: OrgPrivateKey::from([0x55; 32]).x25519_keypair().org_public_key().unwrap(),
-        ..change_set(0xbb, 0x66, 5).into()
-    });
-    data.insert_provisional(other_key).unwrap();
-    assert_eq!(data.provisional_updates.len(), 5);
-}
-
-// Normal: a genesis update and a Change-set update each hold their
-// Organisation private key once in the store's plaintext; abnormal: with the
-// updates gone, no copy of either key remains anywhere in the store.
-// *Rewritten 2026-10-06 (change worktree-org-node-org-key-pair).* Was
-// `the_genesis_private_key_lives_only_in_its_provisional_update`: only a
-// genesis update held a key.
-// verifies: REQ-ech45n, REQ-stx9v3, LLR-qjz3q4
-#[test]
-fn every_updates_private_key_lives_only_in_its_provisional_update() {
-    let mut data = empty();
-    let update = genesis("p-alice", 0x10);
-    let ProvisionalChange::Genesis { org_private_key, .. } = update.change_for_test() else { panic!("genesis") };
-    assert_eq!(org_private_key.x25519_keypair().org_public_key().unwrap(), update.org_pub_key);
-    data.insert_provisional(update).unwrap();
-    data.insert_provisional(change_set(0xbb, 0x66, 4)).unwrap();
-    let plaintext = postcard::to_allocvec(&data).unwrap();
-    assert_eq!(contains(&plaintext, &PRIVATE), 1);
-    assert_eq!(contains(&plaintext, &CHANGE_SET_PRIVATE), 1);
-    assert!(data.orgs.is_empty());
-    data.provisional_updates.clear();
-    let plaintext = postcard::to_allocvec(&data).unwrap();
-    assert_eq!(contains(&plaintext, &PRIVATE), 0);
-    assert_eq!(contains(&plaintext, &CHANGE_SET_PRIVATE), 0);
-}
-
-/// The postcard length of a one-update group whose change set is `n` bytes.
-fn group_len(n: usize) -> usize {
-    postcard::to_allocvec(&vec![change_set(0xbb, 0x66, n)]).unwrap().len()
-}
-
-// Normal (boundary): a group of exactly 1 MiB is kept; the bound is the
-// wire frame's.
-// verifies: REQ-fwfku9, LLR-jq7qh7
-#[test]
-fn a_group_of_exactly_the_bound_is_kept() {
-    // *2026-10-14 (S4, task T14):* the transport's frame bound left with the
-    // transport; it was the Wire message bound, which stays here.
+fn epoch_state_of_exactly_the_bound_is_kept() {
     assert_eq!(MAX_PROVISIONAL_BYTES, org_node::wire::MAX_MESSAGE);
-    let fixed = group_len(20_000) - 20_000; // the varint is three bytes from 16 384 up
-    let n = MAX_PROVISIONAL_BYTES - fixed;
-    assert_eq!(group_len(n), MAX_PROVISIONAL_BYTES);
-    let mut data = empty();
-    data.insert_provisional(change_set(0xbb, 0x66, n)).unwrap();
-    assert_eq!(data.provisional_updates.len(), 1);
+    let bytes = filler_for("ps-exact-measure", MAX_PROVISIONAL_BYTES);
+    let (mut story, b_persona_id, a_device, body) = b_with_filler("ps-exact", bytes);
+    let (checked, change) = check(&mut story.node_b, &b_persona_id, a_device, &body).unwrap();
+    assert!(matches!(checked, Checked::ProvisionalOrganisationKept { .. }), "{checked:?}");
+    assert!(change.is_some());
+    assert_eq!(fixtures::bound_len(story.node_b.store_of(&b_persona_id)), MAX_PROVISIONAL_BYTES, "exactly the bound");
 }
 
-// Abnormal: one byte over, alone or as the sum of two, is refused with the
-// limit named, and the store is exactly as it was; another Organisation's
-// group is measured on its own.
-// verifies: REQ-fwfku9, LLR-jq7qh7, LLR-mxskg9
+// Abnormal: one byte over is refused naming the limit, nothing changed; the bound
+// measures the provisional changes and kept notices too — with a recorded
+// change taking the room, the keep that fitted alone is refused.
+// verifies: REQ-g2537c, LLR-m76r4k, LLR-3sddey
 #[test]
-fn an_update_that_would_exceed_the_bound_is_refused_and_nothing_changes() {
-    let fixed = group_len(20_000) - 20_000;
-    let mut data = empty();
+fn a_keep_that_would_exceed_the_bound_is_refused_and_nothing_changes() {
+    let bytes = filler_for("ps-over-measure", MAX_PROVISIONAL_BYTES + 1);
+    let (mut story, b_persona_id, a_device, body) = b_with_filler("ps-over", bytes);
+    let before = postcard::to_allocvec(story.node_b.store_of(&b_persona_id)).unwrap();
+    let refused = check(&mut story.node_b, &b_persona_id, a_device, &body).err().unwrap();
+    assert_eq!(refused, OrgNodeError::ProvisionalLimit { limit: MAX_PROVISIONAL_BYTES });
+    assert!(refused.to_string().contains("1048576"), "{refused}");
+    assert_eq!(postcard::to_allocvec(story.node_b.store_of(&b_persona_id)).unwrap(), before);
+
+    let bytes = filler_for("ps-changes-measure", MAX_PROVISIONAL_BYTES);
+    let (mut story, b_persona_id, a_device, body) = b_with_filler("ps-changes", bytes);
+    let mut store_data = story.node_b.store_of(&b_persona_id).clone();
+    store_data.provisional_changes.push(ProvisionalChange::Revoke { member_id: MemberId::new([0x55; 32]) });
+    story.node_b.put(store_data);
     assert_eq!(
-        data.insert_provisional(change_set(0xbb, 0x66, MAX_PROVISIONAL_BYTES - fixed + 1)).unwrap_err(),
-        OrgNodeError::ProvisionalLimit { limit: MAX_PROVISIONAL_BYTES }
+        check(&mut story.node_b, &b_persona_id, a_device, &body).err(),
+        Some(OrgNodeError::ProvisionalLimit { limit: MAX_PROVISIONAL_BYTES }),
+        "the recorded change counts"
     );
-    assert!(data.provisional_updates.is_empty());
-    data.insert_provisional(change_set(0xbb, 0x66, 600_000)).unwrap();
-    let before = postcard::to_allocvec(&data).unwrap();
+    let mut store_data = story.node_b.store_of(&b_persona_id).clone();
+    store_data.provisional_changes.clear();
+    store_data.kept_revocation_notices.push(org_node::test_fixtures::bob_absence_notice(story.org_id));
+    story.node_b.put(store_data);
     assert_eq!(
-        data.insert_provisional(change_set(0xbb, 0x67, 600_000)).unwrap_err(),
-        OrgNodeError::ProvisionalLimit { limit: MAX_PROVISIONAL_BYTES }
+        check(&mut story.node_b, &b_persona_id, a_device, &body).err(),
+        Some(OrgNodeError::ProvisionalLimit { limit: MAX_PROVISIONAL_BYTES }),
+        "the kept notice counts"
     );
-    assert_eq!(postcard::to_allocvec(&data).unwrap(), before, "StoreData exactly as it was");
-    data.insert_provisional(change_set(0xdd, 0x67, 600_000)).unwrap();
-    assert_eq!(data.provisional_updates.len(), 2, "another Organisation's group is its own");
 }

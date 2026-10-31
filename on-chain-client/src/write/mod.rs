@@ -13,7 +13,7 @@ pub mod proxy;
 pub mod signatory_set;
 pub mod subxt_ops;
 
-pub use ceremony::{genesis, submit_update, FUND_AMOUNT};
+pub use ceremony::{create_proxy, found_at, genesis, submit_update, FUND_AMOUNT};
 
 use crate::types::OrgAdmin;
 use subxt::dynamic::Value;
@@ -22,7 +22,7 @@ use subxt::dynamic::Value;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AccountId(pub [u8; 32]);
 
-/// The genesis step that failed (LLR-z9vugt).
+/// The genesis step that failed (LLR-chy957).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GenesisStep {
     CreatePure,
@@ -45,6 +45,9 @@ pub enum WriteError {
     EventNotFound(&'static str),
     MalformedEvent(&'static str),
     MalformedCall(&'static str),
+    /// A storage value the writer read does not decode as what the runtime
+    /// stores there (LLR-htp5tk); names the storage entry.
+    MalformedStorage(&'static str),
 }
 
 impl fmt::Display for WriteError {
@@ -57,6 +60,7 @@ impl fmt::Display for WriteError {
             WriteError::EventNotFound(m) => write!(f, "expected on-chain event not found: {m}"),
             WriteError::MalformedEvent(m) => write!(f, "malformed event field: {m}"),
             WriteError::MalformedCall(m) => write!(f, "malformed call: {m}"),
+            WriteError::MalformedStorage(entry) => write!(f, "malformed storage value: {entry}"),
         }
     }
 }
@@ -101,13 +105,20 @@ impl WriteWindow {
 
 /// The seam the composition is written against (SDD-yg7n55): create a pure
 /// proxy, fund an account, dispatch a call under the controller — mortal
-/// from `window`'s birth block when one is given (LLR-zj4jju).
+/// from `window`'s birth block when one is given (LLR-zj4jju) — and the two
+/// reads the founding step decides from, both at the latest finalised block.
 /// `SubxtWriteOps` implements it over subxt; a gated test substitutes it.
 #[allow(async_fn_in_trait)]
 pub trait WriteOps {
     type Signer;
     async fn create_pure(&self, signatory: &Self::Signer, co_signatories: &[AccountId]) -> Result<AccountId, WriteError>;
     async fn fund(&self, signatory: &Self::Signer, dest: AccountId, amount: u128) -> Result<(), WriteError>;
+    /// The account's free balance in `System.Account`, zero for an account
+    /// the chain does not hold (LLR-htp5tk).
+    async fn free_balance(&self, account: AccountId) -> Result<u128, WriteError>;
+    /// The account `admin` is mapped to in `Revive.OriginalAccount`, `None`
+    /// when the H160 is not mapped (LLR-m3tjvp's decoding).
+    async fn mapped_account(&self, admin: OrgAdmin) -> Result<Option<AccountId>, WriteError>;
     async fn dispatch(
         &self,
         signatory: &Self::Signer,

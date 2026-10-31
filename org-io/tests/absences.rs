@@ -108,18 +108,12 @@ fn org_io_names_no_device_or_member_private_key() {
     }
 }
 
-// *Clarified 2026-10-08 (S4, task T3; plan §17.2 rule 5):* org-io now
-// receives a device private key, as a move-only `DeviceSecret`, from
+// org-io receives a device private key, as a move-only `DeviceSecret`, from
 // org-node's `create_persona`. The type is named only in its sanctioned
-// places: in org-io, the transitional holder `device_secrets.rs` (and, from
-// task T8, the keychain module `keychain.rs`); in org-node, `keys.rs`, which
-// defines it, and `create_persona`, the one production public function that
-// returns one (`unseal` and the signing operations take one).
-// *Narrowed 2026-10-14 (S4 review round 1, finding 9):* the deleted
-// transitional holder `device_secrets.rs` is no longer sanctioned; a file of
-// that name naming the type now fails the scan. Mutation check, that day: a
-// planted `src/device_secrets.rs` holding a `DeviceSecret` failed it
-// ("…/device_secrets.rs names DeviceSecret"); the file was removed.
+// places: in org-io, the keychain module `keychain.rs`; in org-node,
+// `keys.rs`, which defines it, and `create_persona`, the one production
+// public function that returns one (`unseal` and the signing operations take
+// one). Any other file of org-io naming the type fails the scan.
 // verifies: LLR-3zdw8v
 #[test]
 fn device_secret_is_named_only_in_its_sanctioned_places() {
@@ -142,8 +136,6 @@ fn device_secret_is_named_only_in_its_sanctioned_places() {
             named_in.push(file);
         }
     }
-    // *Adapted 2026-10-13 (S4, task T8):* the keychain module replaced the
-    // transitional holder, which is gone.
     assert!(named_in.iter().any(|file| file == "keychain.rs"), "the keychain module reads and writes the secrets");
 
     let org_node_src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../org-node/src");
@@ -162,7 +154,12 @@ fn device_secret_is_named_only_in_its_sanctioned_places() {
             }
         }
     }
-    assert_eq!(returners, ["create_persona"], "org-node hands out a DeviceSecret from create_persona alone");
+    returners.sort();
+    assert_eq!(
+        returners,
+        ["create", "propose_founding", "propose_member"],
+        "org-node hands out a DeviceSecret from PersonStore::create, propose_founding and propose_member alone"
+    );
 }
 
 /// One public function as written: its whole signature, from `pub fn` (or
@@ -260,41 +257,11 @@ fn struct_attributes(text: &str, name: &str) -> Option<Vec<String>> {
     )
 }
 
-// org-node's operations that judge against the chain take the state org-io
-// read only through `OrgIo`'s own methods: no public method of lib.rs hands
-// out `&mut OrgService`, and none named for a chain-judging operation is
-// offered outside `impl OrgIo` (where they are the sequenced wrappers).
-// verifies: LLR-7pj5af, LLR-9r2bxd
-#[test]
-fn the_handle_offers_no_chain_judging_operation_outside_its_own_sequence() {
-    let lib = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs")).unwrap();
-    for signature in public_signatures(&lib).iter().filter(|signature| !signature.only_in_test_builds()) {
-        assert!(
-            !signature.returns().contains("&mut OrgService"),
-            "lib.rs:{}: hands out org-node's whole service: {}",
-            signature.line,
-            signature.signature
-        );
-    }
-    let lines: Vec<&str> = lib.lines().collect();
-    for signature in public_signatures(&lib) {
-        let item = (0..signature.line - 1).rev().find(|&earlier| lines[earlier].starts_with("impl")).map(|earlier| lines[earlier]);
-        if item.is_some_and(|line| line.starts_with("impl OrgIo")) {
-            continue;
-        }
-        // *S4 T4, 2026-10-13:* `fn check_received` joins the list; `fn commit_`
-        // already covers `commit_checked`.
-        for judging in ["fn commit_", "fn reconcile", "fn prepare_", "fn apply_", "fn check_received", "fn discard_provisional"] {
-            assert!(!signature.signature.contains(judging), "lib.rs:{}: offers {judging}", signature.line);
-        }
-    }
-}
-
-// No other way to a whole `OrgService` (review round 2, finding 2): no
+// No other way to a whole `OrgService`: no
 // public field of org-io holds one and no public function outside test
 // builds returns one by value, so a refused connect cannot hand the app the
 // service whose chain-judging operations org-io sequences.
-// verifies: LLR-7pj5af, LLR-9r2bxd
+// verifies: LLR-n2srhc
 #[test]
 fn org_io_hands_out_no_bare_service() {
     let mut ways_out = vec![];
@@ -361,7 +328,7 @@ fn seed_bytes_offers_no_comparison_outside_test_builds() {
 }
 
 // The `node` re-export reaches all of org-node's public surface (the
-// handle's own surface is an allowlist since review round 3: see
+// handle's own surface is an allowlist: see
 // `the_handle_returns_only_allowlisted_public_types`); this reads that
 // surface for a way out for a
 // stored device private key: a public seed field, a public function handing
@@ -404,10 +371,10 @@ fn org_node_hands_out_no_stored_device_private_key() {
 #[test]
 fn the_handle_hands_out_no_key() {
     let lib = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs")).unwrap();
-    let submit = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/submit.rs")).unwrap();
+    // `OnChainWriter` is in `write.rs`.
+    let submit = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/write.rs")).unwrap();
     // Whole signatures, joined across lines: a return type on a continuation
-    // line is read as well (review round 1, finding 8). *S4 T11,
-    // 2026-10-13:* the receive step's `impl OrgIo` is in receiver.rs.
+    // line is read as well. The receive step's `impl OrgIo` is in receiver.rs.
     let receiver = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/receiver.rs")).unwrap();
     for signature in public_signatures(&lib).into_iter().chain(public_signatures(&receiver)) {
         // Private keys and seeds only: a public key or account may be handed
@@ -464,8 +431,7 @@ fn production_serialize(file: &str, text: &str, holder: &str) -> Vec<String> {
     found
 }
 
-// The owner's rule is no private key, X25519 secrets included (review round
-// 2, finding 1): the Organisation private key and the Member seed. Read
+// The owner's rule is no private key, X25519 secrets included: the Organisation private key and the Member seed. Read
 // through the same surface as the device-seed scan above: no public field
 // holding one (`OrgRecord.org_private_key`, `PersonaRecord.member_seed`, or
 // `ProvisionalUpdate.change`, whose variants carry the next Organisation
@@ -481,7 +447,9 @@ fn org_node_hands_out_no_stored_x25519_secret() {
         let lines: Vec<&str> = text.lines().collect();
         for (index, line) in lines.iter().enumerate() {
             let field = line.trim_start();
-            let holds_secret = ["pub member_seed", "pub org_private_key", "pub change: ProvisionalChange"]
+            // org-node's `ProvisionalChange` is the Admin's change (an invite identifier and a
+            // Handle, or a MemberId) and holds no key, so neither list names it.
+            let holds_secret = ["pub member_seed", "pub org_private_key"]
                 .iter()
                 .any(|declaration| field.starts_with(declaration));
             if holds_secret && !enclosing_item_only_in_test_builds(&lines, index) {
@@ -494,7 +462,7 @@ fn org_node_hands_out_no_stored_x25519_secret() {
         };
         let signatures = if exempt { vec![] } else { public_signatures(&text) };
         for signature in signatures.iter().filter(in_production) {
-            for secret in ["MemberSeed", "OrgPrivateKey", "X25519Keypair", "ProvisionalChange"] {
+            for secret in ["MemberSeed", "OrgPrivateKey", "X25519Keypair"] {
                 if signature.returns().contains(secret) {
                     ways_out.push(format!("{file}:{}: hands out {secret}: {}", signature.line, signature.signature));
                 }
@@ -508,78 +476,28 @@ fn org_node_hands_out_no_stored_x25519_secret() {
 }
 
 /// Every type a production public method of the handle may name in its
-/// return type (review round 3, finding 1): the handle itself, its views,
-/// public-only summaries, ids, public keys, roots, epochs, errors and
-/// org-node's receive outcome values, which carry public data only (signed
-/// acknowledgements). Containers
-/// and path segments are listed too. Anything else is a way out until it is
-/// reviewed and added here.
+/// return type (LLR-gh4rw3): containers and path segments, the handle and
+/// its public-only values, ids, public keys, roots, epochs and typed errors.
+/// Anything else is a way out until it is reviewed and added here.
 const HANDLE_RETURN_ALLOWLIST: &[&str] = &[
     // Containers, primitives and path segments.
     "Result", "Option", "Vec", "Box", "Self", "String", "bool", "usize", "u64", "crate", "org_node", "connect",
-    "signatory", "view", "std",
-    // The handle and its public-only views and summaries.
-    // *S4 T5, 2026-10-13:* `Submitted`, what `submit_commit_send` reports.
-    // *S4 T11, 2026-10-13:* `NodeBuilders` and `NodeView` left: their
-    // methods are `OrgIo`'s own, each returning owned public values.
-    "OrgIo", "PersonaSummary", "OrgSummary", "BuiltUpdate", "ConnectFailed", "Submitted",
+    "signatory", "view", "send", "std",
+    // The handle and its connect refusal.
+    "OrgIo", "ConnectFailed",
     // Ids, public keys, roots, epochs.
     "OrgId", "PersonaId", "MemberId", "DevicePublicKey", "PersonPublicKey", "OrgPublicKey", "RootHash", "Epoch",
-    // Answers and errors.
-    // *S4 T4, 2026-10-13:* `SelfDeleteOutcome` left with the self-delete
-    // path; `Received` holds a `ReceiveOutcome` or a verified acknowledgement.
-    // *S4 T5, 2026-10-13:* `CommitOutcome` left: its Organisation-information
-    // bodies carry the Organisation private key.
-    "AdminStatus", "OwnAdminError", "OrgNodeError", "ReceiveOutcome", "Received",
-    // *S4 T9, 2026-10-13:* the store files' errors, public data only: paths,
-    // Device public keys, the steps and reasons of failed file operations,
-    // and the keychain's and org-node's typed refusals.
-    "OpenError", "CreateError", "OperationError",
-    // *S4 T10, 2026-10-13:* what `start_receiving` refuses with, public data
-    // only: reasons as text, lengths, Device public keys and the keychain's
-    // typed refusals (no endpoint, no key, no body).
-    "TransportError",
-    // *S4 T11, 2026-10-13:* what the receive step returns, public data
-    // only: a `Received` holds a `ReceiveOutcome` (ids, epochs, roots, the
-    // signed acknowledgements) or a `VerifiedAcknowledgement` (ids, an
-    // epoch, a root, a Device public key, a signature); a `ReceiveError`
-    // holds a `TerminalCause` and org-node's, the keychain's, the store's
-    // and the transport's typed refusals. No Organisation information, key
-    // or body.
-    "ReceiveError", "TerminalCause", "VerifiedAcknowledgement",
-    // *S4 T12, 2026-10-13:* the per-Device send report `Submitted` carries
-    // (Device public keys and typed send errors, which hold reasons as text
-    // and the transport's typed refusals) and the parsed peer address (an
-    // endpoint identity and the transport addresses the operator gave). No
-    // body, key or seed.
-    "SendReport", "SendError", "PeerAddr",
-    // *S4 T13, 2026-10-14:* the invitation exchange's answers, public data
-    // only: an imported `InviteReply` (an Organisation id, an invite
-    // identifier, a member key, a Device public key, a handle, a name and
-    // a surname — what its sender put in the Blob), an `AdmitReport` (a
-    // MemberId and a `SendReport`) and an `ExchangeError` (org-node's typed
-    // refusals, a `StoreFailure`, the submission's report as text, or an
-    // `AdmitReport` with an `OperationError`). The Blobs are `String`s
-    // carrying the same public values. No body, key or seed.
-    "InviteReply", "AdmitReport", "ExchangeError",
-    // *Reconciled with S3b-io part 1, 2026-10-14:* S3b-io's line also listed
-    // `CommitOutcome` and `SelfDeleteOutcome`, which S4 removed (T5, T4,
-    // above); its additions follow.
-    // The publish state's reports (SDD-6mpmsw, task T14), reviewed 2026-10-08:
-    // `Settled` holds an OrgId, an Epoch, strings and a `Reconciliation`
-    // (OrgIds, Epochs, DevicePublicKeys, strings). No private key, no seed,
-    // no acknowledgement. *2026-10-13 (task T15d):* `DiscardRefused` left the
-    // list with the public discards (owner ruling of that day).
-    "Settled",
-    // Task T15, reviewed 2026-10-13: `Reconciliation` holds OrgIds, Epochs,
-    // DevicePublicKeys and strings (a removal's acknowledgements stay in
-    // org-io's memory); `Verification` holds a string. No private key, no
-    // seed, no acknowledgement.
-    "Reconciliation", "Verification",
-    // Task T16a, reviewed 2026-10-13: `AdminStatus` (above) gained
-    // `DelegateCannotDispatch`, a variant holding nothing; the signatory set
-    // it is judged from (`SignatorySetView`: an account, proxy definitions
-    // and a type index, public chain data) is not returned by the handle.
+    // The queries' public-only summaries.
+    "PersonaSummary", "OrgSummary", "PersonSummary", "KeptAdmissionRequestSummary", "AcknowledgementReport",
+    // LLR-gh4rw3's list: what the domain methods return.
+    "ProposedFounding", "ProposedMember", "InviteSummary", "ProvisionalChangeSummary", "ProposedOrganisation",
+    "HeldTarget", "WriteReport", "WriteRefused", "Verified", "WriteOutcome", "SendReport", "SendRefused", "Delivery",
+    "RequestError", "Received",
+    // Typed refusals: reasons as text, paths, Device public keys, the
+    // keychain's, the store files', the transport's and org-node's typed
+    // refusals.
+    "AdminStatus", "OwnAdminError", "OrgNodeError", "OpenError", "CreateError", "OperationError", "ExchangeError",
+    "TransportError", "ReceiveError", "TerminalCause",
 ];
 
 /// The identifiers a return type names, lifetimes dropped.
@@ -602,15 +520,14 @@ fn named_types(returns: &str) -> Vec<String> {
         .collect()
 }
 
-// The handle's read surface is an allowlist, not a name scan (review round
-// 3, finding 1): every public method of `OrgIo` (*S4 T11:* wherever its
-// `impl` is; S2's `NodeBuilders` and `NodeView` are folded into it) and
-// `ConnectFailed` outside test builds returns only allowlisted types, so
+// The handle's read surface is an allowlist, not a name scan: every public
+// method of `OrgIo` (wherever its `impl` is) and `ConnectFailed` outside test builds returns only allowlisted types, so
 // no method hands out `OrgService` (whose `endpoint()` reaches `recv_one`
 // and `send`), `OrgEndpoint`, `WireMessage`, `OrgRecord`, `PersonaRecord`,
 // `ProvisionalUpdate` or anything else unreviewed; and no handle type
-// dereferences to another type, which would offer that type's methods.
-// verifies: LLR-3zdw8v, LLR-7pj5af, LLR-9r2bxd
+// dereferences to another type, which would offer that type's methods
+// beyond the exact surface LLR-4usfu2 states.
+// verifies: LLR-gh4rw3, LLR-4usfu2
 #[test]
 fn the_handle_returns_only_allowlisted_public_types() {
     let mut ways_out = vec![];
@@ -636,8 +553,7 @@ fn the_handle_returns_only_allowlisted_public_types() {
 }
 
 /// Every production public method of the handle's types (`OrgIo`,
-/// `ConnectFailed`), with its file. *S4 T11, 2026-10-13:* `NodeBuilders`
-/// and `NodeView` are gone, folded into `OrgIo`.
+/// `ConnectFailed`), with its file.
 fn handle_methods() -> Vec<(String, PublicSignature)> {
     let handle_items = ["impl OrgIo", "impl crate::OrgIo", "impl ConnectFailed"];
     let mut methods = vec![];
@@ -645,8 +561,8 @@ fn handle_methods() -> Vec<(String, PublicSignature)> {
         let file = path.display().to_string();
         let lines: Vec<&str> = text.lines().collect();
         for signature in public_signatures(&text) {
-            let item = (0..signature.line - 1).rev().find(|&earlier| lines[earlier].starts_with("impl")).map(|earlier| lines[earlier]);
-            if !item.is_some_and(|line| handle_items.iter().any(|handle_item| line.starts_with(handle_item))) {
+            let impl_line = (0..signature.line - 1).rev().find(|&earlier| lines[earlier].starts_with("impl")).map(|earlier| lines[earlier]);
+            if !impl_line.is_some_and(|line| handle_items.iter().any(|handle_item| line.starts_with(handle_item))) {
                 continue;
             }
             if signature.only_in_test_builds() || enclosing_item_only_in_test_builds(&lines, signature.line - 1) {
@@ -656,6 +572,147 @@ fn handle_methods() -> Vec<(String, PublicSignature)> {
         }
     }
     methods
+}
+
+/// The types LLR-gh4rw3 names, each defined in org-io.
+const DOMAIN_RETURN_TYPES: &[&str] = &[
+    "PersonSummary", "ProposedFounding", "ProposedMember", "InviteSummary", "ProvisionalChangeSummary",
+    "ProposedOrganisation", "WriteReport", "WriteRefused", "Verified", "WriteOutcome", "SendReport", "SendRefused",
+    "Delivery", "RequestError", "Received", "KeptAdmissionRequestSummary", "AcknowledgementReport",
+];
+
+/// What no returned type may hold, at any depth org-io defines.
+const SECRET_HOLDERS: &[&str] = &[
+    "OrgPrivateKey", "DeviceSecret", "SealedStore", "StoreKey", "SecretKey", "MemberSeed", "OutgoingMessage",
+    "OrgService", "PersonaStore", "PersonStore", "WireMessage", "OrgEndpoint", "KeptAcknowledgements",
+    "Acknowledgement", "HandleRng",
+];
+
+/// The body of the org-io type `name` (`pub struct`, `pub enum` or `pub
+/// type`, with fields, a tuple or generic parameters), comments dropped, from
+/// its declaration to its closing brace or parenthesis (or its `;`), with its
+/// file; `None` when org-io defines no such type.
+fn type_body(name: &str) -> Option<(String, String)> {
+    for (path, text) in sources() {
+        let code = code_lines(&text);
+        for (index, line) in code.iter().enumerate() {
+            let declares = ["pub struct ", "pub enum ", "pub type "].iter().any(|keyword| {
+                line.trim_start().strip_prefix(keyword).and_then(|rest| rest.strip_prefix(name)).is_some_and(|after| {
+                    after.chars().next().is_none_or(|next| !(next.is_alphanumeric() || next == '_'))
+                })
+            });
+            if !declares {
+                continue;
+            }
+            let mut body = vec![];
+            for continuation in &code[index..] {
+                body.push(*continuation);
+                if continuation.trim_end().ends_with(';') && body.len() == 1 {
+                    break;
+                }
+                let closes = continuation.starts_with('}') || continuation.starts_with(')');
+                if closes || (body.len() == 1 && continuation.trim_end().ends_with("{}")) {
+                    break;
+                }
+            }
+            return Some((path.display().to_string(), body.join("\n")));
+        }
+    }
+    None
+}
+
+/// The production public methods of `OrgIo` (wherever its `impl` is), by
+/// name, de-duplicated, with their signatures.
+fn org_io_methods() -> Vec<(String, String)> {
+    let mut methods = vec![];
+    for (_, text) in sources() {
+        let lines: Vec<&str> = text.lines().collect();
+        for signature in public_signatures(&text) {
+            let impl_line = (0..signature.line - 1).rev().find(|&earlier| lines[earlier].starts_with("impl")).map(|earlier| lines[earlier]);
+            if !impl_line.is_some_and(|line| line.starts_with("impl OrgIo") || line.starts_with("impl crate::OrgIo")) {
+                continue;
+            }
+            if signature.only_in_test_builds() || enclosing_item_only_in_test_builds(&lines, signature.line - 1) {
+                continue;
+            }
+            let after = &signature.signature[signature.signature.find("fn ").unwrap() + 3..];
+            let name = after[..after.find(['(', '<']).unwrap()].to_string();
+            methods.push((name, signature.signature.clone()));
+        }
+    }
+    methods.sort();
+    methods.dedup_by(|later, earlier| later.0 == earlier.0);
+    methods
+}
+
+// The handle's production surface is exactly the domain's (LLR-4usfu2):
+// the methods and queries the design names, `open`, `connect`,
+// `not_configured` and `is_own_admin`; none of the removed ones; no
+// parameter is a `PeerAddr`; no method sends, deletes or resends an
+// acknowledgement.
+// verifies: LLR-4usfu2
+#[test]
+fn the_handles_production_methods_are_exactly_the_domain_surface() {
+    let expected = [
+        "acknowledgement_report", "admission_requests", "cancel_invite", "connect", "is_own_admin", "issue_invite",
+        "next_received", "not_configured", "open", "organisation", "organisations", "person", "personas",
+        "propose_admission", "propose_founding_organisation", "propose_member", "propose_person", "propose_revocation",
+        "propose_updated_organisation", "read_invite", "request_admission", "request_organisation", "send_organisation",
+        "start_receiving", "verification", "verify_all", "verify_organisation", "write_organisation_to_chain",
+    ];
+    let methods = org_io_methods();
+    let names: Vec<&str> = methods.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(names, expected, "the handle's production methods");
+    for (name, signature) in &methods {
+        assert!(!signature.contains("PeerAddr"), "{name} takes a peer address: {signature}");
+        assert!(name == "acknowledgement_report" || !name.contains("acknowledg"), "{name}: no acknowledgement command");
+    }
+}
+
+// Every type the domain methods return is in the allowlist, every handle
+// method's return type names allowlisted types only, and no allowlisted
+// type org-io defines holds a secret — read through every org-io type its
+// body names, to a fixed point (LLR-gh4rw3).
+// verifies: LLR-gh4rw3
+#[test]
+fn every_returned_type_is_in_the_handle_return_allowlist_and_holds_no_secret() {
+    let mut found = vec![];
+    for name in DOMAIN_RETURN_TYPES {
+        if !HANDLE_RETURN_ALLOWLIST.contains(name) {
+            found.push(format!("{name}: not allowlisted"));
+        }
+    }
+    for (file, signature) in handle_methods() {
+        for named in named_types(signature.returns()) {
+            if !HANDLE_RETURN_ALLOWLIST.contains(&named.as_str()) {
+                found.push(format!("{file}:{}: returns {named}, not allowlisted", signature.line));
+            }
+        }
+    }
+    // The handle itself, and the refusal that hands it back, hold org-node's
+    // service by design; their way out is the method surface scanned above.
+    let handle_types = ["OrgIo", "ConnectFailed"];
+    let mut to_read: Vec<String> =
+        HANDLE_RETURN_ALLOWLIST.iter().filter(|name| !handle_types.contains(name)).map(|name| name.to_string()).collect();
+    let mut read: Vec<String> = handle_types.iter().map(|name| name.to_string()).collect();
+    let mut defined = 0;
+    while let Some(name) = to_read.pop() {
+        if read.contains(&name) {
+            continue;
+        }
+        read.push(name.clone());
+        let Some((file, body)) = type_body(&name) else { continue };
+        defined += 1;
+        for named in named_types(&body) {
+            if SECRET_HOLDERS.contains(&named.as_str()) {
+                found.push(format!("{file}: {name} holds {named}"));
+            } else if !read.contains(&named) {
+                to_read.push(named);
+            }
+        }
+    }
+    assert!(defined >= DOMAIN_RETURN_TYPES.len(), "the scan read org-io's returned types ({defined})");
+    assert!(found.is_empty(), "returned types beyond the allowlist, or holding a secret:\n{}", found.join("\n"));
 }
 
 /// The public types of org-node's sources that hold an `OutgoingMessage`:
@@ -689,21 +746,17 @@ fn outgoing_holders() -> Vec<String> {
     }
 }
 
-// An Organisation-information body carries the Organisation private key
-// (S4, task T5; plan §17.2 rule 2): no handle method returns a type holding
-// an `OutgoingMessage` — `CommitOutcome` left the allowlist and
-// `submit_commit_send` returns `Submitted`, public data only. The holders
+// An Organisation-information body carries the Organisation private key:
+// no handle method returns a type holding
+// an `OutgoingMessage` — an organisation-request answer travels in
+// org-node's `Checked`, which no handle method returns. The holders
 // are found in org-node's source; the scan is checked to find
-// `CommitOutcome` among them.
-// *2026-10-14 (S4, task T18):* org-node's LLR for the commit's bodies (that
-// every recipient's body is built by the commit) was cited here too; it is
-// not exported to org-io, so the cross-unit ID is removed. This test
-// verifies org-io's handle rule, LLR-3zdw8v, as before.
+// `Checked` among them.
 // verifies: LLR-3zdw8v
 #[test]
 fn no_handle_method_returns_a_type_holding_an_outgoing_body() {
     let holders = outgoing_holders();
-    assert!(holders.iter().any(|holder| holder == "CommitOutcome"), "the scan finds CommitOutcome: {holders:?}");
+    assert!(holders.iter().any(|holder| holder == "Checked"), "the scan finds Checked (its organisation-request answer): {holders:?}");
     let ways_out: Vec<String> = handle_methods()
         .iter()
         .flat_map(|(file, signature)| {
@@ -714,27 +767,6 @@ fn no_handle_method_returns_a_type_holding_an_outgoing_body() {
         })
         .collect();
     assert!(ways_out.is_empty(), "handle methods returning an outgoing body:\n{}", ways_out.join("\n"));
-}
-
-// The pre-write guard of `submit_commit_send` copies no record and no held
-// provisional update, each of which holds an Organisation private key
-// (review round 4, finding 2): from its signature to the chain write, no
-// code line clones or calls `provisional_updates(`.
-// verifies: LLR-qhjp6g
-#[test]
-fn the_pre_write_guard_copies_no_record_and_no_held_update() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("submit.rs");
-    let text = std::fs::read_to_string(&path).unwrap();
-    let lines: Vec<&str> = text.lines().collect();
-    let start = lines.iter().position(|line| line.contains("pub async fn submit_commit_send")).unwrap();
-    let write = (start..lines.len()).find(|&index| lines[index].contains("bounded(writer.update(")).unwrap();
-    let copies: Vec<String> = (start..write)
-        .filter(|&index| !lines[index].trim_start().starts_with("//"))
-        .filter(|&index| ["clone()", "cloned()", "provisional_updates("].iter().any(|copy| lines[index].contains(copy)))
-        .map(|index| format!("{}:{}: {}", path.display(), index + 1, lines[index].trim()))
-        .collect();
-    assert!(write > start + 5, "the scan found the guard ({start}..{write})");
-    assert!(copies.is_empty(), "the pre-write guard copies:\n{}", copies.join("\n"));
 }
 
 /// A source's lines with `//` comments (doc comments included) removed.
@@ -765,9 +797,6 @@ fn dependency_names(manifest: &str) -> Vec<String> {
 // in-memory store alone; its in-memory stores (keyring's own `mock`, org-io's
 // `MemoryKeychain`) only under `test-support`, which `lib.rs` compiles only
 // with that feature; and the crate is built with its native backends only.
-// *Abnormal case, 2026-10-14 (S4, task T23):* a planted file
-// `src/t23_planted.rs` calling `keyring::Entry::new` failed this scan
-// ("…/t23_planted.rs names keyring"); the file was removed.
 // verifies: LLR-677fqq, LLR-36jer8
 #[test]
 fn keyring_is_named_only_in_the_keychain_module_and_its_mock_only_under_test_support() {
@@ -804,8 +833,7 @@ fn keyring_is_named_only_in_the_keychain_module_and_its_mock_only_under_test_sup
     assert_eq!(features, ["apple-native", "crypto-rust", "sync-secret-service", "windows-native"]);
 }
 
-// REQ-hw82ue, as amended 2026-10-07: org-io is the only unit that names a
-// keychain crate.
+// REQ-hw82ue: org-io is the only unit that names a keychain crate.
 // verifies: LLR-677fqq
 #[test]
 fn no_lower_unit_depends_on_a_keychain_crate() {
@@ -913,15 +941,10 @@ fn keychain_copies(text: &str) -> (Vec<String>, Vec<String>) {
     (scanned, violations)
 }
 
-// *Widened 2026-10-14 (S4 review round 1, finding 9):* the scan read only the
-// lines naming `get_secret` or `seed`; it now reads every line of every
-// function of the keychain module that handles a secret (whose code names a
-// `DeviceSecret`, the item's bytes, the seed or its `Zeroizing` buffer),
-// string literals aside, so a copy made one line away from the read is seen.
-// Mutation check, 2026-10-14: the module's text, read into the test, with
-// `let kept = item.clone();` planted in memory above `with_endpoint_seed`'s
-// `Ok(build(seed))` (a line the old scan skipped) failed this scan
-// ("147: `.clone()` in with_endpoint_seed"); the plant was removed.
+// The scan reads every line of every function of the keychain module that
+// handles a secret (whose code names a `DeviceSecret`, the item's bytes, the
+// seed or its `Zeroizing` buffer), string literals aside, so a copy made one
+// line away from the read is seen.
 // verifies: LLR-677fqq
 #[test]
 fn keychain_bytes_reach_no_clone_debug_or_serialise() {
@@ -933,23 +956,18 @@ fn keychain_bytes_reach_no_clone_debug_or_serialise() {
         "write_device_secret",
         "with_endpoint_seed",
         "keep",
-        "for_signing",
         "for_signing_noting_refusal",
         "unseal",
-        "device_secrets_for_signing",
     ] {
         assert!(scanned.iter().any(|name| name == expected), "the scan read `{expected}`: {scanned:?}");
     }
     assert!(violations.is_empty(), "{}: the keychain bytes are copied or formatted:\n{}", path.display(), violations.join("\n"));
 }
 
-// The stores before S4 (S4, task T9): one passphrase store,
-// `persona_store.bin`, and the app's `outstanding_invites.json` beside it.
-// Outstanding invites live only inside the sealed stores now, and no code in
-// `org-io/src` names either file, comments included.
-// *Abnormal case, 2026-10-14 (S4, task T23):* a planted file
-// `src/t23_planted.rs` holding the string "persona_store.bin" failed this
-// scan ("…/t23_planted.rs names `persona_store.bin`"); the file was removed.
+// The former stores, one passphrase store `persona_store.bin` and the app's
+// `outstanding_invites.json` beside it, are named nowhere: outstanding
+// invites live only inside the sealed stores, and no code in `org-io/src`
+// names either file, comments included.
 // verifies: LLR-t4v69b
 #[test]
 fn no_code_names_the_old_files() {
@@ -976,7 +994,7 @@ fn enclosing_function(lines: &[&str], index: usize) -> Option<String> {
     Some(after[..after.find(['(', '<']).unwrap_or(after.len())].to_string())
 }
 
-// iroh's secret-key type is named in one function only (S4, task T10):
+// iroh's secret-key type is named in one function only:
 // `bind_from_keychain` builds it from the keychain item's lent seed and moves
 // it into the endpoint builder. Nothing in `org-io/src` reads it back
 // (`to_bytes()`, `.secret()`, the endpoint's `.secret_key()`), clones it
@@ -1049,10 +1067,7 @@ fn gated_to_test_builds(lines: &[&str], index: usize) -> bool {
 // endpoint once the check is made) bind one: in a production build, no `pub mod` or `pub use` exposes the
 // endpoint module or one of its items, and no production public function
 // outside that module returns one. Only test builds (`test-support`) reach
-// them, as the transport's tests do. *Added 2026-10-14 (S4 review round 1,
-// finding 1):* `iroh_secret_key_is_named_in_one_function_only` checked
-// public fields only, while `transport` re-exported `OrgEndpoint` and its
-// public constructor.
+// them, as the transport's tests do.
 // verifies: LLR-d5y7ks
 #[test]
 fn the_endpoint_and_its_constructor_are_reachable_only_in_test_builds() {
@@ -1132,54 +1147,56 @@ fn the_preflight_reads_no_key_or_seed_from_the_environment() {
     }
 }
 
-// org-io deletes nothing itself (REQ-cz753a): no file of its source removes
-// a file or directory, forgets an Organisation, or drops a store's records or
-// Personas; and org-node's discard is reached only from `publish.rs`.
-// *Amended 2026-10-13 (owner ruling of that day, background discard):* the
-// clause that the two public discards take `&mut self` is replaced by
-// `no_public_method_discards_a_provisional_update`.
-// *Reconciled with S3b-io part 1, 2026-10-14:* S4's store files (task T9)
-// remove a file in two places, both exempted by name: `write_store` removes
-// its own temporary file after a failed step, and `remove_store` removes a
-// forgotten Persona's store file, which `LocalStore::store` calls only for
-// org-node's `StoreChange::Forgotten` — org-node's verified removal,
-// executed by org-io (LLR-amv4mb). The scan reads S4's `code_lines`
-// (trailing comments dropped too) in place of S3b-io's comment-line filter.
-// verifies: LLR-cc59ys
+// org-io removes, renames or
+// deletes nothing itself but in the Persona deletion. File removals and
+// renames are only in `store_file::write_store` (its temporary file, in
+// `replace_file`, which the Person file's write shares),
+// `mark_removed` and `remove_removed_file`; those two and the keychain's
+// `delete_device_secret` are called only from retention.rs, the
+// deletion's module (SDD-wyn7b6); no store
+// record is retained, removed or cleared, and nothing is discarded.
+// verifies: LLR-vvd8dn
 #[test]
-fn org_io_removes_nothing_itself_and_discards_only_in_publish() {
+fn org_io_removes_nothing_itself_but_in_the_persona_deletion() {
     let mut found = vec![];
     for (path, text) in sources() {
-        let file = path.display().to_string();
+        let file = path.file_name().unwrap().to_string_lossy().to_string();
         let code = code_lines(&text);
         for (index, line) in code.iter().enumerate() {
-            let removes = ["remove_file", "remove_dir", "forget_organisation"].iter().any(|call| line.contains(call));
-            let drops_records = ["orgs", "personas"].iter().any(|field| {
-                [".retain(", ".remove(", ".clear("].iter().any(|call| line.contains(&format!("{field}{call}")))
-            });
-            let store_file_step = path.ends_with("store_file.rs")
-                && matches!(enclosing_function(&code, index).as_deref(), Some("write_store" | "remove_store"));
-            if (removes || drops_records) && !store_file_step {
-                found.push(format!("{file}:{}: removes: {}", index + 1, line.trim()));
+            let line = without_strings(line);
+            let in_function = enclosing_function(&code, index);
+            let file_step = file == "store_file.rs"
+                && matches!(in_function.as_deref(), Some("write_store" | "replace_file" | "mark_removed" | "remove_removed_file"));
+            let removes = ["remove_file", "remove_dir", "fs::rename"].iter().any(|call| line.contains(call));
+            if removes && !file_step {
+                found.push(format!("{file}:{}: removes or renames: {}", index + 1, line.trim()));
             }
-            if line.contains("discard_provisional(") && !path.ends_with("publish.rs") {
-                found.push(format!("{file}:{}: discards outside publish.rs: {}", index + 1, line.trim()));
+            let deletion_call = ["mark_removed(", "remove_removed_file(", "delete_device_secret("].iter().any(|call| line.contains(call));
+            let declares = line.contains("fn mark_removed") || line.contains("fn remove_removed_file") || line.contains("fn delete_device_secret");
+            let defining_file = file == "keychain.rs" && line.contains("delete_device_secret(");
+            if deletion_call && !declares && !defining_file && file != "retention.rs" {
+                found.push(format!("{file}:{}: deletes outside retention.rs: {}", index + 1, line.trim()));
+            }
+            let drops_records = [".retain(", ".remove(", ".clear("].iter().any(|call| line.contains(call))
+                && ["record", "provisional", "members"].iter().any(|field| line.contains(field));
+            if drops_records || line.contains("discard_") {
+                found.push(format!("{file}:{}: drops records itself: {}", index + 1, line.trim()));
             }
         }
     }
-    assert!(found.is_empty(), "org-io deletes outside org-node's verified paths:\n{}", found.join("\n"));
+    assert!(found.is_empty(), "org-io deletes outside the Persona deletion:\n{}", found.join("\n"));
 }
 
-// The app reaches the store files only through the handle's operations
-// (REQ-cz753a): no public function of a production build writes, renames or
-// removes a file, or calls the store file functions that do. Added
-// 2026-10-15 (S4 review round 2, finding-2): `store_file::write_store` and
-// `store_file::remove_store` were public, and the scan above exempts them by
-// name without asking who can call them.
-// verifies: LLR-cc59ys
+// No public function of a
+// production build writes, renames or removes a file, or calls the store
+// file or keychain functions that do.
+// verifies: LLR-vvd8dn
 #[test]
-fn no_public_function_writes_or_removes_a_file() {
-    let file_calls = ["remove_file", "remove_dir", "fs::write", "rename(", "OpenOptions", "File::create", "write_store(", "remove_store("];
+fn no_public_function_writes_renames_or_removes_a_file() {
+    let file_calls = [
+        "remove_file", "remove_dir", "fs::write", "rename(", "OpenOptions", "File::create", "write_store(", "mark_removed(",
+        "remove_removed_file(", "delete_device_secret(",
+    ];
     let mut found = vec![];
     let mut scanned = 0;
     for (path, text) in sources() {
@@ -1205,33 +1222,35 @@ fn no_public_function_writes_or_removes_a_file() {
             }
         }
     }
-    assert!(scanned >= 10, "the scan found org-io's public functions ({scanned})");
-    assert!(found.is_empty(), "a public function writes or removes a file:\n{}", found.join("\n"));
+    assert!(scanned >= 20, "the scan found org-io's public functions ({scanned})");
+    assert!(found.is_empty(), "a public function writes, renames or removes a file:\n{}", found.join("\n"));
 }
 
-// The app discards nothing (owner ruling of 2026-10-13): no file of org-io's
-// source declares a public discard, only a private or crate-visible one.
-// *Reconciled with S3b-io part 1, 2026-10-14:* reads S4's `code_lines`.
-// verifies: LLR-cc59ys
+// No public function of
+// org-io discards or forgets a provisional change or organisation.
+// verifies: LLR-vvd8dn
 #[test]
-fn no_public_method_discards_a_provisional_update() {
+fn no_public_method_discards_a_provisional_change_or_organisation() {
     let mut found = vec![];
     for (path, text) in sources() {
-        let file = path.display().to_string();
         for (index, line) in code_lines(&text).iter().enumerate() {
-            if ["pub fn discard", "pub async fn discard"].iter().any(|declared| line.contains(declared)) {
-                found.push(format!("{file}:{}: a public discard: {}", index + 1, line.trim()));
+            let trimmed = line.trim_start();
+            let Some(after) = trimmed.strip_prefix("pub fn ").or_else(|| trimmed.strip_prefix("pub async fn ")) else { continue };
+            let name = &after[..after.find(['(', '<']).unwrap_or(after.len())];
+            if ["discard", "forget", "drop_provisional", "cancel_provisional", "drop_change"].iter().any(|word| name.contains(word)) {
+                found.push(format!("{}:{}: a public discard: {}", path.display(), index + 1, line.trim()));
             }
         }
     }
     assert!(found.is_empty(), "org-io offers a public discard:\n{}", found.join("\n"));
 }
 
-// iroh is one adapter's dependency (S4, ARCHITECTURE review finding-1): only
+// iroh is one adapter's dependency: only
 // the transport module, `src/transport/`, and the test-only support,
 // `src/test_support.rs`, name `iroh::` in code; every other file reaches the
 // transport through org-io's own types. Comments are not code.
-// verifies: LLR-3vb4k9
+// LLR-4k43dm states this over the addresses kept per Device key.
+// verifies: LLR-4k43dm
 #[test]
 fn iroh_is_named_only_in_the_transport_module_and_test_support() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -1251,4 +1270,149 @@ fn iroh_is_named_only_in_the_transport_module_and_test_support() {
     }
     assert!(naming.iter().any(|file| file == "transport/endpoint.rs"), "the scan found the transport's iroh calls: {naming:?}");
     assert!(outside.is_empty(), "iroh named outside the transport module:\n{}", outside.join("\n"));
+}
+
+// The handle's one random source (SDD-3qwjs2): no file of `org-io/src` but `rng.rs` (the
+// handle's `OsRng`) and `test_support.rs` (the test seams) names a generator. Code lines only.
+// verifies: LLR-4qd5fx
+#[test]
+fn no_file_outside_rng_and_test_support_names_a_generator() {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let generators = ["OsRng", "thread_rng", "StdRng", "SmallRng", "from_entropy"];
+    let mut found = vec![];
+    let mut named_in_rng = false;
+    for (path, text) in sources() {
+        let relative = path.strip_prefix(&src).unwrap().to_string_lossy().replace('\\', "/");
+        for (index, line) in code_lines(&text).iter().enumerate() {
+            for generator in generators.iter().filter(|generator| line.contains(**generator)) {
+                match relative.as_str() {
+                    "rng.rs" => named_in_rng = true,
+                    "test_support.rs" => {}
+                    _ => found.push(format!("{relative}:{}: `{generator}`: {}", index + 1, line.trim())),
+                }
+            }
+        }
+    }
+    assert!(named_in_rng, "the scan found the handle's OsRng in rng.rs");
+    assert!(found.is_empty(), "a generator named outside rng.rs and test_support.rs:\n{}", found.join("\n"));
+}
+
+// No caller supplies or sees the random source: no `pub fn` of `org-io/src` (signatures joined
+// across lines, as LLR-u2pk5y's scan reads them) names `RngCore`, `CryptoRng` (which
+// `CryptoRngCore` contains) or `HandleRng`; `test_support.rs` is excepted.
+// verifies: LLR-ctm86b
+#[test]
+fn no_public_method_takes_or_returns_a_random_source() {
+    let mut found = vec![];
+    let mut scanned = 0;
+    for (path, text) in sources() {
+        if path.ends_with("test_support.rs") {
+            continue;
+        }
+        for signature in public_signatures(&text) {
+            scanned += 1;
+            for name in ["RngCore", "CryptoRng", "HandleRng"] {
+                if signature.signature.contains(name) {
+                    found.push(format!("{}:{}: names `{name}`: {}", path.display(), signature.line, signature.signature));
+                }
+            }
+        }
+    }
+    assert!(scanned >= 10, "the scan found org-io's public functions ({scanned})");
+    assert!(found.is_empty(), "a public function takes or returns a random source:\n{}", found.join("\n"));
+    let lib = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs")).unwrap();
+    for line in code_lines(&lib) {
+        let field = line.trim_start();
+        assert!(!(field.starts_with("pub ") && field.contains("HandleRng")), "a public field holds the source: {field}");
+    }
+}
+
+// org-io names the Person only through org-node's types (owner ruling 2026-10-15: no org-io →
+// person edge): no table of its manifest names a `person` crate — as a key, as a
+// `[dependencies.person]` table of any kind, or renamed through `package = "person"` — and no
+// code line of `org-io/src` has a `use person` or `person::` path.
+// verifies: LLR-b97usg
+#[test]
+fn org_io_names_no_person_crate() {
+    let manifest = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
+    for line in manifest.lines().map(str::trim) {
+        let unspaced = line.replace(' ', "");
+        let names_the_crate = unspaced.starts_with("person=")
+            || unspaced.starts_with("person.")
+            || (unspaced.starts_with('[') && unspaced.ends_with("dependencies.person]"))
+            || unspaced.contains("package=\"person\"");
+        assert!(!names_the_crate, "the manifest names the person crate: {line}");
+    }
+    let mut scanned = 0;
+    for (path, text) in sources() {
+        scanned += 1;
+        for (index, line) in code_lines(&text).iter().enumerate() {
+            let names_the_crate = line.contains("use person")
+                || line.match_indices("person::").any(|(at, _)| line[..at].chars().next_back().is_none_or(|before| !(before.is_alphanumeric() || before == '_')));
+            assert!(!names_the_crate, "{}:{}: names the person crate: {}", path.display(), index + 1, line.trim());
+        }
+    }
+    assert!(scanned > 5, "the scan read org-io's sources ({scanned})");
+}
+
+// Adoption has one way in (SDD-t4z8sz): org-node's `verify` is called in `org-io/src` only from
+// `verify.rs`; no receive, write or send path adopts. Code lines only.
+// verifies: LLR-3ame3g
+#[test]
+fn org_nodes_verification_is_called_only_from_verify_rs() {
+    let mut callers = vec![];
+    for (path, text) in sources() {
+        for (index, line) in code_lines(&text).iter().enumerate() {
+            if line.contains(".verify(") {
+                callers.push(format!("{}:{}", path.file_name().unwrap().to_string_lossy(), index + 1));
+            }
+        }
+    }
+    assert!(callers.iter().any(|caller| caller.starts_with("verify.rs:")), "the scan found verify.rs's call: {callers:?}");
+    assert!(callers.iter().all(|caller| caller.starts_with("verify.rs:")), "org-node's verification called elsewhere: {callers:?}");
+}
+
+/// org-node's reads that hand out a value holding a key field: `OrgRecord`
+/// (the Organisation private key), `PersonaRecord` (the member seed),
+/// `PersonStoreContent` (the Person seed) and `StoreData` (all of them).
+const KEY_CARRYING_READS: [&str; 4] = ["list_orgs(", "list_personas(", ".data()", "store_data("];
+
+// org-io's production code reads org-node's stores only through the key-free
+// views (`persona_view`, `persona_records`, `PersonStore::view` and their
+// siblings): no line of `org-io/src` outside test-support code calls a read
+// that hands out a key-carrying value. Code lines only, string literals
+// aside; `test_support.rs`, and any function or item gated on
+// `test-support`, is exempt.
+// verifies: LLR-jqb5z7
+#[test]
+fn org_io_reads_org_node_stores_only_through_key_free_views() {
+    let mut reads = vec![];
+    let mut scanned = 0;
+    for (path, text) in sources() {
+        if path.ends_with("test_support.rs") {
+            continue;
+        }
+        scanned += 1;
+        let lines: Vec<&str> = text.lines().collect();
+        let code = code_lines(&text);
+        for (index, line) in code.iter().enumerate() {
+            let line = without_strings(line);
+            if !KEY_CARRYING_READS.iter().any(|read| line.contains(read)) {
+                continue;
+            }
+            let declaration = (0..=index).rev().find(|&earlier| {
+                let trimmed = code[earlier].trim_start();
+                ["fn ", "pub fn ", "async fn ", "pub async fn ", "pub(crate) fn ", "pub(crate) async fn "]
+                    .iter()
+                    .any(|start| trimmed.starts_with(start))
+            });
+            let in_test_builds = declaration.is_some_and(|declaration| gated_to_test_builds(&lines, declaration))
+                || enclosing_item_only_in_test_builds(&lines, index);
+            if !in_test_builds {
+                reads.push(format!("{}:{}: {}", path.display(), index + 1, line.trim()));
+            }
+        }
+    }
+    assert!(scanned > 5, "the scan read org-io's sources ({scanned})");
+    assert!(reads.is_empty(), "org-io reads org-node through a key-carrying value:\n{}", reads.join("\n"));
 }

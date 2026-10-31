@@ -30,17 +30,22 @@ _Avoid_: using it in new text; DevicePublicKey is the term
 
 **Operator**:
 The person using this application, in whichever of the two roles the moment
-calls for: an administrator admitting or revoking, or a member watching their
-own membership. One word for both, deliberately — the application does not
-distinguish them, and a glossary that did would imply a separation the software
-does not provide.
-_Avoid_: user, admin, end user
+calls for: an Admin (root `docs/CONTEXT.md`) admitting or revoking, or a
+Member watching their own membership. One word for both, deliberately — the
+application checks neither role itself. Where text names the role, it says
+Admin, as the panels an Admin uses do ("Issue Invite (Admin)"); whether a
+user is one is a fact on the chain, which a write reports.
+*Amended 2026-10-28 (change `worktree-org-io-domain-api`, ARCHITECTURE review round 3, AR3-7):* "admin" left _Avoid_: the
+root glossary's Admin is the term for the role, and the changed panels use it.
+_Avoid_: user, administrator, end user
 
 **Command**:
 One named operation the frontend may ask the backend to perform, registered in
 the Tauri invoke handler and reachable from the frontend by that name and no
-other. Twelve exist. A command is the only way the frontend can cause anything
-to happen.
+other. Seventeen exist (the app's design draft lists them, LLR-kk8gc7). A
+command is the only way the frontend can cause anything to happen.
+*Amended 2026-10-28 (change `worktree-org-io-domain-api`, ARCHITECTURE review round 3, AR3-7):* "Twelve" became seventeen with
+the domain surface.
 _Avoid_: handler, endpoint, IPC call, action
 
 **Event**:
@@ -66,40 +71,50 @@ _Avoid_: receiver flag, running flag, started
 
 **Transport mode**:
 Which of the two ways this installation reaches other nodes: Networked, where a
-peer is found by discovery from its DevicePublicKey, or Loopback, where a peer must
-be dialled at an address supplied alongside the request. It is fixed at startup
-and it decides whether a peer address is required — which is why it has to be
+peer is found by discovery from its DevicePublicKey, or Loopback, where a peer
+is dialled at a Peer address org-io holds for it. It is fixed at startup and
 reported to the frontend rather than assumed there.
+*Amended 2026-10-28 (change `worktree-org-io-domain-api`, ARCHITECTURE review round 3, AR3-7):* it decided whether the
+operator had to supply a peer address; none is supplied any more (see Peer
+address).
 _Avoid_: network mode, iroh mode, connectivity
 
 **Peer address**:
-The dialling information for one node, as distinct from its DevicePublicKey. Required
-in Loopback, absent by design in Networked, and optional in every request that
-takes one.
+The dialling information for one node, as distinct from its DevicePublicKey.
+The operator never supplies one: an Invite carries the issuing Device's, an
+Admission request and an Organisation request carry the sender's, and org-io
+keeps each for that Device's DevicePublicKey and dials only those.
+*Amended 2026-10-28 (change `worktree-org-io-domain-api`, ARCHITECTURE review round 3, AR3-7):* it was "required in Loopback,
+absent by design in Networked, and optional in every request that takes
+one"; no command takes one since the change retired the pasted address
+(REQ-vgr7s2 retired 2026-10-20).
 _Avoid_: node addr, endpoint addr, peer blob
 
 **Blob**:
-An opaque encoded string an operator moves between two installations by hand —
-an Invite, or an Invite reply. A Blob carries no proof of who produced it; what
+An opaque encoded string an operator moves between two installations by hand:
+an Invite. A Blob carries no proof of who produced it; what
 it decodes to is what its author chose.
 _Avoid_: payload, token, code, invite string
 
 **Invite**:
-What a Member sends a prospective Member over a channel of their choosing: the
-Organisation's name as the inviter typed it, the Organisation identifier, the
-inviter's guess of the invitee's full name, the inviter's DevicePublicKeys and an
-invite identifier the inviter keeps, paired with that Organisation, until a
-reply naming both has been acted on; a refused reply, or one whose chain write
-fails, leaves it outstanding. The name is for display and is verified by
-nothing.
+What an Admin's Device sends a prospective Member over a channel of their
+choosing: the Organisation's name as the inviter typed it, the Organisation
+identifier, the inviter's guess of the invitee's full name, the issuing
+Device's DevicePublicKey and Peer addresses, and an invite identifier the
+issuing Device keeps outstanding, paired with that Organisation, until an
+adopted epoch admits the Member whose Admission request (root
+`docs/CONTEXT.md`) answered it, or the Invite is cancelled. The name is for
+display and is verified by nothing.
+*Amended 2026-10-28 (change `worktree-org-io-domain-api`, ARCHITECTURE review round 3, AR3-7):* it named the inviter's
+DevicePublicKeys and stayed outstanding "until a reply naming both has been
+acted on"; it now names the one issuing Device and is answered by an
+Admission request.
 _Avoid_: invitation code, link, ticket
 
-**Invite reply**:
-What the invitee sends back so that the inviter can admit them: the
-Organisation identifier and invite identifier from the Invite, and the chosen
-Persona's Member-as-a-group key,
-DevicePublicKey, handle, name and surname.
-_Avoid_: join request, application, enrolment request
+*Invite reply* was defined here until 2026-10-28, when the change
+`worktree-org-io-domain-api` replaced it with the root glossary's Admission
+request, sent over iroh rather than moved by hand (round 3 review, AR3-7).
+The root glossary lists "Invite reply" under that term's _Avoid_.
 
 **Connection status**:
 The report the backend returns describing how this installation is configured:

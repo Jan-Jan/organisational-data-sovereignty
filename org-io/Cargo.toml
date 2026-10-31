@@ -13,7 +13,7 @@ default = []
 # ODS_ADMIN_SEED is compiled only with this feature. No release build enables it.
 dev-seed = []
 # Test-only constructors and fakes (`test_support`); never in production builds.
-# Carries org-node's test-only seams with it (org-node is a dependency since T5).
+# Carries org-node's test-only seams with it.
 test-support = ["org-node/test-support", "iroh/test-utils"]
 
 [dependencies]
@@ -23,24 +23,21 @@ on-chain-client = { path = "../on-chain-client", default-features = false, featu
 subxt-signer = { version = "0.50", default-features = false, features = ["sr25519", "subxt"] }
 zeroize = "1.9"
 # The Organisation logic org-io feeds values to and takes values from
-# (docs/adr/2026-10-06-org-io-unit.md); `app` until S4 narrows it.
+# (docs/adr/2026-10-06-org-io-unit.md), with its `app` feature.
 org-node = { path = "../org-node", features = ["app"] }
-# The chain connection and read (SDD-z85ux9, moved from org-node 2026-10-07);
-# the same pins org-node's manifest gave, so the subxt types unify.
+# The chain connection and read (SDD-z85ux9); the same pins as
+# on-chain-client's, so the subxt types unify.
 subxt = { version = "0.50", default-features = false, features = ["native", "jsonrpsee", "reconnecting-rpc-client"] }
-# `sync` (S4 task T10): the endpoints' map and their receive channel.
+# `sync`: the endpoints' map and their receive channel.
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 async-trait = "0.1"
 hex = "0.4"
-# The peer address as text (S4 task T12, moved from the app with the parse):
-# the hexadecimal of a postcard-encoded `iroh::EndpointAddr` (`transport/peer_addr.rs`).
-# org-node's and the app's version, so one copy is built.
-postcard = { version = "1", features = ["use-std"] }
-# The transport (S4 task T10, moved from org-node with its pin): one endpoint
+# The transport: one endpoint
 # per Persona, bound from its keychain item. `test-support` adds `test-utils`
 # for the in-process relay (`BindPlan::Relay`).
 iroh = "0.98"
-# `getrandom` (S4 task T9): `OsRng` names each store file's temporary
+# `getrandom`: `OsRng` is the handle's random source in a production build
+# (`HandleRng`, LLR-4qd5fx), which also names each store file's temporary
 # (LLR-b9bm36).
 rand_core = { version = "0.6", features = ["getrandom"] }
 # The OS keychain: one item per Device key (SDD-4fvypt, REQ-hw82ue; the only
@@ -48,21 +45,22 @@ rand_core = { version = "0.6", features = ["getrandom"] }
 # (LLR-36jer8): macOS and iOS through `apple-native`, Windows through
 # `windows-native`, Linux through `sync-secret-service` with `crypto-rust`
 # for an encrypted D-Bus session. No `vendored`, no `linux-native`. Android
-# has no backend in 3.x (the crate falls back to its mock there; S4 refuses).
+# has no backend in 3.x (the crate falls back to its mock there; org-io
+# refuses there, LLR-8erfbu).
 keyring = { version = "=3.6.3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 
 [dev-dependencies]
 bolero = "0.13"
-# The paused clock of the 90-second bound's test (LLR-be3zv9).
+# The paused clock of the 90-second write bound's tests (LLR-d3farr;
+# tests/chain_write.rs, tests/verification.rs).
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "test-util"] }
-# `iroh::test_utils::run_relay_server()` for the hermetic Networked test
-# (moved from org-node's dev-dependencies, S4 task T10).
+# `iroh::test_utils::run_relay_server()` for the hermetic Networked test.
 iroh = { version = "0.98", features = ["test-utils"] }
 # `OsRng`, as org-node's and the app's tests use.
 rand = "0.8"
 # Chopsticks test harness (tests/common, used by preflight): chopsticks spawn +
-# subxt client. Moved with the preflight from org-node's dev-dependencies,
-# which mirror on-chain-client's for the same helpers.
+# subxt client, mirroring on-chain-client's dev-dependencies for the same
+# helpers.
 jsonrpsee = { version = "0.26", default-features = false, features = ["ws-client", "http-client"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 libc = "0.2"
@@ -70,16 +68,26 @@ libc = "0.2"
 [lints]
 workspace = true
 
-# The operator preflight (moved from org-node 2026-10-07). No
-# `required-features`: org-io always has the chain.
+# The operator preflight. No `required-features`: org-io always has the
+# chain.
 [[bin]]
 name = "preflight"
 
 # Chopsticks-only: spawns a fork and needs on-chain/scripts/node_modules, so it
-# is not in verify_commands (as in org-node).
+# is not in verify_commands.
 [[test]]
 name = "preflight"
 path = "tests/preflight.rs"
+
+# Chopsticks-only, as `preflight`: the
+# contract test of `test_support::FakeChain`'s writer, run against the
+# production writer on a fork with OrgRegistry deployed; spawns chopsticks
+# and needs on-chain/scripts/node_modules and forge, so it is not in
+# verify_commands.
+[[test]]
+name = "chain_writer_contract"
+path = "tests/chain_writer_contract.rs"
+required-features = ["test-support", "dev-seed"]
 
 # The seed and co-signer parse never panics (LLR-4ax2m6, LLR-9fy622) and its
 # errors carry no part of the value (LLR-gc6kwy).
@@ -90,8 +98,8 @@ harness = false
 
 # The seed and co-signer parse (LLR-4ax2m6, LLR-gc6kwy). Its seed comparison,
 # `SeedBytes::same_bytes_as`, exists only under test-support, so the target
-# declares it (2026-10-14, S4 task T18: a build with no features skips the
-# target instead of failing to compile it; both verify lines name the feature).
+# declares it: a build with no features skips the target instead of failing
+# to compile it, and both verify lines name the feature.
 [[test]]
 name = "key_custody_config"
 path = "tests/key_custody_config.rs"
@@ -103,32 +111,6 @@ required-features = ["test-support"]
 name = "dev_seed_env"
 path = "tests/dev_seed_env.rs"
 required-features = ["dev-seed"]
-
-# Submission (LLR-qhjp6g, LLR-be3zv9, LLR-9r2bxd) and the receive sequence
-# (LLR-7pj5af), over `test_support::FakeChain`.
-[[test]]
-name = "submit_flow"
-path = "tests/submit_flow.rs"
-required-features = ["test-support"]
-
-# The publish state (SDD-6mpmsw): the unknown-outcome write, its settle, and
-# discard (LLR-2yjuaj, LLR-t98pk9, LLR-nqvbb6, LLR-fptp57, LLR-36zp69).
-[[test]]
-name = "publish_path"
-path = "tests/publish_path.rs"
-required-features = ["test-support"]
-
-# Reconcile at start and on request, the unverified state, and no deletion
-# but on a verified path (LLR-k5pzsz, LLR-kp95ty, LLR-cc59ys).
-[[test]]
-name = "startup_reconcile"
-path = "tests/startup_reconcile.rs"
-required-features = ["test-support"]
-
-[[test]]
-name = "receive_order"
-path = "tests/receive_order.rs"
-required-features = ["test-support"]
 
 # The own-admin check (LLR-qhyc3n, LLR-vyd5d3, LLR-c9fyun): the pure rule,
 # then the handle over `test_support::FakeChain`'s signatory-set slots.
@@ -155,7 +137,7 @@ required-features = ["test-support"]
 
 # These create Personas, whose device secrets go to the keychain: they run
 # only with `test-support`, over `test_support::MemoryKeychain`, so no test
-# build reaches the OS keychain (S4 task T8).
+# build reaches the OS keychain.
 [[test]]
 name = "open"
 path = "tests/open.rs"
@@ -167,15 +149,14 @@ path = "tests/signatory_key.rs"
 required-features = ["test-support"]
 
 # The store files (LLR-nt8dja, LLR-b9bm36, LLR-murjr6, LLR-uzax55,
-# LLR-amv4mb; S4 task T9), over `test_support::MemoryKeychain`: each test
+# LLR-amv4mb), over `test_support::MemoryKeychain`: each test
 # installs its own, so they run one at a time in their own binary.
 [[test]]
 name = "store_files"
 path = "tests/store_files.rs"
 required-features = ["test-support"]
 
-# The transport (S4 task T10), moved from org-node with its tests: the
-# authenticated endpoint over loopback and over an in-process relay, one
+# The transport: the authenticated endpoint over loopback and over an in-process relay, one
 # endpoint per Persona, and the transport preflight. Every endpoint is bound
 # from a keychain item, `test_support::MemoryKeychain` here.
 [[test]]
@@ -188,7 +169,7 @@ name = "transport_networked"
 path = "tests/transport_networked.rs"
 required-features = ["test-support"]
 
-# The receive step (S4 task T11): no lock held while it waits, check then
+# The receive step: no lock held while it waits, check then
 # one read then commit and write, and the typed terminal condition. Its tests
 # install their own `test_support::MemoryKeychain` and run one at a time.
 [[test]]
@@ -197,7 +178,7 @@ path = "tests/receive_step.rs"
 required-features = ["test-support"]
 
 # A revoked Device may connect, for its acknowledgement only; every inbound
-# stream is answered with one verdict byte (S4 task T11a). Its tests install
+# stream is answered with one verdict byte. Its tests install
 # their own `test_support::MemoryKeychain` and run one at a time.
 [[test]]
 name = "acknowledgement_inbound"
@@ -209,49 +190,73 @@ name = "endpoints"
 path = "tests/endpoints.rs"
 required-features = ["test-support"]
 
-# The fan-out of a committed update and the Loopback address check (S4 task
-# T12), over Loopback endpoints and the in-process relay; its tests install
+# The fan-out of an Organisation's epoch and the Loopback address check, over Loopback endpoints and the in-process relay; its tests install
 # their own `test_support::MemoryKeychain`.
 [[test]]
 name = "send_fanout"
 path = "tests/send_fanout.rs"
 required-features = ["test-support"]
 
-# The peer-address parse (S4 task T12, moved from the app with its cases).
-[[test]]
-name = "peer_addr"
-path = "tests/peer_addr.rs"
-required-features = ["test-support"]
-
-# The peer-address parse never panics, on any text (LLR-2b2ghe).
-[[test]]
-name = "fuzz_peer_addr"
-path = "tests/fuzz_peer_addr/fuzz_target.rs"
-harness = false
-
 [[test]]
 name = "preflight_transport"
 path = "tests/preflight_transport.rs"
 required-features = ["test-support"]
 
-# The invitation exchange runner (S4 task T13; its first fourteen tests moved
-# from the app), and the five stories end to end over two Loopback
-# endpoints, duplicated from org-node's `service_stories.rs`. Every Persona's
-# secret is in the shared `test_support::MemoryKeychain`.
+# The invitation exchange: an Invite issued, read and answered with an
+# admission request. Every Persona's secret is in the shared
+# `test_support::MemoryKeychain`.
 [[test]]
 name = "invitation_exchange"
 path = "tests/invitation_exchange.rs"
 required-features = ["test-support"]
 
-[[test]]
-name = "node_stories"
-path = "tests/node_stories.rs"
-required-features = ["test-support"]
-
 # The six expectations org-io declared on org-node, shown to hold through the
-# handle (S4 task T19; owner ruling 1 of 2026-10-14). Its tests install their
+# handle (owner ruling 1 of 2026-10-14). Its tests install their
 # own `test_support::MemoryKeychain` and run one at a time.
 [[test]]
 name = "expectations_met"
 path = "tests/expectations_met.rs"
+required-features = ["test-support"]
+
+# The domain surface's targets: the random source, the Person, Persona
+# creation, proposals, the chain write, verification, the kept admission
+# requests and the removal acknowledgements.
+[[test]]
+name = "rng_source"
+path = "tests/rng_source.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "person"
+path = "tests/person.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "persona_creation"
+path = "tests/persona_creation.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "propose"
+path = "tests/propose.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "chain_write"
+path = "tests/chain_write.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "verification"
+path = "tests/verification.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "requests"
+path = "tests/requests.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "acknowledgements"
+path = "tests/acknowledgements.rs"
 required-features = ["test-support"]

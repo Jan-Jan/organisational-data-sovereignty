@@ -69,12 +69,36 @@ the half of the process they live in.
 
 | Half | Items | What it decides |
 |---|---|---|
-| **Rust: startup** | SDD-k95rmp, SDD-aq7m6b | Which passphrase, data directory and transport mode the node runs with, when startup is refused, and how the managed state is assembled from those values |
-| **Rust: the command side** | SDD-2pa6h6, SDD-rmbr3t, SDD-q4dpym | What an operator-supplied value must be before it reaches the service, what each command returns, and what is reported about the running configuration |
-| **Rust: the receiver side** | SDD-5fchuy, SDD-mwqf6x | Whether a receiver loop may start, and how each receive result becomes a named event with a payload |
-| **Webview** | SDD-8jw9mn, SDD-jx363y | How events become the verification view, and whether a revocation may be submitted |
+| **Rust: startup** | SDD-k95rmp, SDD-aq7m6b | Which passphrase, data directory, transport mode and verification interval the node runs with, when startup is refused, and how the managed state is assembled from those values |
+| **Rust: the command side** | SDD-2pa6h6, SDD-6pjvhc, SDD-6zqqm8, SDD-q4dpym | What an operator-supplied value must be before it reaches org-io, what each command of org-io's domain surface returns, what a verification or a write asks for next (a send, a request, a verification), and what is reported about the running configuration |
+| **Rust: periodic verification** | SDD-tgu7dp | That every held Organisation is verified once per interval while the app runs, through the same body as every other verification |
+| **Rust: the receiver side** | SDD-5fchuy, SDD-mwqf6x | Whether a receiver loop may start, and how each received message and verification result becomes a named outcome and event with a payload |
+| **Webview** | SDD-8jw9mn, SDD-swt9fs, SDD-ua2d9b, SDD-xg4nj7, SDD-p7sdy3, SDD-czjf2c, SDD-7aq69w, SDD-g5wmxt | How events become the verification view; what a verification shows; when the webview asks for one; the notices of a membership change in flight; the Admin's commands that take a change to the chain (propose the next epoch, write it, cancel an Invite); whether a revocation may be proposed; the invitee's confirmation before the first admission request; whether a refused Person stops the founding |
 | **Configuration** | SDD-32hath | What any script in the webview may load, run or connect to |
 | **Untested shell** | SDD-6g3wnh | Everything above, wired together at its call sites, that no gated test reaches |
+
+*Amended 2026-10-20 (change `worktree-org-io-domain-api`, consistency
+pass):* the table is brought up to the in-force items. SDD-rmbr3t is
+superseded by SDD-6pjvhc (the commands carry org-io's domain-surface names),
+SDD-jx363y by SDD-ckqyh3 (the warning before the first admission request
+replaces the Loopback address check), and SDD-huk773 by SDD-ktsgh5; SDD-tgu7dp
+(periodic verification) and SDD-xg4nj7 (the admission and notices view) are
+new, all in `2026-10-16-domain-api.md`. Since that
+change the Rust half drives org-io, not org-node: the app names no org-node
+item, and org-io holds the node, the chain connection and the transport.
+Where the text below names SDD-rmbr3t or SDD-jx363y, read their successors.
+
+*Amended 2026-10-28 (change `worktree-org-io-domain-api`, round 3 review
+AR3-5 and AR3-6):* SDD-ktsgh5 is superseded by SDD-swt9fs (the display) and
+SDD-ua2d9b (when the webview asks), SDD-ckqyh3 by SDD-czjf2c (the revocation
+input) and SDD-7aq69w (the admission-request confirmation), each for holding
+two responsibilities; SDD-g5wmxt (the creation form's refused-Person
+decision) is new.
+
+*Amended 2026-10-30 (change `worktree-org-io-domain-api`, merge review
+round 1, MR1-A1):* SDD-p7sdy3 (the Admin's epoch commands in the webview:
+"Propose next epoch", "Write to chain" for a proposed update, cancelling an
+Invite) is new, in `2026-10-16-domain-api.md`.
 
 The policy decisions are pure: SDD-k95rmp and SDD-q4dpym take every input as
 a parameter and read no environment, and SDD-mwqf6x is a total mapping from

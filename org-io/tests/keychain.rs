@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! The keychain module (SDD-4fvypt; LLR-677fqq, LLR-8erfbu, LLR-n9dnm4,
+//! The keychain module (SDD-4fvypt; LLR-677fqq, LLR-8erfbu, LLR-6sfub6,
 //! LLR-36jer8), driven through its `test_support` facade over org-io's
 //! in-memory credential store, `MemoryKeychain`. The OS keychain is never
 //! touched: every test installs a fresh `MemoryKeychain`, and the tests run
@@ -50,7 +50,7 @@ fn a_written_secret_reads_back_as_the_same_device_key() {
     let read = read_device_secret(&device_key).unwrap();
     assert_eq!(read.device_key(), device_key);
     // Compared inside two nested lends: the lend returns no bytes
-    // (org-node's lend signature, 2026-10-15), so no seed is copied out.
+    // (org-node's lend signature), so no seed is copied out.
     let same = read.lend_to_keychain(|read_seed| {
         secret.lend_to_keychain(|seed| if read_seed == seed { Ok(()) } else { Err(std::fmt::Error) })
     });
@@ -172,7 +172,7 @@ fn any_other_failure_is_unavailable_with_no_secret_byte_in_its_reason() {
     }
 }
 
-// *Added 2026-10-13 (T7's finding):* keyring 3.6.3 makes its non-persistent
+// keyring 3.6.3 makes its non-persistent
 // in-memory store the default on any target with no native backend
 // (Android among them); org-io refuses there instead. No such target is
 // installed here, so the test is a scan of the module.
@@ -209,27 +209,25 @@ fn a_target_without_a_native_backend_refuses_as_unavailable() {
         }
     }
     let fallback = lines[none_start..=none_end].join("\n");
-    for function in ["fn read_device_secret", "fn write_device_secret", "fn with_endpoint_seed"] {
+    // The item's deletion (LLR-vj2nkb) is the fourth fallback function.
+    for function in ["fn read_device_secret", "fn write_device_secret", "fn delete_device_secret", "fn with_endpoint_seed"] {
         assert!(fallback.contains(function), "the fallback defines `{function}`");
     }
     assert_eq!(
         fallback.matches("KeychainError::Unavailable").count(),
-        3,
+        4,
         "each fallback function returns Unavailable:\n{fallback}"
     );
-    // *Added 2026-10-14 (S4 review round 1, finding 12):* each with the
-    // reason LLR-8erfbu's T8 note names. Mutation check, that day: the
-    // source read with its first fallback reason replaced, in memory, by
-    // "Unknown" failed this assertion; the replacement was removed.
+    // Each with the reason LLR-8erfbu names, `NoNativeBackend`.
     assert_eq!(
         fallback.matches("KeychainError::Unavailable { device_key: *device_key, reason: \"NoNativeBackend\" }").count(),
-        3,
+        4,
         "each fallback function's reason is NoNativeBackend:\n{fallback}"
     );
     assert!(!fallback.contains("keyring"), "the fallback calls no keyring");
 }
 
-// verifies: LLR-n9dnm4
+// verifies: LLR-6sfub6
 #[test]
 fn the_write_lends_the_bytes_only_through_lend_to_keychain() {
     let lines = code_lines(&keychain_source());

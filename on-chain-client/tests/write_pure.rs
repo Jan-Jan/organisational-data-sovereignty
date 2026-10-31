@@ -10,8 +10,8 @@ use on_chain_client::write::calldata::{
     WEIGHT_PROOF_SIZE, WEIGHT_REF_TIME,
 };
 use on_chain_client::write::multisig::{build_dispatch_tx, multi_account_id};
-use on_chain_client::write::proxy::{map_account_call, proxied};
-use on_chain_client::write::{AccountId, WriteError, WriteWindow, WRITE_MORTALITY_BLOCKS};
+use on_chain_client::write::proxy::{free_balance_of, map_account_call, proxied};
+use on_chain_client::write::{AccountId, WriteError, WriteWindow, FUND_AMOUNT, WRITE_MORTALITY_BLOCKS};
 use on_chain_client::{Epoch, OnChainRootHash, OrgPubKey};
 use subxt::dynamic::Value;
 use subxt::ext::scale_value::Composite;
@@ -443,4 +443,60 @@ fn the_last_valid_block_saturates() {
 fn the_mortality_is_a_power_of_two() {
     assert!(WRITE_MORTALITY_BLOCKS.is_power_of_two());
     assert!((4..=65_536).contains(&WRITE_MORTALITY_BLOCKS));
+}
+
+/// `System.Account`'s eighty-byte `AccountInfo` as LLR-htp5tk lays it out:
+/// the four four-byte counters (nonce, consumers, providers, sufficients),
+/// then `free`, `reserved`, `frozen` and `flags` as sixteen-byte
+/// little-endian integers. The neighbours of `free` hold distinct non-zero
+/// values, so a read at the wrong offset shows.
+fn account_info(free: u128) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(80);
+    for counter in [7u32, 1, 2, 3] {
+        bytes.extend_from_slice(&counter.to_le_bytes());
+    }
+    for field in [free, 0x1111, 0x2222, 1u128 << 127] {
+        bytes.extend_from_slice(&field.to_le_bytes());
+    }
+    bytes
+}
+
+// Normal: an account the chain holds no value for (it was never funded) has
+// a free balance of zero, not an error.
+// verifies: LLR-htp5tk
+#[test]
+fn free_balance_of_none_is_zero() {
+    assert_eq!(free_balance_of(None), Ok(0));
+}
+
+// Normal: `free` is the little-endian integer at bytes sixteen to
+// thirty-one, whatever the counters before it and the fields after it hold.
+// verifies: LLR-htp5tk
+#[test]
+fn free_balance_of_reads_free_at_bytes_sixteen_to_thirty_one() {
+    for free in [0, 1, FUND_AMOUNT - 1, FUND_AMOUNT, u128::MAX] {
+        let bytes = account_info(free);
+        assert_eq!(bytes.len(), 80);
+        assert_eq!(free_balance_of(Some(&bytes)), Ok(free), "free = {free}");
+    }
+    // Every byte but `free`'s is 0xff and `free` is one: only a little-endian
+    // read at offset sixteen gives one.
+    let mut bytes = [0xffu8; 80];
+    bytes[16..32].copy_from_slice(&1u128.to_le_bytes());
+    assert_eq!(free_balance_of(Some(&bytes)), Ok(1));
+}
+
+// Abnormal (boundary): any length but eighty — empty, one short, one over,
+// the counters alone, twice the record — is malformed storage, never a
+// balance read from a prefix.
+// verifies: LLR-htp5tk
+#[test]
+fn free_balance_of_refuses_any_length_but_eighty_as_malformed_storage() {
+    for len in [0usize, 1, 16, 32, 79, 81, 96, 160] {
+        assert_eq!(
+            free_balance_of(Some(&vec![0u8; len])),
+            Err(WriteError::MalformedStorage("System.Account")),
+            "{len} bytes"
+        );
+    }
 }

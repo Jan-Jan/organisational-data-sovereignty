@@ -38,10 +38,9 @@
 //! verifies: REQ-gr2ver, REQ-ntn4ss, REQ-5zux82
 //!
 //! Deliberately carries no `#![cfg(...)]` guard, unlike the chain-dependent
-//! targets beside it (corrected 2026-09-28: this said "the nine
-//! chain-dependent targets". Nine run at no gate; the eight that carry a
-//! crate-level `#![cfg(...)]` guard are exactly the eight that are chain-dependent
-//! — seven need a fork, `smoldot_smoke` live Paseo, `regenerate_corpus` neither): the
+//! targets beside it (the eight that carry a crate-level `#![cfg(...)]` guard
+//! are exactly the eight that are chain-dependent — seven need a fork,
+//! `smoldot_smoke` live Paseo): the
 //! `test-support` feature this target needs is declared as a
 //! `required-features` entry in `Cargo.toml`, so an
 //! explicit `--test best_lane_reorg_rule` with the feature off is refused by

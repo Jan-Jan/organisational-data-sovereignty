@@ -1,138 +1,160 @@
 <script lang="ts">
 	/**
 	 * Story 2: Invite flow (two sides).
-	 * A (Member):  export_invite (REQ-prjja8) → show/copy the Invite Blob.
-	 * B (Invitee): paste an Invite → import_invite (parsed by org-node) → choose a
-	 *              Persona → read REPLY_WARNING and confirm (REQ-ab2mfz,
-	 *              RC-wzb48r) → produce_invite_reply (REQ-tcutr6) → copy.
-	 *              Only Personas bound to no Organisation are offered
-	 *              (LLR-pms47e).
+	 * A (Admin):   issue_invite (LLR-y3zykm) → show/copy the Invite Blob.
+	 * B (Invitee): paste an Invite → read_invite (LLR-b7ywy4) → name, surname
+	 *              and preferred Handles → propose_member (a new Persona,
+	 *              LLR-rg9vc7) → read ADMISSION_REQUEST_WARNING and confirm
+	 *              (LLR-qcg6bz) → request_admission. A retry of a confirmed
+	 *              request asks nothing again (LLR-prh433).
 	 */
 	import {
 		listOrgs,
-		listPersonas,
-		exportInvite,
-		importInvite,
-		createPersona,
-		produceInviteReply,
+		issueInvite,
+		readInvite,
+		proposeMember,
+		requestAdmission,
 		type OrgDto,
-		type PersonaDto,
-		type InviteDto
+		type InviteDto,
+		type AdmissionDto
 	} from '$lib/api';
-	import { REPLY_WARNING, replyGate, unboundPersonas } from '$lib/invite';
+	import { ADMISSION_REQUEST_WARNING, admissionRequestGate } from '$lib/invite';
+	import { admissionRequestMessage, type RequestMessage } from '$lib/notices';
 
 	interface Props {
 		notifyReload?: () => void;
 	}
 	let { notifyReload }: Props = $props();
 
-	// --- Side A: export invite ---
+	// --- Side A: issue an Invite ---
 	let orgs = $state<OrgDto[]>([]);
 	let selectedOrgId = $state('');
-	let orgName = $state('');
 	let inviteeName = $state('');
 	let inviteBlob = $state('');
-	let exportBusy = $state(false);
-	let exportErr = $state('');
+	let issueBusy = $state(false);
+	let issueErr = $state('');
 
 	async function loadOrgs() {
 		try {
 			orgs = await listOrgs();
 			if (orgs.length > 0 && !selectedOrgId) selectedOrgId = orgs[0].org_id;
-		} catch (e) {
-			exportErr = String(e);
+		} catch (refusal) {
+			issueErr = String(refusal);
 		}
 	}
 
-	$effect(() => { loadOrgs(); });
+	$effect(() => {
+		loadOrgs();
+	});
 
-	async function doExportInvite() {
-		if (!selectedOrgId) { exportErr = 'Select an org.'; return; }
-		exportBusy = true;
-		exportErr = '';
+	async function doIssueInvite() {
+		if (!selectedOrgId) {
+			issueErr = 'Select an org.';
+			return;
+		}
+		issueBusy = true;
+		issueErr = '';
 		try {
-			inviteBlob = await exportInvite(selectedOrgId, orgName.trim(), inviteeName.trim());
-		} catch (e) {
-			exportErr = String(e);
+			inviteBlob = await issueInvite(selectedOrgId, inviteeName.trim());
+		} catch (refusal) {
+			issueErr = String(refusal);
 		} finally {
-			exportBusy = false;
+			issueBusy = false;
 		}
 	}
 
-	// --- Side B: import invite → choose Persona → confirm → produce reply ---
+	// --- Side B: read the Invite → propose a Member → confirm → request admission ---
 	let pastedInvite = $state('');
-	let imported = $state<InviteDto | null>(null);
-	let importBusy = $state(false);
-	let importErr = $state('');
+	let read = $state<InviteDto | null>(null);
+	let readBusy = $state(false);
+	let readErr = $state('');
 
-	let personas = $state<PersonaDto[]>([]);
+	let name = $state('');
+	let surname = $state('');
+	let handles = $state('');
 	let personaId = $state('');
+	let proposeBusy = $state(false);
+	let proposeErr = $state('');
+
+	/** LLR-prh433: the provisional Members whose request the user confirmed. */
+	let confirmedPersonas = $state<string[]>([]);
 	let confirmed = $state(false);
-	let replyBlob = $state('');
-	let replyBusy = $state(false);
-	let replyErr = $state('');
+	let confirmedBefore = $derived(personaId !== '' && confirmedPersonas.includes(personaId));
+	let gate = $derived(admissionRequestGate({ confirmedBefore, confirmed }));
+	let requestBusy = $state(false);
+	let requestErr = $state('');
+	let outcome = $state<AdmissionDto | null>(null);
+	/** LLR-d8998k: the error shown above the form, for an invite another Device used. */
+	let requestMessage = $state<RequestMessage | null>(null);
 
-	let gate = $derived(replyGate({ personaId, confirmed }));
-
-	// Persona form (create one to reply as)
-	let newHandle = $state('');
-	let newName = $state('');
-	let newSurname = $state('');
-	let createBusy = $state(false);
-	let createErr = $state('');
-
-	async function loadPersonas() {
-		try {
-			// LLR-pms47e: a Persona bound to an Organisation is not offered.
-			personas = unboundPersonas(await listPersonas());
-		} catch (e) {
-			replyErr = String(e);
+	async function doReadInvite() {
+		if (!pastedInvite.trim()) {
+			readErr = 'Paste an Invite first.';
+			return;
 		}
-	}
-
-	async function doImportInvite() {
-		if (!pastedInvite.trim()) { importErr = 'Paste an Invite first.'; return; }
-		importBusy = true;
-		importErr = '';
-		imported = null;
+		readBusy = true;
+		readErr = '';
+		read = null;
+		personaId = '';
 		confirmed = false;
-		replyBlob = '';
-		replyErr = '';
+		outcome = null;
 		try {
-			imported = await importInvite(pastedInvite.trim());
-			await loadPersonas();
-		} catch (e) {
-			importErr = String(e);
+			read = await readInvite(pastedInvite.trim());
+		} catch (refusal) {
+			readErr = String(refusal);
 		} finally {
-			importBusy = false;
+			readBusy = false;
 		}
 	}
 
-	async function doCreatePersona() {
-		if (!newHandle.trim() || !newName.trim()) { createErr = 'Handle and name required.'; return; }
-		createBusy = true;
-		createErr = '';
+	async function doProposeMember() {
+		const preferred = handles
+			.split(',')
+			.map((preferredHandle) => preferredHandle.trim())
+			.filter((preferredHandle) => preferredHandle !== '');
+		proposeBusy = true;
+		proposeErr = '';
 		try {
-			personaId = await createPersona(newHandle.trim(), newName.trim(), newSurname.trim());
-			await loadPersonas();
+			personaId = (await proposeMember(pastedInvite.trim(), name.trim(), surname.trim(), preferred)).persona_id;
 			notifyReload?.();
-		} catch (e) {
-			createErr = String(e);
+		} catch (refusal) {
+			proposeErr = String(refusal);
 		} finally {
-			createBusy = false;
+			proposeBusy = false;
 		}
 	}
 
-	async function doProduceReply() {
-		if (!gate.ok) { replyErr = gate.message; return; }
-		replyBusy = true;
-		replyErr = '';
+	async function doRequestAdmission() {
+		requestMessage = null;
+		if (!gate.ok) {
+			requestErr = gate.message;
+			return;
+		}
+		requestBusy = true;
+		requestErr = '';
 		try {
-			replyBlob = await produceInviteReply(pastedInvite.trim(), personaId, confirmed);
-		} catch (e) {
-			replyErr = String(e);
+			outcome = await requestAdmission(personaId, true);
+			requestMessage = admissionRequestMessage(outcome);
+			if (!confirmedPersonas.includes(personaId)) confirmedPersonas = [...confirmedPersonas, personaId];
+		} catch (refusal) {
+			requestErr = String(refusal);
 		} finally {
-			replyBusy = false;
+			requestBusy = false;
+		}
+	}
+
+	function outcomeText(requestOutcome: AdmissionDto): string {
+		switch (requestOutcome.result) {
+			case 'delivered':
+				return 'Delivered: the Admin will see your request.';
+			case 'already_received':
+				return 'The Admin already has this request.';
+			case 'invite_used_by_another_device':
+				return 'Another Device already used this invite.';
+			case 'refused':
+				return 'The receiving Device refused the request.';
+			case 'not_delivered':
+				return `Not delivered: ${requestOutcome.reason}`;
 		}
 	}
 
@@ -145,9 +167,8 @@
 	<h2>Story 2: Invite Flow</h2>
 
 	<div class="two-col">
-		<!-- Side A: a Member exports an Invite -->
 		<div class="side">
-			<h3>A — Export Invite (Member)</h3>
+			<h3>A — Issue Invite (Admin)</h3>
 			{#if orgs.length === 0}
 				<p class="muted">No orgs yet (create one in Story 1).</p>
 			{:else}
@@ -160,17 +181,11 @@
 					</select>
 				</label>
 				<label>
-					Organisation name (as you want the invitee to see it)
-					<input type="text" bind:value={orgName} placeholder="Acme Co-op" disabled={exportBusy} />
+					Invitee's full name
+					<input type="text" bind:value={inviteeName} placeholder="Bob Builder" disabled={issueBusy} />
 				</label>
-				<label>
-					Invitee's full name (your guess)
-					<input type="text" bind:value={inviteeName} placeholder="Bob Builder" disabled={exportBusy} />
-				</label>
-				<button onclick={doExportInvite} disabled={exportBusy}>
-					{exportBusy ? 'Exporting…' : 'Export Invite'}
-				</button>
-				{#if exportErr}<p class="err">{exportErr}</p>{/if}
+				<button onclick={doIssueInvite} disabled={issueBusy}>{issueBusy ? 'Issuing…' : 'Issue Invite'}</button>
+				{#if issueErr}<p class="err">{issueErr}</p>{/if}
 				{#if inviteBlob}
 					<label>
 						Invite (copy to the invitee)
@@ -181,62 +196,45 @@
 			{/if}
 		</div>
 
-		<!-- Side B: the invitee imports the Invite and replies -->
 		<div class="side">
-			<h3>B — Import Invite + Reply (Invitee)</h3>
+			<h3>B — Read Invite + Request Admission (Invitee)</h3>
+			{#if requestMessage}<p class="err prominent" role="alert">{requestMessage.text}</p>{/if}
 			<label>
 				Paste Invite
 				<textarea rows="4" bind:value={pastedInvite} placeholder="Paste the Invite here…"></textarea>
 			</label>
-			<button onclick={doImportInvite} disabled={importBusy}>
-				{importBusy ? 'Importing…' : 'Import Invite'}
-			</button>
-			{#if importErr}<p class="err">{importErr}</p>{/if}
-			{#if imported}
+			<button onclick={doReadInvite} disabled={readBusy}>{readBusy ? 'Reading…' : 'Read Invite'}</button>
+			{#if readErr}<p class="err">{readErr}</p>{/if}
+			{#if read}
 				<dl>
 					<dt>Organisation name</dt>
-					<dd>{imported.org_name} <span class="warn">(stated by the sender, unverified)</span></dd>
-					<dt>Org id</dt><dd class="mono">{imported.org_id}</dd>
-					<dt>Invitee name</dt><dd>{imported.invitee_name}</dd>
+					<dd>{read.org_name} <span class="warn">(stated by the sender, unverified)</span></dd>
+					<dt>Org id</dt><dd class="mono">{read.org_id}</dd>
+					<dt>Invitee name</dt><dd>{read.invitee_name}</dd>
+					<dt>Issued by Device</dt><dd class="mono">{read.issuer_device_key}</dd>
 				</dl>
-
-				<label>
-					Reply as Persona
-					<select bind:value={personaId} disabled={replyBusy}>
-						<option value="">— choose a Persona —</option>
-						{#each personas as p (p.persona_id)}
-							<option value={p.persona_id}>{p.handle} ({p.name} {p.surname})</option>
-						{/each}
-					</select>
-				</label>
-
-				<h4>Or create a Persona</h4>
-				<label>Handle <input type="text" bind:value={newHandle} placeholder="bob" disabled={createBusy} /></label>
-				<label>Name <input type="text" bind:value={newName} placeholder="Bob" disabled={createBusy} /></label>
-				<label>Surname <input type="text" bind:value={newSurname} placeholder="Builder" disabled={createBusy} /></label>
-				<button onclick={doCreatePersona} disabled={createBusy}>
-					{createBusy ? 'Creating…' : 'Create Persona'}
-				</button>
-				{#if createErr}<p class="err">{createErr}</p>{/if}
-
-				<div class="warning-box" role="alert">
-					<p>{REPLY_WARNING}</p>
-					<label class="confirm">
-						<input type="checkbox" bind:checked={confirmed} disabled={replyBusy} />
-						I understand
-					</label>
-				</div>
-				<button onclick={doProduceReply} disabled={replyBusy || !gate.ok}>
-					{replyBusy ? 'Producing…' : 'Produce reply'}
-				</button>
-				{#if !gate.ok}<p class="muted">{gate.message}</p>{/if}
-				{#if replyErr}<p class="err">{replyErr}</p>{/if}
-				{#if replyBlob}
-					<label>
-						Invite reply (send to the Invite's sender)
-						<textarea readonly rows="4" value={replyBlob}></textarea>
-					</label>
-					<button onclick={() => copy(replyBlob)}>Copy</button>
+				{#if personaId === ''}
+					<label>Name <input type="text" bind:value={name} disabled={proposeBusy} /></label>
+					<label>Surname <input type="text" bind:value={surname} disabled={proposeBusy} /></label>
+					<label>Preferred Handles (1 to 3, comma-separated) <input type="text" bind:value={handles} placeholder="bob, builder" disabled={proposeBusy} /></label>
+					<button onclick={doProposeMember} disabled={proposeBusy}>{proposeBusy ? 'Proposing…' : 'Propose Member'}</button>
+					{#if proposeErr}<p class="err">{proposeErr}</p>{/if}
+				{:else}
+					{#if !confirmedBefore}
+						<div class="warning-box" role="alert">
+							<p>{ADMISSION_REQUEST_WARNING}</p>
+							<label class="confirm">
+								<input type="checkbox" bind:checked={confirmed} disabled={requestBusy} />
+								I understand
+							</label>
+						</div>
+					{/if}
+					<button onclick={doRequestAdmission} disabled={requestBusy || !gate.ok}>
+						{requestBusy ? 'Requesting…' : confirmedBefore ? 'Request admission again' : 'Request admission'}
+					</button>
+					{#if !gate.ok}<p class="muted">{gate.message}</p>{/if}
+					{#if requestErr}<p class="err">{requestErr}</p>{/if}
+					{#if outcome}<p class="small">{outcomeText(outcome)}</p>{/if}
 				{/if}
 			{/if}
 		</div>
@@ -247,24 +245,22 @@
 	.panel { background: #111; padding: 1rem; border-radius: 6px; margin-bottom: 1rem; }
 	h2 { margin-top: 0; font-size: 1rem; color: #ddd; }
 	h3 { font-size: 0.9rem; color: #aaa; margin: 0 0 0.5rem; }
-	h4 { font-size: 0.85rem; color: #888; margin: 0.5rem 0 0.25rem; }
 	.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 	@media (max-width: 700px) { .two-col { grid-template-columns: 1fr; } }
 	.side { display: flex; flex-direction: column; gap: 0.4rem; }
 	label { display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.82rem; color: #888; }
 	label.confirm { flex-direction: row; align-items: center; gap: 0.4rem; color: #ddd; }
 	input, select, textarea { background: #1a1a1a; border: 1px solid #333; color: #eee; padding: 0.3rem 0.5rem; border-radius: 3px; font-size: 0.82rem; font-family: monospace; resize: vertical; }
-	input:disabled { opacity: 0.5; }
 	button { cursor: pointer; background: #1a3a5c; color: #7ec8e3; border: 1px solid #2a5f8c; border-radius: 3px; padding: 0.3rem 0.75rem; font-size: 0.82rem; align-self: flex-start; }
 	button:disabled { opacity: 0.5; cursor: default; }
-	button:not(:disabled):hover { background: #204d7a; }
 	dl { display: grid; grid-template-columns: 8rem 1fr; gap: 0.2rem 0.5rem; font-size: 0.82rem; margin: 0; }
 	dt { color: #666; }
 	dd { color: #ccc; margin: 0; word-break: break-all; }
+	.warning-box { border: 1px solid #ff9800; border-radius: 4px; padding: 0.5rem; color: #ffcc80; font-size: 0.82rem; }
 	.mono { font-family: monospace; }
-	.warning-box { background: #2a1f00; border: 1px solid #ff9800; border-radius: 4px; padding: 0.6rem; margin-top: 0.5rem; }
-	.warning-box p { margin: 0 0 0.4rem; font-size: 0.82rem; color: #ffcc80; }
+	.small { font-size: 0.8rem; color: #aaa; }
 	.err { color: #f44336; font-size: 0.8rem; }
-	.warn { color: #ff9800; font-size: 0.78rem; }
-	.muted { color: #555; font-size: 0.82rem; }
+	.prominent { font-size: 0.95rem; font-weight: bold; border: 1px solid #f44336; padding: 0.4rem; border-radius: 3px; }
+	.warn { color: #ff9800; }
+	.muted { color: #555; font-size: 0.8rem; }
 </style>

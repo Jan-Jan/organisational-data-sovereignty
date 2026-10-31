@@ -2,36 +2,62 @@
 	import {
 		listPersonas,
 		listOrgs,
-		reconcileOrganisations,
+		verifyOrganisations,
+		writeOrganisationToChain,
 		type PersonaDto,
 		type OrgDto,
-		type ReconciliationDto
+		type VerificationEntryDto
 	} from '$lib/api';
-	import { reconciliationLine, verificationLabel } from '$lib/reconcile';
+	import { verificationLine, verificationLabel, foundingWrites } from '$lib/verification';
+	import { handleLabel } from '$lib/personas';
 
 	interface Props {
 		/** Increment this to trigger a reload */
 		reloadToken?: number;
-		/** The results of the reconcile at start, once it has returned. */
-		reconciled?: ReconciliationDto[] | null;
+		/** LLR-84cxpt: every verification result the page filed, newest first. */
+		results?: VerificationEntryDto[];
+		/** Files the entries of a verification the user asked for into that list. */
+		fileResults?: (entries: VerificationEntryDto[]) => void;
+		/** LLR-rhc555: the founders of the foundings proposed here (`proposeFoundingOrganisation`'s `founder`). */
+		proposed?: string[];
 	}
 
-	let { reloadToken = 0, reconciled = null }: Props = $props();
+	let { reloadToken = 0, results = [], fileResults, proposed = [] }: Props = $props();
 
-	/** LLR-hwcj9n: the results of the user's own reconcile, which replace the startup ones. */
-	let requested = $state<ReconciliationDto[] | null>(null);
-	let reconciling = $state(false);
-	let shown = $derived(requested ?? reconciled);
+	let verifying = $state(false);
+	/** The founder whose founding is being written, if any. */
+	let writing = $state<string | null>(null);
 
-	async function reconcile() {
-		reconciling = true;
+	/** LLR-j2x9jb: the "Verify with chain" button. */
+	async function verify() {
+		verifying = true;
 		try {
-			requested = await reconcileOrganisations();
+			const entries = await verifyOrganisations();
+			fileResults?.(entries);
 			error = '';
-		} catch (e) {
-			error = String(e);
+		} catch (refusal) {
+			error = String(refusal);
 		} finally {
-			reconciling = false;
+			verifying = false;
+		}
+		await reload();
+	}
+
+	/** LLR-rhc555: a founding's "Write to chain" button, by its founder's Device key. */
+	async function writeFounding(founder: string) {
+		writing = founder;
+		try {
+			const written = await writeOrganisationToChain({ founder });
+			if (written.result === 'included') {
+				fileResults?.([written.verification]);
+				error = '';
+			} else {
+				error = `write ${written.result}: ${written.reason}`;
+			}
+		} catch (refusal) {
+			error = String(refusal);
+		} finally {
+			writing = null;
 		}
 		await reload();
 	}
@@ -46,8 +72,8 @@
 		try {
 			[personas, orgs] = await Promise.all([listPersonas(), listOrgs()]);
 			error = '';
-		} catch (e) {
-			error = String(e);
+		} catch (refusal) {
+			error = String(refusal);
 		} finally {
 			loading = false;
 		}
@@ -94,7 +120,7 @@
 			<tbody>
 				{#each personas as p (p.persona_id)}
 					<tr>
-						<td><strong>{p.handle}</strong></td>
+						<td><strong>{handleLabel(p.handle)}</strong></td>
 						<td>{p.name} {p.surname}</td>
 						<td><span class="badge {statusClass(p.status)}">{p.status}</span></td>
 						<td class="mono small">{orgLabel(p.org_id)}</td>
@@ -118,24 +144,31 @@
 						<td>{o.epoch}</td>
 						<td>{o.member_count}</td>
 						<td class="mono small">…{o.root_hash.slice(-16)}</td>
-						<td class:unverified={o.verification.status !== 'verified'}>{verificationLabel(o.verification)}</td>
+						<td class:unverified={o.verification.status !== 'in_step' && o.verification.status !== 'adopted'}>{verificationLabel(o.verification)}</td>
 					</tr>
 				{/each}
 			</tbody>
 		</table>
 	{/if}
 
-	{#if shown && shown.length > 0}
-		<h3>Last reconcile</h3>
+	{#if results.length > 0}
+		<h3>Last verifications</h3>
 		<ul class="mono small">
-			{#each shown as result, index (index)}
-				<li>{reconciliationLine(result)}</li>
+			{#each results as result, index (index)}
+				<li>{verificationLine(result)}</li>
 			{/each}
 		</ul>
 	{/if}
 
+	{#each foundingWrites(results, proposed) as founder (founder)}
+		<p class="mono small">
+			founding by {founder}
+			<button onclick={() => writeFounding(founder)} disabled={writing !== null}>{writing === founder ? 'Writing…' : 'Write to chain'}</button>
+		</p>
+	{/each}
+
 	<button onclick={reload}>Refresh</button>
-	<button onclick={reconcile} disabled={reconciling}>{reconciling ? 'Reconciling…' : 'Reconcile with chain'}</button>
+	<button onclick={verify} disabled={verifying}>{verifying ? 'Verifying…' : 'Verify with chain'}</button>
 </section>
 
 <style>

@@ -48,11 +48,17 @@ reported — a block reference, a decoded event, an event paired with the
 contract that emitted it, the notification a subscriber receives, the typed
 error a caller of the client surface is handed, and the stream those
 observations arrive on.
-traces: REQ-2qa5r5, REQ-54txzh, REQ-5upq6n, REQ-ntn4ss
+traces: REQ-54txzh, REQ-5upq6n, REQ-ntn4ss
+
+*Traces amended 2026-10-20 (change worktree-org-io-domain-api): REQ-2qa5r5 →
+REQ-54txzh (already traced).*
 
 (Note, 2026-10-05: REQ-2qa5r5 is superseded by REQ-54txzh, which names the
 second field the Organisation public key. It stays in the trace above as
-history, beside its replacement.)
+history, beside its replacement. *Corrected 2026-10-30 (merge review round 1
+of change worktree-org-io-domain-api):* it no longer stays there. The
+2026-10-20 amendment above removed REQ-2qa5r5 from the trace, which keeps
+its replacement REQ-54txzh.)
 
 `SubscribedEvent` distinguishes an observation taken from a best block from one
 taken from a finalised block. That distinction is carried by the type but

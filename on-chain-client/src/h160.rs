@@ -25,7 +25,7 @@ use tiny_keccak::{Hasher, Keccak};
 /// Mark byte (12 copies of) used by pallet-revive to identify accounts
 /// that are EVM-derived (reverse mapping). Lives in the LAST 12 bytes
 /// of the AccountId32 — Substrate accounts that came from an H160 are
-/// `H160 || [0xEE; 12]`. Confirm against the live runtime in Task 7.
+/// `H160 || [0xEE; 12]`.
 const EVM_FALLBACK_MARK: u8 = 0xEE;
 
 /// Map a 32-byte AccountId32 to its pallet-revive H160.

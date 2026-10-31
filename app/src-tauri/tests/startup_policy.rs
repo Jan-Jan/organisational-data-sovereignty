@@ -1,8 +1,8 @@
 //! Startup policy: no passphrase and the keychain refusal, data-directory
 //! resolution, and the wording of the refusals.
 //!
-//! Requirements carried here: REQ-7g3k9a (as amended 2026-10-14: no
-//! passphrase; a keychain refusal fails startup), REQ-rxc8sp (data
+//! Requirements carried here: REQ-7g3k9a (no passphrase; a keychain
+//! refusal fails startup), REQ-rxc8sp (data
 //! directory), REQ-bmk2z2 (the refusal names both variables, supplier first).
 //!
 //! No test in this file sets an environment variable. The policy functions take
@@ -11,19 +11,13 @@
 //! environment would race every other test in the binary.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use ods_poc_lib::policy::{self, StartupError};
 
-// *Deleted 2026-10-14 (S4, task T17):* `configured_passphrase_is_used`,
-// `absent_passphrase_is_refused`, `empty_passphrase_is_refused_not_honoured`,
-// `absent_passphrase_with_opt_in_uses_dev_default` and
-// `configured_passphrase_wins_over_opt_in`, with `resolve_passphrase`, the
-// behaviour they tested: the app reads no passphrase (LLR-tpkmh3 as amended
-// 2026-10-14; its two tests follow).
-
 // ---------------------------------------------------------------------------
-// REQ-7g3k9a as amended 2026-10-14 (S4, task T17) — no passphrase; a
-// keychain refusal fails startup, naming the condition
+// REQ-7g3k9a — no passphrase (LLR-tpkmh3); a keychain refusal fails
+// startup, naming the condition
 // ---------------------------------------------------------------------------
 
 /// The unit's sources under `src-tauri/src`, as (path, text), comments
@@ -66,7 +60,6 @@ fn startup_reads_no_passphrase() {
 // verifies: LLR-tpkmh3, REQ-7g3k9a
 #[test]
 fn a_keychain_refusal_fails_startup_naming_the_condition() {
-    use org_io::node::{Handle, Name, Surname};
     use org_io::test_support::{MemoryKeychain, Refusal};
     use ods_poc_lib::policy::TransportModeName;
     use ods_poc_lib::state::AppState;
@@ -76,13 +69,8 @@ fn a_keychain_refusal_fails_startup_naming_the_condition() {
     let state = AppState::for_test(data_dir.clone(), None, TransportModeName::Loopback).expect("first start");
     tokio::runtime::Runtime::new()
         .expect("runtime")
-        .block_on(state.org_io.create_persona(
-            &mut rand::rngs::OsRng,
-            Handle::parse("alice").unwrap(),
-            Name::parse("Test").unwrap(),
-            Surname::parse("User").unwrap(),
-        ))
-        .expect("persona");
+        .block_on(state.org_io.propose_founding_organisation("Test", "User", "alice", "Acme"))
+        .expect("a founding Persona");
     drop(state);
     let device_keys = org_io::store_file::list_stores(&data_dir).expect("list store files");
     assert_eq!(device_keys.len(), 1, "one Persona, one store file: {device_keys:?}");
@@ -179,10 +167,6 @@ fn assert_names_supplier_before_waiver(msg: &str, supplier: &str) {
     assert!(supplier_at < waiver_at, "the supplying variable must be named first: {msg}");
 }
 
-// *Deleted 2026-10-14 (S4, task T17):* `passphrase_refusal_names_both_variables_supplier_first`,
-// with the passphrase refusal it read (LLR-97rww8, narrowed the same day to
-// the data directory).
-
 // verifies: LLR-97rww8
 #[test]
 fn data_dir_refusal_names_both_variables_supplier_first() {
@@ -195,8 +179,90 @@ fn data_dir_refusal_names_both_variables_supplier_first() {
 fn refusals_for_empty_values_name_both_variables_supplier_first() {
     // Abnormal input: the variable is set, to the empty string. The value is
     // treated as absent, and the operator must be told the same thing, in the
-    // same order, as when it is unset. *2026-10-14 (S4, task T17):* the
-    // passphrase half left with the passphrase; the data directory remains.
+    // same order, as when it is unset.
     let msg = policy::resolve_data_dir(Some(""), None, false).unwrap_err().to_string();
     assert_names_supplier_before_waiver(&msg, "ODS_DATA_DIR");
+}
+
+// ---------------------------------------------------------------------------
+// REQ-ergn9z — the verification interval
+// ---------------------------------------------------------------------------
+
+// verifies: LLR-2dpn52
+#[test]
+fn an_absent_or_empty_interval_is_ten_minutes() {
+    for raw in [None, Some("")] {
+        assert_eq!(policy::resolve_verification_interval(raw), Ok(Duration::from_secs(600)), "{raw:?}");
+    }
+    assert_eq!(policy::DEFAULT_VERIFICATION_INTERVAL, Duration::from_secs(600));
+}
+
+// verifies: LLR-2dpn52
+#[test]
+fn a_decimal_from_one_to_u32_max_is_that_many_seconds() {
+    for (raw, seconds) in [("1", 1u64), ("2", 2), ("600", 600), ("86400", 86_400), ("4294967295", 4_294_967_295)] {
+        assert_eq!(policy::resolve_verification_interval(Some(raw)), Ok(Duration::from_secs(seconds)), "{raw:?}");
+    }
+}
+
+// verifies: LLR-rvrc25
+#[test]
+fn zero_a_sign_a_space_a_suffix_a_fraction_or_over_u32_max_is_refused_naming_the_variable() {
+    for raw in [
+        "0", "00", "+5", "-5", " 5", "5 ", "5s", "10m", "1.5", "1e3", "0x10", "4294967296",
+        "99999999999999999999", "five", "\u{0663}",
+    ] {
+        let refused = policy::resolve_verification_interval(Some(raw));
+        assert_eq!(
+            refused,
+            Err(StartupError::InvalidVerificationInterval { given: raw.to_string() }),
+            "{raw:?} is refused, carrying the value as given"
+        );
+        let message = refused.expect_err("refused").to_string();
+        assert!(message.contains("ODS_VERIFICATION_INTERVAL_SECS"), "names the variable: {message}");
+        assert!(message.contains("whole number of seconds"), "states the form: {message}");
+        assert!(message.contains("at least 1"), "states the minimum: {message}");
+        assert!(message.contains(&format!("{raw:?}")), "quotes the value: {message}");
+    }
+}
+
+// verifies: LLR-hgrez9
+// Normal and boundary: the ahead limit is twice the interval, for the
+// default and for configured intervals from the least to the greatest the
+// resolver accepts (the greatest doubled does not overflow).
+#[test]
+fn the_ahead_limit_is_twice_the_verification_interval() {
+    assert_eq!(policy::verification_ahead_limit(policy::DEFAULT_VERIFICATION_INTERVAL), Duration::from_secs(1_200));
+    for seconds in [1u64, 2, 90, 600, 86_400, 4_294_967_295] {
+        let interval = policy::resolve_verification_interval(Some(&seconds.to_string())).expect("accepted");
+        assert_eq!(policy::verification_ahead_limit(interval), Duration::from_secs(2 * seconds), "{seconds} s");
+    }
+}
+
+// verifies: LLR-rvrc25
+// A value that is not UTF-8 is refused, never read as absent and given the
+// default; a UTF-8 value is decided as `resolve_verification_interval`
+// decides it.
+#[cfg(unix)]
+#[test]
+fn an_interval_that_is_not_utf8_is_refused_not_defaulted() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    let not_utf8 = OsStr::from_bytes(b"6\xff0");
+    let refused = policy::verification_interval_from(Some(not_utf8));
+    assert_eq!(
+        refused,
+        Err(StartupError::InvalidVerificationInterval { given: not_utf8.to_string_lossy().into_owned() }),
+        "refused, carrying the value as far as it can be shown"
+    );
+    let message = refused.expect_err("refused").to_string();
+    assert!(message.contains("ODS_VERIFICATION_INTERVAL_SECS"), "names the variable: {message}");
+    // UTF-8 values: the same decisions as `resolve_verification_interval`.
+    assert_eq!(policy::verification_interval_from(None), Ok(Duration::from_secs(600)));
+    assert_eq!(policy::verification_interval_from(Some(OsStr::new(""))), Ok(Duration::from_secs(600)));
+    assert_eq!(policy::verification_interval_from(Some(OsStr::new("60"))), Ok(Duration::from_secs(60)));
+    assert_eq!(
+        policy::verification_interval_from(Some(OsStr::new("0"))),
+        Err(StartupError::InvalidVerificationInterval { given: "0".to_string() })
+    );
 }

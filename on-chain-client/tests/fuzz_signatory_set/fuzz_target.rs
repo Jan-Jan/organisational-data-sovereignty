@@ -7,7 +7,9 @@
 //! input's length does not bound (LLR-n2vx5q: a length prefix larger than
 //! the bytes that follow is `Malformed`, checked before anything is
 //! allocated). An accepted value accounts for every byte (LLR-n2vx5q:
-//! trailing or missing bytes are `Malformed`).
+//! trailing or missing bytes are `Malformed`). The same bytes are given to
+//! `free_balance_of`, the founding step's `System.Account` decoder
+//! (LLR-htp5tk), which reads a value fetched the same way.
 //!
 //! It is a `harness = false` binary in the shape of `fuzz_decode_org_state`:
 //! a green run means bolero exhausted its time budget (one second under the
@@ -19,12 +21,28 @@
 //! `cargo test --features test-support,write --test fuzz_signatory_set`.
 
 use bolero::check;
+use on_chain_client::write::proxy::free_balance_of;
 use on_chain_client::write::signatory_set::{decode_original_account, decode_proxy_definitions};
+use on_chain_client::write::WriteError;
 use parity_scale_codec::{Compact, Encode};
 
 /// One definition's bytes and the deposit's, as LLR-n2vx5q lays them out.
 const DEFINITION_BYTES: usize = 32 + 1 + 4;
 const DEPOSIT_BYTES: usize = 16;
+
+/// `System.Account`'s `AccountInfo`, as LLR-htp5tk lays it out.
+const ACCOUNT_INFO_BYTES: usize = 4 * 4 + 4 * 16;
+
+// Property: any stored `System.Account` value yields Ok/Err, never a panic;
+// only an eighty-byte value decodes, and every other one is
+// `MalformedStorage("System.Account")`.
+// verifies: LLR-htp5tk
+fn free_balance_of_never_panics(bytes: &[u8]) {
+    match free_balance_of(Some(bytes)) {
+        Ok(_) => assert_eq!(bytes.len(), ACCOUNT_INFO_BYTES, "only an eighty-byte AccountInfo decodes"),
+        Err(refusal) => assert_eq!(refusal, WriteError::MalformedStorage("System.Account")),
+    }
+}
 
 fn main() {
     check!().for_each(|bytes: &[u8]| {
@@ -38,5 +56,6 @@ fn main() {
                 "an accepted value accounts for every byte"
             );
         }
+        free_balance_of_never_panics(bytes);
     });
 }

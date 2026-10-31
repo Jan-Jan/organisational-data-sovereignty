@@ -1,87 +1,67 @@
 <script lang="ts">
 	/**
-	 * Story 3: Admit a member.
-	 * Paste an Invite reply → import_invite_reply (REQ-65xqp8: refused unless it
-	 * names an Invite outstanding for the Organisation it names) → review the
-	 * parsed fields → select org → "Admit" → admit_member (REQ-nfr3n2: written
-	 * to the chain, then committed and sent). The org preselected from the
-	 * reply is a convenience only: the backend admits to the Organisation the
-	 * outstanding Invite was issued for and refuses any other selection
-	 * (org-io's admission of a reply). A chain-write
-	 * failure or timeout is shown as the backend phrased it.
+	 * Story 3: Admit a member (SDD-xg4nj7; markup SDD-6g3wnh's). The kept
+	 * admission requests, listed at start and announced on arrival, each shown
+	 * beside the invitee name typed for its Invite (LLR-47zvjn). The Admin
+	 * chooses one, may choose a Handle (blank: org-io takes the first preferred
+	 * Handle free), confirms, and proposes the admission (LLR-e63yrs): it is
+	 * recorded as a provisional change, written with the next epoch
+	 * (LLR-b59vcx). The Admin may instead cancel the request's Invite
+	 * (LLR-e7bbm5, SDD-p7sdy3).
 	 */
-	import {
-		listOrgs,
-		importInviteReply,
-		admitMember,
-		connectionStatus,
-		type OrgDto,
-		type InviteReplyDto,
-		type TransportMode
-	} from '$lib/api';
+	import { proposeAdmission } from '$lib/api';
+	import { admissionGate, type AdmissionConfirmation } from '$lib/notices';
+	import { NEXT_EPOCH_NOTE } from '$lib/epoch';
 
 	interface Props {
 		notifyReload?: () => void;
+		/** LLR-dhtec7: one confirmation per org id and invite id. */
+		requests?: AdmissionConfirmation[];
+		/** LLR-e7bbm5: what the page last told of a cancel, and whether one is in flight. */
+		cancelMessage?: string;
+		cancelBusy?: boolean;
+		/** LLR-e7bbm5: the page's cancel, which drops the request of a cancelled Invite; true once cancelled. */
+		onCancel?: (confirmation: AdmissionConfirmation) => Promise<boolean>;
 	}
-	let { notifyReload }: Props = $props();
+	let { notifyReload, requests = [], cancelMessage = '', cancelBusy = false, onCancel }: Props = $props();
 
-	let orgs = $state<OrgDto[]>([]);
-	let selectedOrgId = $state('');
-	let pastedBlob = $state('');
-	let parsed = $state<InviteReplyDto | null>(null);
-	let parseErr = $state('');
-	let parseBusy = $state(false);
+	async function doCancel(confirmation: AdmissionConfirmation) {
+		const cancelled = (await onCancel?.(confirmation)) ?? false;
+		if (cancelled && keyOf(confirmation) === selectedKey) selectedKey = '';
+	}
 
-	/** REQ-645jq9: the transport the backend runs; the peer address is required in Loopback only. */
-	let transportMode = $state<TransportMode>('networked');
-	let peerAddrBlob = $state('');
-
+	let selectedKey = $state('');
+	let handle = $state('');
+	let confirmed = $state(false);
 	let admitBusy = $state(false);
 	let admitErr = $state('');
-	let memberId = $state('');
-	let admitted = $state(false);
+	let proposed = $state(false);
 
-	async function load() {
-		try {
-			orgs = await listOrgs();
-			transportMode = (await connectionStatus()).transport_mode;
-			if (parsed && orgs.some((o) => o.org_id === parsed?.org_id)) selectedOrgId = parsed.org_id;
-			else if (orgs.length > 0 && !selectedOrgId) selectedOrgId = orgs[0].org_id;
-		} catch (e) {
-			parseErr = String(e);
-		}
+	function keyOf(confirmation: AdmissionConfirmation): string {
+		return `${confirmation.org_id}/${confirmation.invite_id}`;
 	}
 
-	$effect(() => { load(); });
+	let selected = $derived(requests.find((confirmation) => keyOf(confirmation) === selectedKey) ?? null);
+	let gate = $derived(admissionGate({ request: selected, confirmed }));
 
-	async function doParse() {
-		if (!pastedBlob.trim()) { parseErr = 'Paste an Invite reply.'; return; }
-		parseBusy = true;
-		parseErr = '';
-		parsed = null;
-		try {
-			parsed = await importInviteReply(pastedBlob.trim());
-			if (orgs.some((o) => o.org_id === parsed?.org_id)) selectedOrgId = parsed.org_id;
-		} catch (e) {
-			parseErr = String(e);
-		} finally {
-			parseBusy = false;
-		}
+	function choose(key: string) {
+		selectedKey = key;
+		confirmed = false;
+		admitErr = '';
+		proposed = false;
 	}
 
 	async function doAdmit() {
-		if (!parsed) { admitErr = 'Parse the reply first.'; return; }
-		if (!selectedOrgId) { admitErr = 'Select an org.'; return; }
-		// The same rule as validateRevokeInput (REQ-vgr7s2): an address is needed only in Loopback.
-		if (transportMode === 'loopback' && peerAddrBlob.trim() === '') {
-			admitErr = 'Peer address is required in Loopback transport (same-machine dialling).';
+		if (!gate.ok) {
+			admitErr = gate.message;
 			return;
 		}
+		if (selected === null) return;
 		admitBusy = true;
 		admitErr = '';
 		try {
-			memberId = await admitMember(selectedOrgId, pastedBlob.trim(), peerAddrBlob.trim());
-			admitted = true;
+			await proposeAdmission(selected.org_id, selected.invite_id, handle.trim(), true);
+			proposed = true;
 			notifyReload?.();
 		} catch (e) {
 			admitErr = String(e);
@@ -89,97 +69,74 @@
 			admitBusy = false;
 		}
 	}
-
-	function reset() {
-		pastedBlob = '';
-		parsed = null;
-		parseErr = '';
-		peerAddrBlob = '';
-		admitErr = '';
-		memberId = '';
-		admitted = false;
-	}
 </script>
 
 <section class="panel">
 	<h2>Story 3: Admit Member</h2>
-	<p class="hint">Paste the Invite reply from the invitee, review the fields, then admit.</p>
-
-	{#if admitted}
-		<div class="result-box ok">
-			<p>Member admitted: written to the chain, committed and sent.</p>
-			<p>Member ID: <code>{memberId}</code></p>
-		</div>
-		<button onclick={reset}>Admit another</button>
+	{#if requests.length === 0}
+		<p class="muted">No admission requests kept.</p>
 	{:else}
-		<label>
-			Invite reply
-			<textarea rows="5" bind:value={pastedBlob} placeholder="Paste the Invite reply here…" disabled={parseBusy || admitBusy}></textarea>
-		</label>
-		<button onclick={doParse} disabled={parseBusy || admitBusy}>
-			{parseBusy ? 'Parsing…' : 'Parse'}
-		</button>
-		{#if parseErr}<p class="err">{parseErr}</p>{/if}
-
-		{#if parsed}
-			<div class="parsed-fields">
-				<h3>Parsed Invite reply</h3>
-				<dl>
-					<dt>Org id</dt><dd class="mono">{parsed.org_id}</dd>
-					<dt>Handle</dt><dd>{parsed.handle}</dd>
-					<dt>Name</dt><dd>{parsed.name} {parsed.surname}</dd>
-					<dt>Member key</dt><dd class="mono">…{parsed.member_key.slice(-16)}</dd>
-					<dt>Device key</dt><dd class="mono">…{parsed.device_key.slice(-16)}</dd>
-				</dl>
-
-				{#if orgs.length === 0}
-					<p class="warn">No orgs available — create one in Story 1 first.</p>
-				{:else}
-					<label>
-						Target org
-						<select bind:value={selectedOrgId}>
-							{#each orgs as o (o.org_id)}
-								<option value={o.org_id}>…{o.org_id.slice(-12)} (epoch {o.epoch}, {o.member_count} members)</option>
-							{/each}
-						</select>
-					</label>
-					<label>
-						Peer addr blob (hex — required in Loopback only; transport is {transportMode})
-						<input type="text" bind:value={peerAddrBlob} disabled={admitBusy}
-							placeholder={transportMode === 'loopback' ? 'required' : 'leave empty in Networked'} />
-					</label>
-					<button class="admit-btn" onclick={doAdmit} disabled={admitBusy}>
-						{admitBusy ? 'Admitting…' : 'Admit'}
+		<ul class="requests">
+			{#each requests as confirmation (keyOf(confirmation))}
+				<li>
+					<button class:chosen={keyOf(confirmation) === selectedKey} onclick={() => choose(keyOf(confirmation))}>
+						{confirmation.name} {confirmation.surname} — invite …{confirmation.invite_id.slice(-8)}
 					</button>
-				{/if}
-				{#if admitErr}<p class="err">{admitErr}</p>{/if}
-			</div>
-		{/if}
+					<button class="cancel-btn" onclick={() => doCancel(confirmation)} disabled={cancelBusy}>Cancel invite</button>
+				</li>
+			{/each}
+		</ul>
+	{/if}
+	{#if cancelMessage}<p class="cancel-message">{cancelMessage}</p>{/if}
+
+	{#if selected}
+		<div class="confirmation">
+			<dl>
+				<dt>Invited as</dt><dd>{selected.invitee_name}</dd>
+				<dt>Request</dt><dd>{selected.name} {selected.surname}</dd>
+				<dt>Preferred Handles</dt><dd>{selected.preferred_handles.join(', ')}</dd>
+				<dt>DevicePublicKey</dt><dd class="mono">{selected.device_public_key}</dd>
+				<dt>Org id</dt><dd class="mono">{selected.org_id}</dd>
+			</dl>
+			{#if selected.mismatch}
+				<p class="warn" role="alert">The name in the request is not the name you typed for this Invite.</p>
+			{/if}
+			<label>
+				Handle (blank: the first preferred Handle free)
+				<input type="text" bind:value={handle} disabled={admitBusy} />
+			</label>
+			<label class="confirm">
+				<input type="checkbox" bind:checked={confirmed} disabled={admitBusy} />
+				This request is from the person I invited
+			</label>
+			<button class="admit-btn" onclick={doAdmit} disabled={admitBusy || !gate.ok}>
+				{admitBusy ? 'Proposing…' : 'Propose admission'}
+			</button>
+			{#if !gate.ok}<p class="muted">{gate.message}</p>{/if}
+			{#if admitErr}<p class="err">{admitErr}</p>{/if}
+			{#if proposed}<p class="ok">Admission proposed. {NEXT_EPOCH_NOTE}</p>{/if}
+		</div>
 	{/if}
 </section>
 
 <style>
 	.panel { background: #111; padding: 1rem; border-radius: 6px; margin-bottom: 1rem; }
 	h2 { margin-top: 0; font-size: 1rem; color: #ddd; }
-	h3 { font-size: 0.9rem; color: #aaa; margin: 0.75rem 0 0.4rem; }
-	.hint { color: #666; font-size: 0.8rem; margin-bottom: 0.75rem; }
+	.requests { list-style: none; padding: 0; margin: 0 0 0.5rem; }
 	label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.82rem; color: #888; margin-bottom: 0.4rem; }
-	textarea, select, input { background: #1a1a1a; border: 1px solid #333; color: #eee; padding: 0.3rem 0.5rem; border-radius: 3px; font-family: monospace; font-size: 0.82rem; resize: vertical; }
-	textarea:disabled, input:disabled { opacity: 0.5; }
+	label.confirm { flex-direction: row; align-items: center; gap: 0.4rem; color: #ddd; }
+	input { background: #1a1a1a; border: 1px solid #333; color: #eee; padding: 0.3rem 0.5rem; border-radius: 3px; font-family: monospace; font-size: 0.82rem; }
 	button { cursor: pointer; background: #1a3a5c; color: #7ec8e3; border: 1px solid #2a5f8c; border-radius: 3px; padding: 0.3rem 0.75rem; font-size: 0.82rem; }
 	button:disabled { opacity: 0.5; cursor: default; }
-	button:not(:disabled):hover { background: #204d7a; }
+	button.chosen { border-color: #7ec8e3; }
 	.admit-btn { background: #1b4d1b; color: #81c784; border-color: #2e7d32; margin-top: 0.5rem; }
-	.admit-btn:not(:disabled):hover { background: #245a24; }
-	.parsed-fields { background: #0d0d1a; border: 1px solid #222; border-radius: 4px; padding: 0.75rem; margin-top: 0.5rem; }
-	dl { display: grid; grid-template-columns: 8rem 1fr; gap: 0.2rem 0.5rem; font-size: 0.82rem; margin: 0 0 0.5rem; }
+	.confirmation { background: #0d0d1a; border: 1px solid #222; border-radius: 4px; padding: 0.75rem; margin-top: 0.5rem; }
+	dl { display: grid; grid-template-columns: 9rem 1fr; gap: 0.2rem 0.5rem; font-size: 0.82rem; margin: 0 0 0.5rem; }
 	dt { color: #666; }
 	dd { color: #ccc; margin: 0; word-break: break-all; }
 	.mono { font-family: monospace; }
-	.result-box { background: #0d2f1d; border: 1px solid #1b5e20; border-radius: 4px; padding: 0.75rem; margin-bottom: 0.5rem; }
-	.result-box p { margin: 0.2rem 0; font-size: 0.85rem; color: #ccc; }
-	code { font-family: monospace; font-size: 0.78rem; color: #81c784; word-break: break-all; }
 	.err { color: #f44336; font-size: 0.8rem; }
-	.ok { color: #4caf50; }
-	.warn { color: #ff9800; }
+	.ok { color: #4caf50; font-size: 0.85rem; }
+	.warn { color: #ff9800; font-size: 0.85rem; }
+	.muted { color: #555; font-size: 0.85rem; }
 </style>

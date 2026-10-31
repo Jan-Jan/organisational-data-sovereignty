@@ -145,6 +145,7 @@ carries a Membership root (and, for genesis, an Organisation public key) that
 no stored provisional update produces. Each is distinct from every other
 variant.
 satisfies: REQ-fwfku9, REQ-8amu2a, REQ-kt877x, REQ-tqap3r, REQ-yp75u9
+superseded-by: LLR-3sddey
 
 *Amended 2026-10-06 (merge of master `5f7c177`).* This item also removed
 `BadSignature`, which master removed; and it gains `AdmissionNotOurs` for
@@ -172,10 +173,21 @@ caller can run it before it reads the chain.
 Result<(), OrgNodeError>` runs, in this order and touching no `ChainReader`,
 the Organisation check (`OrgIdMismatch`), the Sequence number check
 (`StaleSeq`), the Change set decode (`MalformedDelta`) and the base-root check
-(`DeltaBaseMismatch`), and returns `Ok(())` only when all four pass;
-`verify_envelope_against_chain` runs exactly these checks first and calls
-`ChainReader::get_org_state` once, and only after they have passed.
+(`DeltaBaseMismatch`), and returns `Ok(())` only when all four pass.
+[Struck 2026-10-30, see the note below: ~~`verify_envelope_against_chain`
+runs exactly these checks first and calls `ChainReader::get_org_state` once,
+and only after they have passed.~~]
 satisfies: REQ-f2k4tr
+
+*Amended in place 2026-10-30 (change `worktree-org-io-domain-api`, merge
+review MR1-N1, owner ruling 2026-10-29), a narrowing:* the clause after the
+semicolon is struck. `verify_envelope_against_chain` is deleted, and the
+receive path, which takes no chain state, calls `check_chain_free` before
+anything is kept (LLR-76bhw9, LLR-e6w3nr). The four checks and their order
+are unchanged, and `VerifyContext` holds the expected Organisation and the
+guard alone. Its tests are now receive-path tests (`receive_path.rs`).
+*Tidied 2026-10-30 (merge review round 2, finding-7):* the struck clause is
+marked inline above, where it stood after a semicolon.
 
 ## SDD-kwncn7 — The wire frame and its bound
 
@@ -188,6 +200,7 @@ org-node defines no `InviteId` type: the bytes of an encoded Wire message of
 either kind (LLR-js9dsu) are exactly its variant index, its Envelope and, for
 Organisation information, its record snapshot and Organisation private key.
 satisfies: REQ-8amu2a
+superseded-by: LLR-g3wmen
 
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 This said `WireMessage` carries, after its record snapshot, an `invite_id:
@@ -224,6 +237,7 @@ otherwise appends, so several provisional updates for one Organisation are
 held at once, and two built for the same change with different fresh keys
 are two updates.
 satisfies: REQ-xs4ab8, REQ-8amu2a
+superseded-by: LLR-d925uu
 
 *Amended 2026-10-06 (owner ruling on pre-emption, REQ-8amu2a as amended).*
 `expected_admissions` held Organisation identifiers alone; an expectation now
@@ -268,6 +282,7 @@ transport's `MAX_FRAME`) refuses with `ProvisionalLimit { limit:
 MAX_PROVISIONAL_BYTES }` and leaves `StoreData` exactly as it was; the
 operation that called it then writes nothing to disk.
 satisfies: REQ-fwfku9
+superseded-by: LLR-m76r4k
 
 **LLR-nvn3wk**: `OrgService::provisional_updates(org_id)` returns the stored
 provisional updates whose `org_id` is that Organisation, and
@@ -276,6 +291,7 @@ that Persona built, each with its resulting root, base root, Sequence number
 and Organisation public key, so the app can submit one after a restart; neither
 changes the store.
 satisfies: REQ-xs4ab8
+superseded-by: LLR-8ru6mv
 
 **LLR-qjz3q4**: every provisional update holds the Organisation private key
 whose X25519 public key is its `org_pub_key`, as an `OrgPrivateKey` inside
@@ -287,6 +303,7 @@ update, and leaves the store with the update when the update is removed
 without being committed — discarded (LLR-7cmp38) or orphaned by another
 commit (LLR-mkj4bz).
 satisfies: REQ-ech45n, REQ-stx9v3
+superseded-by: LLR-qw8tyu
 
 *Amended 2026-10-06 (owner ruling on rotation, change
 `worktree-org-node-org-key-pair`).* This was about a genesis provisional
@@ -313,6 +330,7 @@ saves the store before returning; when no such update is stored it returns
 `NoProvisionalUpdate`, leaves the store unchanged and writes nothing. It never
 touches a record, an expectation or another provisional update.
 satisfies: REQ-hhva9d
+superseded-by: LLR-d9x6xf
 
 *Amended 2026-10-06 (owner ruling on rotation, change
 `worktree-org-node-org-key-pair`).* The operation named an update by target
@@ -344,6 +362,7 @@ private key (LLR-qjz3q4); it saves the store before returning, and calls no
 chain operation. The key pair is drawn after the genesis record's root is
 calculated, as every provisional update's is (LLR-e2b7gv).
 satisfies: REQ-xs4ab8, REQ-stx9v3
+superseded-by: LLR-d4gpxm
 
 *Amended 2026-10-06 (owner ruling on rotation, change
 `worktree-org-node-org-key-pair`).* Genesis was the only operation that drew
@@ -381,6 +400,7 @@ Organisation private key, and `proxy_account`
 `Some(proxy_account)` — removes that provisional update, and saves the store;
 on any refusal the store is unchanged and not written.
 satisfies: REQ-tqap3r
+superseded-by: LLR-gcm7bq
 
 *Amended 2026-10-06 (merge of master `5f7c177`, REQ-txvtm9 and REQ-ech45n).*
 This refused with `StaleEpoch` an epoch not greater than zero and created the
@@ -430,6 +450,7 @@ update, changes no Persona or record, and writes nothing to disk. A Persona
 whose `org_id` is unset may build any number of genesis provisional updates
 (LLR-95753m); LLR-eyc4ud decides which of them can commit.
 satisfies: REQ-yp75u9
+superseded-by: LLR-qqqg4b
 
 *Added 2026-10-06 (owner ruling: one Persona, one Organisation; independent
 review round 1, finding-1).* Before it a Persona that had founded or joined
@@ -449,6 +470,7 @@ nothing, when no Persona is bound to it; an endpoint already bound is used as
 it is (the bind-once item and the endpoint-bound-once report, both org-io's
 since S4 task T10).
 satisfies: derived
+superseded-by: LLR-degg8t
 
 *Amended 2026-10-13 (S4, task T5 of `docs/plans/2026-10-06-org-io-transport.md`):*
 org-node names the sending Persona, org-io binds. `CommitOutcome.sender` is
@@ -495,6 +517,7 @@ endpoint per Persona, org-io's design ledger).
 it sends carries one (LLR-ms8njy); `send_update` neither reads nor stores an
 invite identifier.
 satisfies: REQ-8amu2a
+superseded-by: LLR-degg8t
 
 *Amended 2026-10-13 (S4, task T5 of `docs/plans/2026-10-06-org-io-transport.md`):*
 `send_update` is gone: no outgoing body the commit builds carries an invite
@@ -525,6 +548,12 @@ of, `receive_and_verify` and `receive_and_self_delete_if_revoked` call
 the provisional updates and the expected admissions unchanged; the early
 `read_state` that existed to obtain a signing key is removed.
 satisfies: REQ-f2k4tr
+superseded-by: LLR-76bhw9
+
+*Superseded 2026-10-20 (change `worktree-org-io-domain-api`, dispatcher's
+resolution C6 of 2026-10-16):* the functions it names are removed; the
+receive path takes no chain state at all (LLR-94rzrk), and LLR-76bhw9 states
+the chain-free checks it runs on Organisation information.
 
 *Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
 The chain-free checks are `check_received`'s, on the one receive path; a
@@ -553,6 +582,7 @@ reads the chain once. Every refusal leaves every expectation in place. (A
 revocation about such an Organisation is refused before this check,
 LLR-38e2kn.)
 satisfies: REQ-8amu2a
+superseded-by: LLR-e6w3nr
 
 *Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
 The expectation gate is `check_received`'s, before the snapshot is decoded
@@ -581,6 +611,7 @@ DevicePublicKey of at least one Persona in the store; otherwise it refuses with
 `AdmissionNotOurs { org_id }`, creates no record, marks no Persona, leaves every
 expectation in place and writes nothing to disk.
 satisfies: REQ-kt877x
+superseded-by: LLR-q4puca
 
 *Added 2026-10-06 (owner ruling on pre-emption).* Without it a relay holding a
 genuine admission of someone else to an Organisation this node expects could
@@ -605,6 +636,7 @@ with the record's Organisation private key and public key replaced by the
 update's (LLR-6s785x), and returns the Envelope and the encoded snapshot of
 the record as it stood before the commit as `outgoing`.
 satisfies: REQ-tqap3r, REQ-jy6ybw
+superseded-by: LLR-34c5y3
 
 *Amended 2026-10-06 (owner ruling on rotation, change
 `worktree-org-node-org-key-pair`).* The update was selected by its root alone
@@ -620,6 +652,7 @@ any refusal of verify-against-chain — returns the typed error and leaves the
 record, every provisional update and the Persona records exactly as they were,
 with nothing written to disk.
 satisfies: REQ-tqap3r
+superseded-by: LLR-qvp7mq
 
 *Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place: a
 narrowing. "A failed or empty chain read" reads "no chain state given
@@ -636,6 +669,13 @@ nothing: each returns once the store is saved, so a commit never waits on a
 send and its outcome does not depend on whether the committed update is ever
 sent.
 satisfies: REQ-tqap3r
+superseded-by: LLR-g2jeqd
+
+*Superseded 2026-10-21 (change `worktree-org-io-domain-api`, design gap G2
+of its plan):* `commit_update` and `commit_genesis` are removed; verification
+adopts, and it is sealed and returned with no send made or awaited, its
+outcome independent of whether the epoch's messages are ever sent
+(LLR-g2jeqd).
 
 *Amended 2026-10-14 (S4, task T14 of `docs/plans/2026-10-06-org-io-transport.md`),
 a narrowing of the evidence, not of the claim:* "bind no endpoint and send
@@ -655,6 +695,7 @@ for that Organisation whose `base_root` is not the new record's root is
 removed, in the same store save; provisional updates for every other
 Organisation are left as they were.
 satisfies: REQ-uv3v5w
+superseded-by: LLR-34c5y3
 
 *Amended 2026-10-06 (change `worktree-org-io-commit-workflow`; REQ-uv3v5w as
 amended there: no legacy trie, each device keeps the delta that produced its
@@ -669,6 +710,7 @@ update, signs the acknowledgements and forgets the Organisation as
 provisional update and expected admission for it and every Persona bound to
 it are removed (LLR-pba7yu), and the acknowledgements are returned.
 satisfies: REQ-uxv2x2
+superseded-by: LLR-jhy6t6
 
 *Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
 On the receive path the removal step runs in `commit_checked` (one path; the
@@ -702,6 +744,7 @@ Persona, keeping every expectation and writing nothing. `commit_update` and
 Organisation (LLR-b27jr6, LLR-6p4pj2) deletes the Personas bound to it, so no
 binding of a forgotten Organisation survives to be reused.
 satisfies: REQ-yp75u9
+superseded-by: LLR-qqqg4b
 
 *Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
 On the receive path the binding is made by `commit_checked` (a first

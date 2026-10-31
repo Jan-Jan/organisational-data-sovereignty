@@ -1,8 +1,8 @@
 /**
- * Typed wrappers around Tauri invoke/listen for the ODS commands + 8 events.
+ * Typed wrappers around Tauri invoke/listen for the ODS commands + the events the receiver and the verification announce.
  *
  * Command signatures mirror commands.rs exactly (camelCase arg names per Tauri convention).
- * Return shapes mirror the Rust DTOs (PersonaDto, OrgDto, InviteDto, InviteReplyDto, ConnectionStatus).
+ * Return shapes mirror the Rust DTOs of commands.rs and carry their names (PersonaDto, OrgDto, InviteDto, ConnectionStatus, ...).
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -15,16 +15,21 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 export interface PersonaDto {
 	persona_id: string;
 	org_id: string | null;
-	handle: string;
+	/** null for a Persona that holds no Handle yet, such as a provisional Member (LLR-pguhw5). */
+	handle: string | null;
 	name: string;
 	surname: string;
 	/** "Proposed" | "Active" | "Revoked" (Debug format of enum) */
 	status: string;
 }
 
-/** LLR-8axx7h: whether the Organisation's last reconcile verified it. */
+/** LLR-g8wfy9: the last verification of an Organisation on this handle. */
 export type VerificationDto =
-	| { status: 'verified' }
+	| { status: 'in_step'; epoch: number }
+	| { status: 'adopted'; epoch: number }
+	| { status: 'removed' }
+	| { status: 'behind'; chain_epoch: number }
+	| { status: 'inconsistent'; reason: string }
 	| { status: 'unverified'; reason: string }
 	| { status: 'not_checked' };
 
@@ -36,31 +41,70 @@ export interface OrgDto {
 	verification: VerificationDto;
 }
 
-/** LLR-ekz4zn: one Organisation's reconcile result, tagged by `result`. */
-export type ReconciliationDto =
-	| { result: 'in_step'; org_id: string; epoch: number }
-	| { result: 'committed'; org_id: string; epoch: number; recipients: string[] }
-	| { result: 'behind'; org_id: string; chain_epoch: number }
-	| { result: 'removed'; org_id: string }
-	| { result: 'refused'; org_id: string; reason: string }
-	| { result: 'unverified'; org_id: string; reason: string };
-
+/** LLR-b7ywy4: an Invite's public fields; nothing is stored. */
 export interface InviteDto {
 	org_name: string;
-	org_id: string;
+	org_id: string; // 40 hex chars
 	invitee_name: string;
-	inviter_device_keys: string[];
-	invite_id: string;
+	issuer_device_key: string; // 64 hex chars
 }
 
-export interface InviteReplyDto {
-	org_id: string;
-	handle: string;
-	name: string;
-	surname: string;
-	member_key: string;
-	device_key: string;
+/** LLR-rg9vc7: the new Persona a Member proposal created. */
+export interface ProposedPersonaDto {
+	persona_id: string;
+	status: string;
 }
+
+/** LLR-8cz828: org-io's outcome of an admission request, tagged by `result`. */
+export type AdmissionDto =
+	| { result: 'delivered' }
+	| { result: 'already_received' }
+	| { result: 'invite_used_by_another_device' }
+	| { result: 'refused' }
+	| { result: 'not_delivered'; reason: string };
+
+/** LLR-rywe8f, LLR-nkg8sb: one Device's outcome of a send or a request. */
+export type DeviceReportDto =
+	| { device: string; result: 'sent' }
+	| { device: string; result: 'failed'; reason: string };
+
+/**
+ * LLR-n64wvr: a provisional change an adopted epoch left out. org-io reports
+ * the request's name and surname, and a revoked Member's Handle, when it
+ * still holds them; otherwise the field is `null` (names table OPEN-1).
+ */
+export type DiscardedDto =
+	| { kind: 'admission'; invite_id: string; name: string | null; surname: string | null; handle: string }
+	| { kind: 'revocation'; member_id: string; handle: string | null };
+
+/**
+ * LLR-jf63e4: which target an entry is for. An
+ * Organisation's entry has its `org_id` and no `founder`. Every provisional
+ * founding's entry carries `founder`, its founder's Device key (64 hex),
+ * beside `org_id` `null` before its proxy is recorded and the proxy's
+ * Organisation identifier after.
+ */
+export type EntryOrg = { org_id: string; founder?: undefined } | { org_id: string | null; founder: string };
+
+/** LLR-jf63e4: what a verification settled of an unknown chain write (org-io's `Verified::Settled`). */
+export type WriteLabelDto = 'adopted' | 'not_executed' | 'deprecated' | 'still_unknown';
+
+/** LLR-jf63e4: one verification result, tagged by `result`. */
+export type VerificationEntryDto = EntryOrg & { write?: WriteLabelDto } & (
+		| { result: 'in_step'; epoch: number }
+		| {
+				result: 'adopted';
+				epoch: number;
+				own: boolean;
+				discarded: DiscardedDto[];
+				sends?: DeviceReportDto[];
+				sends_refused?: string;
+		  }
+		| { result: 'removed' }
+		| { result: 'behind'; chain_epoch: number; requests?: DeviceReportDto[]; requests_refused?: string }
+		| { result: 'inconsistent'; reason: string }
+		| { result: 'unverified'; reason: string }
+	);
 
 /**
  * Which of the two ways this installation reaches other nodes.
@@ -92,8 +136,9 @@ export interface MembershipUpdatedPayload {
 	root: string;
 }
 
+/** LLR-ygr6gd: `org_id` is null for a provisional founding whose proxy is not recorded. */
 export interface RevokedPayload {
-	org_id: string;
+	org_id: string | null;
 }
 
 /**
@@ -123,7 +168,8 @@ export interface VerificationFailedPayload {
 /** REQ-2k7ys4 / REQ-dp95pv: an update verified but its record could not be
  * read back. No membership, epoch or verification event accompanies it. */
 export interface RecordUnreadablePayload {
-	org_id: string;
+	/** LLR-acb5g4: null for a provisional founding whose proxy is not recorded. */
+	org_id: string | null;
 }
 
 /** REQ-jfxah3: the receiver loop has exited and is no longer running. */
@@ -131,68 +177,34 @@ export interface ReceiverStoppedPayload {
 	reason: string;
 }
 
+/** LLR-y7nc6x: one kept admission request as list_admission_requests returns it; also the admission-requested payload, field for field (LLR-dp45mm). */
+export interface AdmissionRequestDto {
+	org_id: string; // 40 hex chars
+	invite_id: string; // 64 hex chars
+	invitee_name: string;
+	name: string;
+	surname: string;
+	preferred_handles: string[];
+	device_public_key: string; // 64 hex chars
+}
+
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
 
-/** Create a new persona (no chain interaction). Returns persona_id. */
-export function createPersona(handle: string, name: string, surname: string): Promise<string> {
-	return invoke<string>('create_persona', { handle, name, surname });
-}
-
 /**
- * Create an organisation: build genesis trie + submit to chain.
- * Returns org_id (40 hex chars).
+ * LLR-gmb4p8: record the admission of the request kept for `inviteId`, with
+ * the Admin's chosen Handle (blank: org-io chooses), once confirmed
+ * (LLR-cr9nmw). These four values alone: no Organisation secret, reply or
+ * peer address.
  */
-export function createOrganisation(personaId: string): Promise<string> {
-	return invoke<string>('create_organisation', { personaId });
-}
-
-/** REQ-prjja8: an Invite Blob for an Organisation this device belongs to. */
-export function exportInvite(orgId: string, orgName: string, inviteeName: string): Promise<string> {
-	return invoke<string>('export_invite', { orgId, orgName, inviteeName });
-}
-
-/** Parse an Invite Blob (org-node's parse); a field that does not parse is named. */
-export function importInvite(blob: string): Promise<InviteDto> {
-	return invoke<InviteDto>('import_invite', { blob });
-}
-
-/** REQ-tcutr6 / REQ-ab2mfz: the reply, only with `confirmed` true. */
-export function produceInviteReply(inviteBlob: string, personaId: string, confirmed: boolean): Promise<string> {
-	return invoke<string>('produce_invite_reply', { inviteBlob, personaId, confirmed });
-}
-
-/** REQ-65xqp8: parse a reply; refused unless it names an Invite outstanding for the Organisation it names. */
-export function importInviteReply(blob: string): Promise<InviteReplyDto> {
-	return invoke<InviteReplyDto>('import_invite_reply', { blob });
-}
-
-/**
- * REQ-nfr3n2: admit through the chain, then commit and send. No Organisation
- * secret or key is passed: the key the admission carries is the one
- * org-node's record holds (LLR-8krgzj).
- */
-export function admitMember(orgId: string, replyBlob: string, peerAddrBlob: string): Promise<string> {
-	return invoke<string>('admit_member', { orgId, replyBlob, peerAddrBlob });
-}
-
-/**
- * Revoke a member by member_id_hex (64 hex chars) and peer_addr_blob (the
- * revoked member's peer address in hex, needed for Loopback dialling only; its
- * format is org-io's, which parses it).
- *
- * REQ-vgr7s2: `peerAddrBlob` may be the empty string, which means "no address".
- * Networked mode dials by device key and has no address to give, so demanding
- * one made revocation unreachable in the default transport (HAZ-n97v5g). See
- * `validateRevokeInput`.
- */
-export function revokeMember(
+export function proposeAdmission(
 	orgId: string,
-	memberIdHex: string,
-	peerAddrBlob: string
+	inviteId: string,
+	handle: string | null,
+	confirmed: boolean
 ): Promise<void> {
-	return invoke<void>('revoke_member', { orgId, memberIdHex, peerAddrBlob });
+	return invoke<void>('propose_admission', { orgId, inviteId, handle, confirmed });
 }
 
 /** List all local personas (no key material returned). */
@@ -205,9 +217,118 @@ export function listOrgs(): Promise<OrgDto[]> {
 	return invoke<OrgDto[]>('list_orgs');
 }
 
-/** REQ-363366: reconcile every held Organisation; one result each. */
-export function reconcileOrganisations(): Promise<ReconciliationDto[]> {
-	return invoke<ReconciliationDto[]>('reconcile_organisations');
+/** LLR-5mw2dj: the admission requests kept before the start; no argument. */
+export function listAdmissionRequests(): Promise<AdmissionRequestDto[]> {
+	return invoke<AdmissionRequestDto[]>('list_admission_requests');
+}
+
+/** LLR-y3zykm: an Invite for this Organisation; no Organisation name and no address are passed. */
+export function issueInvite(orgId: string, inviteeName: string): Promise<string> {
+	return invoke<string>('issue_invite', { orgId, inviteeName });
+}
+
+/** LLR-b7ywy4: read an Invite Blob; a field that does not parse is named. */
+export function readInvite(blob: string): Promise<InviteDto> {
+	return invoke<InviteDto>('read_invite', { blob });
+}
+
+/** LLR-rg9vc7: a new Persona proposed as a Member from an Invite; sends nothing. */
+export function proposeMember(
+	inviteBlob: string,
+	name: string,
+	surname: string,
+	preferredHandles: string[]
+): Promise<ProposedPersonaDto> {
+	return invoke<ProposedPersonaDto>('propose_member', { inviteBlob, name, surname, preferredHandles });
+}
+
+/** LLR-q2k9z8: the provisional Member's admission request, only with `confirmed` true. */
+export function requestAdmission(personaId: string, confirmed: boolean): Promise<AdmissionDto> {
+	return invoke<AdmissionDto>('request_admission', { personaId, confirmed });
+}
+
+/** LLR-7n4hgr: record a revocation as a provisional change; no peer address. */
+export function proposeRevocation(orgId: string, memberId: string): Promise<void> {
+	return invoke<void>('propose_revocation', { orgId, memberId });
+}
+
+/** LLR-j2x9jb: verify every Organisation and provisional founding held; one entry per result. */
+export function verifyOrganisations(): Promise<VerificationEntryDto[]> {
+	return invoke<VerificationEntryDto[]>('verify_organisation');
+}
+
+/** verification-result: LLR-8grnbb, LLR-84cxpt. One per result of a verification the app ran itself. */
+export function onVerificationResult(handler: (payload: VerificationEntryDto) => void): Promise<UnlistenFn> {
+	return listen<VerificationEntryDto>('verification-result', (event) => handler(event.payload));
+}
+
+/** admission-requested: LLR-dp45mm. One per admission request kept on arrival. */
+export function onAdmissionRequested(handler: (payload: AdmissionRequestDto) => void): Promise<UnlistenFn> {
+	return listen<AdmissionRequestDto>('admission-requested', (event) => handler(event.payload));
+}
+
+/** LLR-k57uqv: the Person as `propose_person` returns it: its Device key (64 hex), the names stored, its status. */
+export interface PersonDto {
+	device_public_key: string;
+	name: string;
+	surname: string;
+	status: 'provisional';
+}
+
+/** LLR-k57uqv: why `propose_person` refused, and org-io's text (a refused field named first). */
+export interface PersonRefusalDto {
+	kind: 'person_already_held' | 'refused';
+	message: string;
+}
+
+/** LLR-k57uqv: propose the user's Person from a name and a surname (no Handle); it rejects with a `PersonRefusalDto`. */
+export function proposePerson(name: string, surname: string): Promise<PersonDto> {
+	return invoke<PersonDto>('propose_person', { name, surname });
+}
+
+/** LLR-6ff735: a proposed founding, with its founder's Device key (64 hex). */
+export interface ProposedFoundingDto {
+	persona_id: string;
+	status: 'provisional_founding';
+	founder: string;
+}
+
+/** LLR-6ff735: propose a founding; its result carries the founder's Device key the founding's write takes. */
+export function proposeFoundingOrganisation(
+	name: string,
+	surname: string,
+	handle: string,
+	orgName: string
+): Promise<ProposedFoundingDto> {
+	return invoke<ProposedFoundingDto>('propose_founding_organisation', { name, surname, handle, orgName });
+}
+
+/** LLR-dt8ak9 (LLR-2u3cga): the updated Organisation org-io proposed; nothing is written. */
+export interface ProposedOrganisationDto {
+	epoch: number;
+	root: string; // 64 hex chars
+	org_public_key: string; // 64 hex chars
+}
+
+/** LLR-dt8ak9: propose the next epoch of `orgId` from the provisional changes org-io holds. */
+export function proposeUpdatedOrganisation(orgId: string): Promise<ProposedOrganisationDto> {
+	return invoke<ProposedOrganisationDto>('propose_updated_organisation', { orgId });
+}
+
+/** LLR-dt8ak9 (LLR-vqz4s6): cancel the outstanding Invite `inviteId` of `orgId`, removing its kept request. */
+export function cancelInvite(orgId: string, inviteId: string): Promise<void> {
+	return invoke<void>('cancel_invite', { orgId, inviteId });
+}
+
+/** LLR-rhc555, LLR-k4rhbs: a write's outcome, tagged by `result`; an included write carries its verification. */
+export type WriteDto =
+	| { result: 'included'; epoch: number; verification: VerificationEntryDto }
+	| { result: 'refused'; reason: string }
+	| { result: 'unknown'; reason: string };
+
+/** LLR-rhc555: write a held Organisation by `orgId`, or a founding by its `founder`; exactly one. */
+export function writeOrganisationToChain(target: { orgId: string } | { founder: string }): Promise<WriteDto> {
+	return invoke<WriteDto>('write_organisation_to_chain', target);
 }
 
 /** Return the current connection status (chain env vars + data dir). */

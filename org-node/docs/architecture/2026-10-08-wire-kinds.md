@@ -28,6 +28,7 @@ its record snapshot or before the 32 bytes of its Organisation private key,
 and a body of any of the three kinds with bytes left over after its last
 field.
 satisfies: REQ-c29s93, REQ-3dsweu
+superseded-by: LLR-xr88a8
 supersedes: LLR-js9dsu
 
 *Supersession (2026-10-08, owner's ruling on PR-zf924s, hybrid).* The text is

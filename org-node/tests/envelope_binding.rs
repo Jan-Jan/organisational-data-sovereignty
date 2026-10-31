@@ -1,19 +1,9 @@
 #![cfg(feature = "test-support")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 //! The Envelope (SDD-kk2y3e): what it binds together and how its Change set
-//! is decoded.
-//!
-//! Relocated from the `#[cfg(test)]` module in `org-node/src/envelope.rs` so
-//! the `verifies:` annotations sit under `test_paths`.
-//!
-//! *Merged 2026-10-05 into worktree-person-shared-types.* The Envelope carries
-//! no signature (owner ruling; REQ-ag6kqm, amended in place): the chain's root
-//! at a newer epoch decides, and nothing about the sender is checked. Master's
-//! cases for the signed transcript and for a signature failing when the org,
-//! sequence number, delta bytes or key change test code that no longer
-//! exists. LLR-p8uu47, LLR-e7s4ye and LLR-pzde8b are amended in place to the
-//! unsigned wire form and what `build` transmits, and the tests below verify
-//! them as amended.
+//! is decoded. The Envelope carries no signature (REQ-ag6kqm): the chain's
+//! root at a newer epoch decides, and nothing about the sender is checked
+//! (LLR-p8uu47, LLR-e7s4ye, LLR-pzde8b).
 
 use org_node::ids::OrgId;
 use org_node::test_fixtures::admit_member_delta;
@@ -40,9 +30,7 @@ fn build_binds_org_and_sequence_to_the_encoded_delta() {
     assert_eq!(env.delta_bytes, postcard::to_allocvec(&delta).unwrap());
 }
 
-// Was `build_signs_the_delta_bytes_it_transmits` (REQ-ag6kqm, LLR-p8uu47).
-// The canonical-encoding half is kept; the signature half has nothing to
-// check. LLR-p8uu47, as amended, states the half that is kept.
+// `build` transmits the canonical encoding of the delta (LLR-p8uu47).
 // verifies: LLR-p8uu47
 #[test]
 fn build_transmits_the_canonical_encoding_of_the_delta() {
@@ -63,9 +51,8 @@ fn decode_delta_refuses_bytes_that_are_not_a_delta() {
     assert_eq!(env.decode_delta().unwrap_err(), OrgNodeError::MalformedDelta);
 }
 
-// Relocated from `src/envelope.rs`. Since 2026-10-05 it also reads the bytes
-// in order, not only their count, because the amended wire-form item states
-// the order.
+// The wire form's bytes, read in order, not only their count: the wire-form
+// item states the order.
 // verifies: LLR-e7s4ye, LLR-pzde8b
 #[test]
 fn the_wire_form_has_no_signature_field() {

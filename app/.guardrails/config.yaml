@@ -198,8 +198,9 @@ test_paths:
 # Both npm entries need app/node_modules, which is gitignored: the merging
 # machine must run `npm --prefix app ci` first. A fresh worktree does not have
 # it.
+# 2026-10-21, T1 of docs/plans/2026-10-21-org-io-domain-api.md: two empty targets (verification, periodic) registered.
 verify_commands:
-  - cargo test --manifest-path app/src-tauri/Cargo.toml --features test-support --test startup_policy --test connection_status --test org_id_parsing --test receiver_events --test receiver_guard --test ipc --test csp_policy --test reconcile
+  - cargo test --manifest-path app/src-tauri/Cargo.toml --features test-support --test startup_policy --test connection_status --test org_id_parsing --test receiver_events --test receiver_guard --test ipc --test csp_policy --test verification --test periodic
   - npm --prefix app run check
   - npm --prefix app run test
 
