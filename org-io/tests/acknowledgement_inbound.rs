@@ -3,7 +3,7 @@
     clippy::await_holding_lock,
     reason = "`fresh_keychain`'s lock serialises the tests over keyring's process-global credential builder for their whole run; each test has its own runtime"
 )]
-//! A revoked Device may connect, for its acknowledgement only (REQ-ur7z4a),
+//! A revoked Device may connect, for its acknowledgement only (REQ-xd5a2d),
 //! over the receive step (SDD-2fc2cq): every completed handshake is
 //! accepted and the body judged by org-node's check with its authenticated
 //! sender, so only a revoked Device's acknowledgement is acted on

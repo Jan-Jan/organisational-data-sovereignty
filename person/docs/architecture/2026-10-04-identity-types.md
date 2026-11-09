@@ -3,8 +3,6 @@
 Design of the validated types `person` owns and org-members uses, from the
 design-architecture session of 2026-10-04. Serves the requirements in
 `person/docs/requirements/2026-10-04-identity-types.md`.
-The order of work and the dependency assessment are in
-`docs/plans/2026-10-04-person-shared-types.md`.
 
 The code these items describe is taken from org-members, not written afresh;
 the behaviour is org-members' existing behaviour except where an item says
@@ -27,8 +25,7 @@ design items for that code gain a note naming `person` as the provider.
 `PersonPublicKey` and `DeviceSlots`, each constructible only through a
 validating constructor, deserialisation included — and the X25519 validity
 check `PersonPublicKey` applies, exported for other units' key types.
-traces: REQ-r7mytp, REQ-q6xkna, REQ-3vqs9b, REQ-4szc22, REQ-tq4ms4, REQ-7gz72r,
-REQ-4e23xr
+traces: REQ-r7mytp, REQ-q6xkna, REQ-3vqs9b, REQ-4szc22, REQ-tq4ms4, REQ-7gz72r, REQ-4e23xr
 
 (Amended 2026-10-24, `worktree-generic-smt`: `DeviceSlots` refuses two keys
 of one position, LLR-xsx6gg and LLR-pjf9qn in `2026-10-24-device-root-tree.md`.)
@@ -79,20 +76,6 @@ point (a prime-order point plus a non-identity point of small order), by the
 owner's decision: it does not check that the point is torsion-free.
 satisfies: REQ-3vqs9b
 
-**LLR-9p34cv**: `DeviceSlots::parse(Vec<DevicePublicKey>)` is the type's parse
-for values built in the process (`TryFrom<Vec<DevicePublicKey>>` delegates to
-it; decoding is LLR-sjrh7z's); it sorts its input and
-fails with `DeviceSlotsFull` when given more than `MAX_DEVICES` (4) keys and
-with `DuplicateDevice` when given a key twice; an empty set is accepted.
-`add_device` fails with `DeviceSlotsFull` at the bound and `DuplicateDevice`
-for a key already in the set; `remove_device` fails with `DeviceNotFound` for
-a key not in the set;
-each returns a new set and leaves the receiver unchanged. `devices` returns
-the keys in sorted order, `device_count` their number, and `has_device` whether
-a given key is in the set.
-satisfies: REQ-4szc22
-superseded-by: LLR-xsx6gg
-
 **LLR-sjrh7z**: `DeviceSlots`' `Deserialize` impl rejects a sequence longer than
 `MAX_DEVICES` before storing a key beyond the bound, and rejects one that is
 not strictly increasing, rather than sorting it. That the rejection comes
@@ -107,12 +90,14 @@ satisfies: REQ-4szc22, REQ-tq4ms4, REQ-vxx8k3
 returns `true` for a canonical u-coordinate of a point on the quadratic twist
 and for the u-coordinate of a mixed-order point;
 `PersonPublicKey::parse` accepts exactly the bytes this function accepts,
-by calling it. satisfies: REQ-7gz72r, REQ-3vqs9b
+by calling it.
+satisfies: REQ-7gz72r, REQ-3vqs9b
 
 **LLR-fbqs2r**: The `Debug` form of a `Name` is `Name([REDACTED])` and of a
 `Surname` is `Surname([REDACTED])`, whatever the value; `Display` writes the
 stored NFC value unredacted, and `From<Name> for String` and
-`From<Surname> for String` return it. satisfies: derived
+`From<Surname> for String` return it.
+satisfies: derived
 
 **LLR-a6krbh**: The `Debug` form of a `DevicePublicKey` or a `PersonPublicKey`
 is the type name followed by the first four of its 32 bytes in lowercase hex
@@ -122,19 +107,10 @@ satisfies: derived
 
 **LLR-78t363**: `DevicePublicKey` and `PersonPublicKey` compare equal, order
 and hash by their 32 bytes: `Ord` is the lexicographic order of `as_bytes()`,
-which is the sorted order `DeviceSlots` keeps (LLR-9p34cv) and the slot order
-of the device root (LLR-6ezhw7) rests on. `DevicePublicKey::verifying_key`
+which is the sorted order `DeviceSlots` keeps (LLR-xsx6gg) and the slot order
+of the device root rests on. `DevicePublicKey::verifying_key`
 returns the decoded ed25519 key whose encoding `as_bytes` returns.
 satisfies: derived
-
-**LLR-5za6mp**: With the `serde` feature, a `DevicePublicKey` and a
-`PersonPublicKey` serialise as their 32 bytes (a fixed-length byte array, no
-length prefix), a `Name` and a `Surname` as the string of their NFC value, and
-a `DeviceSlots` as the sequence of its keys in sorted order. Decoding a
-`DeviceSlots` from anything other than a sequence fails with an error that
-names the expected form, `at most 4 device keys in strictly increasing order`.
-satisfies: derived
-superseded-by: LLR-cyx9a3
 
 **SDD-7r833z**: Device root — the root of the device root tree, the depth-4
 sparse Merkle tree that commits to a set of DevicePublicKeys, each at its
@@ -148,32 +124,9 @@ check; its LLRs are in `2026-10-24-device-root-tree.md`. Its statement was
 restated as one responsibility on 2026-10-27, guideline review round 1, and
 on 2026-10-28, round 6, to name the tree the device root tree.)
 
-**LLR-4vsm8d**: `DeviceTrieHasher` provides `hash_device_leaf(&[u8]) -> NodeHash`,
-`hash_device_node(&NodeHash, &NodeHash) -> NodeHash` and an associated
-`DEVICE_EMPTY_SENTINEL: &'static [u8]`. satisfies: REQ-mu3qgz, REQ-aj6x3n
-superseded-by: LLR-9mjfjn
-
-Its associated constant and its functions without a receiver make the trait
-not object-safe, so callers use it through generics.
-
-**LLR-6ezhw7**: `compute_device_root::<H>(&DeviceSlots)` hashes a fixed depth-2
-binary tree of `MAX_DEVICES` slots: slot `i` contains the `i`-th key in sorted
-order, hashed with `H::hash_device_leaf` over its 32 bytes, and an unoccupied
-slot contains `H::hash_device_leaf(H::DEVICE_EMPTY_SENTINEL)`; the two levels
-above are `H::hash_device_node`. It is the code org-members uses today, with
-the sentinel and both hashes taken from `H`. satisfies: REQ-mu3qgz,
-REQ-aj6x3n
-superseded-by: LLR-8y8tqr
-
-**LLR-z99qee**: A `NodeHash` wraps any 32 bytes, unvalidated:
-`NodeHash::new` and `From<[u8; 32]>` construct it, `as_bytes` returns the
-bytes, its `Debug` form is `NodeHash(` and the first four bytes in lowercase hex
-and `..)`, and with the `serde` feature it serialises as the 32 bytes.
-satisfies: derived
-retired: 2026-10-24 — NodeHash is sparse-merkle-tree's, which this unit re-exports (2026-10-24-device-root-tree.md)
-
 **SDD-u9cddc**: Errors — the error type every constructor in the unit returns,
-and the no-panic discipline. traces: REQ-vxx8k3, REQ-bczz87, REQ-r4keha
+and the no-panic discipline.
+traces: REQ-vxx8k3, REQ-bczz87, REQ-r4keha
 
 *Amended 2026-10-06 (Person definition):* `IdentityError` is also the error
 type of every Person operation — `Person::new`, the successor check, the
@@ -189,7 +142,7 @@ REQ-r4keha is traced here for them.
 through the deserializer's own error type, with a message that names the rule:
 the `IdentityError` message for a key or a name, `device slots exceed
 MAX_DEVICES` or `device slots must be strictly increasing (sorted, no
-duplicates)` for a `DeviceSlots`, and the expected form of LLR-5za6mp for a
+duplicates)` for a `DeviceSlots`, and the expected form of LLR-cyx9a3 for a
 `DeviceSlots` decoded from anything other than a sequence.
 satisfies: REQ-bczz87
 
@@ -204,13 +157,14 @@ decoding a `Person` still rejects through the deserializer's error, with the
 **LLR-64muuw**: The crate is `#![no_std]` with `alloc`, builds under the
 workspace lints that deny `unwrap`, `expect` and `panic`, and denies
 `clippy::indexing_slicing` crate-wide, so it indexes no slice or array with a
-value derived from input. satisfies: REQ-vxx8k3
+value derived from input.
+satisfies: REQ-vxx8k3
 
 ## Items with no invalid input
 
-REQ-mu3qgz, REQ-aj6x3n, LLR-6ezhw7, LLR-4vsm8d, LLR-z99qee, LLR-fbqs2r,
-LLR-a6krbh and LLR-78t363 take only already-validated types (a `DeviceSlots`, a `Name`, a
-key) or any 32 bytes (`NodeHash`), so there is no invalid input to give them.
+REQ-mu3qgz, REQ-aj6x3n, LLR-fbqs2r, LLR-a6krbh and LLR-78t363 take only
+already-validated types (a `DeviceSlots`, a `Name`, a key), so there is no
+invalid input to give them.
 Their tests cover the normal case and the boundaries — an empty and a full
 `DeviceSlots`, an empty name — and none is an abnormal-input test.
 

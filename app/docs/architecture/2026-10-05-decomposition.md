@@ -10,8 +10,8 @@ override), so every item carries low-level requirements, **except SDD-6g3wnh,
 which carries none.** That is a deviation, not an override. Its section, "The
 item with no low-level requirements", records it in full.
 
-Written under owner ruling 1 of `docs/plans/2026-10-05-app-architecture.md`.
-A low-level requirement is written here only where a gated test reddens when
+Written under an owner ruling of 2026-10-05 (the architecture change):
+a low-level requirement is written here only where a gated test reddens when
 its behaviour breaks. A behaviour that no gated test reaches is listed in the
 deviation item instead. New tests were written only where the existing harness
 already reaches the code: the command handlers driven over Tauri's mock IPC on
@@ -85,9 +85,8 @@ with development defaults enabled yields `DEV_PASSPHRASE`. No gated test
 passes an empty value with the opt-in, and returning the empty string there
 reddened nothing (run T5-A05).
 
-*Amended 2026-10-14 (S4, task T17 of
-`docs/plans/2026-10-06-org-io-transport.md`; REQ-7g3k9a amended the same
-day, owner ruling of 2026-10-06, IDs kept).* `resolve_passphrase`,
+*Amended 2026-10-14 (change `worktree-org-io-transport`, S4 task T17;
+REQ-7g3k9a amended the same day, owner ruling of 2026-10-06, IDs kept).* `resolve_passphrase`,
 `DEV_PASSPHRASE` and `StartupError::MissingPassphrase` are deleted, and
 LLR-tpkmh3 now reads: *no source of the unit reads or names
 `ODS_PASSPHRASE`; when org-io's `OrgIo::open` refuses because the OS
@@ -178,7 +177,7 @@ the chain not configured (`OrgIo::not_configured`). Classification under the
 hybrid rule: a clarification of the item's code and wiring, not a change of
 meaning.
 
-*Moved 2026-10-13 (S4, task T9 of docs/plans/2026-10-06-org-io-transport.md).*
+*Moved 2026-10-13 (change `worktree-org-io-transport`, S4 task T9).*
 The item that stated "create the data directory and open the store in it,
 refusing rather than substituting" moved to org-io, rewritten per Persona
 (one store file per Persona, unsealed through its keychain item), with its
@@ -296,21 +295,21 @@ Abnormal: `unknown_command_is_rejected` (ipc): the near-miss name
 at the IPC edge, before they address a service call.
 traces: REQ-sjkp8z
 
-*Traces amended 2026-10-20 (change worktree-org-io-domain-api): REQ-vgr7s2 →
-none (retired 2026-10-20, owner answer A2; no peer address reaches the IPC
+*Traces amended 2026-10-20 (change worktree-org-io-domain-api): the
+peer-address precondition's requirement is dropped (retired 2026-10-20, owner
+answer A2; no peer address reaches the IPC
 edge any more).*
 
 *Amended 2026-10-06 (change `worktree-org-node-chain-authority`).* The
 invitation exchange left org-node for this unit, so the Invite and the Invite
 reply are parsed here, at this unit's edge: `Invite::parse` and
-`InviteReply::parse` in `app/src-tauri/src/invitation.rs` (the Blob-parse
-low-level requirement, then in `2026-10-06-invitation.md`), and the item
-traced the Blob-parse requirement. `admit_member` takes a reply Blob and a
+`InviteReply::parse` in `app/src-tauri/src/invitation.rs` (under a Blob-parse
+low-level requirement since replaced), and the item traced the Blob-parse
+requirement. `admit_member` takes a reply Blob and a
 peer address in place of the join-request Blob (the admission's peer-address
-item, amended below; org-io's from 2026-10-13, S4 task T12, and back
-here as LLR-ctrfz4 since 2026-10-15).
+item, since retired with the pasted address).
 
-*Amended 2026-10-13 (S4, task T6 of docs/plans/2026-10-06-org-io-transport.md).*
+*Amended 2026-10-13 (change `worktree-org-io-transport`, S4 task T6).*
 The Invite and its reply return to org-node, which parses them; the Blob-parse
 requirement and its low-level requirement moved there with their tests
 (ruling A), so `traces:` drops that requirement. The commands still call the
@@ -343,388 +342,11 @@ Narrowed by the sweep: the order of the twenty bytes is not part of this
 requirement. Every gated input repeats a single byte value, so reversing the
 bytes reddened nothing (run T5-A77). Changing a value does redden (T5-A78).
 
-**LLR-vzf8j2**: `export_invite`, `admit_member` and `revoke_member` each parse
-the organisation identifier with `parse_org_id` before they call the service.
-On a refusal each returns the parser's message, and none refuses a well-formed
-identifier.
-satisfies: REQ-sjkp8z
-superseded-by: LLR-97hujy
+## Under SDD-6pjvhc — The command surface
 
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-97hujy:*
-the three commands are gone; the rule holds for every command of the new
-surface that takes an Organisation identifier.
-
-Normal: `export_invite_does_not_refuse_a_well_formed_org_id`,
-`admit_member_does_not_refuse_a_well_formed_org_id`,
-`revoke_member_does_not_refuse_a_well_formed_org_id` (ipc);
-`the_app_manifest_names_no_iroh_base64_or_postcard` (ipc, since
-2026-10-14, S4 task T15).
-Abnormal: `export_invite_rejects_a_short_org_id`,
-`export_invite_rejects_a_non_hex_org_id`,
-`admit_member_refuses_a_malformed_org_id_with_the_parsers_message`,
-`revoke_member_refuses_a_malformed_org_id_with_the_parsers_message` (ipc).
-
-The sweep narrowed this requirement to `export_invite`: no gated test handed
-`admit_member` or `revoke_member` a malformed identifier, so substituting a
-fixed identifier for a refusal reddened nothing in either (runs T5-A85,
-T5-A86). Review round 1 (finding-3) restored the two commands. Their abnormal
-tests require the parser's exact message for an under-width, an over-width and
-a non-hexadecimal identifier. The reviewer's substitution probe on each
-command now reddens that command's test. Review round 2 (finding-1) did the
-same for `export_invite`: its two abnormal tests checked only that the message
-contained `40 hex chars` or `hex`, so a fixed message in their place left them
-green. They now require the parser's exact message too.
-
-*Note 2026-10-06 (change `worktree-org-node-chain-authority`):* the three
-commands keep this requirement with new arguments — `export_invite` takes the
-Organisation name and the invitee's name, `admit_member` an Invite reply Blob
-and a peer address — and on `AppState::for_test` they now fail after the
-parse at the first step that needs a stored Organisation or an outstanding
-invite, not at `find_org`; the abnormal tests are unchanged in what they
-assert.
-
-Narrowed by the deslop review. The text read "on success it hands the
-parsed identifier on". On `AppState::for_test`, all three commands fail at
-`find_org` with `OrgNotOnChain` whatever identifier they hand on, so no gated
-test observes which identifier reaches the service. T3's M6 (the identifier
-sliced) reddened because the slice made the identifier short and the parser
-refused it. That shows the refusal clause, not the handing on.
-
-*Clarified 2026-10-14 (S4, task T15 of
-`docs/plans/2026-10-06-org-io-transport.md`; hybrid rule: a clarification,
-the ID is kept).* The parse order at this edge: the org identifier is parsed
-here, by `parse_org_id`, first; the peer address of `admit_member` and
-`revoke_member` is parsed next by org-io's `parse_peer_addr`, and the
-Invite reply by org-node's parse inside org-io's exchange. "The service" is
-the org-io handle. The commands name no transport type and no Blob format:
-the app's manifest lists neither `iroh` nor `base64` nor `postcard`
-(`the_app_manifest_names_no_iroh_base64_or_postcard`, ipc). On
-`AppState::for_test`, `export_invite` fails after the parse with org-node's
-refusal for an Organisation it holds no record of.
-
-**LLR-6pmrma**: `revoke_member` strips at most one leading `0x` from the member
-identifier. It refuses a remainder that is not hexadecimal with a message
-beginning `member_id hex`, and one that does not decode to exactly
-thirty-two bytes with `member_id must be 32 bytes (64 hex chars)`.
-satisfies: derived
-superseded-by: LLR-7n4hgr
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-7n4hgr:*
-the same parse on `propose_revocation`, which records a provisional change
-and sends nothing.
-
-Normal: `revoke_member_accepts_a_zero_x_prefixed_member_id`,
-`revoke_member_is_not_refused_for_an_empty_peer_addr` (ipc).
-Abnormal: `revoke_member_rejects_a_short_member_id`,
-`revoke_member_rejects_a_doubled_zero_x_prefix_on_the_member_id` (ipc).
-
-Since review round 1 (finding-6), `revoke_member_rejects_a_short_member_id`
-requires the width message exactly. It used to accept either `32 bytes` or
-`64 hex`, so rewording the message to `member_id must be 64 hex chars` left
-it green.
-
-*Moved 2026-10-13 (S4, task T12 of `docs/plans/2026-10-06-org-io-transport.md`,
-ruling A):* the revocation's two peer-address items (a blank or
-whitespace-only address is absent; a non-blank one is decoded from
-hexadecimal and then as an endpoint address, and refused, not dropped, when
-either step fails) moved to org-io with the parse, to
-`org-io/docs/architecture/2026-10-07-transport.md`
-("Moved from the app: the peer-address parse"), re-parented there to org-io's
-parse requirement, with their sweep notes. Their pure parse tests moved to
-org-io's `tests/peer_addr.rs`. `revoke_member_is_not_refused_for_an_empty_peer_addr`
-stays here for LLR-6pmrma; REQ-vgr7s2 keeps LLR-c9r5uf. Task T15 makes
-`revoke_member` call org-io's parse.
-
-*Moved back 2026-10-15 (S4, TEST conformance review finding-4; ruling A's
-move rule, IDs kept).* The two items state what `revoke_member` does with
-the peer-address text, and org-io's handle takes no peer address: the
-command is the only caller of `parse_peer_addr`, so the seam that observes
-them is this unit's IPC command, not org-io's parse. They return here with
-their T12 clarifications, LLR-ty85xv to REQ-vgr7s2 (its parent before T12)
-and LLR-n6twt7 derived again (org-io's parse requirement is not exported
-to this unit), and their tests are written at the IPC seam in
-`tests/ipc.rs`. org-io's ledger keeps a prose pointer; the parse itself
-stays org-io's (its own low-level requirement and fuzz target).
-
-**LLR-ty85xv**: `revoke_member` treats a peer address that is empty or only
-whitespace as absent. It does not decode it and does not refuse the request.
-satisfies: REQ-vgr7s2
-superseded-by: LLR-ss4zmh
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-ss4zmh:*
-proposing a revocation sends nothing; the Loopback address goes with
-`send_organisation`, the step that sends.
-
-*Note 2026-10-20 (change `worktree-org-io-domain-api`; owner answer A2 of
-2026-10-16):* LLR-ss4zmh is retired: admission and organisation requests
-carry the sender's own addresses, so no Loopback address is pasted anywhere
-and `send_organisation` takes none. This item stays out of force.
-
-Normal: `revoke_member_treats_a_blank_or_whitespace_only_peer_addr_as_absent`
-(ipc; the empty address).
-Abnormal: the same test (whitespace-only text, which a form field easily
-carries).
-
-*Amended 2026-10-13 (S4, task T12; clarification):* org-io's
-`parse_peer_addr` treats it so, and `revoke_member` calls it. *Cut by the
-app's sweep:* "it hands the service no address", which no gated test
-observed (run T5-A92).
-
-**LLR-n6twt7**: `revoke_member` decodes a non-blank peer address from
-hexadecimal and then as a postcard-encoded iroh `EndpointAddr`, and does not
-refuse one that decodes. Text that is not hexadecimal is refused with a
-message beginning `peer_addr_blob hex:`. Bytes that are not an `EndpointAddr`
-are refused with a message beginning `peer_addr decode:`; they are not
-dropped.
-satisfies: derived
-superseded-by: LLR-4jggyx
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-4jggyx:*
-the same decode on `send_organisation`'s address.
-
-*Note 2026-10-20 (change `worktree-org-io-domain-api`; owner answer A2 of
-2026-10-16):* LLR-4jggyx is retired with the pasted address it decoded
-(requests carry the sender's own addresses). This item stays out of force.
-
-Normal: `revoke_member_does_not_refuse_an_encoded_endpoint_addr` (ipc).
-Abnormal: `revoke_member_refuses_a_peer_addr_that_is_not_hex`,
-`revoke_member_refuses_a_peer_addr_that_is_not_an_endpoint_addr` (ipc).
-
-*Amended 2026-10-13 (S4, task T12; clarification):* org-io's
-`parse_peer_addr` decodes it so, and `revoke_member` calls it; "not an
-`EndpointAddr`" includes bytes left over after one. *Cut by the sweep:* that
-the decoded address is the one handed to the service (run T5-A95).
-
-**LLR-8krgzj**: `admit_member` takes no Organisation secret or key: its
-arguments are `org_id`, `reply_blob` and `peer_addr_blob`, it parses no
-secret, and nothing it hands org-node carries an Organisation secret, an
-Organisation key or an invite identifier for the Wire message. The webview's
-`admitMember(orgId, replyBlob, peerAddrBlob)` (`app/src/lib/api.ts`) invokes
-it with those three values alone, and `Admit.svelte` passes no fourth.
-satisfies: derived
-superseded-by: LLR-gmb4p8
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-gmb4p8:*
-the admission is proposed from a kept admission request by its invite id,
-with no reply Blob and no peer address; it still takes no secret or key.
-
-*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
-This said `admit_member` accepts an optional `org_secret_hex`, refused unless
-it decodes from hexadecimal to thirty-two bytes (`org_secret hex:`,
-`org_secret must be 32 bytes`). The Organisation secret is removed from
-org-node; the Organisation private key an admission's Wire message carries is
-the one org-node's record holds, and `send_update` takes none from its caller
-(org-node's requirements, change `worktree-org-node-org-key-pair`). The parameter, its parse and its two refusals go, and
-the item states their absence. Its tests are rewritten accordingly; the
-`0x` note below no longer applies to this command.
-
-Normal and abnormal: `admit_member_takes_no_organisation_secret` (ipc,
-a stale `orgSecretHex` of any value is not read);
-`api.admit.test.ts` (the webview passes three values).
-
-The `0x` handling is deliberately left out of this requirement: the parse
-strips a run of prefixes, not one, and that is PR-5mc4d8's.
-
-*Amended 2026-10-14 (S4, task T15; a clarification, the ID is kept).*
-`admit_member` hands the reply Blob and the parsed peer address to org-io's
-`admit_reply`, which has org-node check, build and commit the admission;
-it still takes and hands on no Organisation secret or key. Since then the
-peer address is parsed by org-io's `parse_peer_addr`, which strips exactly
-one `0x` (PR-5mc4d8, noted there).
-
-Cut by the sweep: which secret reaches the service. Every gated call fails in
-the service before the secret is used. Handing a fixed secret when none was
-supplied, or in place of the decoded one, reddened nothing (runs T5-A96,
-T5-A100).
-
-*Moved 2026-10-13 (S4, task T12 of `docs/plans/2026-10-06-org-io-transport.md`,
-ruling A):* the admission's peer-address item (blank is absent; a non-blank
-address is decoded from hexadecimal and then as an endpoint address, and
-refused naming the step that failed) moved to org-io with the parse, to
-`org-io/docs/architecture/2026-10-07-transport.md`
-("Moved from the app: the peer-address parse"), re-parented there to org-io's
-parse requirement, with its 2026-10-06 amendment. Its three pure parse tests
-moved to org-io's `tests/peer_addr.rs`; `admit_member_takes_no_organisation_secret`
-stays here for LLR-8krgzj. Its sweep notes (which address reaches the
-service; a device key that is not a valid `EndpointId`) stay here as history:
-neither clause was part of the item. Task T15 makes `admit_member` call
-org-io's parse.
-
-*Moved back 2026-10-15 (S4, TEST conformance review finding-4; ruling A's
-move rule, ID kept),* for the reason given above for the revocation's two
-items: it states what `admit_member` does with the peer-address text. It
-returns here derived, as before T12 (org-io's parse requirement is not
-exported to this unit), with its amendments; its tests are written at the
-IPC seam in `tests/ipc.rs`.
-
-**LLR-ctrfz4**: `admit_member` treats a peer address that is empty or only
-whitespace as absent, and does not decode it or refuse the request. It decodes
-a non-blank one from hexadecimal and then as a postcard-encoded
-`EndpointAddr`, and does not refuse one that decodes. Text that is not
-hexadecimal is refused with a message beginning `peer_addr_blob hex:`, and
-bytes that are not an `EndpointAddr` with one beginning `peer_addr decode:`.
-satisfies: derived
-superseded-by: LLR-ss4zmh, LLR-4jggyx
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-ss4zmh
-and LLR-4jggyx:* the admission takes no address (the invitee reaches the
-inviter at the Invite's addresses); the Loopback address the admitted
-Device is sent to goes with `send_organisation`, whose two items keep this
-one's blank and decode rules.
-
-*Note 2026-10-20 (change `worktree-org-io-domain-api`; owner answer A2 of
-2026-10-16):* both successors are retired: the admitted Device's admission
-request carries its own addresses, which org-io keeps for its key, so no
-address is pasted for it. This item stays out of force.
-
-Normal: `admit_member_does_not_refuse_a_blank_or_decodable_peer_addr` (ipc).
-Abnormal: `admit_member_refuses_a_peer_addr_that_is_not_hex`,
-`admit_member_refuses_a_peer_addr_that_is_not_an_endpoint_addr` (ipc).
-
-*Amended 2026-10-06 (change `worktree-org-node-chain-authority`).* This
-stated how `admit_member` read the node address a join request carried. The
-join request left org-node, and the Invite reply carries no address
-(org-io's reply requirement since S4), so the caller passes the joiner's address as `revoke_member`'s
-caller does (LLR-ty85xv, LLR-n6twt7), needed in Loopback transport only.
-
-*Amended 2026-10-13 (S4, task T12; clarification):* org-io's
-`parse_peer_addr` does so, and `admit_member` calls it (the invitation
-exchange runs in org-io from task T13).
-
-**LLR-p7dfxb**: `create_persona` parses the handle, name and surname with
-`org_node::store::PersonaDetails::parse` before it calls the service, and
-stores the parsed (NFC) form. A refusal names the field it is about (`handle:`,
-`name:`, `surname:`) without org-node's `persona.` prefix, and creates nothing.
-satisfies: derived
-superseded-by: LLR-k57uqv
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-k57uqv:*
-`create_persona` becomes `propose_person`, which takes no Handle (a Person
-has none; a Handle belongs to a Persona in an Organisation).
-
-Normal: `create_persona_stores_the_parsed_details` (ipc).
-Abnormal: `create_persona_refuses_an_invalid_field_naming_it_and_creates_nothing`
-(ipc).
-
-## SDD-rmbr3t — The command surface
-
-`app/src-tauri/src/commands.rs`: `PersonaDto`, `JoinRequestDto`,
-`import_join_request`, `list_personas`, and the handler list the IPC suite
-registers. `app/src-tauri/src/lib.rs` registers its own copy of that list in
-`run`. The rest of `run` is SDD-6g3wnh's, but the list's contents are gated
-here (LLR-4wcyqy).
-
-**SDD-rmbr3t**: the twelve IPC commands as a surface. Each one locks the
-service, calls `OrgService`, maps its error to a string and returns a DTO
-that carries no secret key material. The commands named in SDD-6g3wnh carry
-no low-level requirement.
-traces: REQ-vgr7s2, REQ-sjkp8z, REQ-645jq9, REQ-prjja8, REQ-tcutr6, REQ-65xqp8, REQ-ab2mfz, REQ-m8sgjk, REQ-363366
-superseded-by: SDD-6pjvhc
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by
-SDD-6pjvhc* (`2026-10-16-domain-api.md`). The surface
-is now the eighteen commands that carry org-io's domain-surface names; the
-reply, reconcile and submit-commit-send commands are gone, and most of the
-requirements traced above are out of force. LLR-5wb4vd, LLR-yrb6th and
-LLR-pguhw5 are unchanged and sit under the successor. The amendments below
-are this item's history.
-
-*Amended 2026-10-06 (change `worktree-org-node-chain-authority`).* The
-invitation exchange and the chain write moved into this unit, behind the
-commands. The item's code gains `app/src-tauri/src/invitation.rs`
-(`issue_invite`, `OutstandingInvites`, `produce_reply`, `check_reply`,
-`admit_reply`) and `app/src-tauri/src/submit.rs` (`ChainWriter`,
-`WriterNotConfigured`, `found_organisation`, `submit_commit_send`), and loses
-`JoinRequestDto` and `import_join_request`, whose place `InviteReplyDto` and
-`import_invite_reply` take. The surface is still twelve commands:
-`export_join_request` and `import_join_request` leave, `produce_invite_reply`
-and `import_invite_reply` arrive. Its low-level requirements for the new
-behaviour (issuing an Invite, the outstanding pairs, producing a reply, the
-reply's check and admission, and the two
-low-level requirements of the chain write's order and bound) are in `2026-10-06-invitation.md`.
-*(2026-10-14, S4 task T13: the first four moved to org-io with the exchange,
-as the chain write's two had in S2, and are named here in prose.)*
-
-*Amended 2026-10-08 (change `worktree-org-io-create`, task T9).*
-`app/src-tauri/src/submit.rs` leaves the item: it is deleted, and the chain
-write, then org-node's commit and send, are org-io's (`org-io/src/submit.rs`).
-Each command locks the org-io handle (`AppState.org_io`) and calls org-node's
-queries and builders through it (`OrgIo::node`, `OrgIo::node_mut`) and the
-submission through it (`OrgIo::found_organisation`,
-`OrgIo::submit_commit_send`); `revoke_and_send` and `admit_reply` take the
-handle. The two low-level requirements of the chain write's order and its
-90-second bound moved with the code to org-io's architecture ledger
-(`org-io/docs/architecture/2026-10-08-org-io.md`), which
-does not export them; the sentence above that named them is rewritten to
-prose. `traces:` swaps the submission requirement, now org-io's, for the
-app's REQ-m8sgjk (the decision when to submit and to which Device). The
-surface is still twelve commands. Classification under the hybrid rule: a
-clarification, not a change of meaning.
-
-*Amended 2026-10-14 (change `worktree-org-io-transport`, S4 task T15; a
-clarification, the ID is kept).* `app/src-tauri/src/invitation.rs` is
-deleted: the four invitation commands call org-io's exchange
-(`OrgIo::issue_invite`, `produce_reply`, `import_reply`, `admit_reply`),
-`revoke_member` calls `OrgIo::revoke_member` then `submit_commit_send`
-(`revoke_and_send` is gone), and both report org-io's send report
-(`report_sends`: a committed update whose send failed is a failure naming
-the commit). The queries are the handle's own (`personas`,
-`organisations`, `organisation`); `OrgIo::node`/`node_mut` are gone. The
-commands name no iroh type and no Blob format. org-node's value types reach
-the app through org-io's narrowed re-export (`org_io::node`). The commands
-still lock the app's `Mutex<OrgIo>`, and the receiver still waits under it;
-task T16 removes that lock.
-
-*Amended 2026-10-13 (change `worktree-org-io-publish`, task T15b).* The
-surface grows to fifteen commands: `reconcile_organisations`,
-`discard_update` and `discard_genesis` join it, each calling org-io
-(`OrgIo::reconcile_held`, `OrgIo::discard_update`, `OrgIo::discard_genesis`),
-and `OrgDto` gains `verification`. Their low-level requirements (LLR-ekz4zn,
-LLR-8axx7h, and one for each discard command) are in
-`2026-10-13-publish.md`, and `traces:` gains their parent
-requirements, REQ-363366 and the app's discard requirement. Classification
-under the hybrid rule: an extension of the surface; no existing command
-changes meaning. *(The discard items' IDs were removed from this note by
-task T15d, with the items: see the amendment below.)*
-
-*Amended 2026-10-13 (change `worktree-org-io-publish`, task T15c).* The
-surface grows to sixteen commands: `list_provisional_updates` joins it,
-calling org-io's `NodeView::provisional_updates`, so that the user can learn
-the name `discard_update` takes. Its low-level requirement is in
-`2026-10-13-publish.md`; its parent, the discard
-requirement, is already traced. Classification under the hybrid rule: an
-extension of the surface; no existing command changes meaning.
-
-*Amended 2026-10-13 (change `worktree-org-io-publish`, task T15d; owner
-ruling of that day, background discard).* The surface shrinks from sixteen
-commands to thirteen: `discard_update`, `discard_genesis` and
-`list_provisional_updates` leave it, with the discard view, because
-provisional updates are now discarded in the background, in org-io, and the
-app offers the user no discard. Their three low-level requirements and the
-app's discard requirement, minted only in this unmerged change, are deleted
-(`2026-10-13-publish.md`), and `traces:` loses that
-requirement; the two T15b and T15c amendments above are kept as the record of
-what was added and removed. The commands this item had before this change are
-unchanged.
-
-*Clarified 2026-10-14 (master's S3b-io part 1 merged into
-`worktree-org-io-transport`; a clarification, the ID is kept).* The two
-changes' amendments hold together: the surface is thirteen commands, S4's
-twelve and `reconcile_organisations`. The three T15b–T15d notes above were
-written against S2's handle (`&mut self` methods, `NodeView`); on the merged
-tree `reconcile_organisations` calls `OrgIo::reconcile_held` and
-`list_orgs` reads `OrgIo::verification`, both `&self` and `async` methods,
-under the app's `Mutex<OrgIo>` until S4's task T16 removes it.
-
-*Amended 2026-10-14 (change `worktree-org-io-transport`, S4 task T16; a
-clarification, the ID is kept).* The app's lock is gone: `AppState.org_io`
-is an `Arc<OrgIo>`, every command calls org-io on it directly (org-io's
-methods take `&self` and lock org-node inside, for org-io's own sequences
-only), and the receiver loop holds its own clone and waits in
-`OrgIo::next_received` with no app-side lock (LLR-5wb4vd). "Locks the
-service" in the item's text above, and "locks the org-io handle" in the T9
-note, now read "calls the shared org-io handle". The surface and the DTOs
-are unchanged.
+Low-level requirements of the command surface written before SDD-6pjvhc
+(`2026-10-16-domain-api.md`) replaced the earlier surface; they are unchanged
+and sit under it.
 
 **LLR-5wb4vd**: `AppState` holds the org-io handle as a shared `Arc<OrgIo>`
 and no command and not the receiver loop takes an app-side lock on it; the
@@ -773,54 +395,6 @@ T20 un-ignored `after_a_stop_start_receiver_starts_a_loop_that_runs`, when
 org-io came to bind a closed endpoint again on the next `start_receiving`;
 the test now runs and passes, and the restart clause holds.
 
-**LLR-4wcyqy**: the IPC suite's handler list registers the twelve commands
-under their snake_case names, and an invocation of any other name is refused
-rather than answered. The `generate_handler!` list in
-`app/src-tauri/src/lib.rs` names the same set of commands as the suite's list,
-and `lib.rs` has exactly one `generate_handler!` list in exactly one
-`invoke_handler` call.
-satisfies: derived
-superseded-by: LLR-kk8gc7
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-kk8gc7:*
-the same rule over the eighteen renamed commands, with the five old names
-refused.
-
-Normal: `list_personas_returns_an_empty_list_on_a_fresh_store`,
-`connection_status_is_registered_under_its_name`,
-`product_registers_the_same_commands_as_the_harness` (ipc).
-Abnormal: `unknown_command_is_rejected` (ipc).
-
-Restated by review round 1 (finding-4). The first two clauses are properties
-of the suite's own registration: the tests invoke the suite's copy of the
-list, not `lib.rs`'s, so deleting a command from `lib.rs` left every test
-green. The third clause gates the product: the test reads both files as text
-and compares the two lists as sets of names. Deleting
-`commands::revoke_member` from `lib.rs` now reddens it.
-
-Extended by review round 2 (finding-2). Tauri's `Builder::invoke_handler`
-replaces any earlier handler, so the last call wins, and the test read only the
-first list: a second `invoke_handler` registering one command left it green.
-The test now also counts `generate_handler!` and `.invoke_handler(` in
-`lib.rs`, outside `//` comments, and requires one of each. It does not parse
-block comments or string literals.
-
-*Clarified 2026-10-13 (change `worktree-org-io-publish`, task T15b).* "The
-twelve commands" is now fifteen, the three of SDD-rmbr3t's amendment of that
-date; `product_registers_the_same_commands_as_the_harness` counts fifteen.
-The rule — one list, the same set in the product and the suite, anything
-else refused — is unchanged, so the test keeps its annotation.
-
-*Clarified 2026-10-13 (change `worktree-org-io-publish`, task T15c).*
-Fifteen is now sixteen: `list_provisional_updates` joins (SDD-rmbr3t's
-second amendment of that date); the test counts sixteen. The rule is
-unchanged, so the test keeps its annotation.
-
-*Clarified 2026-10-13 (change `worktree-org-io-publish`, task T15d).*
-Sixteen is now thirteen: the three discard and listing commands leave
-(SDD-rmbr3t's third amendment of that date); the test counts thirteen. The
-rule is unchanged, so the test keeps its annotation.
-
 **LLR-pguhw5**: each persona `list_personas` returns has exactly the fields
 `persona_id`, `org_id`, `handle`, `name`, `surname` and `status`. No seed or
 other secret crosses IPC. `org_id` is present and null for a persona that
@@ -838,45 +412,6 @@ LLR-q735zx states. The rule is unchanged. The fixture of the faked IPC
 boundary (`app/tests/contract/backend.json`) holds a provisional Member's
 entry with `handle` null and a founder's with its Handle, each checked
 against the real `list_personas` in ipc.rs.
-
-**LLR-pmus9f**: `import_invite_reply` parses an Invite reply Blob (org-node's parse since S4 task T6)
-and stores nothing. It returns the Organisation identifier, the handle, name
-and surname, and the member and device keys as hexadecimal. A Blob that does
-not parse is refused with the parse's message, which names the field, and a
-reply whose invite identifier this device does not hold as outstanding for the
-Organisation the reply names (the reply check's `check_reply`, org-io's since
-2026-10-14, S4 task T13) is refused with a message saying so.
-satisfies: derived
-superseded-by: LLR-dp45mm
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-dp45mm:*
-the Invite reply Blob is gone; the joiner's details reach the Admin as the
-`admission-requested` event of an admission request org-io kept.
-
-Normal: `import_invite_reply_reports_the_reply_it_parses` (ipc).
-Abnormal: `import_invite_reply_refuses_a_malformed_blob_or_an_unknown_invite`
-(ipc).
-
-*Amended 2026-10-06 (independent review round 2, finding-1).* "Outstanding"
-now means outstanding for the reply's Organisation: the abnormal test also
-presents the outstanding invite identifier under another Organisation.
-
-*Amended 2026-10-06 (change `worktree-org-node-chain-authority`).* This
-described `import_join_request`, which decoded org-node's join-request blob.
-The join request left org-node; the Invite reply the app parses takes its
-place in the onboarding flow, and the command that shows it to the inviter
-before admission is `import_invite_reply`. The notes below describe the
-earlier command's tests and are kept as its history.
-
-Since review round 1 (finding-5), the abnormal test requires the message
-that `OrgService::import_join_request` itself returns for each input. It used
-to check only that the message contained `blob`, so replacing org-node's
-message with `invalid blob` left it green.
-
-Since review round 2 (finding-3), it checks both. The equality moves with
-org-node's wording, so it cannot hold the clause "which names the blob". A
-`contains("blob")` assertion beside it does: rewording org-node's decode
-errors in `org-node/src/blobs.rs` so they no longer name the blob reddens it.
 
 ## SDD-5fchuy — Receiver start guard
 
@@ -935,102 +470,11 @@ condition (`ReceiveError::Terminal`). `TERMINAL_ERRORS` and
 `is_terminal_error` are deleted; the item's code gains `Arrival` and
 `outcome_for_arrival`, and `outcomes_for_receive_error` takes org-io's
 `ReceiveError`. The detection of a terminal error is now a match on that
-variant (LLR-zw6jqy, superseding LLR-a9rjtf), and the outcome of a received
-message comes from org-io's `Received` and its `ReceiveKind` (LLR-bym4md).
+variant (LLR-zw6jqy), and the outcome of a received
+message comes from org-io's `Received` and its `ReceiveKind`.
 The paragraph above is history. Classification under the hybrid rule: a
 clarification of the item (its responsibilities are unchanged); the change
-of meaning is carried by the superseding LLR.
-
-**LLR-7bk6qh**: `classify_receive_error` classifies the seven verdict variants
-(`OrgIdMismatch`, `StaleSeq`, `MalformedDelta`, `DeltaBaseMismatch`,
-`RootMismatch`, `StaleEpoch`, `SeqNotEpoch`) as `VerifyFailed`, carrying
-the error's message and no organisation. It classifies every other variant
-(`Chain`, `OrgNotOnChain`, `Trie`, `InvalidOrgPublicKey`, `InvalidField`,
-`AdmissionNotExpected`, `AdmissionNotOurs`, `ProvisionalLimit`,
-`NoProvisionalUpdate`, `PersonaAlreadyBound`, `MalformedMessage`,
-`OrgKeyMismatch`, `RevocationNotHeld`, `RevocationNotForThisDevice`) as
-`ReceiveError`, carrying the error's message.
-satisfies: REQ-kn5rtx
-superseded-by: LLR-wgr46u
-
-*Superseded 2026-10-21 (change `worktree-org-io-domain-api`; owner decision
-of 2026-10-20) by LLR-wgr46u:* the variant lists below name variants
-org-io's re-exported `OrgNodeError` no longer has and omit those it gained
-with the chain-free receive step; LLR-wgr46u classifies the current set
-with the class rule unchanged.
-
-*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3, task
-T12a; owner rulings at the S3a close-out residual review).* org-node gains
-two more refusals, each classified as `ReceiveError`: a message for a held
-Organisation, or a revocation, from a Device the record does not list
-(`SenderNotListed`), and an acknowledgement not sent by the Device it names
-(`AcknowledgementNotFromItsDevice`). Both
-are refused before anything is verified — before the chain is read — so
-neither is a verdict on an update. The abnormal test
-`the_sender_refusals_are_classified_as_receiver_errors` lists the two.
-
-*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3).*
-org-node gains ten refusals (`OrgNotHeld`, `StaleChainState`,
-`ChainStateConflict`, `RevocationProofRefused`, the four
-`Acknowledgement*`, `DeviceSecretNotSupplied`, `NoRevocationForRecipient`),
-each classified as `ReceiveError`. None is produced by
-`verify_envelope_against_chain`, the rule for a verdict, and none is a
-verdict on an update: a `VerifyFailed` row is shown under "Verified Updates
-(chain root match)", and filing a refused revocation proof or acknowledgement
-there would claim an update failed a root match when no update was received
-— HAZ-9fmhm4's misrepresentation — while filing it as a receiver error is
-only less specific. `RevocationProofRefused` is the closest case, since it
-checks a proof against the chain's root; it stays a receiver error because
-what it refuses is a notice about this node, not a membership update, and
-`StaleChainState` is reachable from the node's own record alone. The
-abnormal test `the_commit_workflow_refusals_are_classified_as_receiver_errors`
-lists the ten.
-
-*Amended 2026-10-06 (change `worktree-org-node-org-key-pair`).* org-node
-gains four refusals of a received Wire message: one that does not decode
-(`MalformedMessage`), a revocation about an Organisation the node holds no
-record of (`RevocationNotHeld`), a carried Organisation private key whose
-public half is not the chain's (`OrgKeyMismatch`), and a revocation after
-which this node's Device is still listed (`RevocationNotForThisDevice`). None
-is produced by `verify_envelope_against_chain`, the rule the note below
-states for a verdict: the first two are refused before anything is verified,
-the last two after it on a rule about the key or about this node, as
-`AdmissionNotOurs` is. Each is a receiver error. `PersonaAlreadyBound`, which
-the receiver list already matched, is now named. The abnormal test
-`locally_reachable_variants_are_classified_as_receiver_errors` lists the four.
-
-*Amended 2026-10-06 (change `worktree-org-node-chain-authority`).* org-node
-gains four refusals: a first admission no expectation matches, a first
-admission that lists none of the node's Personas, the bound on provisional
-updates, and a commit no provisional update matches. None is a verdict on a
-delivered change verified against the chain — the first is refused before
-anything is verified, the second after verification but on a rule about this
-node, and the other two never arise on receive — so each is a receiver error.
-The classification rule and the tests above are unchanged; the abnormal test
-`locally_reachable_variants_are_classified_as_receiver_errors` lists the four.
-
-*Amended 2026-10-06 (merge of master `d8b9f9b` into
-`worktree-worktree-person-shared-types`):* this item was written against
-org-node's error set before that change. org-node no longer has
-`BadSignature` (the Envelope carries no signature) or `InvalidKey` (an
-Organisation public key that fails its X25519 parse is `InvalidOrgPublicKey`),
-and gained `SeqNotEpoch` (a Sequence number other than the chain's epoch, a
-refusal of the delivered update). The variant lists now name the set
-`classify_receive_error` matches; the classification rule and the tests below
-are unchanged.
-
-Normal: `every_verification_verdict_is_classified_as_a_verification_failure`,
-`a_verification_verdict_carries_its_own_message_and_no_invented_organisation`,
-`the_two_classes_are_actually_distinguished` (receiver_events).
-Abnormal: `a_chain_failure_is_classified_as_a_receiver_error`,
-`a_chain_failure_emits_no_verification_event_for_any_message`,
-`locally_reachable_variants_are_classified_as_receiver_errors`,
-`a_refused_key_or_field_is_classified_as_a_receiver_error` (receiver_events).
-
-*Clarified 2026-10-14 (S4, task T16).* org-node's refusal reaches the app
-inside org-io's `ReceiveError::Refused`; `outcomes_for_receive_error`
-(LLR-zw6jqy) hands it to `classify_receive_error`, whose rule above is
-unchanged. org-io's other failures never reach `classify_receive_error`.
+of meaning is carried by LLR-zw6jqy.
 
 **LLR-usxk57**: a `ReceiveError` outcome is announced as exactly one
 `receiver-error` event, whose payload carries the message and no
@@ -1042,27 +486,6 @@ Normal: `the_receiver_error_payload_carries_a_message_and_no_verification_state`
 Abnormal: `a_chain_failure_emits_no_verification_event_for_any_message`
 (receiver_events).
 
-**LLR-a9rjtf**: `outcomes_for_receive_error` returns the error's class outcome.
-When the rendered message contains `endpoint bind:`,
-`endpoint bind failed unexpectedly` or `endpoint closed`, it follows it with a
-`Stopped` outcome whose reason is that message; otherwise it returns nothing
-else.
-satisfies: REQ-jfxah3
-superseded-by: LLR-zw6jqy
-
-Normal: `every_real_terminal_message_stops_the_loop`,
-`the_stop_is_announced_after_the_failure_for_the_same_error` (receiver_events).
-Abnormal: `a_non_terminal_failure_does_not_stop_the_loop` (receiver_events).
-
-*Superseded 2026-10-14 (change `worktree-org-io-transport`, S4 task T16) by
-LLR-zw6jqy.* The stop is decided by org-io's typed terminal condition, not by
-the message's text: a failure whose text contains one of the three fragments
-no longer stops the loop unless it is `ReceiveError::Terminal`. That reverses
-this item's rule on such inputs, so it is a change of meaning and takes a new
-ID. The three tests above were rewritten at their call sites onto org-io's
-`ReceiveError` (dated comment in receiver_events) and keep their `verifies:`
-lines; the new red-first test carries both IDs.
-
 **LLR-zw6jqy**: `outcomes_for_receive_error` takes org-io's `ReceiveError`.
 A `Refused` error gives the one outcome `classify_receive_error` returns for
 org-node's refusal it carries. A `Terminal` error gives a `ReceiveError`
@@ -1071,7 +494,6 @@ that message. Every other variant (`Connection`, `Chain`, `Store`,
 `Keychain`) gives one `ReceiveError` outcome carrying its message and nothing
 else. No outcome depends on the text of the message.
 satisfies: REQ-jfxah3, REQ-kn5rtx, REQ-x3c8n2
-supersedes: LLR-a9rjtf
 
 Normal: `terminal_is_decided_by_the_error_variant_not_its_text` (its terminal
 half), `every_real_terminal_message_stops_the_loop`,
@@ -1081,28 +503,6 @@ Abnormal: `terminal_is_decided_by_the_error_variant_not_its_text` (non-terminal
 variants whose text names an endpoint failure, and an empty terminal
 message), `a_non_terminal_failure_does_not_stop_the_loop`,
 `a_refusal_this_change_added_does_not_stop_the_loop` (receiver_events).
-
-**LLR-bym4md**: `outcome_for_arrival` maps one received message to its
-outcome. A committed message of kind `Removed` or `Revoked` is `SelfDeleted`
-naming the Organisation, whatever the record read back; one of kind `Updated`
-or `Admitted` is `Updated` with the epoch and root of the record read back,
-or `RecordUnreadable` when none could be read; an acknowledgement is
-`AcknowledgementReceived`. The receiver loop (`next_outcomes`) builds the
-`Arrival` from org-io's `Received` and reads the record through the shared
-handle after the message.
-satisfies: REQ-tw4cb5, REQ-2k7ys4, REQ-dp95pv
-superseded-by: LLR-4bvdn7, LLR-ygr6gd, LLR-dp45mm, LLR-t9rdf8
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-4bvdn7,
-LLR-ygr6gd, LLR-dp45mm and LLR-t9rdf8:* received Organisation information is
-kept as a provisional organisation and adopted only by verification (owner
-ruling R2), so a received message no longer gives `Updated` or
-`RecordUnreadable`; those now follow a verification (LLR-acb5g4).
-
-Normal and abnormal: `the_outcome_kind_comes_from_receive_kind` (every kind,
-with and without a record; an acknowledgement), and
-`a_revocation_accepted_by_its_notice_is_announced_as_self_deleted` (epochs 0,
-1 and `u64::MAX` on the record read) (receiver_events).
 
 **LLR-2zmhvs**: a `Stopped` outcome is announced as exactly one
 `receiver-stopped` event whose payload carries the reason, even when the
@@ -1151,7 +551,7 @@ signs are dropped by the app until S3b-io sends them. Normal:
 `a_received_acknowledgement_emits_nothing` (receiver_events).
 
 *Clarified 2026-10-14 (S4, task T16).* The outcomes now come from org-io's
-`Received` (LLR-bym4md): `SelfDeleted` from a committed message of kind
+`Received`: `SelfDeleted` from a committed message of kind
 `Removed` or `Revoked` (this node's removal by an update, or a revocation
 notice accepted), `AcknowledgementReceived` from `Received::Acknowledged`.
 org-node's `SelfDeleteOutcome` no longer reaches the app. The announcement
@@ -1177,7 +577,7 @@ Normal: `verify_failure_carries_the_organisation_when_known`,
 (receiver_events).
 Abnormal: `verify_failure_carries_null_organisation_when_unknown` (receiver_events).
 
-`classify_receive_error` never names an organisation (LLR-7bk6qh), so the
+`classify_receive_error` never names an organisation (LLR-wgr46u), so the
 known-organisation shape is reachable only from a constructed outcome. The
 2026-09-14 risk analysis records this as REQ-affyf5 being vacuous today.
 *Note 2026-10-14 (review round 1, finding 3):* REQ-x3c8n2's met half is the
@@ -1270,31 +670,9 @@ On a rejection, the listeners that had registered are not cancelled. That is
 a defect against REQ-rq8g2v, booked as PR-cu2h2g.
 This requirement does not claim it.
 
-## SDD-jx363y — Revocation input decision
+## Under SDD-czjf2c — Revocation input decision
 
 `app/src/lib/revoke.ts`: `validateRevokeInput`.
-
-**SDD-jx363y**: the decision, made before any command is invoked, whether a
-revocation may be submitted, from the transport mode and the operator's
-inputs.
-traces: REQ-vgr7s2, REQ-he8ejb, REQ-ab2mfz
-superseded-by: SDD-ckqyh3
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by
-SDD-ckqyh3:* the reply gate becomes the warning before the first admission
-request, and the Loopback address check moves from the revocation to a
-repeated send. LLR-csbs5v is unchanged and sits under the successor.
-
-*Amended 2026-10-06 (change `worktree-org-node-chain-authority`).* The item
-also makes the webview's other pre-command decision this change adds: whether
-an Invite reply may be produced, and what the user is told first
-(`app/src/lib/invite.ts`: `REPLY_WARNING`, `replyGate`; LLR-n2u4uf, in
-`2026-10-06-invitation.md`). It is the same kind
-of decision — pure, made from the operator's inputs, tested under vitest — so
-it sits here rather than in a new item, and the item traces REQ-ab2mfz. The
-backend refuses an unconfirmed reply as well (org-io's `produce_reply`, since
-2026-10-14), as SDD-2pa6h6
-re-checks what this item checks.
 
 **LLR-csbs5v**: `validateRevokeInput` trims the member identifier and strips at
 most one leading `0x`. It refuses a remainder that is not exactly 64
@@ -1306,27 +684,6 @@ measuring" (revoke.validate).
 Abnormal: "rejects a 63-character member id", "rejects a 65-character member
 id", "rejects an empty member id", "rejects a 64-character non-hexadecimal
 member id", "rejects a doubled 0x prefix" (revoke.validate).
-
-**LLR-c9r5uf**: `validateRevokeInput` requires a peer address that is not blank
-in Loopback transport, refusing with a message naming Loopback, and accepts
-any peer address, including none, in Networked transport.
-satisfies: REQ-vgr7s2
-superseded-by: LLR-zqy3tq
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`) by LLR-zqy3tq:*
-the revocation is proposed with no address; the same rule applies to the
-address of a repeated send.
-
-*Note 2026-10-20 (change `worktree-org-io-domain-api`; owner rulings Q1 and
-A2 of 2026-10-16):* there is no repeated send and no pasted address; LLR-zqy3tq
-is amended in place to state that no pre-command decision asks for a peer
-address, in either transport mode.
-
-Normal: "accepts an empty peer address in networked transport", "accepts a
-supplied peer address in networked transport", "accepts a supplied peer
-address in loopback transport" (revoke.validate).
-Abnormal: "rejects an empty peer address in loopback transport", "trims
-surrounding whitespace before measuring" (revoke.validate).
 
 ## SDD-32hath — The webview's Content-Security-Policy
 
@@ -1395,7 +752,7 @@ Normal: `shipped_csp_meets_every_clause`, `fixture_policy_passes_the_checker`
 Abnormal: `connect_src_beyond_ipc_is_rejected`,
 `localhost_dev_server_is_rejected_in_shipped_policy` (csp_policy).
 
-Task T2 of `docs/plans/2026-10-05-app-architecture.md` cut the clause that
+Task T2 of the 2026-10-05 architecture change cut the clause that
 `connect-src` must name the IPC sources: an empty `connect-src` passes the
 checker (T2's mutation M10 reddened nothing).
 
@@ -1468,8 +825,9 @@ frontend IPC client, and every Svelte component and route. It carries **no
 low-level requirements**.
 traces: REQ-7g3k9a, REQ-rxc8sp, REQ-bmk2z2, REQ-645jq9, REQ-e4ah9h, REQ-bvx4nh, REQ-6hgm8r, REQ-3hfggn, REQ-jfxah3, REQ-2k7ys4, REQ-dp95pv, REQ-tw4cb5, REQ-a83vqr, REQ-wu6z9p, REQ-rq8g2v, REQ-he8ejb, REQ-vb5pag, REQ-2yh3c8, REQ-akeah6, REQ-k7ay5b, REQ-5q7nyg, REQ-ergn9z, REQ-y53dqn
 
-*Traces amended 2026-10-20 (change worktree-org-io-domain-api): REQ-vgr7s2 →
-none (retired 2026-10-20, owner answer A2).*
+*Traces amended 2026-10-20 (change worktree-org-io-domain-api): the
+peer-address precondition's requirement is dropped (retired 2026-10-20, owner
+answer A2).*
 
 *Amended 2026-10-20 (change `worktree-org-io-domain-api`; owner rulings Q2,
 A1 and A3 of 2026-10-16; a clarification, the ID is kept):* `traces:` gains
@@ -1482,8 +840,8 @@ requests beside those announced on arrival. The list is in
 `2026-10-16-domain-api.md`.
 
 *Amended 2026-10-15 (change `worktree-org-io-domain-api`; a clarification,
-the ID is kept):* `traces:` drops REQ-prjja8, REQ-tcutr6, REQ-ab2mfz and
-REQ-m8sgjk, all out of force, and gains their successors as this unit's
+the ID is kept):* `traces:` drops the Invite's and the Invite reply's requirements, the Invite reply's
+warning and the submission decision, all out of force, and gains their successors as this unit's
 call sites realise them — REQ-vb5pag, REQ-2yh3c8, REQ-akeah6 and
 REQ-k7ay5b. The commands whose success needs a chain or a peer are now the
 renamed surface of SDD-6pjvhc; the receiver loop now also calls
@@ -1505,7 +863,7 @@ reads it, in development builds only. The candidates 12–16 below are
 narrowed accordingly: the admin seed and co-signer parse moved to org-io,
 where they are tested, and "that stub's three refusals" are org-io's.
 `traces:` swaps the submission requirement, now org-io's, for the app's
-REQ-m8sgjk, which `create_organisation`, `admit_member` and `revoke_member`
+submission decision (since replaced by REQ-vb5pag), which `create_organisation`, `admit_member` and `revoke_member`
 realise at their call sites. Classification under the hybrid rule: a
 narrowing of the item's code, not a change of meaning.
 
@@ -1557,9 +915,9 @@ policy, the loop emits and stops, and the panels render, subscribe and
 validate.
 
 **The reason.** No gated test reaches this code, so a low-level requirement
-written for it could not redden when its behaviour broke. Owner ruling 1 of
-`docs/plans/2026-10-05-app-architecture.md` forbids writing one on those
-terms. The reach of each part:
+written for it could not redden when its behaviour broke. The owner's ruling of
+2026-10-05 (a low-level requirement only where a gated test reddens) forbids
+writing one on those terms. The reach of each part:
 
 - `run` panics on a failed `init`, and the gate never builds a real Tauri
   application. `init`, `build_chain_ops` and `connect_chain` read the process
@@ -1592,9 +950,9 @@ here. Its `submit_update` and `read_state` refusals are not reachable, because
 both need a stored Organisation first.
 
 **The candidates that moved here.** These are the behaviours the survey
-proposed as low-level requirements, which have no gated test. Numbers refer to
-§3 of the decomposition survey listed under "Inputs" in
-`docs/plans/2026-10-05-app-architecture.md` (measured at `06c357b`).
+proposed as low-level requirements, which have no gated test. Numbers are the
+candidate numbers of the 2026-10-05 decomposition survey (measured at
+`06c357b`).
 
 - 7, 10, 11: `init` reads the four `ODS_*` variables, propagates the startup
   policy's refusal, sets the service's transport mode from the recorded one,

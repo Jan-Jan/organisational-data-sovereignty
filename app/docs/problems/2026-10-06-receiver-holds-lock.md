@@ -1,7 +1,7 @@
 # The receiver holds the service lock while it waits for a peer
 
-*Moved 2026-10-13 (S4, task T11 of `docs/plans/2026-10-06-org-io-transport.md`,
-ruling A):* the report this file held — while the app's receiver ran, every
+*Moved 2026-10-13 (change `worktree-org-io-transport`, S4 task T11;
+ruling A: an item moves with the code that realises it, keeping its ID):* the report this file held — while the app's receiver ran, every
 other command that needed the service waited until a peer connected, because
 the receive loop took the service lock and then waited for an incoming
 connection with it held — moved to org-io with the receive loop, to

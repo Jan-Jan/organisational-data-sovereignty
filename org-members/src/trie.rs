@@ -707,7 +707,8 @@ impl<H: MemberHasher> OrgTrie<H> {
         // LLR-n5t6bn: release every outgoing handle before checking any
         // incoming one, so a handle moving between two present members is
         // judged against the record after the whole set, in any identifier
-        // order (PR-vf5hdm).
+        // order. A single ascending pass refused an honest handover whenever
+        // the member acquiring the handle sorted before the one releasing it.
         for member in &delta.upserted {
             if let Some(old) = member_of(&tree, member.id()) {
                 if old.handle() != member.handle() {

@@ -628,7 +628,7 @@ fn the_two_classes_are_actually_distinguished() {
 // ---------------------------------------------------------------------------
 //
 // The loop stops on org-io's typed `ReceiveError::Terminal` (LLR-zw6jqy,
-// which supersedes LLR-a9rjtf), so the cases below are org-io's two terminal
+// which replaced a match on the message's text), so the cases below are org-io's two terminal
 // causes, and the message each carries is whatever org-io renders: nothing
 // is keyed to its text. The text-independence itself is
 // `terminal_is_decided_by_the_error_variant_not_its_text`'s.
@@ -650,7 +650,7 @@ fn terminal_cases() -> Vec<(ReceiveError, String)> {
     .collect()
 }
 
-// inherited from LLR-a9rjtf (superseded by LLR-zw6jqy)
+// inherited from the text-matching terminal rule LLR-zw6jqy replaced
 // verifies: LLR-zw6jqy
 #[test]
 fn every_real_terminal_message_stops_the_loop() {
@@ -665,7 +665,7 @@ fn every_real_terminal_message_stops_the_loop() {
     }
 }
 
-// inherited from LLR-a9rjtf (superseded by LLR-zw6jqy)
+// inherited from the text-matching terminal rule LLR-zw6jqy replaced
 // verifies: LLR-zw6jqy
 #[test]
 fn a_non_terminal_failure_does_not_stop_the_loop() {
@@ -701,7 +701,7 @@ fn a_non_terminal_failure_does_not_stop_the_loop() {
     );
 }
 
-// inherited from LLR-a9rjtf (superseded by LLR-zw6jqy)
+// inherited from the text-matching terminal rule LLR-zw6jqy replaced
 // verifies: LLR-zw6jqy
 #[test]
 fn the_stop_is_announced_after_the_failure_for_the_same_error() {

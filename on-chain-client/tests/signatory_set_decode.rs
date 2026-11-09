@@ -331,14 +331,15 @@ fn function_body<'a>(source: &'a str, signature: &str, closing: &str) -> &'a str
     &rest[..end]
 }
 
-// The pinned read (PR-ksm2ua's reproduction): `signatory_set` resolves the
+// The pinned read (the reproduction of two reads each resolving their own
+// finalised block, so one answer mixed two chain states): `signatory_set` resolves the
 // latest finalised block once and every read in it is made at that block —
 // it calls neither of the two reads that each resolve their own block. The
 // reads and the `Any` lookup are chain-free functions (`read_signatory_set`
 // over a `SignatorySetSource`, `any_proxy_type_index` over metadata), tested
 // above; this scan pins that `signatory_set` hands both the one block — its
 // metadata, and a source whose every fetch is at it.
-// verifies: LLR-sc79gq, PR-ksm2ua
+// verifies: LLR-sc79gq
 #[test]
 fn the_signatory_set_is_read_at_one_block() {
     let body = function_body(CLIENT_SOURCE, "pub async fn signatory_set(", "\n    }\n");

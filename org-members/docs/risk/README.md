@@ -2,9 +2,12 @@
 
 This directory is a per-change ledger: each change contributes one dated
 file, `YYYY-MM-DD-<slug>.md`, dated the day the change creates it and never
-renamed. **Edit existing items in the file that defines them.** This README
-contains the project-wide acceptability matrix; the dated files contain
-hazards, controls, derived assessments, and residual-risk statements.
+renamed. **Edit existing items in the file that defines them.** A reworded
+item keeps its ID; a changed hazard or control gets a new ID and the old item
+is deleted; a dropped item is deleted. The squash message records each under
+`Items:`. This README contains the project-wide acceptability matrix; the
+dated files contain hazards, controls, derived assessments, and residual-risk
+statements.
 
 <!--
 Item grammar (enforced by .guardrails/scripts/check-trace.sh):
@@ -14,11 +17,12 @@ Item grammar (enforced by .guardrails/scripts/check-trace.sh):
 
   **RC-NNNNNN**: <risk control measure>. mitigates: HAZ-NNNNNN
 
+- An item is terse: no rationale, history or implementation detail.
 - Every hazard must have at least one risk control that `mitigates:` it.
   `mitigates:` is read only inside the RC's block: on the definition line, as
-  above, or on a line below it before the block closes. A block closes at the
-  next markdown heading, the next bold line that contains an ASCII colon, or
-  the end of the file. A `mitigates:` anywhere else mitigates nothing, so the
+  above, or at the start of a line below it before the block closes. A block
+  closes at the next markdown heading, the next bold line that contains an
+  ASCII colon, or the end of the file. A `mitigates:` anywhere else mitigates nothing, so the
   hazard reports UNMITIGATED-HAZARD; at column one, after any list markers,
   the line also reports ORPHAN-ANNOTATION.
 - Every risk control must be implemented by at least one requirement containing

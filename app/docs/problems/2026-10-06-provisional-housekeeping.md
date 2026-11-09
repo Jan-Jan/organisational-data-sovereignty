@@ -1,7 +1,8 @@
 # Problem reports — the app's handling of kept provisional updates
 
 *Moved 2026-10-13 (change `worktree-org-io-publish`, task T17a; ruling A of
-the owner's rulings of 2026-10-06, `docs/plans/2026-10-06-org-io-roadmap.md`).*
+the owner's rulings of 2026-10-06: an item moves with the code that realises
+it, keeping its ID).*
 The one report this file defined — that a chain write which timed out and
 then executed was never retried, so the next admission could commit the
 earlier update and send it to the new recipient, and that no way existed to

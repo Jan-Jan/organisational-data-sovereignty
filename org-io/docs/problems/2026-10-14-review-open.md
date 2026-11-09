@@ -1,7 +1,7 @@
 # Open problems found by the S4 review, round 1
 
 Opened 2026-10-14 by the fix of the S4 review, round 1
-(`docs/plans/2026-10-06-org-io-transport.md`, merge-change step 6a). Neither
+(change `worktree-org-io-transport`, merge-change step 6a). Neither
 is fixed by S4: each is recorded here so that it is not lost.
 
 **PR-7hu3v5**: an invite stays outstanding after an admission whose chain
@@ -10,7 +10,7 @@ write timed out and later committed: `OrgIo::admit_reply` returns at the
 and the late commit lands through `settle_unknown` or `reconcile`, neither of
 which settles the invite; re-admitting the same reply is then refused
 (`DuplicateKey`), so the pair cannot be settled through the exchange.
-affects: REQ-prjja8, LLR-y4dg74, LLR-t98pk9, LLR-k5pzsz
+affects: REQ-ek652a, LLR-un47j8, LLR-zey4mg, LLR-t2pve7
 opened: 2026-10-14
 status: open
 
@@ -18,8 +18,8 @@ Review round 1, finding 5 (`org-io/src/exchange.rs`, the `admit_reply`
 return at the submission's error; `org-io/src/publish.rs`, the late-commit
 paths of `settle_unknown` and `reconcile`). It needs a write whose outcome is
 unknown; nothing is lost and no one is admitted twice, but the invite stays
-outstanding in the inviting Persona's store, contrary to REQ-prjja8's
-settle-on-admission.
+outstanding in the inviting Persona's store, contrary to the settle-on-admission of the Invite requirement of that
+time.
 
 **PR-m3tfnu**: a received update that was declined because this node's own
 update for the same Organisation was still provisional (the node behind the
@@ -27,7 +27,7 @@ chain) is never offered again: the receive step checks it against the
 current record as designed (owner's explanation of 2026-10-14) and declines
 it, and once the node's own update is promoted nothing re-offers or re-reads
 the declined update, so the node stays behind until another update arrives.
-affects: LLR-cvyyr8, SDD-aw3nka
+affects: LLR-kz9hj4, SDD-2fc2cq
 opened: 2026-10-14
 status: open
 

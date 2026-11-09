@@ -102,8 +102,7 @@ at 16.37% line coverage — carries no low-level requirements, because nothing a
 this unit's gate can verify one. (The hand-computed "roughly 580 of 699" that
 stood here was dropped 2026-09-28 by this change's review sweep as
 unreproducible; the decomposition file states why.) That is recorded in full in
-the architecture ledger, and as an owner item in
-`docs/plans/2026-09-05-ratchet-setup.md`.
+the architecture ledger, as an owner item.
 
 It is named here because a reader of the risk ledger should not have to learn
 it elsewhere, but it is **not** a new hazard and mints no control. The code it
@@ -116,10 +115,10 @@ lane's first backfill span. The other two open reports are elsewhere and are not
 this item's: PR-qpp28h is the reorg predicate in `internals::scan_step`, which
 is **SDD-m59zrg**, an item fully refined into low-level requirements and gated;
 and PR-h4mb8y is `src/verify.rs`, which this change records as **no software
-item at all**. (Five reports exist in this unit's ledger; PR-p5ngya is resolved,
-so four are open. This paragraph said "four of the five problem reports open",
-which both mis-stated that arithmetic and over-counted how many sit in
-SDD-3b8zef's code — review round 2 caught both.) What this change adds is not
+item at all**. (This paragraph said "four of the five problem reports open",
+which both mis-stated the arithmetic — a fifth report was already resolved —
+and over-counted how many sit in SDD-3b8zef's code; review round 2 caught
+both.) What this change adds is not
 a new risk but a *measurement* of an existing one: the residual that the register
 recorded per-hazard is now also visible as a structural fact about the unit's
 decomposition — the majority of its source has no verifiable design refinement.

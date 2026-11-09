@@ -39,7 +39,7 @@ is `expects:`.
 
 **REQ-645jq9**: The software shall report, in the connection status returned to
 the frontend, which transport mode the running service was configured with.
-(implements: RC-8ygnjd)
+implements: RC-8ygnjd
 satisfies: derived
 
 The frontend cannot decide whether a peer address is required without knowing
@@ -47,12 +47,12 @@ the transport mode, and today it cannot ask: `ConnectionStatus` carries
 `chain_configured`, `chain_ws`, `contract_h160` and `data_dir`, and nothing
 about transport. `AppState::init` already computes the mode from
 `ODS_TRANSPORT` and hands it to the service; this requirement is that the value
-be reported rather than discarded. It is the prerequisite for REQ-vgr7s2, and
-it is written separately because it is the backend's obligation and REQ-vgr7s2
-is the frontend's.
+be reported rather than discarded. It was the prerequisite for the frontend's
+peer-address precondition (retired 2026-10-20 with the pasted address), and
+it is written separately because it is the backend's obligation.
 
-*Checked 2026-10-14 (S4, task T15 of
-`docs/plans/2026-10-06-org-io-transport.md`); text unchanged.* "The running
+*Checked 2026-10-14 (change `worktree-org-io-transport`, S4 task T15); text
+unchanged.* "The running
 service" is org-io's handle since the transport moved there: `init` hands
 the mode to `OrgIo::open` as org-io's `transport::TransportMode`
 (`transport_mode_for`), and the mode name reported is still the app's
@@ -60,13 +60,15 @@ decision and the app's type.
 
 **REQ-e4ah9h**: The software shall report an endpoint and a contract address in
 the connection status only when chain operations are configured, and shall
-report both as absent otherwise. (implements: RC-a7fenm)
+report both as absent otherwise.
+implements: RC-a7fenm
 satisfies: derived
 
 **REQ-bvx4nh**: The software shall report, as the connection status's endpoint,
 contract address and data directory, the values the running configuration was
 built from, and shall not re-read them from the process environment when the
-status is requested. (implements: RC-a7fenm)
+status is requested.
+implements: RC-a7fenm
 satisfies: derived
 
 *Checked 2026-10-08 (change `worktree-org-io-create`, task T9); text
@@ -132,41 +134,16 @@ either alone leaves the other.
 
 ## Whether a revocation can be submitted
 
-**REQ-vgr7s2**: The software shall accept a revocation request with no peer
-address when the transport mode is not Loopback, and shall require a peer
-address only when it is Loopback. (implements: RC-jrkn7w)
-satisfies: derived
-retired: 2026-10-20 — addresses now come with the Invite, the admission request and the organisation request and are kept per Device key (owner answer A2, change worktree-org-io-domain-api)
-
-*Note 2026-10-20 (change `worktree-org-io-domain-api`):* with no peer
-address taken anywhere in the app, there is no precondition left to derive
-from the transport mode. RC-jrkn7w keeps its other in-force implementer,
-REQ-he8ejb (the member identifier is checked before any command); REQ-645jq9
-and REQ-sjkp8z, which the control's note also names, stay in force.
-
-The frontend's obligation, and the one that reopens the safety action. Today
-`Revoke.svelte` rejects an empty `peerAddrBlob` unconditionally
-(`if (!peerAddrBlob.trim()) { revokeErr = 'Peer addr blob (hex) is required.'; return; }`)
-while `revoke_member`'s own doc-comment states the field is optional and needed
-only for same-machine dialing. In Networked transport — the default, and the
-mode `AppState::init` describes as "the right choice for two laptops over the
-internet on live Paseo" — a join request carries no `node_addr`, so
-`node_addr_blob` is the empty string and the operator has nothing to paste.
-Revocation is unreachable. See HAZ-n97v5g.
-
-The requirement is written as a property of the *decision*, not of the form, so
-it can be tested without rendering: the check is a function of the transport
-mode and the two input strings.
-
 **REQ-he8ejb**: The software shall reject a revocation request whose member
 identifier is not exactly 64 hexadecimal characters, ignoring surrounding
 whitespace and an optional single `0x` prefix, and shall do so before any
-command is invoked. (implements: RC-jrkn7w)
+command is invoked.
+implements: RC-jrkn7w
 satisfies: derived
 
 The abnormal-input half of the same control, and not merely defensive: with
-REQ-vgr7s2 relaxing the peer-address precondition, the member identifier
-becomes the only field the frontend validates at all. `revoke_member` in Rust
+no peer address asked for (the peer-address precondition was retired on
+2026-10-20), the member identifier is the only field the frontend validates at all. `revoke_member` in Rust
 does check the width, so this is a second line rather than the only one — but
 the frontend's check is what produces a message the operator can act on instead
 of an error string surfaced from a hex decoder.
@@ -174,11 +151,13 @@ of an error string surfaced from a hex decoder.
 ## What the verification log is allowed to claim
 
 **REQ-a83vqr**: The software shall render a verification-failure event as a log
-row whose outcome is "not verified". (implements: RC-h7mnfj)
+row whose outcome is "not verified".
+implements: RC-h7mnfj
 satisfies: derived
 
 **REQ-akt4p7**: The software shall derive a verification log row's outcome from
-the event that produced the row, and from no other source. (implements: RC-h7mnfj)
+the event that produced the row, and from no other source.
+implements: RC-h7mnfj
 satisfies: derived
 
 The two halves of making the ✗ state reachable, and again they fail separately.
@@ -194,7 +173,8 @@ HAZ-9fmhm4.
 
 **REQ-affyf5**: The software shall emit, when an inbound update fails
 verification, an event that carries the organisation identifier where the
-failing update names one. (implements: RC-6ajdv4)
+failing update names one.
+implements: RC-6ajdv4
 satisfies: derived
 
 The backend half that gives REQ-a83vqr something to render. Today a failed
@@ -212,12 +192,12 @@ did have.
 **REQ-kn5rtx**: The software shall report a receive-path failure as a
 verification failure only when the underlying error is a verification verdict,
 and shall report every other failure as a receiver error.
-(implements: RC-3rddh7)
+implements: RC-3rddh7
 satisfies: derived
 
 **REQ-wu6z9p**: The software shall render a receiver error outside the
 verification log, and shall assign it no verification outcome.
-(implements: RC-3rddh7)
+implements: RC-3rddh7
 satisfies: derived
 
 Added 2026-09-14 after the independent review, and they exist because the first
@@ -286,12 +266,14 @@ renders a component.
 
 **REQ-rq8g2v**: The software shall unsubscribe exactly the event listeners it
 registered when a verification view is torn down, including listeners whose
-registration completed after teardown began. (implements: RC-h7mnfj)
+registration completed after teardown began.
+implements: RC-h7mnfj
 satisfies: derived
 
 Written because the restructuring REQ-a83vqr and REQ-akt4p7 need — moving
 subscription out of the component so the row-building logic can be tested —
-also fixes a defect that was there before, recorded as PR-u34uqm. The clause
+also fixes a defect that was there before, a listener leak across tab
+switches (reported and fixed in the change that wrote this). The clause
 about late registration is the whole requirement: the old shape returned its
 cleanup synchronously while the `listen` calls it was meant to cancel were
 still pending, so the cleanup emptied an array the pending subscriptions then
@@ -300,12 +282,14 @@ refilled, and the refilled listeners were never cancelled by anything.
 ## What the receiver is allowed to report
 
 **REQ-2k7ys4**: The software shall not emit a membership-updated event when the
-organisation record for that update cannot be read. (implements: RC-2t9sgv)
+organisation record for that update cannot be read.
+implements: RC-2t9sgv
 satisfies: derived
 
 **REQ-dp95pv**: The software shall emit, when an organisation record cannot be
 read after a successful verification, an event identifying that organisation
-and stating that its record was unreadable. (implements: RC-2t9sgv)
+and stating that its record was unreadable.
+implements: RC-2t9sgv
 satisfies: derived
 
 Today `start_receiver` re-reads the org record to fill in the epoch and root it
@@ -321,7 +305,8 @@ REQ-dp95pv is what stops the fix from turning a wrong announcement into no
 announcement at all. See HAZ-5ha5vv.
 
 **REQ-tw4cb5**: The software shall not include an epoch value in the event it
-emits when a persona self-deletes on revocation. (implements: RC-9t3kpm)
+emits when a persona self-deletes on revocation.
+implements: RC-9t3kpm
 satisfies: derived
 
 The other half of the same hazard. The self-delete path emits
@@ -332,11 +317,13 @@ reported. A consumer that needs to know the persona self-deleted has the
 `revoked` event, which carries what is actually known.
 
 **REQ-3hfggn**: The software shall release the receiver's start guard when the
-receiver loop exits. (implements: RC-nyy73d)
+receiver loop exits.
+implements: RC-nyy73d
 satisfies: derived
 
 **REQ-6hgm8r**: The software shall spawn no second receiver loop while a
-receiver loop is running. (implements: RC-nyy73d)
+receiver loop is running.
+implements: RC-nyy73d
 satisfies: derived
 
 `receiver_started` is an `AtomicBool` set by `compare_exchange` before the loop
@@ -351,7 +338,8 @@ plausible mistake: releasing the guard without preserving exclusion reintroduces
 double-spawning, and the current code is the other error.
 
 **REQ-jfxah3**: The software shall emit an event naming the reason the receiver
-loop stopped, before that loop exits. (implements: RC-8abufw)
+loop stopped, before that loop exits.
+implements: RC-8abufw
 satisfies: derived
 
 Releasing the guard makes a restart *possible*; this is what makes anyone aware
@@ -363,12 +351,14 @@ no event is emitted. See HAZ-cfp4jb.
 
 **REQ-7g3k9a**: The software shall fail to start when no passphrase is
 configured for the persona store, unless development defaults are explicitly
-enabled. (implements: RC-xt4qr3)
+enabled.
+implements: RC-xt4qr3
 satisfies: derived
 
 **REQ-bmk2z2**: The software shall name, in the failure it returns when a
 required startup value is missing, the environment variable that would supply
-it and the variable that would waive the requirement. (implements: RC-xt4qr3)
+it and the variable that would waive the requirement.
+implements: RC-xt4qr3
 satisfies: derived
 
 Today an unset `ODS_PASSPHRASE` silently yields `"ods-dev-default"` — a literal
@@ -383,9 +373,8 @@ silent degradations into startup failures while PR-w5dae4 records that a startup
 failure is currently delivered as a panic. Naming the variable is what makes the
 message worth surfacing once PR-w5dae4 is closed.
 
-*Amended 2026-10-14 (S4, task T17 of
-`docs/plans/2026-10-06-org-io-transport.md`; owner ruling of 2026-10-06,
-plan §13, "IDs kept"):* no persona store is sealed under a passphrase any
+*Amended 2026-10-14 (change `worktree-org-io-transport`, S4 task T17; owner
+ruling of 2026-10-06, "IDs kept"):* no persona store is sealed under a passphrase any
 more. org-io seals each Persona's store under a key derived from that
 Persona's device secret, which lives only in the OS keychain, and the app
 reads no passphrase. REQ-7g3k9a now reads: *the software shall fail to start
@@ -412,7 +401,8 @@ instead (REQ-7g3k9a as amended).
 
 **REQ-rxc8sp**: The software shall fail to start when the application data
 directory cannot be resolved, unless development defaults are explicitly
-enabled. (implements: RC-djzms3)
+enabled.
+implements: RC-djzms3
 satisfies: derived
 
 The same treatment for the other silent fallback. `lib.rs` currently answers a
@@ -426,7 +416,8 @@ membership record with it. See HAZ-ny7yvt.
 
 **REQ-sjkp8z**: The software shall reject an organisation identifier that is not
 exactly 40 hexadecimal characters, optionally preceded by a single `0x` prefix,
-before it is used to address any command. (implements: RC-8ygnjd)
+before it is used to address any command.
+implements: RC-8ygnjd
 satisfies: derived
 
 The app's boundary check for every organisation-addressed command.

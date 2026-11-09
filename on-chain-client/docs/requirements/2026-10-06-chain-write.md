@@ -8,9 +8,8 @@ from org-node (`org-node/src/ceremony.rs`, `org-node/src/chain_write/`) to this
 unit, and the app calls them. org-node keeps reading the chain through this
 unit and verifies updates against what it reads.
 
-*Amended 2026-10-08 (change `worktree-org-io-create`, stage S2 of
-`docs/plans/2026-10-06-org-io-roadmap.md`; ADR
-`docs/adr/2026-10-06-org-io-unit.md`).* The consumer named above changed;
+*Amended 2026-10-08 (change `worktree-org-io-create`, stage S2 of the org-io
+roadmap; ADR `docs/adr/2026-10-06-org-io-unit.md`).* The consumer named above changed;
 neither requirement's meaning did. The paragraph read "the app calls them.
 org-node keeps reading the chain through this unit and verifies updates
 against what it reads." Both now hold of org-io: org-io calls the genesis

@@ -18,7 +18,7 @@ use crate::custody::SignatoryKey;
 use crate::{Cause, OrgIo, StoreFailure};
 
 /// How long one chain write may take before org-io gives up on it
-/// (LLR-be3zv9).
+/// (LLR-d3farr).
 pub const WRITE_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Why the chain is not configured, as every refused write and read says it
@@ -74,7 +74,7 @@ pub trait ChainWriter: Send + Sync {
     /// which skips what the chain shows done); a step's failure names the step.
     async fn found_at(&self, proxy: ChainAccount, root: RootHash, key: OrgPublicKey) -> Result<(), ChainWriteError>;
     /// The block an update write is signed mortal from: the latest
-    /// finalised block (LLR-2yjuaj).
+    /// finalised block (LLR-a66ufr).
     async fn write_window(&self) -> Result<WriteWindow, ChainWriteError>;
     /// Move the slot, through `proxy`, from `expected_epoch`, mortal from
     /// `window`'s birth block.
@@ -216,7 +216,7 @@ pub enum WriteFailure {
     /// A founding's `create_proxy` failed; nothing is stored.
     CreateProxy(Cause<ChainWriteError>),
     /// An Unanswered proxy creation: a founding's `create_proxy` passed `WRITE_TIMEOUT`; nothing
-    /// is stored, and the next write creates the proxy again (PR-8ghk9s).
+    /// is stored, and the next write creates the proxy again (LLR-sq5pbq).
     CreateProxyUnanswered,
     /// A founding's `found_at` at `proxy` failed.
     Founding { proxy: ChainAccount, cause: Cause<ChainWriteError> },
@@ -399,7 +399,7 @@ impl OrgIo {
                         return Ok(WriteReport::Refused { failure: WriteFailure::CreateProxy(error) })
                     }
                     // No proxy is known, so nothing is recorded and the next write creates one
-                    // again (PR-8ghk9s); a proxy the unanswered call made holds only its deposit.
+                    // again (LLR-sq5pbq); a proxy the unanswered call made holds only its deposit.
                     Err(WriteNotDone::TimedOut) => {
                         return Ok(WriteReport::Refused { failure: WriteFailure::CreateProxyUnanswered })
                     }

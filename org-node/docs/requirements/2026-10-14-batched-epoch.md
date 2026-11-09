@@ -29,7 +29,6 @@ Member-as-a-group key pair and a Device key pair used for that Organisation
 alone, build the founding record listing the founder with them, calculate its
 Membership root, draw its Organisation key pair, and keep the result as a
 provisional founding, writing nothing to the chain.
-supersedes: REQ-xs4ab8
 satisfies: derived
 
 *Owner ruling R1, 2026-10-15 (change `worktree-org-io-domain-api`):* each
@@ -42,7 +41,6 @@ against the Organisation's current record, keep it in the store with that
 Organisation's other provisional changes, and, in doing so, calculate no
 Membership root, draw no Organisation key pair, write nothing to the chain
 and leave its current record unchanged.
-supersedes: REQ-xs4ab8
 satisfies: derived
 
 **REQ-3pj7rd**: The software shall, when the app asks it to propose the
@@ -53,7 +51,6 @@ record's current Organisation public key and from every Member-as-a-group
 key and DevicePublicKey in the resulting record, and keep the result, with
 its private key in the encrypted store, as that Organisation's provisional
 organisation for the epoch after its current one.
-supersedes: REQ-stx9v3
 satisfies: derived
 
 **REQ-x2dnee**: The software shall, when it adopts as current an epoch of an
@@ -64,15 +61,14 @@ Change set that produced it and no earlier one (a record created by a
 founding keeps none); and discard every provisional change it holds for that
 Organisation that the adopted epoch did not include, reporting each to the
 app.
-(implements: RC-dv6mka)
-supersedes: REQ-uv3v5w REQ-hhva9d
+implements: RC-dv6mka
 satisfies: derived
 
 *Amended in place 2026-10-16 (unmerged draft; dispatcher's resolution C5 of
-2026-10-16):* this item also supersedes REQ-hhva9d (discard a provisional
+2026-10-16):* this item also supersedes an earlier form of REQ-x2dnee (discard a provisional
 update on request). Discarding is now automatic only, as this item and
 org-io's discard requirement state; no command discards on request, so
-REQ-hhva9d had no successor in force.
+an earlier form of REQ-x2dnee had no successor in force.
 
 **REQ-9ktgwx**: The software shall keep Organisation information it receives
 from a Device its current record lists, for the epoch after its current one,
@@ -80,7 +76,7 @@ as a provisional organisation alongside any other provisional organisation it
 holds for that Organisation — its own included — and shall adopt none of them
 as current until verification against the chain, and then only the one whose
 Membership root and Organisation public key the chain holds.
-(implements: RC-d4fc4s)
+implements: RC-d4fc4s
 satisfies: derived
 
 *Amended in place 2026-10-30 (change `worktree-org-io-domain-api`, merge
@@ -112,8 +108,7 @@ Organisation state, it shall refuse with a typed error, leaving the store
 unchanged. It shall decide each outcome from the state and the provisional
 organisations it holds alone, checking no signature and never consulting the
 Device that delivered any of them.
-(implements: RC-ub82my, RC-5gbgwb, RC-6a2dke, RC-e5atck, RC-95dgg8)
-supersedes: REQ-tb4f8p REQ-bwx7eg REQ-wp2nyc REQ-8gz8bu REQ-nhe2zu REQ-txvtm9
+implements: RC-ub82my, RC-5gbgwb, RC-6a2dke, RC-e5atck, RC-95dgg8
 satisfies: derived
 
 *Amended in place 2026-10-30 (change `worktree-org-io-domain-api`, merge
@@ -127,8 +122,8 @@ changes, its record and everything else stay unchanged; given no state,
 nothing changes.
 
 *Amended in place 2026-10-30 (change `worktree-org-io-domain-api`, merge
-review round 2, finding-4):* the last two sentences are added. REQ-bvh8v6
-(no chain state: refuse, nothing changed) and REQ-ag6kqm (no signature and
+review round 2, finding-4):* the last two sentences are added. An earlier form of LLR-rr558z
+(no chain state: refuse, nothing changed) and an earlier form of LLR-8528ud (no signature and
 no Member's or Device's key in the decision) were superseded by LLRs
 (LLR-rr558z, LLR-8528ud), so no in-force REQ stated either behaviour,
 although both are designed and tested (LLR-rr558z, LLR-8528ud, LLR-qvp7mq).
@@ -136,8 +131,7 @@ This item now states them, and the LLRs that satisfied only the superseded
 REQs (LLR-pzde8b, LLR-e7s4ye, LLR-cja9zv, LLR-7en38k) satisfy it.
 
 *Amended in place 2026-10-30 (change `worktree-org-io-domain-api`, merge
-review MR1-N1, owner ruling 2026-10-29):* supersedes REQ-wp2nyc, REQ-8gz8bu,
-REQ-nhe2zu, REQ-txvtm9, which `verify_envelope_against_chain` alone did; it is
+review MR1-N1, owner ruling 2026-10-29):* supersedes earlier forms of REQ-dwb9bq, which `verify_envelope_against_chain` alone did; it is
 deleted, and this item states what each became (see each one's note). It
 implements in their place the controls they implemented: RC-6a2dke (a record
 is adopted only when the chain holds its root, and nothing is adopted with no
@@ -153,21 +147,18 @@ reports such a state as the outcome `Inconsistent { reason }`
 now says so. The store is left unchanged either way.
 
 *Amended in place 2026-10-20 (unmerged draft; consistency pass):* this item
-also supersedes REQ-bwx7eg (a typed error on receipt when a received key's
+also supersedes an earlier form of REQ-dwb9bq (a typed error on receipt when a received key's
 public half is not the chain's key). Receipt reads no chain (owner ruling
 R2); a provisional organisation whose Organisation public key is not the
 chain's is no match here, so it is neither adopted nor refused with an
 error, and the chain's state is reported behind or adopts another one.
-RC-9cefcn, which REQ-bwx7eg implemented, keeps REQ-c29s93 as its in-force
-implementer; this item does not claim it.
 
 *Amended in place 2026-10-21 (unmerged draft; owner decision of
-2026-10-20):* RC-5gbgwb supersedes RC-9cefcn, and this item implements its
+2026-10-20):* RC-5gbgwb supersedes an earlier form of RC-5gbgwb, and this item implements its
 verification half: a provisional organisation is adopted only when its
 Organisation public key is the one the chain holds, so nothing of one whose
 key is not the chain's is adopted. Its receipt half is REQ-zxgd46's, which
-supersedes REQ-c29s93; the sentence above about RC-9cefcn and REQ-c29s93 is
-replaced by this note.
+supersedes an earlier form of REQ-zxgd46.
 
 **REQ-zxgd46**: The software shall refuse with a typed error, leaving the
 store unchanged and reading no chain state, a received Wire message of the
@@ -175,8 +166,7 @@ Organisation-information kind that carries no Organisation private key, or
 whose key does not decode as 32 bytes; and shall keep, as the Organisation
 public key of the provisional organisation such a message is kept as, the
 X25519 public half derived from the key it carries.
-(implements: RC-5gbgwb)
-supersedes: REQ-c29s93
+implements: RC-5gbgwb
 satisfies: derived
 
 Whether that derived key is the chain's is decided only at verification
@@ -189,8 +179,7 @@ limit, to keep a provisional change or a provisional organisation — its own
 or one it received — that would bring the provisional changes and
 provisional organisations it holds for one Organisation above 1 MiB in their
 stored form, and shall keep nothing in that case.
-(implements: RC-d4fc4s)
-supersedes: REQ-fwfku9
+implements: RC-d4fc4s
 satisfies: derived
 
 **REQ-rv4dwb**: The software shall, for any sequence of bytes received as a
@@ -198,12 +187,11 @@ message body — Organisation information whose Change set it applies, to its
 current record or, holding no record, to the record snapshot the body
 carries, included — either act on it or refuse it with a typed error, leaving
 the store unchanged on a refusal, and shall not panic.
-(implements: RC-e2uvje)
-supersedes: REQ-bcxz96
+implements: RC-e2uvje
 satisfies: derived
 
 *Added 2026-10-30 (change `worktree-org-io-domain-api`, merge review round 2,
-MR2-N1).* REQ-bcxz96 bounded the verification of an Envelope against a
+MR2-N1).* An earlier form of REQ-rv4dwb bounded the verification of an Envelope against a
 record and a chain state; that function is deleted, but applying a received
 Change set, the step HAZ-5f9jcm's hostile Change set targets, moved to
 receipt. REQ-9g6as6 bounds decoding alone; this item bounds the receipt that
@@ -222,8 +210,7 @@ refuse, or one of whose keys is not a curve point, and a provisional Member
 whose preferred Handles are fewer than one, more than three, or not all
 distinct, reporting the field that failed, and shall create, store or extend
 nothing in that case.
-(implements: RC-zutc67)
-supersedes: REQ-qn2erx
+implements: RC-zutc67
 satisfies: derived
 
 **REQ-2nnsmv**: The software shall, when it records an admission, give the
@@ -286,7 +273,7 @@ shall answer a later one for that invite from the same Device, as the
 transport authenticated it, as already received, changing nothing; and shall
 refuse a later one from any other Device, changing nothing, with a refusal
 the sending Device is told of, stating that the invite has already been used.
-(implements: RC-sp46zh)
+implements: RC-sp46zh
 satisfies: derived
 
 *Amended in place 2026-10-16 (unmerged draft; dispatcher's resolution C4 and
@@ -301,7 +288,7 @@ admission request it keeps for an outstanding invite and cancel that invite,
 so that every later admission request carrying its invite id is refused, and
 shall refuse, changing nothing, a request naming no admission request it
 keeps.
-(implements: RC-amgwm9)
+implements: RC-amgwm9
 satisfies: derived
 
 **REQ-nbx4nn**: The software shall settle an Invite once an epoch it adopted
@@ -324,9 +311,9 @@ satisfies: derived
 **REQ-2yduet**: The software shall adopt a full record received in answer to its request for an Organisation only when verification against the chain finds the chain at that record's epoch with its Membership root and Organisation public key, and the Organisation private key received is the private half of that public key; shall act on a revocation notice received in answer to that request only through verification, accepting it only as REQ-m2xh8q accepts a revocation, against the Membership root of the Organisation state read from the chain, and then report the Organisation removed; and shall refuse anything else, changing nothing.
 satisfies: derived
 
-*Amended in place 2026-10-16 (unmerged draft; owner ruling Q3 of 2026-10-16):* the revocation notice a revoked Device receives in answer (REQ-p4hwuv) is checked by that Device against the chain's root before it is acted on. What accepting it deletes is left as the deletion requirements in force state (REQ-uxv2x2, REQ-em28bq); this amendment does not change it.
+*Amended in place 2026-10-16 (unmerged draft; owner ruling Q3 of 2026-10-16):* the revocation notice a revoked Device receives in answer (REQ-p4hwuv) is checked by that Device against the chain's root before it is acted on. What accepting it deletes is left as the deletion requirements then in force stated (earlier forms of REQ-48zc3e and REQ-y9p27b); this amendment does not change it.
 
-*Amended in place 2026-10-16 (unmerged draft; owner ruling Q4' of 2026-10-16):* what accepting it deletes, and what it keeps, is now REQ-48zc3e, with its trigger restated by REQ-y9p27b; REQ-uxv2x2 and REQ-em28bq are superseded.
+*Amended in place 2026-10-16 (unmerged draft; owner ruling Q4' of 2026-10-16):* what accepting it deletes, and what it keeps, is now REQ-48zc3e, with its trigger restated by REQ-y9p27b; earlier forms of REQ-48zc3e and REQ-y9p27b are superseded.
 
 **REQ-akfwf3**: The software shall refuse, changing nothing, to record a provisional change or propose an updated Organisation for an Organisation that its last verification reported behind, until a later verification reports it in step or adopted.
 satisfies: derived
@@ -351,7 +338,6 @@ verdict; return an organisation request from a Device its current record
 lists, or from a Device a record it holds lists as removed, answered per
 REQ-p4hwuv, with its answer; settle an acknowledgement as before; refuse anything else with a
 typed error; and return the sealed store.
-supersedes: REQ-2ugh2f
 satisfies: REQ-2yw5y3
 exported: yes
 
@@ -369,8 +355,7 @@ Organisation only through verification: it shall keep it as a provisional
 organisation, whichever Device key the connection authenticated, and adopt
 it only when the chain's state matches it and its record lists the
 provisional Member's keys, requiring no further Invite import.
-(implements: RC-b6mydy)
-supersedes: REQ-xa6smf
+implements: RC-b6mydy
 satisfies: derived
 
 Owner ruling R3, 2026-10-15: RC-b6mydy's intent is kept — a first admission
@@ -381,7 +366,6 @@ verification.
 **REQ-ttv8k7**: The software shall return, for the adopted current epoch of
 an Organisation, on each request, every recipient Device and the encoded
 message for each, writing nothing.
-supersedes: REQ-6ehufy
 satisfies: REQ-u894ty
 exported: yes
 
@@ -403,7 +387,6 @@ Device's key, the endpoint addresses an accepted admission request carries
 and those an organisation request carries from a Device its current record
 lists or a Device it holds as revoked, and return them for that key; and
 return the sealed store from each of those operations that changes it.
-supersedes: REQ-58tzex
 satisfies: REQ-2xgsbn
 exported: yes
 
@@ -427,10 +410,9 @@ supplies.
 
 **REQ-9xf99q**: The software shall refuse an imported Invite that does not
 parse, naming the field that failed, and shall act on nothing from it.
-supersedes: REQ-yazum3
 satisfies: derived
 
-Narrowed from REQ-yazum3 (2026-10-15, change `worktree-org-io-domain-api`):
+Narrowed from an earlier form of REQ-9xf99q (2026-10-15, change `worktree-org-io-domain-api`):
 the Invite reply it also covered is replaced by the admission request, whose
 check is REQ-6qxesy.
 
@@ -451,8 +433,8 @@ once its recipient answers it accepted, and whatever remains is deleted 7
 days after the revocation was verified, delivered or not. Verification
 deletes nothing in any other case. No app confirmation is involved.
 
-These items supersede REQ-uxv2x2 (delete everything), REQ-em28bq (delete only
-on a verified removal) and REQ-y99c9w (sign, return and keep no
+These items supersede an earlier form of REQ-48zc3e (delete everything), an earlier form of REQ-y9p27b (delete only
+on a verified removal) and an earlier form of REQ-h29c8e (sign, return and keep no
 acknowledgement). They are the store's half; sending the acknowledgements,
 acting on a recipient's answer, the 7-day deadline and deleting the store
 file and keychain item are org-io's.
@@ -472,8 +454,7 @@ acknowledgements REQ-6tepxq counts, each with its recipient Device's
 DevicePublicKey and the endpoint addresses it kept for that key, and the time
 its caller gives as that of the verification; and it shall leave the data of
 every other Organisation and Persona unchanged.
-(implements: RC-5jkcxz, RC-45k3zg)
-supersedes: REQ-uxv2x2
+implements: RC-5jkcxz, RC-45k3zg
 satisfies: derived
 
 The time of the verification is kept so that the 7-day deadline, which
@@ -489,8 +470,7 @@ other input — a refused message, a chain state reported behind or
 inconsistent, a call that supplies no chain state, a discard of a provisional
 change or provisional organisation — shall delete any of it beyond, for a
 discard, what is discarded.
-(implements: RC-ub82my)
-supersedes: REQ-em28bq
+implements: RC-ub82my
 satisfies: derived
 
 What is left 7 days after the verification is deleted by org-io removing the
@@ -506,11 +486,10 @@ refuse with a typed error, deleting nothing, when the caller gives no Device
 secret key for a Persona that has an acknowledgement to sign; and shall keep
 no Device secret key it was given, in the store or anywhere else, once the
 operation returns.
-(implements: RC-45k3zg)
-supersedes: REQ-y99c9w
+implements: RC-45k3zg
 satisfies: derived
 
-The signing is REQ-y99c9w's, unchanged, the transient type included (S4's
+The signing is an earlier form of REQ-h29c8e's, unchanged, the transient type included (S4's
 move-only, zeroised `DeviceSecret`); what changes is that the signed
 acknowledgements are kept in the store (REQ-48zc3e) rather than returned and
 held by no one.
@@ -521,7 +500,7 @@ its record held before the removal lists other than that Persona's own, and
 keep for that Persona three acknowledgements when they are five or more, two
 when they are three or four, one when they are one or two, and none when
 there are none, each for a distinct one of those Devices as its recipient.
-(implements: RC-45k3zg)
+implements: RC-45k3zg
 satisfies: derived
 
 Which of those Devices are chosen as recipients is not ruled.
@@ -538,7 +517,7 @@ accepted, delete that acknowledgement with its recipient's DevicePublicKey
 and endpoint addresses, return the sealed store, and report whether any
 acknowledgement is still kept for that Organisation; and shall refuse,
 changing nothing, a request naming no acknowledgement it keeps.
-(implements: RC-45k3zg)
+implements: RC-45k3zg
 satisfies: REQ-bg5whd
 exported: yes
 

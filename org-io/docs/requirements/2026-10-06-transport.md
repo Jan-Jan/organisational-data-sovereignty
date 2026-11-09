@@ -1,8 +1,6 @@
 # org-io: transport, storage IO and the invitation exchange (stage S4)
 
-Change `worktree-org-io-transport`, stage S4 of
-`docs/plans/2026-10-06-org-io-roadmap.md`. Plan:
-`docs/plans/2026-10-06-org-io-transport.md` (§12 lists these items). Drafted
+Change `worktree-org-io-transport`, stage S4 of the org-io roadmap. Drafted
 2026-10-06, before any code. The key-pair change those rulings waited for
 merged on 2026-10-07 (`1f52c36`); S4's code starts on top of S2's crate, once
 S2 has merged (plan, task T0). Until then each requirement below is reported
@@ -25,7 +23,8 @@ to `OrgIo` or its view returns only types on S2's reviewed allowlist
 (`the_handle_returns_only_allowlisted_public_types`), and no device or
 signatory private key, and no X25519 secret, is reachable through a public
 operation; public keys may be. The owner's rulings of 2026-10-08 on the
-plan's §16.4 are applied below (REQ-ur7z4a, REQ-hw82ue) and in the risk
+plan's §16.4 are applied below (REQ-hw82ue; the revoked-Device inbound
+rule, since replaced by REQ-xd5a2d) and in the risk
 draft (HAZ-abm3xs).
 
 ## What moves here rather than being written here
@@ -67,7 +66,7 @@ the receiving side does check it now. Owner ruling R1 of 2026-10-07 (S3a's
 member-sender rule, a control in org-node's risk file) acts on an update for a held
 Organisation and on a revocation only from a Device the record lists, and
 on an acknowledgement only from the Device it names; org-io hands org-node
-the authenticated key with the body (REQ-fnsjb6).
+the authenticated key with the body (now REQ-xd5a2d).
 
 **REQ-xuzw32**: The software shall bind a Persona's endpoint from that
 Persona's device seed in one function: it shall read the seed from the
@@ -76,7 +75,8 @@ buffer, build iroh's secret key from it, move that key into the endpoint
 builder, and zeroise the buffer before the function returns; it shall not
 clone the seed or the key, render either through `Debug` or `Display`,
 serialise, log or store either outside the endpoint, call the endpoint's own
-secret-key accessor, or hand an endpoint to the app. (implements: RC-pt49zn)
+secret-key accessor, or hand an endpoint to the app.
+implements: RC-pt49zn
 satisfies: derived
 
 *Rewritten 2026-10-06 before first merge (owner ruling of that day,
@@ -104,7 +104,8 @@ four-byte little-endian length followed by the body, shall read at most
 1 MiB plus those four bytes from one inbound stream, and shall refuse a
 longer stream with a typed error without buffering beyond that bound and
 without handing any of it to org-node; the length field shall be discarded,
-not trusted, and the body handed on unchanged. (implements: RC-5wz559)
+not trusted, and the body handed on unchanged.
+implements: RC-5wz559
 satisfies: derived
 
 The wire format is today's, so S4 and pre-S4 nodes interoperate (the ALPN is
@@ -117,10 +118,11 @@ every other, shall drop a connection whose handshake, stream and body have
 not completed within a fixed time limit, reporting it as that connection's
 failure, and shall read at most a fixed number of one endpoint's
 connections at once, so that a connection that stalls cannot stop another
-peer's message being received. (implements: RC-96w7nf)
+peer's message being received.
+implements: RC-96w7nf
 
-*Added 2026-10-15 before first merge (S4 review round 2, finding 1;
-PR-d2p5y2).* The limit and the count are LLR-8uf9a5's constants.
+*Added 2026-10-15 before first merge (S4 review round 2, finding 1: one
+stalled connection stopped the endpoint receiving).* The limit and the count are LLR-8uf9a5's constants.
 
 ### The binding scope of the transport (moved from org-node)
 
@@ -194,88 +196,13 @@ app's expectation (was `derived`): the app's receiver now stops on
 or store while it waits for an inbound connection or reads an inbound stream,
 and shall take that state only for the synchronous org-node calls that judge
 and commit a received message and for the store write that follows them.
-(implements: RC-97kdfv)
+implements: RC-97kdfv
 
 Ruled 2026-10-06 (the receive loop holds no lock while it waits). Fixes the
 app's problem report on the receiver holding the service lock (filed
 2026-10-06 on this branch), whose loop moves here. Verified by a test that
 runs a command needing the service while the loop is waiting, with no peer
 sending, and sees it complete within a bound.
-
-## Receiving
-
-**REQ-fnsjb6**: The software shall pass every received message body through
-org-node's single receive path, whatever the message is (a first admission
-the user declared, an update to an Organisation this node holds, or the
-node's own revocation), handing org-node exactly the body bytes and nothing
-derived from the connection, and shall read the chain for a message only
-after org-node's chain-free checks have accepted it, at most once per
-message, then hand org-node the state it read.
-satisfies: derived
-superseded-by: REQ-cj9u3y
-
-Ruled 2026-10-06 (one receive path). Fixes the app's problem report that an
-invitee never commits its own first admission, because the app's loop called
-only the self-delete entry point. The chain read's position after the
-chain-free checks is what keeps a peer from driving chain reads at will; the
-moved first-admission gate is org-node's, and this item is org-io's half.
-
-*Amended 2026-10-07 before first merge (reconciled with S3a, `60c7d58`):*
-"handing org-node exactly the body bytes and nothing derived from the
-connection" becomes "handing org-node exactly the body bytes and the
-DevicePublicKey the transport authenticated for the connection, and nothing
-else derived from it". S3a's member-sender rule (owner ruling R1, org-node's
-org-node's update and acknowledgement requirements as amended) decides on that key, so org-node must
-receive it; org-io neither checks it nor alters it. "Whatever the message is"
-now also covers a revocation notice and a revoked Device's acknowledgement
-(S3a's two new Wire message kinds); an acknowledgement is settled by
-org-node's check alone and costs no chain read.
-
-## Acknowledgements from revoked Devices
-
-**REQ-ur7z4a**: The software shall accept an inbound connection from a
-Device that a held Organisation's record no longer lists (a Device the node
-holds as revoked) and act on a message from it only when it is an
-acknowledgement, handed to org-node's check with the connection's
-authenticated DevicePublicKey; it shall refuse every other message kind
-from such a Device before any chain read or store write; and it shall write
-on any inbound connection nothing but a single verdict that the message was
-accepted or refused, serving no Organisation information, record, key,
-address or other Organisation data to the connecting Device.
-(implements: RC-b4m5sj)
-satisfies: derived
-superseded-by: REQ-xd5a2d
-
-Owner ruling of 2026-10-07 (plan §header, ruling 8): "members accept
-INBOUND connections from devices they hold as revoked, for acknowledgements
-ONLY". A revoked Device connects directly to up to three distinct Member
-Devices at addresses it kept, with no relay, and tries the next address when
-one refuses; that delivery, and keeping the addresses, are S3b-io's (S3 plan
-T13–T17, its proposed 8 and 9). This item is the receiving side S4 provides.
-Which messages from such a Device are acted on is org-node's member-sender
-rule (S3a, owner ruling R1: an update and a revocation only from a listed
-Device, an acknowledgement only from the Device it names, which the
-receiver holds as removed); this item keeps the transport from narrowing
-that (no allow-list at accept time, no relay-only acceptance) or widening it
-(nothing served back). The verdict is what tells the revoked Device to try
-its next address; a Member that has not yet committed the revocation still
-lists the Device and refuses (`AcknowledgementForListedDevice`).
-
-*Clarified 2026-10-13 (S4, task T11a):* a Member behind the revocation
-refuses as stated, but org-node judges the acknowledgement's epoch before
-the listing, so the refusal it reports is `AcknowledgementFromFuture`; the
-verdict is `Refused` either way. Tests, through the design items
-(`org-io/tests/acknowledgement_inbound.rs`):
-`a_revoked_devices_acknowledgement_over_a_direct_connection_is_accepted_and_answered_accepted`,
-`a_revoked_device_sending_anything_but_an_acknowledgement_is_refused_and_served_nothing`,
-`an_acknowledgement_a_member_still_listing_the_device_refuses_is_answered_refused`,
-`an_acknowledgement_relayed_by_another_device_is_refused`,
-`a_dropped_responder_writes_nothing`, `the_accept_path_has_no_allow_list`,
-`nothing_but_the_verdict_is_written_on_an_inbound_stream`.
-
-*Ruled 2026-10-08 (owner, plan §16.4 point 1):* the verdict is one byte on
-the message's own stream, accepted or refused, and nothing else; the ALPN is
-unchanged, and a pre-S4 sender, which does not read it, ignores it.
 
 ## Storage
 
@@ -295,7 +222,8 @@ are kept at org-io's API by this item.
 shall write the new sealed bytes to a new file in the store's directory,
 flush it to stable storage, and rename it over the store file, so that an
 interrupted write leaves either the previous sealed store or the new one in
-place and never a truncated or mixed file. (implements: RC-37y46c)
+place and never a truncated or mixed file.
+implements: RC-37y46c
 
 Ruled 2026-10-06 (store writes atomic). Fixes org-node's problem report on
 non-atomic store writes, filed on this branch.
@@ -352,7 +280,8 @@ serialise or store those bytes or that value, shall keep neither beyond the
 operation it was read for, and shall zeroise the bytes when that operation
 ends. org-io shall be the only unit that calls the OS keychain: org-node and
 every unit below it receive a device secret only as org-node's opaque value
-and never touch the keychain. (implements: RC-jgyd6m)
+and never touch the keychain.
+implements: RC-jgyd6m
 
 *Clarified 2026-10-08 before first merge (owner ruling of that day, plan
 §16.4 point 4):* "only from the OS keychain item" covers every reader of a
@@ -379,7 +308,8 @@ to the OS keychain, as one item named for that Persona's Device key, by
 handing org-node's opaque device-secret value to the keychain call through
 the value's single scoped write operation in one function, and shall write
 the device secret to no other place: not the sealed store, not any other
-file, not the environment, not the app. (implements: RC-jgyd6m)
+file, not the environment, not the app.
+implements: RC-jgyd6m
 
 Both are verified by a source scan in org-io's absence test (the keychain
 crate is named in one module; its read result flows only into org-node's
@@ -403,7 +333,8 @@ keychain item (creating the Persona, opening or reloading its store, binding
 its endpoint, and signing with its device key) when the OS keychain is
 locked, unavailable, or refuses access to that item, and shall never fall
 back to a passphrase, a plaintext file, an environment variable or any other
-key source. (implements: RC-d8dbxs)
+key source.
+implements: RC-d8dbxs
 
 *Narrowed 2026-10-07 before first merge (owner ruling of that day):* the
 first wording refused to "open, create or write" a store. Saving a change to
@@ -415,26 +346,10 @@ locked. Only the four operations named above read or write the item.
 **REQ-fh5gsq**: The software shall, when a Persona's sealed store exists but
 the keychain holds no item for its Device key, refuse to open it with a typed
 error naming the Persona, leave the store file untouched, and create no new
-device secret, store or Persona in its place. (implements: RC-hd5des)
+device secret, store or Persona in its place.
+implements: RC-hd5des
 
 ## The invitation exchange
-
-**REQ-a2a6rm**: The software shall act on an Invite reply the user chose to
-admit in this order: have org-node build the admission as a provisional
-update, submit the chain write, have org-node commit the update against the
-state read back from the chain, send it to every recipient REQ-6skn67 names,
-and settle the reply's invite identifier; it shall settle once the admission
-has committed whether or not any send succeeded, shall stop before the chain
-write if building the admission fails, and shall write the sealed store
-after each step that changes it.
-satisfies: derived
-superseded-by: REQ-3pjmub REQ-36gxmg REQ-nactq6
-
-Ruled 2026-10-06 (the invitation exchange moves in S4: org-node builds and
-serialises, org-io holds the store and runs the exchange, the app keeps the
-UI). The rules on which replies may be acted on (outstanding, for the
-Organisation the Invite was issued for) move here with their IDs; this item
-is the sequence that joins them to the chain write and the send.
 
 **REQ-pnr6kh**: The software shall keep invite identifiers it holds as
 outstanding only inside the sealed Persona store, write no other file for
@@ -445,114 +360,17 @@ Ruled 2026-10-06 (outstanding invites move into the encrypted store, no
 migration). An invite outstanding in the old plain file at upgrade is lost:
 its reply is refused as not outstanding, and the inviter issues a new Invite.
 
-*Moved 2026-10-14 from app (`app/docs/requirements/2026-10-06-invitation.md`),
-plan task T13 of docs/plans/2026-10-06-org-io-transport.md (ruling A).* The three requirements below — producing an Invite, producing a
-reply, refusing a reply that is not outstanding and settling — came with
-their IDs, their text and their notes, as written in the app's change
-`worktree-org-node-chain-authority` and amended since; their low-level items
-moved with them, to this unit's architecture draft under the invitation
-exchange runner (SDD-rr7dtw). "org-node" in them is still org-node: org-io
-declares the expectation and keeps the outstanding pairs through org-node's
-operations (REQ-txkm94), in the sealed store (REQ-pnr6kh). Each is marked
-`exported: yes`, as the submission requirement S2 moved here is, because the
-app still decides when to issue, reply and admit and cites them.
-
-**REQ-prjja8**: The software shall produce, for an Organisation the user holds,
-an Invite as a Blob carrying the Organisation's name as the inviter typed it, the
-Organisation identifier, the inviter's guess of the invitee's full name, the
-inviter's DevicePublicKeys, and an invite identifier of 32 bytes drawn from its
-cryptographic random source, and shall keep that identifier as outstanding.
-satisfies: derived
-exported: yes
-superseded-by: REQ-ek652a
-
-The Organisation's name is free text for display. It is stored nowhere and
-verified by nothing; the Organisation identifier is what the invitee's node
-reads the chain with (owner ruling 2026-10-05). The inviter's DevicePublicKeys are
-where the reply will be sent once the transport moves to the app; the invite
-identifier lets the inviter discard any reply it did not ask for (owner
-journey, 2026-10-05). *(2026-10-14, moved: the transport moved to org-io, not
-the app; the Device public keys are those of the Persona bound to the
-Organisation, which org-node's `build_invite` reads.)*
-
-**REQ-tcutr6**: The software shall produce, from an Invite the user imported
-and a Persona the user chose, an Invite reply as a Blob carrying that
-Persona's Member-as-a-group key, DevicePublicKey, handle, name and surname, and the Organisation identifier and
-invite identifier the Invite named; and shall declare to org-node that it
-expects a first admission to that Organisation.
-satisfies: derived
-exported: yes
-superseded-by: REQ-sjqxg2
-
-*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
-The declaration named the invite identifier as well, which the admission's
-Wire message carried. The owner ruled that the invite identifier travels only
-in the Invite and its reply, never between peers; org-node matches a first
-admission against the Organisation alone
-(`org-node/docs/requirements/2026-10-06-chain-authority.md`).
-
-**REQ-65xqp8**: The software shall refuse an imported Invite reply whose invite
-identifier is not one it holds as outstanding for the Organisation the reply
-names, acting on nothing from it; shall act on a reply only for the
-Organisation the Invite was issued for; and shall stop holding an invite
-identifier as outstanding once a reply naming it has been acted on.
-satisfies: derived
-exported: yes
-superseded-by: REQ-xd5a2d
-
-*Amended 2026-10-06 (independent review round 2, finding-1).* An invite
-identifier is outstanding for the Organisation it was issued for, not for any
-Organisation: before this amendment a reply to an Invite for one Organisation
-could name another Organisation this device holds, and the first Invite's
-identifier let it through to an admission there.
-
-## Fan-out
-
-**REQ-6skn67**: The software shall, in Networked mode, send a committed
-update to every Device the committed record lists other than its own, and a
-revocation to every Device the update removed, dialling each by the
-endpoint identity equal to its Device key; it shall attempt every recipient
-whatever happened to the others, report the outcome per Device, and leave
-the committed record in place when any send fails. (implements: RC-wbs9ch)
-superseded-by: REQ-nactq6
-
-Ruled 2026-10-06 (the fan-out lands in S4, Networked mode). Before S4 a
-committed update reached one Device only (the app's problem report on the
-update fan-out, merged with the key-pair change on 2026-10-07; PR-3ue4va,
-moved here and resolved 2026-10-13, S4 task T12). Which message each recipient
-gets is org-node's (REQ-jxyh9c). In Loopback mode, which has no address book,
-the single addressed recipient stays, under REQ-8trkps.
-
 ## Peer addresses
-
-**REQ-n82q47**: The software shall parse a peer address given as text with a
-total function: it shall accept exactly the hexadecimal encoding of a
-serialised endpoint address, refuse any other input with a typed error that
-names the field, and panic on no input.
-satisfies: derived
-retired: 2026-10-20 — addresses now come with the Invite, the admission request and the organisation request and are kept per Device key (owner answer A2, change worktree-org-io-domain-api)
-
-The app passes the address as text and no longer names iroh. The parse
-moves from the app with its items (§3.5 of the plan); this item adds the
-totality claim, verified by a fuzz target over arbitrary text (always fuzz,
-`AGENTS.md`).
-
-*Clarified 2026-10-14 (S4 review round 1, finding 6), REQ-n82q47:* "exactly
-the hexadecimal encoding" admits two forms the parse has accepted since it
-moved from the app, as LLR-2b2ghe states them: blank or whitespace-only text
-is no address (`Ok(None)`, the caller's "no address given"), not a refusal;
-and the hexadecimal, read after its surrounding whitespace is trimmed, may
-carry one leading `0x`. Every other input is refused as the item says.
 
 **REQ-8trkps**: The software shall, in Loopback mode, send to a recipient
 only at an address whose endpoint identity equals that recipient's Device
 key, and shall refuse with a typed error, sending nothing, when it holds no
 address for the recipient or the address names a different identity.
-(implements: RC-d6f25u)
+implements: RC-d6f25u
 
 Fixes org-node's open problem report on loopback sends to an unchecked
-address (opened 2026-09-09), which moves here (PR-2dmjzj, moved and resolved
-2026-10-13, S4 task T12). Since the key-pair change, the
+address (opened 2026-09-09), which moved here and was resolved
+2026-10-13, S4 task T12. Since the key-pair change, the
 message to a listed Device carries the Organisation private key, so a
 misdirected send hands that key to a device the record does not name.
 
@@ -573,58 +391,6 @@ expects: org-node
 opened: 2026-10-06
 satisfies: derived
 
-**REQ-tzr3dk**: The software shall rely on org-node to offer exactly one
-receive path, driven by values: a chain-free check of a received message
-body that names the Organisation to read, then a commit of the checked
-message against the state org-io read, returning the outcome and the sealed
-store; covering a first admission, an update and the node's own revocation.
-expects: org-node
-opened: 2026-10-06
-satisfies: derived
-superseded-by: REQ-2yw5y3
-
-*Amended 2026-10-07 before first merge (reconciled with S3a, `60c7d58`):*
-the check takes the connection's authenticated DevicePublicKey with the body
-(S3a's member-sender rule), settles a revoked Device's acknowledgement
-itself with no chain state, and the path also covers a revocation notice
-accepted against the state org-io read, signing with the transient device
-secret org-io supplies from the keychain (org-node's acknowledgement-signing requirement).
-
-*Note, 2026-10-30 (merge review round 1, finding-5):* REQ-tzr3dk is
-superseded, not an open expectation. Its successor REQ-2yw5y3 carries the
-in-force `expects: org-node`, which org-node answers. The
-UNMET-EXPECTATION advisory that check-trace still prints for REQ-tzr3dk
-comes from this out-of-force item's own `expects:` line, kept as history.
-
-**REQ-jxyh9c**: The software shall rely on org-node to return, for a
-committed update, every recipient Device and the encoded message for each,
-writing nothing, so that org-io decides nothing about who receives what.
-expects: org-node
-opened: 2026-10-06
-satisfies: derived
-superseded-by: REQ-u894ty
-
-*Note, 2026-10-30 (merge review round 1, finding-5):* REQ-jxyh9c is
-superseded, not an open expectation. Its successor REQ-u894ty carries the
-in-force `expects: org-node`, which org-node answers. The
-UNMET-EXPECTATION advisory that check-trace still prints for REQ-jxyh9c
-comes from this out-of-force item's own `expects:` line, kept as history.
-
-**REQ-txkm94**: The software shall rely on org-node to build and parse the
-Invite and Invite reply Blobs, to record and settle outstanding invite
-identifiers and declared expectations inside the store, and to return the
-sealed store from each of those operations.
-expects: org-node
-opened: 2026-10-06
-satisfies: derived
-superseded-by: REQ-2xgsbn
-
-*Note, 2026-10-30 (merge review round 1, finding-5):* REQ-txkm94 is
-superseded, not an open expectation. Its successor REQ-2xgsbn carries the
-in-force `expects: org-node`, which org-node answers. The
-UNMET-EXPECTATION advisory that check-trace still prints for REQ-txkm94
-comes from this out-of-force item's own `expects:` line, kept as history.
-
 **REQ-v6r2gd**: The software shall rely on org-node to accept a Persona's
 device secret only as an opaque value that cannot be cloned, renders no
 bytes in `Debug`, has no `Display`, cannot be serialised and offers no
@@ -632,7 +398,7 @@ operation returning its bytes except one scoped write for the keychain call;
 to consume it within a single operation (deriving the store key, or
 signing) and zeroise it when that operation ends; and
 to persist neither the secret nor anything derived from it.
-(implements: RC-jgyd6m)
+implements: RC-jgyd6m
 expects: org-node
 opened: 2026-10-06
 satisfies: derived
@@ -641,7 +407,8 @@ satisfies: derived
 Persona's store only under a key derived from that Persona's device secret by
 a domain-separated derivation that is never the signing key itself, to keep
 in the store the Device public key and never the device private seed, and to
-offer no passphrase-sealed store. (implements: RC-d8dbxs)
+offer no passphrase-sealed store.
+implements: RC-d8dbxs
 expects: org-node
 opened: 2026-10-06
 satisfies: derived

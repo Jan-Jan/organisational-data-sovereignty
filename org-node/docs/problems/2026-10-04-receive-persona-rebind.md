@@ -1,21 +1,8 @@
 # Problem reports — org-node, the receive path rebinds Personas across Organisations
 
-Opened by the architecture tooth
-(`docs/plans/2026-10-03-org-node-architecture.md`) from review round 5, which
+Opened by the architecture tooth from review round 5, which
 reproduced it on the tree that review round 4 had declared the lookup class
 closed on.
-
-**PR-mdv38y**: `receive_and_verify` chooses the Persona to mark Active from
-every Persona whose device key is in the verified trie, whatever Organisation
-that Persona is bound to, and then overwrites its Organisation binding and
-member id. A device holding two Organisations has one Organisation's Persona
-silently rebound to the other the moment the other's administrator enrols that
-Persona's device key, after which ordinary updates and revocations are judged
-against the wrong Organisation.
-affects: SDD-8cpyfa, SDD-72ddm6, LLR-y2v8v2, LLR-jwhzh3, LLR-jsx922, LLR-e5c9ud, LLR-w3fhhg, LLR-q3aj8z
-opened: 2026-10-04
-status: resolved
-resolution: root cause was `PersonaRecord.org_id` holding one Organisation while `commit_genesis` and both branches of `receive_and_verify` overwrote it; by owner ruling 2026-10-06 (REQ-yp75u9) no path rebinds a bound Persona: `create_organisation` and `commit_genesis` refuse it with `PersonaAlreadyBound` (LLR-6z5xya, LLR-eyc4ud), and `receive_and_verify` binds only an unbound Persona on a first admission, refusing one that lists only Personas bound elsewhere (LLR-eyc4ud); reproduced by `pr_mdv38y_an_update_enrolling_another_organisations_persona_does_not_rebind_it`, `pr_mdv38y_a_member_persona_cannot_found_another_organisation` and `a_first_admission_listing_only_a_persona_bound_elsewhere_is_refused` (org-node/tests/admission_sender.rs).
 
 ## What was observed
 
@@ -54,13 +41,13 @@ Review round 4 wrote
 `membership_of_one_organisation_is_judged_by_that_organisations_personas_alone`
 for step 3's attack and delivered the enrolment through
 `receive_and_self_delete_if_revoked`, the one receive path that never rebinds
-a Persona. The test is a true test of that path, and LLR-jwhzh3 is true of that
+a Persona. The test is a true test of that path, and an earlier form of LLR-2d5a7m is true of that
 path. It is not true of the device, because the other path rewrites the input
 the self-delete path relies on.
 
 ## Why it matters
 
-- **RC-wqgm2p does not hold for a rebound device.** That is the cooperative
+- **An earlier form of RC-5jkcxz does not hold for a rebound device.** That is the cooperative
   self-delete control in `org-node/docs/risk/2026-09-09-org-node-hazards.md`.
   Step 3 is a cooperating device that has learnt of its removal and carries on.
   The precondition is an administrator enrolling a device key the member uses
@@ -76,7 +63,7 @@ the self-delete path relies on.
 
 Scope the selection to Personas bound to this Organisation, or not yet bound:
 `p.org_id.is_none() || p.org_id == Some(org_id)`. Write that, and the
-administrator exclusion, into LLR-e5c9ud, under TDD with the pin test
+administrator exclusion, into an earlier form of LLR-exaa9u, under TDD with the pin test
 inverted. It belongs in a change of its own. This one is an architecture
 ledger and must not change production behaviour under cover of documenting it.
 Whether one Persona may be bound to more than one Organisation is a model
@@ -86,7 +73,7 @@ settled before the fix, not by it.
 
 ## Widened by review round 6 — a second writer
 
-`create_organisation` also writes the binding. LLR-w3fhhg requires it to bind
+`create_organisation` also writes the binding. An earlier form of LLR-exaa9u required it to bind
 the founding Persona to the Organisation it founds, and when that Persona is
 already a member elsewhere, the old binding is overwritten. The self-delete
 path reads the binding. So B, a member of org 1, founds org Y, and the next
@@ -104,7 +91,7 @@ because it is the same binding and the same cure decision.
 
 *Annotated 2026-10-05 by review round 8.* The second writer leaves the
 Persona's member id from the Organisation it was bound to before
-(LLR-q3aj8z), so after it the Persona names a member id that is not in the
+(an earlier form of LLR-gcm7bq), so after it the Persona names a member id that is not in the
 Organisation it is bound to. `pr_mdv38y_founding_an_organisation_rebinds_a_member_persona`
 asserts it.
 
@@ -118,6 +105,6 @@ closed that path (REQ-yp75u9) and rewrote
 founding is refused and its binding and member id are left as they were.
 
 *Annotated 2026-10-05 by review round 1 of `worktree-worktree-person-shared-types`
-(finding-6); reworded the same day by docs/plans/2026-10-05-switch-trim.md.* The
+(finding-6); reworded the same day.* The
 items the `affects:` line names are amended in place on that branch rather
 than superseded, so the line names them alone.

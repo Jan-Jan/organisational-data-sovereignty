@@ -41,7 +41,7 @@ exported: yes
 hash of a given Person definition, shall report a match only when the
 value equals the hash it computes for that definition, and shall retain no
 hash or definition from one check to the next.
-(implements: RC-qn2r5b)
+implements: RC-qn2r5b
 satisfies: derived
 exported: yes
 
@@ -66,7 +66,7 @@ REQ-tq4ms4's; this ledger does not restate them.
 **REQ-ht3x78**: The software shall reject a Person definition that holds no
 DevicePublicKey and holds a PersonPublicKey, so that removing every device
 also removes every key a removed device could derive access from.
-(implements: RC-ee994g)
+implements: RC-ee994g
 satisfies: derived
 exported: yes
 
@@ -91,7 +91,7 @@ must always commit with one.
 successor of another whose set of DevicePublicKeys differs from its predecessor's
 and whose PersonPublicKey equals its predecessor's, so that a device added or
 removed cannot keep or use the key agreed without it.
-(implements: RC-5gzfux)
+implements: RC-5gzfux
 satisfies: derived
 exported: yes
 
@@ -104,12 +104,11 @@ PersonPublicKey rules of REQ-ht3x78 and
 REQ-7qgx2q — and shall reject one that fails before computing or checking its
 hash, so that a hash match is reported only for a definition the software
 itself would accept.
-(implements: RC-bnm8qs)
+implements: RC-bnm8qs
 satisfies: derived
 exported: yes
 
-The rules REQ-7ymek3 re-applies are the shared types' own, merged with change 1
-of `docs/plans/2026-10-04-person-sequencing.md`
+The rules REQ-7ymek3 re-applies are the shared types' own
 (`person/docs/requirements/2026-10-04-identity-types.md`): names and surnames
 REQ-r7mytp, device slots REQ-4szc22 and REQ-tq4ms4, each DevicePublicKey
 REQ-q6xkna, and the PersonPublicKey REQ-3vqs9b.
@@ -123,7 +122,7 @@ among them — as an error that identifies the rule broken, shall report a hash
 that does not match a valid definition as a non-match rather than as an error,
 and shall not panic in any Person operation for any input, including input
 that is malformed, hostile, or exceeds a documented limit.
-(implements: RC-d8n777)
+implements: RC-d8n777
 satisfies: derived
 exported: yes
 

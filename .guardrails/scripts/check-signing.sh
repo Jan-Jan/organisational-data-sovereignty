@@ -38,7 +38,8 @@
 # exits 0.
 #
 # A trust root that is configured and present but that the process lacks
-# permission to read — a chmod'd signers file, an unreadable ~/.gnupg — is
+# permission to use — a chmod'd signers file, an unreadable ~/.gnupg, a
+# trustdb.gpg gpg cannot open read-write — is
 # exit 2 in EVERY mode, never UNVERIFIED/UNREADABLE at exit 1: exit 1 states
 # "the project is wrong", and there only the environment is.
 #
@@ -80,14 +81,11 @@ fi
 # What the verifier itself stated, indented, or nothing if it stated nothing.
 #
 # `git log --format=%G?` answers with ONE LETTER and discards the verifier's
-# output: measured 2026-09-01, a gpg dying on an unwritable trustdb reaches
-# this script as `N` and zero bytes of stderr. A letter is not a cause, and
-# this script used to supply one by guessing — it appended the
-# gpg.ssh.allowedSignersFile remedy to every verdict alike, including the
-# OpenPGP ones where nothing reads that setting. A repository's history can be
-# signed BOTH ways (this one is: measured 2026-09-01, 17 ssh to 3 OpenPGP in
-# the last 20 commits), and the two formats then fail to verify for entirely
-# different reasons behind one identical line (PR-52rnrn).
+# output: a gpg dying on an unwritable trustdb reaches this script as `N` and
+# zero bytes of stderr. A letter is not a cause, and a guessed remedy is
+# wrong for one format or the other: a repository's history can be signed
+# BOTH ways, and the two formats then fail to verify for entirely different
+# reasons behind one identical line.
 # `git verify-commit` runs the same
 # verification and lets the verifier's own words through, so ask it rather
 # than guess. Called only on a verdict that already failed, so the extra fork
@@ -136,13 +134,28 @@ trust_root_env_guard() {
   or run as the user who owns it. check-signing.sh --setup is the tool that
   separates configuration gaps from environment ones."
         fi
+        # gpg opens trustdb.gpg read-write even to verify, so a keyring it can
+        # read is still unusable when that open fails. Probed by opening, not
+        # `[ -w ]`: macOS TCC denies at open() what the mode bits allow. `<>`
+        # neither truncates nor writes, and the file is known to exist. The
+        # shell's open() diagnostic is dropped because the message below
+        # names the file and the read-write open that failed, which is all
+        # that diagnostic says; its errno text (EACCES, EPERM) points to the
+        # same remedy either way.
+        if [ -f "$_tr_home/trustdb.gpg" ] &&
+            ! ( : <> "$_tr_home/trustdb.gpg" ) 2>/dev/null; then
+            gr_die "gpg cannot open its trustdb read-write: $_tr_home/trustdb.gpg
+  This is an ENVIRONMENT error, not a project one — gpg opens trustdb.gpg
+  read-write even to verify. Copy pubring.kbx and trustdb.gpg to a writable
+  directory and set GNUPGHOME to it, or run where $_tr_home is writable."
+        fi
     fi
 }
 
 # Whether a commit carries a signature: a `gpgsig` or `gpgsig-sha256` header.
 # Only the header is read, which ends at the first empty line of the commit
-# object; a message line starting with `gpgsig` made an unsigned commit read
-# as signed when the whole object was searched (PR-qm5gfy). A mergetag's
+# object; searching the whole object would read an unsigned commit whose
+# message has a line starting with `gpgsig` as signed. A mergetag's
 # continuation lines start with a space and do not match. One function for
 # every caller in check_commits, so the questions cannot drift apart.
 carries_signature() {
@@ -158,7 +171,7 @@ check_commits() {
     for c in $1; do
         # --no-show-signature: with log.showSignature set, git log prints the
         # verifier's output above the letter, and a good signature would read
-        # as no verdict (PR-nyw3ww).
+        # as no verdict.
         #
         # `%G?` is asked for the verdict letter only; whatever git states
         # about how it got there is collected deliberately by verifier_reason
@@ -171,9 +184,9 @@ check_commits() {
         # A `git log` that fails outright computed no verdict, and a signed
         # commit nobody verified fails in both modes, as `B` does. git dies
         # this way when a verifier that fails exits before reading the payload
-        # git writes to it: SIGPIPE, exit 141, intermittent under load
-        # (PR-8zcc72). An unsigned commit falls to `*)` and is reported from
-        # its own headers, as before.
+        # git writes to it: SIGPIPE, exit 141, intermittent under load.
+        # An unsigned commit falls to `*)` and is reported from its own
+        # headers.
         if ! gstat=$(git log -1 --no-show-signature --format='%G?' "$c" 2>/dev/null) &&
             carries_signature "$c"; then
             gstat=failed
@@ -191,10 +204,9 @@ check_commits() {
                 verifier_reason "$c"
                 ;;
             (B|X|Y|R)
-                # Failing in BOTH modes, unchanged. What changed is the claim:
-                # git reports `B` when the verifier rejected the signature AND
-                # when the verifier could not run, and the old wording picked
-                # the first and printed it as fact (PR-74gcqg).
+                # Failing in BOTH modes. git reports `B` when the verifier
+                # rejected the signature AND when the verifier could not run,
+                # so the line claims neither.
                 echo "UNVERIFIED $c (the verifier did not accept this signature)"
                 _fail=1
                 verifier_reason "$c"
@@ -247,11 +259,11 @@ run_setup() {
     trust_root_env_guard
 
     # Unset is not unconfigured. Git documents the default as openpgp, and a
-    # project that leaves it alone signs perfectly well — this repository does.
-    # Reporting MISSING here named a non-problem on a correctly configured
-    # machine and returned before the proof below, which is the only half that
-    # measures anything (PR-mtmr7h). Defaulting also fixes a latent bug: the
-    # throwaway repository below did `git config gpg.format ""`.
+    # project that leaves it alone signs perfectly well. Reporting MISSING
+    # here would name a non-problem on a correctly configured machine and
+    # return before the proof below, which is the only half that measures
+    # anything. Defaulting also keeps the throwaway repository below from
+    # running `git config gpg.format ""`.
     _fmt=$(git config --get gpg.format 2>/dev/null)
     [ -n "$_fmt" ] || _fmt=openpgp
     _key=$(git config --get user.signingkey 2>/dev/null)

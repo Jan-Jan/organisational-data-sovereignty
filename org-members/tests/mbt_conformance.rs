@@ -311,9 +311,9 @@ impl MembershipDriver {
                 // so `root_hash()` succeeds. This does not change observable
                 // model state (member contents), only fills the hash cache.
                 // An ApplyDelta result is already calculated and is kept as is:
-                // recalculating it is to be refused (PR-zqvs7t). On a pending
+                // recalculating it is to be refused (LLR-j35sxz). On a pending
                 // trie recalculate has no lawful failure, so an Err is a crate
-                // defect (PR-499dzp).
+                // defect, and the step fails rather than swallowing it.
                 let t = if t.has_pending_changes() {
                     t.recalculate()
                         .unwrap_or_else(|e| panic!("recalculate after an accepted mutation: {e:?}"))
@@ -325,7 +325,7 @@ impl MembershipDriver {
                 // calculate_delta + apply_delta + verify_against must reproduce t's
                 // root (the model's round-trip law, against the real crate). Both
                 // tries are calculated here, so a missing root fails the step
-                // rather than skipping the check (PR-499dzp).
+                // rather than skipping the check.
                 if let Some(old) = &self.trie {
                     let old_root = old
                         .root_hash()
@@ -667,7 +667,7 @@ fn run_scenario(test: &str) {
 /// verifies: LLR-k89ahd, LLR-v6gfc7, LLR-fym7dy
 ///
 /// LLR-s97ywt and LLR-w92psx are carried for their unchanged-replacement-key
-/// refusal (PR-zz4exm): removing the `P2pKeyNotReplaced` guard from either
+/// refusal: removing the `P2pKeyNotReplaced` guard from either
 /// `delete_p2p_device` or `emergency_isolate_member` turns this test red
 /// (measured, 2026-10-03, three seeds each). Re-measured against the moved
 /// model and this driver (2026-10-03, base merge): red 5 of 5 random seeds
@@ -872,7 +872,7 @@ fn scenario_apply_verify_fail() {
 }
 /// verifies: REQ-wx3wpv, LLR-n5t6bn
 ///
-/// PR-vf5hdm: a handle moved between two members who are both still present,
+/// Regression: a handle moved between two members who are both still present,
 /// in one honest delta produced by `recalculate()`.
 #[test]
 fn scenario_handover_a_to_b() {
@@ -880,21 +880,21 @@ fn scenario_handover_a_to_b() {
 }
 /// verifies: REQ-wx3wpv, LLR-n5t6bn
 ///
-/// PR-vf5hdm: the same handover in the other identifier order.
+/// Regression: the same handover in the other identifier order.
 #[test]
 fn scenario_handover_b_to_a() {
     run_scenario("scenarioHandoverBtoA")
 }
 /// verifies: REQ-wx3wpv, LLR-n5t6bn
 ///
-/// PR-vf5hdm: two present members swap handles in one honest delta.
+/// Regression: two present members swap handles in one honest delta.
 #[test]
 fn scenario_handle_swap() {
     run_scenario("scenarioHandleSwap")
 }
 /// verifies: REQ-wx3wpv, LLR-n5t6bn
 ///
-/// PR-vf5hdm: a handle moved off a present member to a member the same honest
+/// Regression: a handle moved off a present member to a member the same honest
 /// delta admits.
 #[test]
 fn scenario_handover_to_new_member() {

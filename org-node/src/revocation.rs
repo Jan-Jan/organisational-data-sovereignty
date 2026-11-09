@@ -70,7 +70,7 @@ impl Acknowledgement {
     /// The bytes the Device signs: [`ACK_DOMAIN`], then the postcard encoding
     /// of `(org_id, member_id, device, epoch, root)`. LLR-bs6yxf.
     ///
-    /// Written by hand so that no step can fail (PR-y6ay44): postcard
+    /// Written by hand so that no step can fail (LLR-bs6yxf): postcard
     /// encodes each fixed-size byte array as its bytes, with no length, and
     /// the epoch as its LEB128 varint.
     pub fn signed_bytes(&self) -> Vec<u8> {

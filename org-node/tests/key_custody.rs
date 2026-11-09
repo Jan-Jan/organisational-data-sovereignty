@@ -4,7 +4,7 @@
 //!
 //! A DevicePublicKey is ed25519 and signs nothing, and a Member-as-a-group
 //! key is an X25519 key-agreement key drawn from its own seed
-//! (`X25519Keypair`); the Envelope carries no signature (REQ-ag6kqm).
+//! (`X25519Keypair`); the Envelope carries no signature (LLR-e7s4ye).
 
 use org_node::keys::{DeviceSecret, SigningKeypair, X25519Keypair};
 use org_node::MemberSeed;
@@ -254,7 +254,7 @@ fn from_keychain_bytes_refuses_any_length_but_32_and_echoes_no_byte() {
 #[test]
 fn lend_to_keychain_calls_the_writer_exactly_once_with_the_seed() {
     // The seed is compared inside the writer, not copied out of the lend
-    // (PR-aa7prn); the writer's refusal comes back.
+    // (LLR-37k2s3); the writer's refusal comes back.
     let secret = secret_of(0x07);
     let mut calls = 0;
     let mut saw_the_seed = false;
@@ -268,7 +268,7 @@ fn lend_to_keychain_calls_the_writer_exactly_once_with_the_seed() {
     assert_eq!(refused.unwrap_err().to_string(), "keychain refused");
 }
 
-// PR-aa7prn: the lend's return must not be a channel for the bytes. The
+// Regression: the lend's return must not be a channel for the bytes. The
 // writer returns `Result<(), E>` and the lend returns exactly that, with `E`
 // bound to `std::error::Error` (which no byte array implements), so neither
 // `|seed| *seed` nor `|seed| Err(*seed)` compiles. A generic return over the

@@ -3,39 +3,5 @@
 Recorded 2026-10-07 by the independent review of change
 `worktree-org-node-org-key-pair` (round 1, the last round: every finding low).
 Neither fix is mechanical, so both stay open.
-*(Amended 2026-10-07: PR-q8r32t was fixed by change
+*(Amended 2026-10-07: the resolved problem report on unreachable RevocationNotHeld arms was fixed by change
 `worktree-org-io-commit-workflow`; see its resolution.)*
-
-**PR-gnh3j2**: `send_update` sends the Organisation private key the record
-holds when it runs, not the key of the epoch the outgoing Envelope reaches, so
-if a later update was committed before an earlier one is sent, the receiver
-gets an earlier Envelope beside a later epoch's key, which REQ-szq3ud's
-wording ("the Organisation private key of the epoch the update reaches") does
-not allow.
-affects: REQ-szq3ud, LLR-6ymd6d
-opened: 2026-10-07
-status: resolved
-resolution: fixed 2026-10-13 (change `worktree-org-io-transport`, S4 task T5 of `docs/plans/2026-10-06-org-io-transport.md`; owner ruling 2026-10-07: S4 resolves it) — `send_update` is gone; the commit step builds every recipient's body inside the commit, an Organisation-information body carrying the Organisation private key that commit stored, and returns the bodies in `CommitOutcome.outgoing` (LLR-gdfqn9, LLR-6ymd6d as amended), so a later commit cannot change a body already returned; reproduced by `a_later_commit_cannot_change_an_earlier_body` (org-node/tests/outgoing_bodies.rs), red before against the send-time choice (`send_update`'s rule, through the test helper `body_to`: the earlier body carried the later commit's key), green after.
-
-Review finding-4. No key is disclosed beyond what the record's current
-Devices may hold, and the receiver refuses the message (its key does not match
-the chain's key at the Envelope's epoch, or the Envelope is stale), so nothing
-is committed wrongly; the defect is a requirement the tree does not meet in a
-rare ordering. The fix is either to refuse a send whose Envelope is not the
-record's current epoch (a new typed refusal, which the app must classify) or
-to reword REQ-szq3ud to the record's key at the time of sending.
-
-**PR-q8r32t**: `receive_and_verify` holds two `RevocationNotHeld` refusals
-that no input can reach, the `(None, None)` arm and the `let … else` on the
-first-admission branch, because an earlier arm already refuses every
-revocation about an Organisation the node does not hold; no test can exercise
-them, and they read as further REQ-vxqc5g sites.
-affects: REQ-vxqc5g, LLR-38e2kn
-opened: 2026-10-07
-status: resolved
-resolution: fixed 2026-10-07 (change `worktree-org-io-commit-workflow`): both unreachable `RevocationNotHeld` arms in `receive_and_verify` removed — a revocation now leaves the match on `WireMessage` at once through `receive_revocation` (whose unheld refusal is REQ-qrtsc9's, in `org-node/src/revocation.rs`), so neither the `(None, None)` arm nor the first-admission `let … else` exists; confirmed by `git grep -n "RevocationNotHeld\|(None, None)" -- org-node/src/service.rs`, which matches lines 783, 800 and 841 at the key-pair merge `1f52c36` and nothing on this change's tree, the variant now raised only in `org-node/src/revocation.rs`.
-
-Review finding-5, also noted and left alone by the change's deslop pass.
-Removing them means restructuring the receive path so the first-admission data
-travels in the match; `unreachable!` is denied by the workspace lints in
-production code.

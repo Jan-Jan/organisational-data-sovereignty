@@ -1,7 +1,7 @@
 # Problem reports — the app never commits its own first admission
 
-*Moved 2026-10-13 (S4, task T11 of `docs/plans/2026-10-06-org-io-transport.md`,
-ruling A):* the report this file held — the app's receiver loop called only
+*Moved 2026-10-13 (change `worktree-org-io-transport`, S4 task T11;
+ruling A: an item moves with the code that realises it, keeping its ID):* the report this file held — the app's receiver loop called only
 org-node's self-delete entry point, which refuses an Envelope for an
 Organisation the node holds no record of, so an invitee's app never committed
 its own first admission — moved to org-io with the receive loop, to

@@ -7,8 +7,7 @@ whenever a dependency changes. Note functional/performance requirements the
 SOUP must meet and known anomalies relevant to safety.
 -->
 
-**As built on 2026-10-25** (plan
-docs/plans/2026-10-24-sparse-merkle-tree.md, T2 and T6): diffed against
+**As built on 2026-10-25**: diffed against
 `sparse-merkle-tree/Cargo.toml` and the workspace `Cargo.lock`; the
 versions below are the locked ones. The dev-dependencies (`blake3`,
 `postcard`, `serde_json`, `proptest`) are test tooling and ship in no build.

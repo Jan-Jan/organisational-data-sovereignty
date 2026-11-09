@@ -79,20 +79,20 @@ already states — no requirement text was changed to fit a control.
 
 Two controls are **not fully implemented**, and both are recorded at the point
 of use rather than in a footnote: RC-mqtks7's second clause, which the code
-does not enforce (PR-zz4exm), and RC-mqtks7's first clause, which holds on the
+does not enforce (the replacement-key problem report), and RC-mqtks7's first clause, which holds on the
 direct API but not on the wire path. Controls that would reduce these risks
 further but have no requirement yet are named in "Controls identified but not
 minted", and are deliberately given no RC identifier — an identifier would
 assert a traced, tested control where there is none.
 
-(Corrected 2026-10-03: RC-mqtks7's second clause is now enforced — PR-zz4exm
+(Corrected 2026-10-03: RC-mqtks7's second clause is now enforced — the replacement-key problem report
 resolved; see the correction under HAZ-s39gbh's residual risk. Its first
 clause's wire-path bypass stands, and a removal may still install a key the
 removed device held *earlier*, which the second clause as worded does not
-reach — PR-z463w5, open; and the first clause is also reachable on the direct
-API by deleting and re-admitting the member — PR-fzu25w, open. Ruled later
+reach — the earlier-key problem report, open; and the first clause is also reachable on the direct
+API by deleting and re-admitting the member — the delete-and-re-add problem report, open. Ruled later
 the same day by the owner: a key no longer held is not refused, and a
-deleted `MemberId` is never legitimately re-added; PR-z463w5 and PR-fzu25w
+deleted `MemberId` is never legitimately re-added; the earlier-key problem report and the delete-and-re-add problem report
 are resolved by ruling. That moves the duty, not the risk: the software refuses
 every key still held (`DuplicateKey`, LLR-v6gfc7, LLR-fym7dy, LLR-gjj6bx — the
 removed device's own key included), but not a key no longer held — a
@@ -141,7 +141,8 @@ software has applied it since 2026-05-12.)
 **RC-4u22ba**: a member is identified by an identifier that does not change
 when that member's handle changes or when any of that member's keys are
 replaced, and an attempt to admit a member whose identifier is already present
-is rejected. mitigates: HAZ-jkc6tj
+is rejected.
+mitigates: HAZ-jkc6tj
 
 RC-4u22ba is the stable-identifier half only. An earlier draft of this control
 also asserted that "every grant is made against that identifier rather than
@@ -171,13 +172,13 @@ P2, and this is the highest occurrence estimate in the register. It needs no
 attacker: `delete_p2p_device` and `emergency_isolate_member` both take the
 replacement key from the caller and both keys have the same type, so passing
 the outgoing key back is a well-typed call that any integration can make by
-accident (PR-zz4exm names both operations). (Corrected 2026-10-03: that call
-is now refused — PR-zz4exm resolved. P2 is **not** re-scored here: the same
-accident with a key the device held *earlier* is still accepted (PR-z463w5),
-delete-and-re-admit removes a device with no key change at all (PR-fzu25w),
+accident (the replacement-key problem report names both operations). (Corrected 2026-10-03: that call
+is now refused — the replacement-key problem report resolved. P2 is **not** re-scored here: the same
+accident with a key the device held *earlier* is still accepted (the earlier-key problem report),
+delete-and-re-admit removes a device with no key change at all (the delete-and-re-add problem report),
 and the wire path is untouched. The owner has since ruled that the software
 does not refuse a key no longer held and that a deleted `MemberId` is never
-re-added — PR-z463w5 and PR-fzu25w resolved by ruling; key uniqueness, decided
+re-added — the earlier-key problem report and the delete-and-re-add problem report resolved by ruling; key uniqueness, decided
 the same day, refuses every key still held, the removed device's own included
 (LLR-fym7dy). The ruling transfers the remaining checks to the caller; it does
 not make the accident less likely, so passing a key no longer held — a member
@@ -189,12 +190,14 @@ check 11 in `org-members/README.md`. That residual, and the wire path, are what
 **RC-mqtks7**: on the direct membership API, removing a device key and
 replacing the member's member-as-a-group key are one operation that cannot be
 performed by halves, and a removal whose replacement key is the key being
-replaced is rejected. mitigates: HAZ-s39gbh
+replaced is rejected.
+mitigates: HAZ-s39gbh
 
 **RC-sq3yhp**: a member whose devices are compromised can be isolated in one
 operation that removes every device key and replaces the member-as-a-group key
 together, without removing the member from the organisation, and the state is
-reversible by adding a device key. mitigates: HAZ-s39gbh, HAZ-sc7wse
+reversible by adding a device key.
+mitigates: HAZ-s39gbh, HAZ-sc7wse
 
 Residual risk: **unacceptable, and the control is defective in two distinct
 ways.**
@@ -202,12 +205,12 @@ ways.**
 The second clause of RC-mqtks7 is not implemented: nothing compares the
 replacement key against the outgoing one, so the control's effectiveness is
 contingent on the caller getting it right, which is the one property a risk
-control must not have. Tracked as **PR-zz4exm**, open since 2026-08-31, whose
+control must not have. Tracked as **the replacement-key problem report**, open since 2026-08-31, whose
 stated fix begins with the test that reproduces it.
 
 (Corrected 2026-10-03: the second clause is now implemented. Both operations
 refuse an unchanged replacement key with `P2pKeyNotReplaced` and change
-nothing; PR-zz4exm is resolved, carried by LLR-s97ywt and LLR-w92psx, their
+nothing; the replacement-key problem report is resolved, carried by LLR-s97ywt and LLR-w92psx, their
 `*_rejects_unchanged_key` tests, a property test, and the Quint model's
 conformance. The residual is **not re-scored here**: the wire-path bypass of
 the first clause, below, is untouched, and re-evaluating HAZ-s39gbh is
@@ -238,7 +241,7 @@ through `delete_member` and `add_member` is the one the next correction
 names.) (Corrected 2026-10-03: "an external caller must go through
 `delete_p2p_device`" is too strong. `delete_member` followed by `add_member`
 with the same key and one device fewer reaches the same state on the direct
-API — PR-fzu25w, resolved by owner ruling the same day: a deleted `MemberId`
+API — the delete-and-re-add problem report, resolved by owner ruling the same day: a deleted `MemberId`
 is never legitimately re-added, so the same-id route is outside the API's
 contract. The same route with a **fresh** `MemberId` and the old key is inside
 it — a re-admitted person is a new member "whatever its handle or keys" — and
@@ -290,7 +293,7 @@ device that was offline. The chain anchor is what makes it recoverable rather
 than permanent.
 
 (Amended 2026-10-03, cause "an honest delta refused at the correct base":
-PR-vf5hdm — a delta this crate produced, moving a handle between two members
+the handle-handover problem report — a delta this crate produced, moving a handle between two members
 who are both still present, or handing a handle to a member the same delta
 admits (`scenario_handover_to_new_member`), is refused by `apply_delta` with
 `DuplicateHandle` depending on identifier order. It joins this hazard rather
@@ -449,11 +452,13 @@ Severity is the worst credible harm of the unavailability pathway, argued in
 "Method". P2: the input is attacker-chosen and the surface is a decoder.
 
 **RC-c4truv**: every rejected membership operation reports a typed error and no
-input, however malformed or hostile, causes a panic. mitigates: HAZ-8suua9
+input, however malformed or hostile, causes a panic.
+mitigates: HAZ-8suua9
 
 **RC-3ppkf6**: the number of device keys a member may hold is bounded, a
 duplicate device key is rejected, and a device key added to a member already at
-the bound is rejected. mitigates: HAZ-8suua9
+the bound is rejected.
+mitigates: HAZ-8suua9
 
 Residual risk: reduced, **not acceptable** — but for a different reason than
 the one an earlier draft gave, and the correction is the most consequential in
@@ -518,7 +523,8 @@ equally ACCEPTABLE under the matrix, so S1 is not being chosen to clear a bar.
 
 **RC-3qn5xg**: applying a modification leaves the existing record unchanged and
 produces the modified membership as a separate value, so a record already
-published cannot be altered in place. mitigates: HAZ-m2xfrm
+published cannot be altered in place.
+mitigates: HAZ-m2xfrm
 
 Residual risk: **acceptable.** S1 is acceptable at every probability under the
 matrix, and the control is structural — path-copying persistence rather than a
@@ -657,7 +663,7 @@ Per hazard, after controls:
 | Hazard | S/P | Residual | Why |
 |---|---|---|---|
 | HAZ-jkc6tj | S3/P1 | not acceptable | last step is a person reading a name |
-| HAZ-s39gbh | S3/P2 | not acceptable | control unimplemented in one clause (PR-zz4exm), bypassed on the wire path in the other (corrected 2026-10-03: PR-zz4exm resolved, the clause now holds; the wire-path bypass stands and the hazard is not re-scored; the owner's rulings leave reuse of a key no longer held — a Member-as-a-group key replaced earlier, the Device key of a device removed earlier while the member stayed, or a deleted member's key given to anyone else — to the administrator who admits or rotates, a key history in the software being the control declined; amended 2026-10-03 by owner ruling: a re-admitted person, a new member under a fresh `MemberId`, may bring the keys their previous membership held when it was deleted, and where a removed device was compromised fresh keys are the joiner's choice, not a software check — residual risk accepted by the owner; key uniqueness (LLR-v6gfc7, LLR-fym7dy, LLR-gjj6bx) now refuses any key still held) |
+| HAZ-s39gbh | S3/P2 | not acceptable | control unimplemented in one clause (the replacement-key problem report), bypassed on the wire path in the other (corrected 2026-10-03: the replacement-key problem report resolved, the clause now holds; the wire-path bypass stands and the hazard is not re-scored; the owner's rulings leave reuse of a key no longer held — a Member-as-a-group key replaced earlier, the Device key of a device removed earlier while the member stayed, or a deleted member's key given to anyone else — to the administrator who admits or rotates, a key history in the software being the control declined; amended 2026-10-03 by owner ruling: a re-admitted person, a new member under a fresh `MemberId`, may bring the keys their previous membership held when it was deleted, and where a removed device was compromised fresh keys are the joiner's choice, not a software check — residual risk accepted by the owner; key uniqueness (LLR-v6gfc7, LLR-fym7dy, LLR-gjj6bx) now refuses any key still held) |
 | HAZ-sc7wse | S3/P1 | not acceptable | bounded by reversibility; no confirmation step exists |
 | HAZ-y8h835 | S3/P2 | not acceptable | decisive control unstated, ungated and unrun (corrected 2026-09-09: now stated and gated in org-node — see the correction under this hazard's residual risk); staleness bound modelled only |
 | HAZ-bmv7cy | S3/P2 | not acceptable | re-validation weaker than admission; evidence is five example tests |
@@ -723,9 +729,9 @@ given an RC identifier until it does — that is `grill-requirements` work with 
 test written before the requirement is claimed, not analysis work.
 
 1. **Enforce the replacement-key check** (HAZ-s39gbh). Not a new control: make
-   RC-mqtks7's second clause true. PR-zz4exm, open, with the reproducing test
+   RC-mqtks7's second clause true. The replacement-key problem report, open, with the reproducing test
    already specified. The only item here that closes an unacceptable residual
-   risk outright. (Corrected 2026-10-03: done — PR-zz4exm resolved. It did not
+   risk outright. (Corrected 2026-10-03: done — the replacement-key problem report resolved. It did not
    close HAZ-s39gbh's residual outright after all: item 2's wire-path bypass
    still stands, and reuse of a key no longer held is left to the caller by
    owner ruling, a software key history being declined. Key uniqueness,

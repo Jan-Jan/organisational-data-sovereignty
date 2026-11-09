@@ -1,4 +1,4 @@
-//! The chain read (SDD-6qz9ms): read, parse through org-node, hand over a value.
+//! The chain read (SDD-4bbt47): read, parse through org-node, hand over a value.
 
 use async_trait::async_trait;
 use on_chain_client::{OrgAdmin, OrgRegistryClient};
@@ -8,7 +8,7 @@ use org_node::{OrgId, OrgNodeError, OrgState};
 #[async_trait]
 pub trait StateReader: Send + Sync {
     async fn read_state(&self, org_id: OrgId) -> Result<Option<OrgState>, OrgNodeError>;
-    /// The latest finalised block's number (LLR-t98pk9).
+    /// The latest finalised block's number (LLR-t2pve7).
     async fn finalised_block(&self) -> Result<u64, OrgNodeError>;
 }
 

@@ -428,7 +428,7 @@ fn a_held_organisations_messages_from_an_unlisted_device_are_refused_before_use(
 }
 
 // The `RevocationNotHeld` refusal is reached through `check_received`, so
-// it is no unreachable branch (PR-q8r32t). A store holds one Organisation,
+// it is no unreachable branch. A store holds one Organisation,
 // so the notice is about another Organisation than the one A's store
 // holds, from A's own listed Device. B's store, a provisional Member's,
 // holds no record and refuses the same notice with `OrgNotHeld`. Neither

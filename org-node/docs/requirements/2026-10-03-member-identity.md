@@ -1,6 +1,6 @@
 # Requirements — where a member's identifier comes from
 
-One requirement, minted while resolving PR-g7cfns. org-node made a member's
+One requirement, minted while resolving the resolved problem report on a MemberId derived from the member key. org-node made a member's
 `MemberId` by copying the bytes of its Member-as-a-group key
 (`member_id_from_key`, a proof-of-concept shortcut), so the identifier was a
 function of a key that is meant to change: after a Member rotates that key

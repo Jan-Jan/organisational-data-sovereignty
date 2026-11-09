@@ -77,7 +77,7 @@ fn delete_now(data_dir: Option<&Path>, service: &mut OrgService, device_key: &De
 /// A leftover whose key also names a live `persona-` file (a restored
 /// backup or a copy; org-io's own deletion renames the store first) is
 /// left untouched, its item kept while its store is live (RC-hd5des,
-/// PR-wch3zu); those keys are returned to be reported.
+/// LLR-upqj5g); those keys are returned to be reported.
 pub(crate) fn finish_leftovers(data_dir: &Path) -> Vec<DevicePublicKey> {
     let mut kept = vec![];
     // A listing that fails finishes nothing and loses nothing: each
@@ -109,7 +109,7 @@ pub(crate) struct OpenFailure {
 }
 
 /// The reports of the leftovers `finish_leftovers` kept beside a live
-/// store, by the Organisation that store's Persona is bound to (PR-wch3zu).
+/// store, by the Organisation that store's Persona is bound to (LLR-upqj5g).
 /// A live store that keeps a removal is reported with that removal's
 /// deadline; one that keeps none has no deadline.
 pub(crate) fn kept_leftover_failures(service: &OrgService, kept: &[DevicePublicKey]) -> Vec<OpenFailure> {

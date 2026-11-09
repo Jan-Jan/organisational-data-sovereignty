@@ -8,13 +8,13 @@
 #
 # This is a UNIT config (.guardrails/units.yaml at the repository root names
 # the units). Every doc_* value and every strict_paths/test_paths entry must
-# sit inside this unit's own directory, and doc_verification must NOT be set —
-# the verification record is repository-level (docs/verification).
+# sit inside this unit's own directory. The verification record is
+# repository-level: it is the change's signed squash commit message.
 #
 # Scripts run from the repository root, so paths and commands below are
 # repository-relative.
 guardrails_version: 0.5.1
-guardrails_commit: 2bc3cca04b75e1205d1c79a8e7b40c302036bf6f
+guardrails_commit: d6e285e71a55a2de7ef342801923ca8ed71f9c76
 
 # IEC 62304 software safety class. C: this crate decides what the chain says
 # the membership is (decoding org state and revive events); a wrong or stale
@@ -142,10 +142,11 @@ problem_open_max: 10
 # branches, floor 99%. That 100% does NOT close the shortfall: it counts only
 # functions that ran, and client.rs's unexecuted paths are not among them (see
 # the Makefile, beside the branch floors). Nor does it reach the chain writer:
-# the run builds without the `write` feature (PR-b795an).
+# the run built without the `write` feature (a problem report since resolved:
+# the writer joined the coverage run, below).
 #
-# The writer measured, 2026-10-07 (worktree-org-io-create, T4, resolves
-# PR-b795an): both recipes now build with `--features test-support,write` and
+# The writer measured, 2026-10-07 (worktree-org-io-create, T4, resolving that
+# report): both recipes now build with `--features test-support,write` and
 # run the six writer targets of the second verify_commands line, so the two
 # coverage commands measure both verify_commands lines. Statement: 47.66% lines
 # (428 of 898) / 48.53% regions (658 of 1356), up from 41.75% / 42.60%; floors

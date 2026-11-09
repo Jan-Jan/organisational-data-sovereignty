@@ -10,8 +10,10 @@ states that it holds none of it
 (`org-node/docs/architecture/2026-10-06-chain-authority.md`
 and the items it amends in `org-node/docs/architecture/2026-10-03-decomposition.md`).
 
-This file adds one software item, SDD-yg7n55, and fourteen low-level
-requirements under it (LLR-24mwew added by review round 1). The unit's Overview in `README.md` is amended for it.
+This file adds one software item, SDD-yg7n55, and low-level requirements
+under it (LLR-24mwew added by review round 1); the genesis ceremony's order
+and step errors are stated in `2026-10-20-domain-api.md`, and `proxied` in
+`2026-10-13-publish.md`. The unit's Overview in `README.md` is amended for it.
 Class C, the unit's class, with no per-item override.
 
 ## The constraints the owner set
@@ -82,37 +84,6 @@ chain, by targets this unit's gate does not run. That is the same recorded
 deviation, extended to the writer's transport, not a new one; the seam exists
 so that everything else in the writer is refined and gated.
 
-**LLR-a2acvh**: `genesis(ops, signatory, co_signatories, contract, root:
-OnChainRootHash, key: OrgPubKey) -> Result<Genesis, WriteError>` performs, in
-this order and each only after the previous one has succeeded: create the pure
-proxy under the controller (`WriteOps::create_pure`); fund it from the
-signatory with `FUND_AMOUNT` (`WriteOps::fund`); dispatch `proxied(proxy,
-map_account_call())`; dispatch `proxied(proxy, revive_update_runtime_call(
-contract, root, key, Epoch(0)))`; and returns `Genesis { proxy, admin }` where
-`admin` is `OrgAdmin(h160_of(proxy))`.
-satisfies: REQ-6jefu2
-superseded-by: LLR-hea6y2
-
-*Superseded 2026-10-20 (change worktree-org-io-domain-api, owner answer
-A4).* LLR-hea6y2
-(`on-chain-client/docs/architecture/2026-10-20-domain-api.md`)
-makes `genesis` the composition of `create_proxy` and `found_at`, which
-reads the chain before funding and mapping; the order of the four writes on
-a fresh proxy is unchanged.
-
-**LLR-z9vugt**: when a genesis step returns an error, or a dispatched step's
-outcome is not `Executed`, `genesis` returns `WriteError::Step { step, reason
-}` whose `step` is the `GenesisStep` that failed — `CreatePure`, `Fund`,
-`MapAccount` or `RecordGenesis` — and performs no later step.
-satisfies: REQ-6jefu2
-superseded-by: LLR-chy957
-
-*Superseded 2026-10-20 (change worktree-org-io-domain-api, owner answer
-A4).* LLR-chy957
-(`on-chain-client/docs/architecture/2026-10-20-domain-api.md`)
-states the rule for `create_proxy` and `found_at`, and names the step of
-the two new chain reads.
-
 **LLR-qs8jfw**: `build_dispatch_tx(co_signatories, call)` returns the call as
 a top-level extrinsic when there are no co-signatories, and otherwise
 `Multisig.as_multi_threshold_1(sorted co_signatories, call)`, the
@@ -164,7 +135,7 @@ for `Proxy.ProxyExecuted`, returning the field decoder's error unchanged, and
 `Other` for any other event without decoding its fields.
 `SubxtWriteOps::dispatch` only fetches the extrinsic's events, maps each
 through `observed_event` and returns `outcome_of`'s answer, so through `genesis` an inner failure is
-`WriteError::Step { step, .. }` naming the step (LLR-z9vugt) and through
+`WriteError::Step { step, .. }` naming the step (LLR-chy957) and through
 `submit_update` it is the update's error (LLR-hun4wf).
 satisfies: REQ-6jefu2, REQ-aat4yt
 
@@ -204,38 +175,6 @@ field names and constants are matched against runtime metadata, so each is
 part of the claim.
 satisfies: REQ-aat4yt
 
-**LLR-ywhd23**: `proxied(proxy, call)` builds `Proxy.proxy` with `real` the
-`Id` of the proxy's thirty-two bytes, `force_proxy_type` `None` and `call` the
-call given, and `map_account_call()` builds `Revive.map_account` with no
-arguments.
-satisfies: REQ-aat4yt, REQ-6jefu2
-superseded-by: LLR-59kxsr
-
-*Superseded 2026-10-08 (change worktree-org-io-publish, task T16a; owner
-ruling D4, hybrid: a change of meaning mints a new ID).* LLR-59kxsr
-(`on-chain-client/docs/architecture/2026-10-13-publish.md`)
-forces the `Any` proxy type instead of `None`.
-
-*Test retired 2026-10-13 (task T16a, hybrid rule).*
-`proxied_and_map_account_build_the_named_calls` (`on-chain-client/tests/write_pure.rs`)
-asserted `force_proxy_type` `None`, this item's superseded meaning, and failed
-once the writer forced `Any`; it was deleted, and its `map_account_call`
-assertion carried into `proxied_forces_the_any_proxy_type_by_name`
-(LLR-59kxsr, LLR-ywhd23). `proxied_wraps_any_call_unchanged_even_another_proxied_call`
-still passes and keeps its annotation.
-
-*Note 2026-10-14 (change worktree-guardrails-upgrade-6a9d6eb).*
-`proxied_wraps_any_call_unchanged_even_another_proxied_call`
-(`on-chain-client/tests/write_pure.rs`) now reads
-`// verifies: LLR-59kxsr, LLR-ywhd23`: it is pointed at this item's
-successor, LLR-59kxsr, as inherited coverage, not red-first evidence. The
-trace gate at guardrails 6a9d6eb fails a test whose `verifies:` names only
-out-of-force items.
-
-*Note 2026-11-09 (change `worktree-org-io-publish-2`, merge review MR1-C1):*
-the `write_pure.rs` tests named above now carry `// verifies: LLR-59kxsr`
-only; none cites this superseded item.
-
 **LLR-gjx3jn**: `multi_account_id(signatories, threshold)` returns the
 blake2-256 of the SCALE encoding of `("modlpy/utilisuba", sorted signatories,
 threshold)`, sorting the signatories before hashing, so the account it derives
@@ -256,11 +195,11 @@ satisfies: derived
 ## Where the evidence comes from
 
 The pure requirements — LLR-qs8jfw, LLR-yvq33e, LLR-5varjf, LLR-d4ftc8,
-LLR-m7wmmx, LLR-ywhd23, LLR-gjx3jn and LLR-kqxw9t — are those org-node's
-`chain_write_pure` and `calldata_typed` targets pinned under org-node's
-identifiers; the tests move with the code and are re-annotated here. The
-composition requirements — LLR-a2acvh, LLR-z9vugt, LLR-kv27gp and LLR-hun4wf —
-are new evidence, carried by a gated target driving `genesis` and
+LLR-m7wmmx, LLR-gjx3jn and LLR-kqxw9t, and `proxied`'s (now LLR-59kxsr) — are
+those org-node's `chain_write_pure` and `calldata_typed` targets pinned under
+org-node's identifiers; the tests move with the code and are re-annotated here.
+The composition requirements — LLR-kv27gp and LLR-hun4wf, and the genesis
+ceremony's (now LLR-hea6y2 and LLR-chy957) — are new evidence, carried by a gated target driving `genesis` and
 `submit_update` through a substitute `WriteOps` that records the steps it is
 asked for and can fail or answer `ApprovalRecorded` at any of them. Every new
 target joins `verify_commands` with `--features test-support,write`.

@@ -4,8 +4,8 @@ Six anomalies. Four were found by reading `app/src-tauri/src` and `app/src` for
 the hazard analysis in `app/docs/risk/`; PR-5mc4d8 was found by the verification
 gate afterwards and widened by the task that fixed the part of it a requirement
 covered; PR-j9f6kk was found by the second independent review. One of the six is
-resolved by this change; five stay open with dated checklist items in
-`docs/plans/2026-09-05-ratchet-setup.md`.
+resolved by this change; five stay unresolved, each with its own status
+below.
 
 Each is a defect in the product as it stands, not a gap in the process. Where
 the analysis found a *missing control* rather than a *wrong behaviour*, it is
@@ -75,8 +75,8 @@ Until then the badge means "this component has called `start_receiver` at least
 once since it mounted", which is not what it says.
 
 **PR-h6xpnh addendum, 2026-10-05: two more symptoms of the same root cause.**
-Found while decomposing the unit (`docs/plans/2026-10-05-app-architecture.md`,
-owner ruling 2). They are booked here rather than as new reports because the
+Found while decomposing the unit (the 2026-10-05 architecture change; booked
+under the owner's ruling of that day that each such defect is deferred work). They are booked here rather than as new reports because the
 cause is the same: the receiver's state lives in the component, not in the
 receiver.
 
@@ -146,57 +146,6 @@ provider, and this change records it as one: REQ-x3c8n2 carries
 
 Named in the hazard register under HAZ-ny7yvt, whose probability rests partly
 on this report staying open.
-
----
-
-**PR-u34uqm**: `Membership.svelte` and `Revoke.svelte` each returned an
-`$effect` cleanup function synchronously while the subscription setup it was
-meant to clean up ran un-awaited, so event listeners leaked and accumulated
-across tab switches.
-affects: RC-h7mnfj
-opened: 2026-09-14
-status: resolved
-
-**Scope widened 2026-09-14, before this report was first merged.** It was
-written naming `Membership.svelte` alone, because that is where the analysis
-found the defect and where its consequence — duplicated rows in the
-verification log — is visible. While rewiring the components, T4 of
-`docs/plans/2026-09-14-app-risk-analysis.md` found `Revoke.svelte` carrying the
-identical defect in miniature: a single `onRevoked` subscription assigned to
-`unlisten` after an un-awaited `await`, so the synchronous teardown had nothing
-to call and every visit to the Revoke tab left one live listener behind. Both
-are now routed through `subscribeAll`.
-
-The second instance is worth recording rather than folding in silently, because
-it says something about the defect's nature: it is not a mistake someone made
-once in a complicated component, it is what this `$effect`-plus-`async`-setup
-shape does every time it is written. A third component written the same way
-would have it too.
-
-Root cause: the effect body called `setup()` — an `async` function that pushes
-each resolved `UnlistenFn` into the shared `unlisteners` array — and then
-returned `() => { unlisteners.forEach(u => u()); unlisteners = []; }` without
-awaiting it. Svelte runs the returned cleanup synchronously on unmount, so on a
-tab switch the cleanup could run while `setup()`'s awaits were still pending:
-it emptied an array the pending subscriptions then pushed into, leaving five
-live listeners attached to a destroyed component and unreachable by any later
-cleanup. Each remount added five more. The observable symptom is duplicated
-rows in the verification log — the display whose trustworthiness HAZ-9fmhm4 is
-about — growing by one copy per visit to the tab.
-
-Fixed by RC-h7mnfj's restructuring: subscription setup moved out of both
-components into `subscribeAll()` in `app/src/lib/receiver.ts`, which awaits
-every `listen` call and resolves to a single cleanup closure over the completed
-array. Each component awaits that promise and stores the closure, so a cleanup
-can no longer run against a half-populated array.
-
-Reproduced by `app/tests/receiver.subscribe.test.ts` — `unsubscribes exactly the
-listeners it registered, including those whose listen call resolved late`. The
-reproduction was confirmed by mutation rather than only by construction: T4
-restored the old shape inside `subscribeAll` (cleanup returned before awaiting,
-unlisteners pushed on `.then` into an array the synchronous cleanup empties) and
-watched that test fail with `expected [ 'fast' ] to deeply equal [ 'fast',
-'slow' ]`, plus two further tests in the same file, then reverted to green.
 
 ---
 

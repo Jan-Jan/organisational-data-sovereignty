@@ -12,7 +12,7 @@ verified directly by `fuzz_first_admission_base` and four `admission_sender`
 tests, and was traced by no item here and refined by no low-level requirement.
 No gate could have caught that — `check-trace.sh` has an UNTRACED-DESIGN rule
 and no UNTRACED-REQUIREMENT rule — so this ledger was the only place it could
-be. It is now refined by LLR-ag9mgm, LLR-rjg3m2 and LLR-j6j95z below. Two of
+be. It is now refined by an earlier form of LLR-4rv4kr, and by LLR-rjg3m2 and LLR-j6j95z, below. Two of
 the twenty are traced by nothing by design: org-io's finalised-block expectation (moved 2026-10-07) and REQ-q92yac are
 expectations on provider units, not behaviours of this one.*
 
@@ -26,19 +26,19 @@ by ruling A, so every item left here carries LLRs and the exception is
 org-io's.)*
 
 *Re-parented 2026-10-08 (change `worktree-org-io-create`, owner's hybrid
-ruling on PR-zf924s).* REQ-ztdza4 is superseded by REQ-uk9rw7, which states
-the member-sender rule REQ-ztdza4 carried after its 2026-10-07 amendment. The
-items below that named REQ-ztdza4 on their `satisfies:` or `traces:` line now
+ruling on the resolved problem report on amendment in place instead of supersession).* An earlier form of REQ-uk9rw7 is superseded by REQ-uk9rw7, which states
+the member-sender rule that earlier form carried after its 2026-10-07 amendment. The
+items below that named the earlier form on their `satisfies:` or `traces:` line now
 name REQ-uk9rw7 in its place, with no other change: the authenticated
 endpoint's design item with its endpoint-identity and authenticated-sender
-items, SDD-rx2yvy's line (from `REQ-xa6smf, REQ-ztdza4,
-REQ-nhe2zu`), the Loopback dial item, SDD-8cpyfa's line, LLR-u6rq4s, SDD-72ddm6's line,
-LLR-3q63zv, and the endpoint lifecycle's design item with its bind-once and
+items, SDD-rx2yvy's line (which also named earlier forms of REQ-eqt23j and
+REQ-dwb9bq), the Loopback dial item, the lines of the items SDD-busuj3, SDD-kegag2
+and SDD-z4m57w replaced, earlier forms of LLR-283x6f, and the endpoint lifecycle's design item with its bind-once and
 named-Persona items. *(2026-10-13, S4 task T10: the endpoint and lifecycle
 items moved to org-io, `org-io/docs/architecture/2026-10-07-transport.md`,
 re-parented to org-io's requirements; S4 task T12: the Loopback dial item
 followed, the same way.)* Prose that cites
-"REQ-ztdza4 as amended" is history and is left as written.
+that earlier form "as amended" is history and is left as written.
 
 *Amended 2026-10-08 (ruling B, change `worktree-org-io-create`).* "The seam"
 below says this unit "performs the chain and peer-to-peer I/O" and that
@@ -46,7 +46,7 @@ below says this unit "performs the chain and peer-to-peer I/O" and that
 `ChainOps` seam. org-node now performs no chain I/O: org-io owns the
 `OrgService`, the chain connection, the reader, the writer and the user's
 signatory key, reads each Organisation's state and passes it in as a value
-(`2026-10-08-values.md`, LLR-mn5c2q). The peer-to-peer I/O
+(`2026-10-08-values.md`, an earlier form of LLR-7en38k). The peer-to-peer I/O
 stays here until stage S4. The text below is kept as the record of the
 decomposition it described.
 
@@ -88,7 +88,7 @@ not a file: `receive_and_verify` and `revoke_member` are separate items that
 happen to be methods on one struct, and the `ChainOps` seam is a third that
 exists precisely so the first two can be exercised without a chain. *(This
 said "Eight". Seven items name `service.rs` as their location: SDD-ueh4tm,
-SDD-89es4z, SDD-rx2yvy, SDD-8cpyfa, SDD-72ddm6, the endpoint lifecycle's item (moved to org-io 2026-10-13) and org-io's chain-connection item (moved 2026-10-07).
+SDD-89es4z, SDD-rx2yvy, the items SDD-busuj3 and SDD-kegag2 and SDD-z4m57w replaced, the endpoint lifecycle's item (moved to org-io 2026-10-13) and org-io's chain-connection item (moved 2026-10-07).
 Counted by review round 7.)*
 
 **The decisive property of the unit is one function.**
@@ -103,8 +103,8 @@ This said "eight checks" and "ten of this ledger's low-level requirements".
 The signature check is removed — an Envelope carries no signature, and the
 on-chain Membership root at a newer epoch is the sole authority — so seven
 remain: the Organisation, the Sequence number, the Change set decode, the base
-root, the apply, the chain read with its epoch, and the root match. LLR-mcdh85
-now states the absence of the signature check, and LLR-fuq379 states that the
+root, the apply, the chain read with its epoch, and the root match. An earlier form of LLR-283x6f
+stated the absence of the signature check, and LLR-fuq379 states that the
 four chain-free checks run before the chain is read.
 
 ## SDD-swtd3w — Value types and the rejection vocabulary
@@ -115,41 +115,40 @@ four chain-free checks run before the chain is read.
 together with the vocabulary in which every refusal is reported — a typed
 variant per rejection path **on the receive-and-commit path**, so a caller can
 state *why* a change was refused rather than only that it was.
-traces: REQ-gju89b, REQ-9g6as6, REQ-bcxz96, REQ-y7tsft, REQ-8jb4ny, REQ-ech45n, REQ-g2537c, REQ-8amu2a, REQ-tqap3r, REQ-kt877x, REQ-yp75u9, REQ-c29s93, REQ-dwb9bq, REQ-vxqc5g, REQ-szq3ud, REQ-3dsweu, REQ-m2xh8q, REQ-b462sh
+traces: REQ-gju89b, REQ-9g6as6, REQ-rv4dwb, REQ-y7tsft, REQ-8jb4ny, REQ-ech45n, REQ-g2537c, REQ-8amu2a, REQ-tqap3r, REQ-kt877x, REQ-yp75u9, REQ-zxgd46, REQ-dwb9bq, REQ-vxqc5g, REQ-szq3ud, REQ-3dsweu, REQ-m2xh8q, REQ-b462sh
 
-*Traces amended 2026-10-20 (change worktree-org-io-domain-api): REQ-fwfku9 →
-REQ-g2537c; REQ-bwx7eg → REQ-dwb9bq; REQ-tb4f8p → REQ-dwb9bq.* The
+*Traces amended 2026-10-20 (change worktree-org-io-domain-api): REQ-g2537c and
+REQ-dwb9bq replace the earlier forms the item traced.* The
 vocabulary's additions and removals of that change are LLR-3sddey's, which
-supersedes LLR-j5vbqj.
+supersedes the earlier form of LLR-3sddey.
 
-*Amended 2026-10-06 (change `worktree-org-io-commit-workflow`, stage S3 of
-`docs/plans/2026-10-06-org-io-roadmap.md`).* Traces REQ-m2xh8q, REQ-b462sh and REQ-tb4f8p for the eight refusals of
-LLR-n67aw8, in `2026-10-07-commit-workflow.md`.
+*Amended 2026-10-06 (change `worktree-org-io-commit-workflow`, stage S3).* Traces REQ-m2xh8q, REQ-b462sh and an earlier form of REQ-dwb9bq for the eight refusals of
+an earlier form of LLR-3sddey, in `2026-10-07-commit-workflow.md`.
 *(Merged 2026-10-07 with the key-pair change's note below, at this branch's
 merge of master `1f52c36`: the trace list is the union of both.)*
 
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
-`types.rs` loses `OrgSecret` and `InviteId` (LLR-qsjde3, LLR-ms8njy), so the
+`types.rs` loses `OrgSecret` and `InviteId` (LLR-qsjde3 and an earlier form of LLR-g3wmen), so the
 secrets it holds are the member seed, the device seed and the Organisation
 private key; and `OrgNodeError` gains `MalformedMessage`, `OrgKeyMismatch`,
-`RevocationNotHeld` and `RevocationNotForThisDevice` (LLR-j5vbqj, in
+`RevocationNotHeld` and `RevocationNotForThisDevice` (an earlier form of LLR-3sddey, in
 `2026-10-07-org-key-pair.md`). The item traces
-REQ-c29s93, REQ-bwx7eg, REQ-vxqc5g, REQ-szq3ud and REQ-3dsweu too. Notes below that list
+REQ-zxgd46, REQ-dwb9bq, REQ-vxqc5g, REQ-szq3ud and REQ-3dsweu too (the first two then in earlier forms). Notes below that list
 the Organisation secret among `types.rs`'s secrets are history.
 
 *Amended 2026-10-06 (change `worktree-org-node-chain-authority`, independent
 review round 1, finding-1):* traces REQ-yp75u9 too, for the refusal
-`PersonaAlreadyBound` that LLR-mxskg9 adds.
+`PersonaAlreadyBound` that an earlier form of LLR-3sddey added.
 
 *Amended 2026-10-06 (change `worktree-org-node-chain-authority`):* traces
-REQ-kt877x too, for the refusal `AdmissionNotOurs` that LLR-mxskg9 adds.
+REQ-kt877x too, for the refusal `AdmissionNotOurs` that an earlier form of LLR-3sddey added.
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 `OrgNodeError::BadSignature` is removed with the Envelope signature, and the
 item gains the refusals of the provisional-update and expected-admission paths
 — `ProvisionalLimit`, `AdmissionNotExpected` and `NoProvisionalUpdate` — stated
-by LLR-mxskg9 in `2026-10-06-chain-authority.md`,
-so it traces REQ-fwfku9, REQ-8amu2a and REQ-tqap3r too.
+by an earlier form of LLR-3sddey in `2026-10-06-chain-authority.md`,
+so it traces REQ-g2537c (then in an earlier form), REQ-8amu2a and REQ-tqap3r too.
 
 *Amended 2026-10-05 by the org-node type-safety change, which re-homed its
 value types here at its merge of this file.* The item also owns
@@ -159,7 +158,7 @@ the Persona identifier, the epoch and the Sequence number, with their
 construction, formatting and serialised form — so it traces REQ-y7tsft too —
 and the two variants that change adds to `OrgNodeError`, `InvalidKey` and
 `InvalidField { field, reason }`. Its low-level requirements for them,
-LLR-sz4xhc, LLR-s7whrn and LLR-ayrdr8, are in `2026-10-04-type-safety.md`.
+LLR-sz4xhc, LLR-s7whrn and an earlier form of LLR-mkvx2k, are in `2026-10-04-type-safety.md`.
 The count of `OrgNodeError::Chain(String)` construction sites below is fifty
 on the tree it was measured on; after that change it is **forty-five**
 (`grep -o 'OrgNodeError::Chain(' -r org-node/src | wc -l`, 2026-10-05), the
@@ -175,11 +174,10 @@ SDD-pa6p7w. It had been placed under SDD-pa6p7w, whose section claimed
 `types.rs` for it.)*
 
 *(Note 2026-10-05, at the merge of master `1feb608` into
-`worktree-person-shared-types`; reworded the same day by
-docs/plans/2026-10-05-switch-trim.md: on that branch `types.rs` also holds
+`worktree-person-shared-types`; reworded the same day: on that branch `types.rs` also holds
 `OrgPrivateKey`, and `OrgPublicKey` is an X25519 key. LLR-mmdu38 and
-LLR-ayrdr8 are amended in place, in `2026-10-04-type-safety.md`. LLR-322xfu
-(`OrgPrivateKey`), LLR-3jjgtw (`OrgPublicKey`'s parse) and LLR-sj7cd5
+an earlier form of LLR-mkvx2k are amended in place, in `2026-10-04-type-safety.md`. LLR-322xfu
+(`OrgPrivateKey`), LLR-3jjgtw (`OrgPublicKey`'s parse) and an earlier form of LLR-9qavm7
 (`ensure_distinct_from`) also constrain `types.rs`. These three are in
 `2026-10-05-unsigned-envelope.md`, LLR-3jjgtw under SDD-sxp8hb, which
 builds the Organisation's key pair.)*
@@ -209,7 +207,7 @@ satisfies: derived
 `OrgNodeError` variant, distinct from every other, and the two that carry the
 values that caused them — `StaleSeq` and `StaleEpoch` — carry both the observed
 value and the value it was judged against.
-satisfies: REQ-9g6as6, REQ-bcxz96
+satisfies: REQ-9g6as6, REQ-rv4dwb
 
 *Narrowed 2026-10-04 by review round 3, because the clause as written was
 **false of the tree**. It said "each rejection path of this unit", and the unit
@@ -257,17 +255,17 @@ each from its own secret (the member seed and the Organisation private key).
 The Organisation public key a node publishes is built from its key pair only
 through `OrgPublicKey`'s parse, `person`'s X25519 validity check. No key here
 signs or verifies anything.
-traces: REQ-ag6kqm, REQ-8jb4ny, REQ-ech45n, REQ-y7tsft
+traces: REQ-8jb4ny, REQ-ech45n, REQ-y7tsft
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+`worktree-person-shared-types`).* This
 item described one ed25519 keypair whose verifying key both signed changes to
 membership as the `P2pMemberKey` and served as the `P2pDeviceKey`. Nothing
 signs now, and a Member-as-a-group key is an X25519 key from its own seed.
 LLR-3jjgtw and LLR-98ufry also constrain this item; they are in
 `2026-10-05-unsigned-envelope.md`. *(Corrected 2026-10-05 by review round 3,
-finding-9: this also named LLR-sj7cd5 and LLR-322xfu, which constrain
+finding-9: this also named an earlier form of LLR-9qavm7, and LLR-322xfu, which constrain
 `create_organisation` (SDD-89es4z) and `types.rs` (SDD-swtd3w) and sit under
 those items.)* LLR-56hc77 and LLR-bwb9pu,
 amended in place, are in `2026-10-04-type-safety.md`.
@@ -275,8 +273,8 @@ amended in place, are in `2026-10-04-type-safety.md`.
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 This said the `P2pMemberKey` "signs a change to membership". An Envelope
 carries no signature, so `SigningKeypair::sign` and `keys::verify`, whose only
-caller was the Envelope, are removed; the item still traces REQ-ag6kqm, which
-now requires that no signature be checked, and LLR-na7p4w states that nothing
+caller was the Envelope, are removed; the item still traced an earlier form of LLR-8528ud, which
+then required that no signature be checked and stated that nothing
 here produces or checks one.
 
 *Amended 2026-10-05 by the org-node type-safety change:* a keypair is built
@@ -297,14 +295,14 @@ satisfies: derived
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+`worktree-person-shared-types`).* This
 item also required the same signature over the same message. Nothing in
 org-node signs. It is derived now, since no requirement asks for a signature;
 it is assessed in `org-node/docs/risk/2026-10-05-envelope-authenticity.md`.
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 This also required "the same signature over the same message" and satisfied
-REQ-ag6kqm, the signature requirement. Nothing in org-node signs now, so the
+an earlier form of LLR-8528ud, the signature requirement. Nothing in org-node signs now, so the
 signature clause has nothing to range over; what remains is that a Persona's
 keys survive the round trip through its stored seeds, which no requirement
 states, so it is derived and assessed in
@@ -316,8 +314,7 @@ rebuilt from `to_seed`". That change removed `to_seed` and `from_seed`
 a `MemberSeed` or a `DeviceSeed`. `a_keypair_rebuilt_from_its_seed_signs_identically`
 checks both roles.)*
 
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* a device seed is held as a
+*Amended 2026-10-08 (S4, task T3):* a device seed is held as a
 `DeviceSecret` and leaves it only through `lend_to_keychain`; a `DeviceSecret`
 rebuilt from those bytes (`from_keychain_bytes`) has the same Device public
 key. `SigningKeypair::device_seed` is gone (LLR-37k2s3).
@@ -331,12 +328,12 @@ satisfies: derived
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+`worktree-person-shared-types`).* This
 item said `member_key()` and `device_key()` wrap one verifying key. A
 Member-as-a-group key is now an X25519 key from its own seed.
 
 *Parent stale, noted 2026-10-05 by review round 4 (finding-5).* Since the
-amendment of 2026-10-05, REQ-ztdza4 and REQ-xa6smf check nothing about a
+amendment of 2026-10-05, the earlier forms of REQ-uk9rw7 and REQ-eqt23j checked nothing about a
 sender's keys, so neither implies this item, and `satisfies:` above names
 them only until it is re-traced. By owner ruling of 2026-10-05 the re-trace is
 left to chain-authority's change 1.
@@ -349,67 +346,11 @@ DevicePublicKey is the iroh identity. The item is derived, and assessed in
 independent review round 2, finding-10: "the DevicePublicKey" read "the
 device key", the term `org-node/docs/CONTEXT.md` retires for new text.)*
 
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* a Persona's Device public key is
+*Amended 2026-10-08 (S4, task T3):* a Persona's Device public key is
 the ed25519 verifying key of its device seed as `DeviceSecret::device_key`
 derives and parses it when the secret is built (LLR-37k2s3); `create_persona`
 returns the seed as that `DeviceSecret` and keeps only the public key.
 `SigningKeypair::device_key` still wraps the verifying key of a key pair.
-
-**LLR-na7p4w**: `VerifyContext` holds the expected Organisation, the
-Sequence-number guard and the last committed epoch, and no key:
-`verify_envelope_against_chain` decides from the Envelope, that context and
-the chain reader alone.
-satisfies: REQ-ag6kqm
-superseded-by: LLR-8528ud
-
-*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
-code that did what this item states, had no product caller and is deleted.
-LLR-8528ud states the behaviour now: the decision is `verify`'s match, from
-the chain state and the held provisional organisations alone (LLR-8528ud);
-`VerifyContext` keeps the expected Organisation and the guard for
-`check_chain_free`, and its `last_committed_epoch` is deleted. The text above
-is kept as it stood.
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item stated that `verify` accepts a signature the keypair produced. org-node
-verifies no signature (REQ-ag6kqm); `keys::verify` is gone.
-
-**LLR-9fvb3y**: a genuine Envelope relayed by a device other than the one that
-built it is committed on both Receive operations when it verifies against the
-chain: the delivering device is not an input to verification.
-satisfies: REQ-ag6kqm
-superseded-by: LLR-283x6f
-
-*Superseded 2026-10-22 (change `worktree-org-io-domain-api`, dispatcher decision O4 of its plan assembly):*
-both Receive operations are removed, and the relay rule is replaced by the
-sender rule: what is received is acted on only from a Device the current
-record lists, and refused with `SenderNotListed` from any other, whoever
-built it (LLR-283x6f). An Envelope relayed by an unlisted Device is no
-longer committed. Verification, which adopts, still never consults the
-Device that delivered what it adopts (LLR-283x6f, LLR-8528ud).
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item stated that `verify` refuses a signature by any other key. Nothing is
-signed, and the device that delivers an Envelope decides nothing (REQ-ag6kqm,
-REQ-xa6smf, REQ-ztdza4).
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-LLR-na7p4w said `verify` accepts this keypair's own signature, and LLR-9fvb3y
-that it refuses another key's. `keys::verify` and `SigningKeypair::sign` are
-removed with the Envelope signature (their only caller). LLR-na7p4w now states
-that absence, which REQ-ag6kqm requires and the compiler enforces, as for
-LLR-836z24. LLR-9fvb3y is rewritten to the nearest true statement about the
-keys that remain — the other side of LLR-e58j8m — and is derived, assessed in
-`org-node/docs/risk/2026-10-06-chain-authority.md`.
-*(Merged 2026-10-06 with master `5f7c177`, which amended LLR-na7p4w and
-LLR-9fvb3y in place for the same ruling: master's texts stand, and this note
-describes this change's texts before that merge.)*
 
 ## SDD-kk2y3e — The Envelope
 
@@ -418,11 +359,11 @@ describes this change's texts before that merge.)*
 **SDD-kk2y3e**: the wire form of a change to membership. It binds the
 Organisation identifier, the Sequence number and the encoded Change set, and
 carries no signature. The item also owns the decode a receiver performs on it.
-traces: REQ-ag6kqm, REQ-gju89b, REQ-9g6as6
+traces: REQ-gju89b, REQ-9g6as6
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+`worktree-person-shared-types`).* This
 item described a signed transcript and the signature check a receiver ran
 before anything else. (The section heading read "The signed Envelope".)
 
@@ -430,7 +371,7 @@ before anything else. (The section heading read "The signed Envelope".)
 This item was "the authenticated wire form": the transcript that is signed, and
 the signature check a receiver ran before anything else. The owner ruled that
 an Envelope carries no signature and that the on-chain root at a newer epoch is
-the sole authority over a received Change set (REQ-ag6kqm as amended).
+the sole authority over a received Change set (an earlier form of LLR-8528ud, as amended).
 `SignedDeltaEnvelope` is renamed `Envelope`; its `signature` field,
 `verify_signature`, the `sig_bytes` serde helper and `build`'s key argument
 are removed. The heading keeps its old title because a heading is part of the
@@ -445,14 +386,13 @@ Change set bytes, in that order and nothing else; no transcript is signed.
 satisfies: REQ-9g6as6, REQ-dwb9bq
 
 *Re-pointed 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-round 2, finding-4).* This item satisfied REQ-ag6kqm alone, superseded by
-LLR-8528ud. It now satisfies REQ-9g6as6, which bounds the decode of this
+round 2, finding-4).* This item satisfied only the item LLR-8528ud replaced. It now satisfies REQ-9g6as6, which bounds the decode of this
 wire form, and REQ-dwb9bq, whose amendment of that day states that no
 signature is checked in the decision.
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+`worktree-person-shared-types`).* This
 item described the signed transcript, which no longer exists. The three fields
 it bound are what the wire form carries.
 
@@ -464,7 +404,7 @@ satisfies: REQ-gju89b
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+`worktree-person-shared-types`).* This
 item said `build` signs the transcript over the encoded bytes. Nothing is
 signed.
 
@@ -485,54 +425,13 @@ satisfies: REQ-9g6as6
 **LLR-ybn5pr**: an Envelope built for one Organisation is refused with
 `OrgIdMismatch` by a receiver expecting another, before its Change set is
 decoded.
-satisfies: REQ-ag6kqm, REQ-gju89b
+satisfies: REQ-gju89b
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+`worktree-person-shared-types`).* This
 item said altering the Organisation identifier breaks the signature. With no
 signature, the receiver's expected Organisation is what refuses it.
-
-**LLR-cs4mpb**: an Envelope whose Sequence number is at or below the
-receiver's mark is refused with `StaleSeq` before its Change set is decoded,
-and one whose Sequence number is above the mark but not the epoch of the chain
-state it is verified against is refused with `SeqNotEpoch`.
-satisfies: REQ-ag6kqm
-superseded-by: LLR-76bhw9
-
-*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
-code that did what this item states, had no product caller and is deleted.
-LLR-76bhw9 states the behaviour now: the receive path refuses a number at or
-below the mark with `StaleSeq` (via `check_chain_free`) and one that is not
-the record's epoch plus one with `SeqNotEpoch` (LLR-76bhw9). The text above is
-kept as it stood.
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item said altering the Sequence number breaks the signature. The mark
-(REQ-6yu72z) and the chain's epoch (REQ-txvtm9) refuse it now.
-
-**LLR-9sknpa**: Change set bytes that do not decode are refused with
-`MalformedDelta`, and a Change set that decodes but does not extend the
-receiver's record is refused with `DeltaBaseMismatch`.
-satisfies: REQ-ag6kqm
-superseded-by: LLR-76bhw9
-
-*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
-code that did what this item states, had no product caller and is deleted.
-LLR-76bhw9 states the behaviour now: `MalformedDelta` and `DeltaBaseMismatch`
-are the receive path's chain-free refusals (LLR-76bhw9). The text above is
-kept as it stood.
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item said altering the delta bytes breaks the signature. The decode and the
-base-root check refuse such bytes now, and the root match refuses any that
-survive both.
 
 **LLR-pzde8b**: an `Envelope` holds exactly the Organisation identifier, the
 Sequence number and the Change set bytes; it has no signature field and no
@@ -540,19 +439,18 @@ Sequence number and the Change set bytes; it has no signature field and no
 satisfies: REQ-dwb9bq, REQ-9g6as6
 
 *Re-pointed 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-round 2, finding-4).* This item satisfied REQ-ag6kqm alone, superseded by
-LLR-8528ud. It now satisfies REQ-dwb9bq, whose amendment of that day states
+round 2, finding-4).* This item satisfied only the item LLR-8528ud replaced. It now satisfies REQ-dwb9bq, whose amendment of that day states
 that no signature is checked in the decision, and REQ-9g6as6, which bounds
 the decode of these three fields.
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+`worktree-person-shared-types`).* This
 item stated that `verify_signature` refuses any key but the signer's. It is
 gone with the signature.
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-LLR-ybn5pr, LLR-cs4mpb and LLR-9sknpa said that altering the identifier, the
+LLR-ybn5pr and earlier forms of LLR-76bhw9 said that altering the identifier, the
 Sequence number or the Change set bytes of a built Envelope makes its
 signature fail to verify, and LLR-pzde8b that `verify_signature` refuses any
 other key. The signature is gone, so tampering is no longer caught at the
@@ -598,19 +496,6 @@ satisfies: REQ-6yu72z
 **LLR-f5kq88**: `check` does not move the mark.
 satisfies: REQ-mr5abb
 
-**LLR-uc7cej**: `advance` moves the mark to the offered number only when that
-number is greater than the mark, and otherwise leaves it where it was.
-satisfies: REQ-mr5abb
-superseded-by: LLR-34c5y3
-
-*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
-code that did what this item states, had no product caller and is deleted.
-LLR-34c5y3 states the behaviour now: `SeqGuard::advance` is deleted with its
-last caller; the mark moves only when an adoption sets the record's Sequence
-number to the adopted, greater epoch (LLR-34c5y3). The text above is kept as
-it stood.
-
 **LLR-duwz79**: `from_last_seen` starts the guard at the given mark, and
 `last_seen` reports the mark currently held.
 satisfies: REQ-mr5abb
@@ -631,20 +516,20 @@ the Change set decode and the base root — runs before the chain is read, so a
 stranger's Envelope is refused without costing a chain read; and the watermark
 moves only after the decisive check has passed. Nothing about who delivered
 the Envelope is checked.
-traces: REQ-wp2nyc, REQ-bvh8v6, REQ-8gz8bu, REQ-gju89b, REQ-ag6kqm, REQ-6yu72z, REQ-mr5abb, REQ-nhe2zu, REQ-txvtm9, REQ-bcxz96, REQ-f2k4tr
+traces: REQ-dwb9bq, REQ-gju89b, REQ-6yu72z, REQ-mr5abb, REQ-rv4dwb, REQ-f2k4tr
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+`worktree-person-shared-types`).* This
 item put an authenticity check first, on an unauthenticated sender. Nothing
-about the sender is checked (REQ-ag6kqm). LLR-9f5hmr, in
-`2026-10-05-unsigned-envelope.md`, also refines this item.
+about the sender is checked (an earlier form of LLR-8528ud). An earlier form of LLR-76bhw9, in
+`2026-10-05-unsigned-envelope.md`, also refined this item.
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 This said "the cheap authenticity checks come first so that untrusted bytes
 are never decoded on behalf of an unauthenticated sender". There is no
 authenticity check now: an Envelope carries no signature, and bytes from any
-peer reach the decoder, which REQ-9g6as6 and LLR-hs7g6j already require to be
+peer reach the decoder, which REQ-9g6as6 and an earlier form of LLR-7u3dg7 already required to be
 total. What the order protects instead is the chain read (RC-mj6gjq,
 REQ-f2k4tr), so the item traces REQ-f2k4tr and LLR-fuq379, in
 `2026-10-06-chain-authority.md`, exposes the
@@ -666,143 +551,9 @@ in force over `check_chain_free`, tested on the receive path.
 `OrgIdMismatch` **before the Change set it carries is decoded**.
 satisfies: REQ-gju89b
 
-**LLR-mcdh85**: `verify_envelope_against_chain` checks no signature and no
-sender: after the Organisation binding, the only check before the Change set
-bytes are decoded is the Sequence-number mark, and bytes that do not decode
-are refused with `MalformedDelta`.
-satisfies: REQ-ag6kqm
-superseded-by: LLR-283x6f
-
-*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
-code that did what this item states, had no product caller and is deleted.
-LLR-283x6f states the behaviour now: no signature is checked (LLR-pzde8b) and
-the order before the decode is LLR-fuq379's, but the receive path now judges
-the sender before anything is used (LLR-283x6f). The text above is kept as it
-stood.
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item required the signature to be checked before the delta bytes are decoded,
-refusing with `BadSignature`.
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-This said the signature is checked before the delta bytes are decoded and a
-failure refused with `BadSignature`. The owner ruled that an Envelope carries
-no signature and that the decision rests on the Organisation, the Sequence
-number, the Change set and the chain alone (REQ-ag6kqm as amended);
-`VerifyContext.author_member_key` and `BadSignature` are removed.
-
 **LLR-xpbkp5**: the sequence check runs **before the delta bytes are decoded**,
 so a replayed envelope is refused without its Change set bytes being parsed.
 satisfies: REQ-6yu72z
-
-**LLR-992mbf**: the delta's base root must equal the local trie's current root,
-and a mismatch is refused with `DeltaBaseMismatch` before the delta is applied.
-satisfies: REQ-wp2nyc
-superseded-by: LLR-76bhw9
-
-*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
-code that did what this item states, had no product caller and is deleted.
-LLR-76bhw9 states the behaviour now: the base-root check (`DeltaBaseMismatch`)
-is made on receipt by `check_chain_free`, before the Change set is applied
-(LLR-76bhw9). The text above is kept as it stood.
-
-**LLR-8m99q2**: an Organisation for which the chain reports no state is refused
-with `OrgNotOnChain`, distinctly from a chain read that failed, which is
-refused with `Chain`.
-satisfies: REQ-bvh8v6
-superseded-by: LLR-rr558z
-
-*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
-code that did what this item states, had no product caller and is deleted.
-LLR-rr558z states the behaviour now: `verify` given `None` refuses with
-`OrgNotOnChain` (LLR-rr558z). The text above is kept as it stood.
-
-*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place: a
-narrowing, the meaning of what stays unchanged. "An Organisation for which
-the chain reports no state" reads "verification given no chain state
-(`None`)", still refused with `OrgNotOnChain`. The clause "distinctly from a
-chain read that failed, which is refused with `Chain`" leaves org-node,
-which no longer sees a read: telling absence from failure is the chain-read
-requirement org-io holds (moved 2026-10-07 to org-io's architecture ledger,
-`org-io/docs/architecture/2026-10-08-org-io.md`). Its
-absent-state test stays (`verify_against_chain.rs`,
-`rejects_when_org_absent_from_chain`); its failed-read test is deleted.
-
-**LLR-vf5mjx**: the epoch the chain reports must be **strictly** greater than
-the last committed epoch, and otherwise the change is refused with `StaleEpoch`
-carrying both.
-satisfies: REQ-8gz8bu
-superseded-by: LLR-rr558z
-
-*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
-code that did what this item states, had no product caller and is deleted.
-LLR-rr558z states the behaviour now: a chain epoch lower than the record's is
-`Inconsistent`, an equal one `InStep` or `Inconsistent` (LLR-rr558z); nothing
-is refused with `StaleEpoch`. The text above is kept as it stood.
-
-**LLR-8n95rf**: the candidate trie produced by applying the delta must verify
-against the root the chain reported, refused with `RootMismatch`; this is the
-**last** check, so no earlier step can have committed anything on its behalf.
-satisfies: REQ-wp2nyc, REQ-nhe2zu, REQ-txvtm9
-superseded-by: LLR-8528ud
-
-*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
-code that did what this item states, had no product caller and is deleted.
-LLR-8528ud states the behaviour now: the root match is `verify`'s match on
-epoch, root and key (LLR-8528ud); nothing is refused with `RootMismatch`. The
-text above is kept as it stood.
-
-**LLR-d6kvbx**: a verification that succeeds returns a sequence guard whose
-mark is the envelope's sequence number, and a verification that fails returns
-no guard at all — so a refused envelope cannot move any mark.
-satisfies: REQ-mr5abb
-superseded-by: LLR-34c5y3
-
-*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
-code that did what this item states, had no product caller and is deleted.
-LLR-34c5y3 states the behaviour now: the mark is the record's Sequence number,
-set to the adopted epoch only by an adoption (LLR-34c5y3); every other outcome
-changes nothing (LLR-qvp7mq). The text above is kept as it stood.
-
-**LLR-8hwqru**: the local trie passed in is not mutated on any path; a
-successful verification returns a new trie and leaves the caller's untouched.
-satisfies: REQ-wp2nyc
-superseded-by: LLR-qvp7mq
-
-*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
-code that did what this item states, had no product caller and is deleted.
-LLR-qvp7mq states the behaviour now: every outcome of `verify` but an adoption
-leaves every sealed byte of the store as it was (LLR-qvp7mq). The text above
-is kept as it stood.
-
-**LLR-hs7g6j**: no sequence of bytes offered as an envelope to this function
-causes a panic or an abort.
-satisfies: REQ-bcxz96
-superseded-by: LLR-7u3dg7
-
-*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-round 2, MR2-N1).* The function this item bounded is deleted, but the work
-its fuzz target reached past the decode, applying a decodable Change set
-with the right base root and calculating the root, now runs on receipt in
-`check_received`. LLR-7u3dg7 states the bound there, over any body, in a
-store with a record and in one without, and its fuzz target
-`fuzz_check_received` carries this item's deleted shapes 2 and 3. The
-`retired:` line is replaced by `superseded-by:`; the text above is kept as
-it stood.
-
-*Retired 2026-10-30 (change `worktree-org-io-domain-api`, merge review MR1-N1,
-owner ruling 2026-10-29), replaced by the note above the same day.* No
-successor states it: no operation now verifies an Envelope against a record
-and a chain state.
 
 ## SDD-pa6p7w — The chain as a read oracle
 
@@ -813,7 +564,7 @@ and `OrgStateCache` *(amended 2026-10-05, see below)*
 membership root and epoch are, as an interface rather than a client — the root
 returned here must come from a path the sender of a change does not control,
 and expressing it as a trait is what makes that substitutable and testable.
-traces: REQ-bvh8v6, REQ-nhe2zu, REQ-txvtm9, REQ-8jb4ny
+traces: REQ-dwb9bq, REQ-8jb4ny
 
 *Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
 the view is now a value, what it decides unchanged. The `ChainReader` trait
@@ -822,7 +573,7 @@ Organisation's state as `Option<OrgState>`, read by org-io from a path the
 sender does not control. `OrgState::from_chain` (the parse edge,
 REQ-8jb4ny) stays in `chain.rs`; `org_state_from_chain` left for org-io (task
 T5); `chain_read.rs`, with `OrgStateCache` and `OnChainReader`, is deleted,
-which resolves PR-k2xxaq. The notes below that name `chain_read.rs`,
+which resolves the resolved problem report on the stale cache on a fetch error. The notes below that name `chain_read.rs`,
 `ChainOps::read_state` or `ChainOpsReader` describe the code before this
 change.
 
@@ -852,18 +603,17 @@ is LLR-3jjgtw's, under SDD-sxp8hb.)*
 Unchanged in what it decides: org-node no longer writes to the chain, and keeps
 reading it through on-chain-client by this item and `ChainOps::read_state`.
 What changes is when the read happens. The Receive operations read the
-Organisation state once, after the chain-free checks (LLR-9ew26y), where they
+Organisation state once, after the chain-free checks (an earlier form of LLR-76bhw9), where they
 used to read it first to obtain the signing key; `ChainOpsReader` wraps that
 one state. Nothing read here is used as a key: the Organisation state
-contributes its root and epoch to the decision and nothing else (LLR-37cj3n).
+contributes its root and epoch to the decision and nothing else (an earlier form of LLR-8528ud).
 
 *Moved 2026-10-07 to org-io's architecture ledger
 (`org-io/docs/architecture/2026-10-08-org-io.md`, finalised
 at the merge of change `worktree-org-io-create`), ruling A: the low-level
 requirement that the chain read tells absence from failure went with the read
 to org-io, re-parented to org-io's chain-read requirement, and its cache
-exception retired with the cache (task T6 of
-`docs/plans/2026-10-06-org-io-create.md` deletes it).*
+exception retired with the cache (task T6 deletes it).*
 
 ## SDD-kwncn7 — The wire frame and its bound
 
@@ -874,9 +624,9 @@ exception retired with the cache (task T6 of
 **SDD-kwncn7**: the framing of one Wire message on the channel — what a frame is
 made of, the one-mebibyte ceiling on a body, and the refusal of anything over
 it on both the sending and the receiving side.
-traces: REQ-eg5j8u, REQ-9g6as6, REQ-y7tsft, REQ-8amu2a, REQ-c29s93, REQ-3dsweu, REQ-ps2gy2, REQ-qrtsc9, REQ-b462sh
+traces: REQ-eg5j8u, REQ-9g6as6, REQ-y7tsft, REQ-8amu2a, REQ-zxgd46, REQ-3dsweu, REQ-ps2gy2, REQ-qrtsc9, REQ-b462sh
 
-*Amended 2026-10-08 (S4, task T2 of `docs/plans/2026-10-06-org-io-transport.md`):*
+*Amended 2026-10-08 (S4, task T2):*
 the item is the Wire message's encoding and bound, not the framing on the
 channel. The codec left `transport/wire.rs` for `org-node/src/wire.rs`, with
 no feature gate: `encode_message` produces the postcard body with no length
@@ -887,8 +637,7 @@ message; both refuse with `OrgNodeError` (`MessageTooLarge { length }`,
 (`transport::encode_frame`, the framing item) until task T10 moves it to org-io;
 `MAX_FRAME` is `MAX_MESSAGE`.
 
-*Amended 2026-10-06 (change `worktree-org-io-commit-workflow`, stage S3 of
-`docs/plans/2026-10-06-org-io-roadmap.md`).* Traces REQ-ps2gy2, REQ-qrtsc9 and REQ-b462sh for the revocation notice
+*Amended 2026-10-06 (change `worktree-org-io-commit-workflow`, stage S3).* Traces REQ-ps2gy2, REQ-qrtsc9 and REQ-b462sh for the revocation notice
 and the acknowledgement on the wire (LLR-dc45ur, LLR-378cj4, in
 `2026-10-07-commit-workflow.md`). The revocation
 kind the key-pair change defines (note below) holds a revocation notice
@@ -901,15 +650,15 @@ A frame carried one shape of Wire message, with an optional Organisation
 secret and an optional invite identifier. The Wire message is now an enum of
 two kinds, Organisation information (always carrying the record snapshot and
 the Organisation private key) and revocation (carrying neither), and no kind
-carries an invite identifier (LLR-js9dsu, LLR-ecxc76 in
-`2026-10-07-org-key-pair.md`; LLR-ms8njy amended).
+carries an invite identifier (an earlier form of LLR-xr88a8, and LLR-ecxc76, in
+`2026-10-07-org-key-pair.md`; an earlier form of LLR-g3wmen amended).
 A body of the first kind without its key does not decode, so the item traces
-REQ-c29s93 and REQ-3dsweu too. The notes below that speak of the Organisation
+REQ-zxgd46 (then in an earlier form) and REQ-3dsweu too. The notes below that speak of the Organisation
 secret or the invite identifier on the wire are history.
 
 *Amended 2026-10-06 (owner ruling on pre-emption, change
 `worktree-org-node-chain-authority`):* a Wire message carries the invite
-identifier of the admission it delivers (LLR-ms8njy, in
+identifier of the admission it delivers (an earlier form of LLR-g3wmen, in
 `2026-10-06-chain-authority.md`), so the item
 traces REQ-8amu2a too.
 
@@ -924,11 +673,11 @@ The Wire message's Envelope carries no signature (SDD-kk2y3e), so a frame now
 carries an `Envelope` of three fields, the record snapshot and the optional
 Organisation secret. Its one-mebibyte bound also sizes the provisional updates
 a Persona store holds for one Organisation: `MAX_PROVISIONAL_BYTES` equals
-`MAX_FRAME` (LLR-jq7qh7, under SDD-af5vnt), by the owner's ruling that the
+`MAX_FRAME` (an earlier form of LLR-m76r4k, under SDD-af5vnt), by the owner's ruling that the
 bound is the wire frame's. The two constants are separate so a change to one
 is a decision about the other.
 
-*Moved 2026-10-13 (S4, task T10 of `docs/plans/2026-10-06-org-io-transport.md`,
+*Moved 2026-10-13 (S4, task T10,
 ruling A):* the framing item (the four-byte little-endian length before the
 body) moved to org-io with the transport, to
 `org-io/docs/architecture/2026-10-07-transport.md`,
@@ -969,8 +718,7 @@ satisfies: REQ-9g6as6
 
 *Moved 2026-10-13 to org-io's design ledger
 (`org-io/docs/architecture/2026-10-07-transport.md`,
-"Moved from org-node with the transport"), S4 task T10 of
-`docs/plans/2026-10-06-org-io-transport.md`, ruling A:* the design item for
+"Moved from org-node with the transport"), S4 task T10, ruling A:* the design item for
 the iroh endpoint whose identity is the Device key, with its five low-level
 items (the endpoint id is the Device key; the sender comes from the
 handshake, never the body; Loopback binds and advertises loopback only; IPv4
@@ -990,10 +738,9 @@ device seeds and the Organisation private key — and the form the file takes,
 which is ciphertext under a passphrase-derived key and nothing else.
 traces: REQ-hzm4kt, REQ-kd34f5, REQ-y7tsft, REQ-ech45n, REQ-4qh2h8, REQ-dhr58q, REQ-g2537c, REQ-8amu2a, REQ-x2dnee, REQ-ju6vn2, REQ-3pj7rd, REQ-48zc3e, REQ-y9p27b
 
-*Traces amended 2026-10-20 (change worktree-org-io-domain-api): REQ-qn2erx →
-REQ-kd34f5; REQ-xs4ab8 → REQ-4qh2h8, REQ-dhr58q; REQ-fwfku9 → REQ-g2537c;
-REQ-hhva9d → REQ-x2dnee; REQ-stx9v3 → REQ-3pj7rd; REQ-uxv2x2 → REQ-48zc3e;
-REQ-em28bq → REQ-y9p27b; REQ-uv3v5w → REQ-x2dnee.*
+*Traces amended 2026-10-20 (change worktree-org-io-domain-api): REQ-kd34f5,
+REQ-4qh2h8, REQ-dhr58q, REQ-g2537c, REQ-x2dnee, REQ-3pj7rd, REQ-48zc3e and
+REQ-y9p27b replace the earlier forms the item traced.*
 
 *Note 2026-10-20 (change `worktree-org-io-domain-api`, dispatcher's
 resolution C6 and owner ruling Q4' of 2026-10-16):* the responsibility —
@@ -1001,14 +748,14 @@ where the secrets rest, and that the file is ciphertext and nothing else —
 is unchanged, so the item stands. What the store holds beside the current
 record is now the epoch state (SDD-undd7q), and on the node's own removal
 the store keeps only the signed acknowledgements, their recipients' keys and
-addresses and the verification time (SDD-z4m57w). Its traces of
-REQ-uxv2x2, REQ-em28bq, REQ-hhva9d, REQ-uv3v5w, REQ-fwfku9 and REQ-xs4ab8
-are out of force; their successors (REQ-48zc3e, REQ-y9p27b, REQ-x2dnee,
-REQ-g2537c, REQ-dhr58q) are traced by SDD-undd7q and SDD-z4m57w.
+addresses and the verification time (SDD-z4m57w). The item traces
+REQ-48zc3e, REQ-y9p27b, REQ-x2dnee, REQ-g2537c, REQ-dhr58q and REQ-4qh2h8
+for where the secrets of that state rest; SDD-undd7q and SDD-z4m57w also
+trace REQ-48zc3e, REQ-y9p27b, REQ-x2dnee, REQ-g2537c and REQ-dhr58q for
+what the store holds.
 
-*Amended 2026-10-06 (change `worktree-org-io-commit-workflow`, stage S3 of
-`docs/plans/2026-10-06-org-io-roadmap.md`).* Traces REQ-uxv2x2, REQ-em28bq and REQ-uv3v5w for forgetting an
-Organisation and for the kept Change set (LLR-pba7yu, LLR-d9778a, in
+*Amended 2026-10-06 (change `worktree-org-io-commit-workflow`, stage S3).* Traces earlier forms of REQ-48zc3e, REQ-y9p27b and REQ-x2dnee for forgetting an
+Organisation and for the kept Change set (earlier forms of LLR-2d5a7m and LLR-p8vpgz, in
 `2026-10-07-commit-workflow.md`). Forgetting an
 Organisation removes its Organisation private key and every provisional
 update's key with it.
@@ -1017,25 +764,25 @@ merge of master `1f52c36`: the definition takes master's wording, "the
 Organisation private key", and the trace list is the union of both.)*
 
 *Amended 2026-10-06 (owner ruling on rotation, change
-`worktree-org-node-org-key-pair`):* traces REQ-stx9v3. Every provisional
+`worktree-org-node-org-key-pair`):* traces an earlier form of REQ-3pj7rd. Every provisional
 update the store holds now holds the private key of the fresh Organisation
 key pair drawn for it, not only a genesis update, and a provisional update is
-identified by its public key as well as its root (LLR-qjz3q4, LLR-95753m and
-LLR-7cmp38 amended).
+identified by its public key as well as its root (earlier forms of LLR-qw8tyu, LLR-f5wrjx and
+LLR-d9x6xf amended).
 
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 This named "the Organisation secret" among the secrets the store holds. The
 Organisation secret is removed; every Organisation record now holds the
 Organisation private key, required, on the creating node and on every
-admitted node alike (LLR-byjvd9 in
+admitted node alike (an earlier form of LLR-78jfrd in
 `2026-10-07-org-key-pair.md`), so the item traces
 REQ-ju6vn2 too. An expectation names the Organisation alone again
-(LLR-95753m amended).
+(an earlier form of LLR-f5wrjx amended).
 
 *Amended 2026-10-06 (change `worktree-org-node-chain-authority`):* an
-expectation the store holds names an invite identifier (LLR-95753m), so the
+expectation the store holds names an invite identifier (an earlier form of LLR-f5wrjx), so the
 item traces REQ-8amu2a; and the genesis provisional update holds the
-Organisation private key until it commits (LLR-qjz3q4, REQ-ech45n).
+Organisation private key until it commits (an earlier form of LLR-qw8tyu; REQ-ech45n).
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 The store holds no pending Invites (`PendingInvite`,
@@ -1043,51 +790,49 @@ The store holds no pending Invites (`PendingInvite`,
 the app, and no administrator key (`OrgRecord.admin_member_key`). It now holds
 the provisional updates a Persona has built and the Organisations the app has
 declared it expects to join, with the 1 MiB bound on the first. The
-requirements stating them, LLR-95753m, LLR-jq7qh7 and LLR-nvn3wk, are in
+requirements stating them, earlier forms of LLR-f5wrjx, LLR-m76r4k and LLR-8ru6mv, are in
 `2026-10-06-chain-authority.md`, so the item
-traces REQ-xs4ab8 and REQ-fwfku9 too. The record of an Organisation keeps its
-proxy account as opaque data (LLR-dzte8x).
+traced the items REQ-dhr58q, REQ-4qh2h8 and REQ-g2537c replaced too. The record of an Organisation keeps its
+proxy account as opaque data (an earlier form of LLR-x5asbx).
 
 *Amended 2026-10-05 by the org-node type-safety change:* the item also owns
 the store encryption key's type, the records the store holds — each field in
 its typed form, parsed when the store is opened — the Persona details a
 Persona is created from, and what the debug rendering of a value holding a
-secret may show, so it traces REQ-qn2erx and REQ-y7tsft too. Its low-level
-requirements for them, LLR-bwb9pu, LLR-scgk5j, LLR-g76zqd and LLR-q6n25z, are
+secret may show, so it traces REQ-kd34f5 (then in an earlier form) and REQ-y7tsft too. Its low-level
+requirements for them, LLR-bwb9pu, LLR-scgk5j and earlier forms of LLR-pv2rdy and LLR-rjphn4, are
 in `2026-10-04-type-safety.md`.
 
 *(Amended 2026-10-05 by the org-node type-safety change, review round 7:
-LLR-8bum44 — a value its type's parse refuses is refused, naming the field —
+An earlier form of LLR-7yu2xy — a value its type's parse refuses is refused, naming the field —
 now sits under this item too, moved from SDD-vee2fq. Most of what it
 constrains is in `store.rs`: `PersonaStore::open`, the `Raw…` mirrors of the
 four records and of `StoreData`, `parse_field`, and the member-snapshot parse
 that `first_admission_base` decodes through. The Join request and Invite
 decode is named by SDD-vee2fq, the import operations by SDD-rx2yvy, and
-`first_admission_base` by SDD-8cpyfa. LLR-g76zqd and LLR-bwb9pu also
-constrain code outside `store.rs`: LLR-g76zqd is named by SDD-vee2fq
+`first_admission_base` by the item SDD-busuj3 and SDD-kegag2 replaced. The earlier form of LLR-pv2rdy and LLR-bwb9pu also
+constrain code outside `store.rs`: the first is named by SDD-vee2fq
 (`JoinRequest`) and SDD-89es4z (`create_persona`), and LLR-bwb9pu by
 SDD-kwncn7 (`WireMessage`) and SDD-sxp8hb (`SigningKeypair`).)*
 
 *(Note 2026-10-05, at the merge of master `1feb608` into
-`worktree-person-shared-types`; reworded the same day by
-docs/plans/2026-10-05-switch-trim.md: on that branch the store also holds the
-Organisation private key, in `OrgRecord.org_private_key` (LLR-3fwykc,
-LLR-2dvhz8, in `2026-10-05-unsigned-envelope.md`). LLR-bwb9pu and LLR-8bum44
+`worktree-person-shared-types`; reworded the same day: on that branch the store also holds the
+Organisation private key, in `OrgRecord.org_private_key` (an earlier form of LLR-qw8tyu, and
+LLR-2dvhz8, in `2026-10-05-unsigned-envelope.md`). LLR-bwb9pu and an earlier form of LLR-7yu2xy
 are amended in place, in `2026-10-04-type-safety.md`.)*
 
 *(Re-traced 2026-10-05 by review round 3, finding-9, change
 `worktree-person-shared-types`: the store keeps the Organisation private key,
-so the item traces REQ-ech45n. LLR-3fwykc and LLR-2dvhz8 sit under this item
+so the item traces REQ-ech45n. An earlier form of LLR-qw8tyu, and LLR-2dvhz8, sit under this item
 in `2026-10-05-unsigned-envelope.md`.)*
 
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* the form the store takes is the
+*Amended 2026-10-08 (S4, task T3):* the form the store takes is the
 sealed form: one store per Persona (owner ruling 2026-10-06), `StoreData`
 holding one `persona`, the record of the Organisation it is bound to, its
 provisional updates and its expectations, AEAD-sealed under a key derived by
 HKDF-SHA-256 from that Persona's device secret (LLR-2qqqx6), not under a
 passphrase-derived key. The Persona record holds its Device public key, not
-its device seed, which never enters the store (LLR-bvt5up). org-node writes no
+its device seed, which never enters the store (an earlier form of LLR-ay8nvu). org-node writes no
 file: it gives each change out as a `StoreWrite` and takes a store back in
 through `PersonaStore::unseal` (SDD-asxwp8); org-io writes and reads the
 bytes. Outstanding invites join `StoreData` in task T6.
@@ -1096,8 +841,7 @@ bytes. Outstanding invites join `StoreData` in task T6.
 the AEAD ciphertext of the encoded store, with no cleartext header.
 satisfies: REQ-hzm4kt
 
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* "the store file" is the sealed
+*Amended 2026-10-08 (S4, task T3):* "the store file" is the sealed
 store a `StoreWrite` carries (`SealedStore`): exactly a twenty-four byte nonce
 followed by the AEAD ciphertext of the encoded store, with no cleartext
 header; org-io writes those bytes to the Persona's file.
@@ -1106,17 +850,15 @@ header; org-io writes those bytes to the Persona's file.
 random source on every save.
 satisfies: REQ-hzm4kt
 
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* "on every save" becomes "on every
+*Amended 2026-10-08 (S4, task T3):* "on every save" becomes "on every
 seal": each `StoreWrite` an operation returns is sealed with a fresh
-twenty-four byte nonce drawn from the caller's random source (LLR-bvt5up).
+twenty-four byte nonce drawn from the caller's random source (an earlier form of LLR-ay8nvu).
 
 **LLR-t4u66w**: opening a store file with a passphrase other than the one it
 was written under yields a typed error and no data.
 satisfies: REQ-hzm4kt
 
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* there is no passphrase. Unsealing
+*Amended 2026-10-08 (S4, task T3):* there is no passphrase. Unsealing
 a store with the device secret of another Device yields `DeviceSecretMismatch`
 and no data, before any decryption, and a ciphertext that does not
 authenticate under the derived key yields `StoreRefused(NotAuthentic)` and no
@@ -1126,8 +868,7 @@ data (LLR-bg538c).
 rather than read as a nonce and an empty ciphertext.
 satisfies: REQ-hzm4kt
 
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* the bound is the nonce and the
+*Amended 2026-10-08 (S4, task T3):* the bound is the nonce and the
 sixteen-byte authentication tag: sealed bytes shorter than forty are refused
 as `StoreRefused(TooShort)` rather than read as a nonce and an empty or
 truncated ciphertext; forty bytes or more go to decryption (LLR-bg538c). A
@@ -1142,10 +883,9 @@ satisfies: REQ-hzm4kt
 This named the Organisation secret, which is removed; REQ-hzm4kt, amended the
 same day, names the Organisation private key in its place.
 
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* "the written file" is the sealed
+*Amended 2026-10-08 (S4, task T3):* "the written file" is the sealed
 store a `StoreWrite` carries, and the device seed leaves the list: the store
-holds no device seed at all, only the Device public key (LLR-bvt5up).
+holds no device seed at all, only the Device public key (an earlier form of LLR-ay8nvu).
 
 ## SDD-vee2fq — Out-of-band exchange blobs
 
@@ -1158,8 +898,8 @@ in, are the app's; what reaches org-node from an admission's other party is a
 admission. `org-node/src/blobs.rs` is removed.
 traces: REQ-eqt23j, REQ-9g6as6, REQ-kd34f5
 
-*Traces amended 2026-10-20 (change worktree-org-io-domain-api): REQ-xa6smf →
-REQ-eqt23j; REQ-qn2erx → REQ-kd34f5.*
+*Traces amended 2026-10-20 (change worktree-org-io-domain-api): REQ-eqt23j and
+REQ-kd34f5 replace the earlier forms the item traced.*
 
 *Noted 2026-10-21 (change `worktree-org-io-domain-api`, design gap G2 of
 its plan):* the responsibility, the boundary of the out-of-band invitation
@@ -1169,8 +909,7 @@ an admission's other party is the admission request the receive path keeps
 parsed (`KeptAdmissionRequest`, LLR-v3av9t, LLR-96z2k5), from which the
 admitted Member is built when the next epoch is proposed. The Invite reply is
 gone too: the joiner's answer is that admission request, a Wire message sent
-over the transport, built and checked under SDD-xexu3k (which supersedes
-SDD-xshv5b), so the Invite is now the one thing exchanged out of band. The
+over the transport, built and checked under SDD-n2x3gb and SDD-42cjqk, so the Invite is now the one thing exchanged out of band. The
 joiner's declared expectation of admission is kept with its provisional
 Member (`propose_member`, LLR-6acxu9).
 
@@ -1187,37 +926,30 @@ that boundary; its four requirements are rewritten to it.
 *Amended 2026-10-05 by the org-node type-safety change:* the blobs' fields are
 held typed, and a decoded value that does not parse is refused, naming the
 field for a Join request (`decode_join_request`); the requirement stating it,
-LLR-8bum44, is in `2026-10-04-type-safety.md`, so the item traces REQ-qn2erx
-too.
+an earlier form of LLR-7yu2xy, is in `2026-10-04-type-safety.md`, so the item traces REQ-kd34f5
+(then in an earlier form) too.
 
 *(Amended 2026-10-05 by the org-node type-safety change, review round 7:
-LLR-8bum44 now sits under SDD-af5vnt, which owns most of what it constrains.
+The earlier form of LLR-7yu2xy now sits under SDD-af5vnt, which owns most of what it constrains.
 This item is also constrained by it, for `decode_join_request`,
-`RawJoinRequest` and the Invite decode, and by LLR-g76zqd, under SDD-af5vnt,
+`RawJoinRequest` and the Invite decode, and by an earlier form of LLR-pv2rdy, under SDD-af5vnt,
 for `JoinRequest`'s typed fields.)*
 
-*Amended 2026-10-13 (S4, task T6 of docs/plans/2026-10-06-org-io-transport.md;
+*Amended 2026-10-13 (S4, task T6;
 owner ruling 1 on the chain-authority sweep).* Rewritten: this item is now
 the out-of-band Invite and Invite reply, built and serialised in org-node and
 exchanged by org-io. The code is `org-node/src/invitation.rs`
-(`blobs.rs` stays removed); SDD-xshv5b, in this change's sans-IO design file,
+(`blobs.rs` stays removed); the design item SDD-n2x3gb and SDD-42cjqk replaced, in this change's sans-IO design file,
 holds the build, the parse and the bookkeeping (the outstanding pairs in the
 sealed store). What reaches `admit_member` is still a `Joiner` of parsed
-values (LLR-kkj64b), and a joining node still keeps an expectation of
+values (an earlier form of LLR-bwtx3h), and a joining node still keeps an expectation of
 admission, recorded now by the reply build.
 
 *Retired 2026-10-13 (S4, task T6; owner ruling of that day on retired
 items).* The low-level requirement that stood here, that org-node defines no
 Invite, is retired: the Invite returns to org-node. Its definition and its
 `assesses:` entry are deleted, and its ID is listed in the S4 verification
-record; its replacement is the Blob-parse requirement under SDD-xshv5b.
-
-**LLR-kkj64b**: `admit_member` takes the joiner as a `Joiner` holding a parsed
-`Handle`, `Name`, `Surname`, Member-as-a-group key (`PersonPublicKey`) and
-`DevicePublicKey`, and the Member it adds to the record carries exactly those
-five values; org-node defines no Join request.
-satisfies: REQ-xa6smf
-superseded-by: LLR-bwtx3h
+record; its replacement is the Blob-parse requirement under the design item SDD-n2x3gb and SDD-42cjqk replaced.
 
 **LLR-8qxwst**: no operation of org-node takes armoured text: every value that
 arrives from another device reaches it as bytes inside a Wire message frame
@@ -1226,7 +958,7 @@ satisfies: REQ-9g6as6
 
 *Amended 2026-10-13 (S4, task T6):* rewritten. Armoured text reaches
 org-node only through `Invite::parse` and `InviteReply::parse`
-(`org-node/src/invitation.rs`, the Blob-parse requirement under SDD-xshv5b);
+(`org-node/src/invitation.rs`, the Blob-parse requirement under the design item SDD-n2x3gb and SDD-42cjqk replaced);
 every other value from another device arrives as a Wire message body
 (`decode_message`) or as typed values. `base64` is named only in
 `invitation.rs` (`absences::org_node_holds_no_invitation_exchange`).
@@ -1238,12 +970,12 @@ satisfies: REQ-9g6as6
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 The retired no-Invite item (S4 T6; see the S4 verification record) and
-LLR-kkj64b said an Invite and a Join request round-trip
+an earlier form of LLR-bwtx3h said an Invite and a Join request round-trip
 through their encoding; LLR-8qxwst and LLR-tcft2r that bad Base64 and a bad
 encoded blob are refused without panicking. All four types and their armour
 leave org-node for the app, which parses the Invite and its reply at its own
 edge. The retired item and LLR-8qxwst now state the absence, which the compiler
-enforces as for LLR-836z24. LLR-kkj64b states what replaces the Join request
+enforces as for an earlier form of LLR-96z2k5. An earlier form of LLR-bwtx3h stated what replaces the Join request
 at `admit_member`. LLR-tcft2r is rewritten to the remaining place where bytes
 another device composed are decoded into a record — the snapshot a first
 admission extends — which `fuzz_first_admission_base` already exercises.
@@ -1264,8 +996,8 @@ resulting root, Organisation public key and the epoch its record holds.
 traces: REQ-4qh2h8, REQ-dhr58q, REQ-dwb9bq
 
 *Re-traced 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-round 2, finding-8):* this item traced REQ-nhe2zu and REQ-txvtm9 alone, both
-superseded by REQ-dwb9bq. It now traces the in-force items that state what
+round 2, finding-8):* this item traced only two items REQ-dwb9bq replaced.
+It now traces the in-force items that state what
 org-node does instead of writing to the chain: a founding and a provisional
 change are kept writing nothing to the chain (REQ-4qh2h8, REQ-dhr58q), and
 verification judges a chain state the caller read (REQ-dwb9bq).
@@ -1277,7 +1009,7 @@ owner ruled that org-node does not write to the chain: `chain_write/`, of
 which `calldata.rs` is part, moves to on-chain-client, which states the
 calldata's layout under its own chain-writer item. The item is kept, as merged
 items are, and its four requirements now state that org-node holds none of it.
-They are compile-enforced, as LLR-836z24 is. The tests that carried them —
+They are compile-enforced, as an earlier form of LLR-96z2k5 was. The tests that carried them —
 `chain_write_pure` and `calldata_typed` — move with the code and are
 re-annotated to on-chain-client's requirements.
 
@@ -1287,7 +1019,7 @@ satisfies: derived
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* The
+`worktree-person-shared-types`).* The
 third field was the Published signing key; it is the Organisation public key.
 
 **LLR-rc74nq**: org-node has no `revive_update_runtime_call` and builds no
@@ -1308,7 +1040,7 @@ both typed write paths unwrap the root, the key and the epoch into calldata:
 `revive_update_runtime_call`'s `data` is `update_calldata` of its arguments,
 and `submit::submit_update` (org-io's chain-connection item's (moved 2026-10-07)) calls it too. `calldata.rs` now
 holds three functions, all this item's. A typed-calldata golden test in
-`org-node/tests/calldata_typed.rs` pinned its output (LLR-ayrdr8).)*
+`org-node/tests/calldata_typed.rs` pinned its output (an earlier form of LLR-mkvx2k).)*
 
 *Added 2026-10-04 by review round 6, which found this function inside
 org-io's chain-connection item (moved 2026-10-07), the item with no low-level requirements, under a list headed "the
@@ -1351,8 +1083,8 @@ between dispatching directly and through it, are on-chain-client's chain writer
 traces: REQ-4qh2h8, REQ-dhr58q, REQ-dwb9bq
 
 *Re-traced 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-round 2, finding-8):* this item traced REQ-nhe2zu and REQ-txvtm9 alone, both
-superseded by REQ-dwb9bq. It now traces the in-force items that state what
+round 2, finding-8):* this item traced only two items REQ-dwb9bq replaced.
+It now traces the in-force items that state what
 org-node does instead of dispatching to the chain: a founding and a
 provisional change are kept writing nothing to the chain (REQ-4qh2h8,
 REQ-dhr58q), and verification judges a chain state the caller read
@@ -1396,7 +1128,7 @@ none of it.
 expressed as a value rather than a trait or a client: the `Option<OrgState>`
 that `verify` takes, read by its caller. It exists so the stories can be
 exercised in full without a chain, and it is the mechanism that makes
-SDD-rx2yvy, SDD-8cpyfa and SDD-72ddm6 verifiable items instead of parts of the
+SDD-rx2yvy, SDD-busuj3, SDD-kegag2 and SDD-z4m57w verifiable items instead of parts of the
 I/O shell.
 traces: REQ-dwb9bq, REQ-ncv4sc
 
@@ -1406,8 +1138,8 @@ trait rather than a client", which the 2026-10-08 note below says no longer
 holds. It now names the value the 2026-10-30 note below names.
 
 *Re-traced 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-round 2, finding-8):* this item traced REQ-nhe2zu, REQ-txvtm9 and
-REQ-bvh8v6 alone, all superseded. It now traces the in-force items that state
+round 2, finding-8):* this item traced only earlier forms of REQ-dwb9bq and
+LLR-rr558z, all superseded. It now traces the in-force items that state
 the boundary as values: verification takes the Organisation state the
 caller read, and refuses with none (REQ-dwb9bq, as amended that day), and
 the one receive path takes no chain state (REQ-ncv4sc). The operations the
@@ -1429,9 +1161,9 @@ values from the test-support store `org_node::test_fixtures::ChainSlots`,
 which replaces `MockChainOps` and keeps its `apply_genesis`/`apply_update`
 stand-ins. Its code is now `service.rs` (`Prepared`, `PendingReceive`, the
 `prepare_*`/`apply_*` split) and `test_fixtures.rs` (`ChainSlots`). The new
-low-level requirement LLR-mn5c2q (in
-`2026-10-08-values.md`) states the absence of any chain
-read and supersedes LLR-65py3d.
+low-level requirement, an earlier form of LLR-7en38k (in
+`2026-10-08-values.md`), states the absence of any chain
+read and supersedes the one before it.
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 The seam is now read-only: `ChainOps` keeps `read_state` and loses
@@ -1440,29 +1172,6 @@ chain — the app submits through on-chain-client and then asks org-node to
 commit. `MockChainOps` keeps a stand-in for that write, `apply_genesis` and
 `apply_update`, inherent methods a test calls in the app's place, so a story
 can still run from provisional update to commit without a chain.
-
-**LLR-65py3d**: `ChainOps` presents reading an Organisation's state as an
-asynchronous operation on a trait object, and presents no operation that
-writes to the chain, so a substitute may be injected without changing the
-service and the service cannot submit an update through it.
-satisfies: derived
-superseded-by: LLR-mn5c2q
-
-*Superseded 2026-10-08 (ruling B, change worktree-org-io-create; owner
-ruling on PR-zf924s, hybrid: a change of meaning).* `ChainOps` is gone and
-org-node presents no chain read at all; LLR-mn5c2q states what holds now.
-The clause "presents no operation that writes to the chain" still holds and
-is still verified by `absences.rs`'s `the_service_presents_no_chain_write`.
-
-*Note 2026-10-08 (review round 1 of change worktree-org-io-create,
-finding-13: dual-ID coverage).* That older test,
-`org-node/tests/absences.rs`'s `the_service_presents_no_chain_write` (:111),
-still names only this ID. It is already green, and the robustness rule
-forbids re-annotating a green test with a new ID: a test gains a new ID only
-by being watched red against it. The dual-ID coverage of the supersession is
-therefore the new red-first test `absences.rs`'s
-`org_node_names_no_chain_library_and_reads_no_chain` (:152), which names
-LLR-mn5c2q and LLR-65py3d both.
 
 **LLR-hg3xzf**: clones of `MockChainOps` share one chain state, so two services
 under test observe the same chain as each other.
@@ -1495,7 +1204,7 @@ org-io makes through on-chain-client, and the compare-and-swap is kept. The
 tests (`service_lifecycle.rs`) are re-pointed to `ChainSlots`.
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-LLR-65py3d said `ChainOps` presents "submitting an update" too, and LLR-ryzr8m
+An earlier form of LLR-7en38k said `ChainOps` presents "submitting an update" too, and LLR-ryzr8m
 stated the compare-and-swap on `MockChainOps`'s `submit_update`. The write
 leaves the trait; the mock's imitation of it stays, as inherent methods a test
 calls where the app would submit through on-chain-client.
@@ -1512,20 +1221,20 @@ it.*
 **SDD-89es4z**: how a node acquires an identity and how an Organisation comes
 into existence — two keypairs drawn once, a genesis provisional update, and
 the Organisation record created only once the chain carries its root.
-traces: REQ-hzm4kt, REQ-nhe2zu, REQ-txvtm9, REQ-d9g6nt, REQ-kd34f5, REQ-ech45n, REQ-4qh2h8, REQ-tqap3r, REQ-yp75u9, REQ-3pj7rd
+traces: REQ-hzm4kt, REQ-dwb9bq, REQ-d9g6nt, REQ-kd34f5, REQ-ech45n, REQ-4qh2h8, REQ-tqap3r, REQ-yp75u9, REQ-3pj7rd
 
-*Traces amended 2026-10-20 (change worktree-org-io-domain-api): REQ-qn2erx →
-REQ-kd34f5; REQ-xs4ab8 → REQ-4qh2h8 (the founding; its other successor,
-REQ-dhr58q, records admissions and revocations); REQ-stx9v3 → REQ-3pj7rd.*
+*Traces amended 2026-10-20 (change worktree-org-io-domain-api): REQ-kd34f5,
+REQ-4qh2h8 (the founding; REQ-dhr58q, which replaced the same item, records
+admissions and revocations) and REQ-3pj7rd replace the earlier forms the item traced.*
 
 *Amended 2026-10-06 (owner ruling on rotation, change
-`worktree-org-node-org-key-pair`):* traces REQ-stx9v3. Genesis draws the
+`worktree-org-node-org-key-pair`):* traces an earlier form of REQ-3pj7rd. Genesis draws the
 first Organisation key pair after its record's root is calculated, as every
-provisional update now does (LLR-s6qnht, LLR-sj7cd5 amended).
+provisional update now does (earlier forms of LLR-d4gpxm and LLR-9qavm7 amended).
 
 *Amended 2026-10-06 (change `worktree-org-node-chain-authority`, independent
 review round 1, finding-1):* traces REQ-yp75u9, for `create_organisation`'s
-refusal of a Persona already bound (LLR-6z5xya, in
+refusal of a Persona already bound (an earlier form of LLR-qqqg4b, in
 `2026-10-06-chain-authority.md`).
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
@@ -1533,44 +1242,24 @@ This said "a genesis trie, and the first on-chain slot": `create_organisation`
 submitted the genesis to the chain and created the record. The owner ruled
 that org-node does not write to the chain and that what it builds is
 provisional until the chain agrees. `create_organisation` now stores a genesis
-provisional update and nothing else (LLR-s6qnht); the app runs the genesis
+provisional update and nothing else (an earlier form of LLR-d4gpxm); the app runs the genesis
 ceremony through on-chain-client and calls `commit_genesis` with the org id
 and proxy account it returned, which verifies the update against the chain and
-creates the record (LLR-wzqqg9). Both requirements are in
+creates the record (an earlier form of LLR-gcm7bq). Both requirements are in
 `2026-10-06-chain-authority.md`, so the item
-traces REQ-xs4ab8 and REQ-tqap3r too.
+traced the item REQ-dhr58q and REQ-4qh2h8 replaced, and REQ-tqap3r, too.
 
 *(Amended 2026-10-05 by the org-node type-safety change, review round 7:
-also constrained by LLR-g76zqd, under SDD-af5vnt in
+also constrained by an earlier form of LLR-pv2rdy, under SDD-af5vnt in
 `2026-10-04-type-safety.md`. `create_persona` takes the handle, name and
 surname as a parsed `Handle`, `Name` and `Surname`, so a Persona record is
-built only from parsed values. So the item traces REQ-qn2erx too.)*
+built only from parsed values. So the item traces REQ-kd34f5 (then in an earlier form) too.)*
 
 *(Re-traced 2026-10-05 by review round 3, finding-8 and finding-9, change
 `worktree-person-shared-types`: `create_organisation` draws the Organisation
 private key, publishes its X25519 public key with the genesis root and
 refuses one equal to a genesis key, so the item traces REQ-ech45n.
-LLR-sj7cd5, in `2026-10-05-unsigned-envelope.md`, refines it.)*
-
-**LLR-tev8h8**: `create_persona` draws an independent member keypair and device
-keypair from the caller's random source and persists their seeds rather than
-the keys.
-satisfies: derived
-superseded-by: LLR-d4gpxm, LLR-6acxu9
-
-*Superseded 2026-10-21 (change `worktree-org-io-domain-api`, design gap G2
-of its plan):* `create_persona` is removed; a Persona is now made by
-`propose_founding` or `propose_member`, which draw the same independent
-member seed and Device secret, keep the member seed and the Device public
-key and no Device seed, and return the secret by value (LLR-d4gpxm,
-LLR-6acxu9).
-
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* `create_persona` draws the member
-keypair as before and the device seed as a `DeviceSecret`
-(`DeviceSecret::generate`), opens the Persona's own store keyed from it,
-records the Device public key and no seed, and returns the secret by value
-with the new store's `StoreWrite`; org-node keeps no copy (LLR-e5kqhg).
+An earlier form of LLR-9qavm7, in `2026-10-05-unsigned-envelope.md`, refines it.)*
 
 **LLR-s7yu4k**: a Persona's identifier is the first sixteen bytes of its
 Member-as-a-group key, the X25519 public key of its member seed, written as
@@ -1580,37 +1269,8 @@ satisfies: derived
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+`worktree-person-shared-types`).* This
 item derived the identifier from the member verifying key.
-
-**LLR-v82xds**: a newly created persona is recorded as Proposed, with no
-Organisation and no member identifier.
-satisfies: derived
-superseded-by: LLR-t2adzg
-
-*Superseded 2026-10-22 (change `worktree-org-io-domain-api`, plan detail
-pass, dispatcher decision):* a provisional Member's Persona is created bound
-to its Invite's Organisation, which contradicts "no Organisation"; the rule
-is restated for each creating operation (LLR-t2adzg).
-
-**LLR-68yd3j**: `create_organisation` writes the store before it returns and
-creates no Organisation record: the record list and every Persona's status and
-binding are as they were, and the only addition is the genesis provisional
-update.
-satisfies: REQ-xs4ab8
-superseded-by: LLR-d4gpxm
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-This said `create_organisation` persists the Organisation record and marks the
-Persona Active, and was derived. Creation now builds a provisional update
-without changing any record (REQ-xs4ab8); the record is created, and the
-Persona marked Active, by `commit_genesis` (LLR-wzqqg9, LLR-w3fhhg).
-
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* "writes the store before it
-returns" becomes "returns the store write": `create_organisation` returns the
-genesis update with its Persona's `StoreWrite`, which org-io writes
-(LLR-bvt5up).
 
 **LLR-rjg3m2**: the founding Member's `MemberId` is drawn from the caller's
 random source before the genesis provisional update's Membership record is
@@ -1621,7 +1281,7 @@ satisfies: REQ-d9g6nt
 *Amended 2026-10-06 (REQ-yp75u9, independent review round 1 of change
 `worktree-org-node-chain-authority`).* This read "the same persona founding two
 Organisations". A Persona is now bound to at most one Organisation, so it can
-found only one (LLR-6z5xya, LLR-eyc4ud); while unbound it can still build
+found only one (earlier forms of LLR-qqqg4b); while unbound it can still build
 several genesis provisional updates, and those are where the same keys meet
 two drawn identifiers.
 
@@ -1629,94 +1289,6 @@ two drawn identifiers.
 "The founding administrator" reads "the founding Member", as REQ-d9g6nt does
 after the same ruling: org-node has no concept of an administrator. The
 identifier is drawn when the provisional update is built.
-
-**LLR-w3fhhg**: `commit_genesis` marks **the named Persona** Active and binds
-it to the Organisation it commits, leaving every other Persona in the store as
-it was. A Persona already bound to an Organisation is refused before this
-step and never rebound (LLR-eyc4ud).
-satisfies: derived
-superseded-by: LLR-exaa9u
-
-*Superseded 2026-10-21 (change `worktree-org-io-domain-api`, design gap G2
-of its plan):* `commit_genesis` is removed; the Persona becomes Active at the
-first adoption in its own store, the founding's or a first admission's, and
-its Organisation is fixed for the life of the store (LLR-exaa9u).
-
-*Amended 2026-10-06 (REQ-yp75u9, independent review round 1 of change
-`worktree-org-node-chain-authority`).* The second and third sentences read
-"Where that Persona was already bound to another Organisation, the binding is
-overwritten. That is PR-mdv38y's second writer, and it is stated here and not
-endorsed." PR-mdv38y is resolved: `commit_genesis` refuses such a Persona.
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-This named `create_organisation`, which no longer changes a Persona; the
-binding moves with the record's creation to `commit_genesis`.
-
-*Added 2026-10-04 by review round 3 with LLR-vdyu65, and for the same
-measurement: `update_persona_status` could mark whichever Persona came first
-in the store, with the gate green, because no gated test had two.*
-
-**LLR-dzte8x**: `commit_genesis` stores in the new Organisation record, as
-opaque data, the proxy account its caller hands over, and the account reaches
-the disk with the record; org-node reads it only to hand it back
-(`OrgService::proxy_account`, LLR-3v5nu9) and never interprets it.
-satisfies: derived
-superseded-by: LLR-x5asbx
-
-*Superseded 2026-10-21 (change `worktree-org-io-domain-api`, design gap G2
-of its plan):* `commit_genesis` is removed; the proxy account is recorded
-with the provisional founding before its write and becomes the record's at
-the founding's adoption, held opaquely as before (LLR-x5asbx).
-
-**LLR-q3aj8z**: `commit_genesis` leaves the founding Persona's member id as it
-was, which is none: only an unbound Persona commits a genesis (LLR-eyc4ud), and
-the founding Member's `MemberId` is held only in the record's member snapshots.
-satisfies: derived
-superseded-by: LLR-gcm7bq
-
-*Superseded 2026-10-21 (change `worktree-org-io-domain-api`, design gap G2
-of its plan):* `commit_genesis` is removed. The founding's adoption, which
-creates the record now, sets the founding Persona's member id to the
-founder's MemberId (LLR-gcm7bq), as a first admission sets a joiner's: a
-change of meaning, so this item is superseded rather than amended.
-
-*Amended 2026-10-06 (REQ-yp75u9, independent review round 1 of change
-`worktree-org-node-chain-authority`).* The last two sentences described
-PR-mdv38y's second-writer path, where the Persona kept the member id of the
-Organisation it was bound to before. That path is closed: `commit_genesis`
-refuses a bound Persona.
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-Both named `create_organisation`, and LLR-dzte8x said the proxy account was
-what "the chain returned at genesis", kept "so the production chain client can
-find the proxy after a restart". org-node no longer submits to the chain: the
-app runs the genesis ceremony through on-chain-client, which returns the proxy
-account, and hands it to `commit_genesis`; the app reads it back to submit
-each later update. org-node holds it opaquely and never uses it (owner ruling
-6). Both requirements move with the record's creation to `commit_genesis`.
-
-*Added 2026-10-05 by review round 8, which measured that not storing the proxy account and setting the member id were
-both green. `MockChainOps` returns no proxy account, so no test could see the
-first. LLR-dzte8x is carried by
-`the_proxy_account_from_genesis_is_kept_and_handed_back` and
-`commit_genesis_creates_the_record_once_the_chain_carries_the_root`, which
-hand `commit_genesis` a proxy account. LLR-q3aj8z is carried by
-`commit_genesis_creates_the_record_once_the_chain_carries_the_root` and,
-for the second-writer path, by
-`pr_mdv38y_founding_an_organisation_rebinds_a_member_persona`.* *(Test names
-updated 2026-10-06, change `worktree-org-node-chain-authority`: the first was
-`…_kept_and_passed_on_every_update`, and
-LLR-q3aj8z was carried by a `create_organisation` test that now asserts only the
-genesis update.)*
-
-*Annotated 2026-10-06 (independent review round 2, finding-3).* The
-second-writer path the note above names is closed: R1a of change
-`worktree-org-node-chain-authority` rewrote
-`pr_mdv38y_founding_an_organisation_rebinds_a_member_persona` as
-`pr_mdv38y_a_member_persona_cannot_found_another_organisation`, which verifies
-that a bound Persona cannot found another Organisation (LLR-6z5xya,
-REQ-yp75u9), not LLR-q3aj8z. LLR-q3aj8z is now carried by
-`commit_genesis_creates_the_record_once_the_chain_carries_the_root` alone.
 
 ## SDD-rx2yvy — Admission
 
@@ -1730,43 +1302,42 @@ on the inviting node, minting the new Member's leaf into an admission
 provisional update and, once that update has committed, sending the joiner the
 committed Envelope and everything they need to check it; on the joining node,
 recording that the app expects that admission.
-traces: REQ-eqt23j, REQ-uk9rw7, REQ-nhe2zu, REQ-txvtm9, REQ-d9g6nt, REQ-kd34f5, REQ-dhr58q, REQ-tqap3r, REQ-8amu2a, REQ-szq3ud, REQ-3dsweu, REQ-3pj7rd
+traces: REQ-eqt23j, REQ-uk9rw7, REQ-dwb9bq, REQ-d9g6nt, REQ-kd34f5, REQ-dhr58q, REQ-tqap3r, REQ-8amu2a, REQ-szq3ud, REQ-3dsweu, REQ-3pj7rd
 
-*Traces amended 2026-10-20 (change worktree-org-io-domain-api): REQ-xa6smf →
-REQ-eqt23j; REQ-qn2erx → REQ-kd34f5; REQ-xs4ab8 → REQ-dhr58q (an admission
-is a provisional change; its other successor, REQ-4qh2h8, is the founding);
-REQ-stx9v3 → REQ-3pj7rd.*
+*Traces amended 2026-10-20 (change worktree-org-io-domain-api): REQ-eqt23j,
+REQ-kd34f5, REQ-dhr58q (an admission is a provisional change; REQ-4qh2h8,
+which replaced the same item, is the founding) and REQ-3pj7rd replace the
+earlier forms the item traced.*
 
-*Amended 2026-10-13 (S4, task T5 of `docs/plans/2026-10-06-org-io-transport.md`):*
+*Amended 2026-10-13 (S4, task T5):*
 the send goes. `send_update` and `OutgoingUpdate` are removed; the commit
 builds every recipient's body and returns it in `CommitOutcome.outgoing`, an
-item of SDD-bm27xt (LLR-gdfqn9), and org-io sends it. Until T14 a
+item of the design the item SDD-qzv5mn replaced (an earlier form of LLR-degg8t), and org-io sends it. Until T14 a
 transitional `send_body` sends one body from the bound endpoint. *(Deleted
 2026-10-14, S4 task T14.)*
 
 *Amended 2026-10-06 (owner ruling on rotation, change
-`worktree-org-node-org-key-pair`):* traces REQ-stx9v3. An admission
+`worktree-org-node-org-key-pair`):* traces an earlier form of REQ-3pj7rd. An admission
 provisional update, built through `keep_change_set`, draws a fresh
 Organisation key pair once its root is calculated, keeps the private key and
-publishes the public key (LLR-e2b7gv; LLR-ghja3x amended).
+publishes the public key (an earlier form of LLR-qghs95; an earlier form of LLR-va2yqz amended).
 
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 "Everything they need to check it" now includes the Organisation private key
 of the epoch the update reaches, as the node's record holds it, which
 `send_update` puts in every Organisation-information message without taking
 it from its caller; and `send_update` chooses the kind of Wire message by
-whether the node's committed record lists the recipient Device (LLR-6ymd6d,
-in `2026-10-07-org-key-pair.md`; LLR-2xzys9,
-LLR-48jakr, LLR-bg3vsw, the Loopback dial item — org-io's since 2026-10-13 —
-and LLR-9zfnmb amended). On the joining
+whether the node's committed record lists the recipient Device (an earlier form of LLR-degg8t,
+in `2026-10-07-org-key-pair.md`; earlier forms of LLR-degg8t and LLR-6acxu9 and the Loopback dial item —
+org-io's since 2026-10-13 — amended). On the joining
 node the expectation names the Organisation alone. The item traces
 REQ-szq3ud and REQ-3dsweu too.
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item handed the new member the signed change. LLR-8bum44, amended in place,
-still constrains it.
+`worktree-person-shared-types`).* This
+item handed the new member the signed change. An earlier form of LLR-7yu2xy, amended in place,
+still constrained it.
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 This was "the administrator's side of letting someone in — minting the new
@@ -1775,227 +1346,20 @@ signed change". The owner ruled that org-node has no administrator, does not
 write to the chain, builds provisional updates, and that the invitation
 exchange belongs to the app. `admit_member` now builds and stores a provisional
 update and nothing more; the app submits it through on-chain-client and calls
-`commit_update` (SDD-8cpyfa); sending is `send_update`, a separate operation
+`commit_update` (the item SDD-busuj3 and SDD-kegag2 replaced); sending is `send_update`, a separate operation
 that a commit never waits on. `export_invite`, `import_invite`,
 `export_join_request` and `import_join_request` are removed; the app reads a
 Persona's public keys through `persona_public_keys`, and declares an expected
-admission through `expect_admission`. The item traces REQ-xs4ab8, REQ-tqap3r
-and REQ-8amu2a for these, and LLR-2xzys9 in
+admission through `expect_admission`. The item traced the item REQ-dhr58q and REQ-4qh2h8 replaced, REQ-tqap3r
+and REQ-8amu2a for these, and an earlier form of LLR-degg8t in
 `2026-10-06-chain-authority.md` sits under it.
 
 *(Amended 2026-10-05 by the org-node type-safety change, review round 7:
-also constrained by LLR-8bum44, under SDD-af5vnt in
+also constrained by an earlier form of LLR-7yu2xy, under SDD-af5vnt in
 `2026-10-04-type-safety.md`. `import_join_request` refuses a Join request
 holding a value its type's parse refuses, with `InvalidField` naming the
 field, and `import_invite` stores no pending Invite whose keys are not curve
-points. So the item traces REQ-qn2erx too.)*
-
-**LLR-rb8r65**: `admit_member(rng, org_id, &Joiner) -> Result<ProvisionalUpdate,
-OrgNodeError>` adds the joiner to the trie rebuilt from the record and stores,
-through `insert_provisional`, an admission provisional update; it calls no
-chain operation, binds no endpoint, sends nothing and leaves the record
-unchanged, so a second admission before the first commits is built on the same
-record.
-satisfies: REQ-xs4ab8
-superseded-by: LLR-bwtx3h
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item said the signed change.
-
-**LLR-ghja3x**: an admission or revocation provisional update carries the
-record's root as its base root, as its Sequence number the epoch the update
-produces on the chain — the record's epoch plus one (REQ-txvtm9) — as the
-value to publish the public key of the fresh Organisation key pair drawn for
-it once that root is calculated (LLR-e2b7gv), never the record's current
-Organisation public key, the postcard-encoded Change set with that pair's
-private key, and the root that Change set produces; nothing in it is signed.
-satisfies: REQ-xs4ab8, REQ-stx9v3
-superseded-by: LLR-va2yqz
-
-*Amended 2026-10-06 (owner ruling on rotation, change
-`worktree-org-node-org-key-pair`).* This said the update carries "the
-record's Organisation public key as the value to publish". The owner ruled
-that every provisional update draws a fresh Organisation key pair when its
-resulting root is calculated and publishes its public key (REQ-stx9v3), so
-the key changes with every update.
-
-*Amended 2026-10-06 (merge of master `5f7c177` into change
-`worktree-org-node-chain-authority`).* This said "one greater than the
-record's mark". That equals the record's epoch plus one only while the mark
-equals the epoch, which master's `create_organisation` broke (it wrote mark 0
-at epoch 1). The contract moves a record at epoch E to E + 1, so the item now
-states that; `commit_genesis` writes mark 1 at epoch 1 (LLR-wzqqg9), after
-which the two readings agree on every record.
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item said the Envelope is signed by the administrator's Member-as-a-group key
-and carries the record's last sequence number plus one. Nothing signs, and the
-Sequence number is the epoch the update produced (REQ-txvtm9).
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-LLR-rb8r65 said `admit_member` submits the new root on chain at the next epoch
-and only then sends the signed change; LLR-ghja3x that the Envelope sent is
-signed by the administrator's Member key. Both were derived. org-node no longer
-writes to the chain or signs, and admission builds a provisional update
-(REQ-xs4ab8). The anchor-before-notice order LLR-rb8r65 protected now holds
-by construction: nothing can be sent before `commit_update` has verified the
-update against the chain.
-
-**LLR-bg3vsw**: the outgoing update `commit_update` returns, and so every
-Organisation-information Wire message `send_update` sends, carries the member
-snapshots as they were **before** the committed update, so a joiner holding
-no record of the Organisation can rebuild the trie the change applies to; a
-revocation carries no snapshot.
-satisfies: REQ-xa6smf
-superseded-by: LLR-degg8t
-
-*Amended 2026-10-13 (S4, task T5 of `docs/plans/2026-10-06-org-io-transport.md`):*
-`commit_update` returns no outgoing update; every Organisation-information
-body it builds (LLR-gdfqn9) carries the member snapshots as they were before
-the committed update. `send_update` is gone.
-
-*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
-This said "the Wire message `send_update` sends", of a message of one kind.
-A revocation goes only to a Device the committed record no longer lists, which
-never rebuilds from a snapshot, and carries none (LLR-js9dsu, LLR-6ymd6d).
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-This said "the Wire message carries", of the message `admit_member` sent. The
-send is now `send_update`, of the `OutgoingUpdate` the commit returned; the
-property is unchanged.
-
-*Moved 2026-10-13 (S4, task T12 of `docs/plans/2026-10-06-org-io-transport.md`,
-ruling A):* the Loopback dial item (the send dials the recipient at the full
-address its caller passes, not by endpoint identity alone) moved to org-io
-with the send, to
-`org-io/docs/architecture/2026-10-07-transport.md`
-("Moved from org-node: the Loopback dial"), re-parented there to org-io's
-Loopback-send requirement, with its history; the defect it stated (nothing
-checked that the address named the recipient's Device key) moved with
-org-node's report of it and is resolved there. org-node's transitional
-`send_body` still dials so until task T14 deletes it, and
-`in_loopback_mode_the_joiner_is_dialled_at_the_full_address` still runs,
-with no `verifies:` line. *(2026-10-14, S4 task T14: the send and that test
-are deleted.)*
-
-**LLR-t4znbk**: `send_update` writes nothing to the store and changes no
-record: the Organisation record has already been updated by the commit the
-outgoing update came from, and a send that fails returns a typed error and
-leaves that committed record in place.
-satisfies: REQ-tqap3r
-superseded-by: LLR-g2jeqd
-
-*Superseded 2026-10-22 (change `worktree-org-io-domain-api`, plan detail
-pass, dispatcher decision):* `send_update` is removed; org-node sends
-nothing, and an adoption's one store change is sealed before any send, which
-neither a send nor its failure changes (LLR-g2jeqd).
-
-*Amended 2026-10-13 (S4, task T5 of `docs/plans/2026-10-06-org-io-transport.md`),
-split, org-node half:* building the bodies writes nothing beyond the
-commit's one store change and sends nothing (LLR-gdfqn9); the transitional
-`send_body`, which replaces `send_update` until T14, writes nothing to the
-store, changes no record, and a send that fails returns a typed error and
-leaves the committed record in place. The other half — org-io's send writes
-nothing — moves with the send to org-io.
-
-*Narrowed 2026-10-14 (S4, task T14):* the transitional `send_body` is
-deleted, so the org-node half is the commit's alone: building the bodies
-writes nothing beyond the commit's one store change and sends nothing, and a
-body that is never delivered leaves the committed record in place. Its two
-failed-send tests (`a_failed_send_leaves_the_committed_record_in_place`,
-`a_failed_revocation_send_leaves_the_committed_removal_in_place`) and
-`the_revoking_record_takes_the_removal_only_through_commit_update` keep their
-annotations, rewritten with dated comments to drop the bodies undelivered.
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-This said the record is updated and the store saved only after the Wire
-message has been sent — the publish-before-persist order PR-vt244s books as a
-defect — and was derived. The owner moved the chain write out of org-node and
-ruled that the sender commits its own update only once it verifies against the
-chain (REQ-tqap3r), and the risk assessment of that requirement made it a
-constraint that the commit must not wait on the send. The record is now
-written by the commit (LLR-4tcxsu) and never by the send, so a failed send no
-longer leaves the record an epoch behind the chain. PR-vt244s stays open by
-owner ruling.
-
-**LLR-ag9mgm**: `admit_member` draws the new member's `MemberId` from the
-caller's random source before the leaf is built and never computes it from a
-key, so admitting the same Member-as-a-group key and device key twice yields two
-different identifiers and a deleted identifier is never reissued.
-satisfies: REQ-d9g6nt
-superseded-by: LLR-4rv4kr
-
-*Superseded 2026-10-21 (change `worktree-org-io-domain-api`, design gap G2
-of its plan):* `admit_member` is removed; a Member's identifier is drawn
-when the provisional organisation admitting it is calculated, the founder's
-when the founding is proposed, by the same rule (LLR-4rv4kr).
-
-**LLR-vdyu65**: `admit_member` builds on the Organisation record the `org_id`
-argument names and stores the provisional update under **that** Organisation,
-so a device holding more than one Organisation admits into the one the caller
-asked for and leaves every other record and every other Organisation's
-provisional updates where they were; no Persona is looked up by an
-administrator key.
-satisfies: derived
-superseded-by: LLR-f9x3vf
-
-*Superseded 2026-10-21 (change `worktree-org-io-domain-api`, design gap G2
-of its plan):* `admit_member` is removed, and a store now holds one
-Organisation; an admission is recorded in the store its Device key names and
-changes no other store (LLR-f9x3vf).
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item also said `admit_member` signs with that Organisation's administrator
-Persona. Nothing is signed; the Persona it looks up names the endpoint to bind
-(the named-Persona bind and the endpoint-bound-once report, both org-io's
-since S4 task T10).
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-This said `admit_member` "signs with the administrator Persona of that
-Organisation" and leaves "every other on-chain root" where it was. Nothing is
-signed, org-node has no administrator (`admin_persona_for_org` is removed),
-and org-node writes no root to the chain; what the clause still protects is
-that the right record and the right Organisation's provisional updates are
-touched.
-
-*Added 2026-10-04 by review round 3, which found four record lookups —
-`find_org`, `find_org_mut`, `admin_persona_for_org` and
-`update_persona_status` — able to ignore the identifier they were given and
-return whatever record came first in the store, with the whole gate green. Every
-gated test until now gave its service one Organisation and one Persona. This is
-round 2's finding-3 one level over: that finding convicted `ensure_endpoint`
-for the same assumption, and the fix wrote a two-persona test for that one call
-site rather than sweeping the lookups. The failure it allows is not small — an
-administrator holding two Organisations calls `admit_member(org_2, …)`, and the
-joiner is minted into org_1's record, org_1's root is submitted on chain for
-the epoch, and the envelope is signed by org_1's administrator.*
-
-**LLR-3v5nu9**: `OrgService::proxy_account(org_id)` returns the proxy account
-the named Organisation's record holds, unchanged — `Some` as `commit_genesis`
-stored it, `None` on a record created by a first admission — and no operation
-of org-node passes it to the chain or reads anything else from it.
-satisfies: derived
-superseded-by: LLR-x5asbx
-
-*Superseded 2026-10-21 (change `worktree-org-io-domain-api`, design gap G2
-of its plan):* `commit_genesis` is removed; `proxy_account` hands back the
-account the founding's adoption carried into the record from the
-provisional founding, `None` for a first admission's (LLR-x5asbx).
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-This said `admit_member` submits the update with the proxy account its record
-holds. The app now submits through on-chain-client, so the account goes to the
-app: org-node keeps it as opaque data and hands it back (owner ruling 6).
-
-*Added 2026-10-05 by review round 8, which measured that passing none was green. It is carried by
-`the_proxy_account_from_genesis_is_kept_and_handed_back` (renamed 2026-10-06
-from `…_kept_and_passed_on_every_update`).*
+points. So the item traces REQ-kd34f5 (then in an earlier form) too.)*
 
 ### The four out-of-band functions
 
@@ -2013,266 +1377,35 @@ satisfies: derived
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
+`worktree-person-shared-types`).* This
 item ended ", so the joiner has a key to pin the first admission's sender
 against". Nothing on the joiner's side compares that key with a sender since
 the owner's ruling.
 
 *Amended 2026-10-13 (S4, task T6):* rewritten. `OrgService::build_invite`
 carries the Device public key of the Persona bound to the Organisation
-(LLR-nr8df3), read inside org-node; there is still no `export_invite`, and
+(an earlier form of LLR-h9f5c9), read inside org-node; there is still no `export_invite`, and
 still no first admission's sender is pinned to that key. The evidence is
 `org_node_holds_no_invitation_exchange`'s presence check of `fn build_invite`
-and `fn build_reply`, and LLR-nr8df3's tests.
-
-**LLR-qezw3n**: no value org-node returns carries a dialling address for
-another device to reach it by: the Invite's dialling address, which nothing
-read, leaves with the Invite, and the Join request's with the Join request.
-satisfies: derived
-superseded-by: LLR-ds228z
-
-*Superseded 2026-10-22 (change `worktree-org-io-domain-api`, plan detail
-pass, dispatcher decision):* under owner answer A2 of 2026-10-16 the Invite
-and the requests carry the sender's endpoint addresses, which the receiver
-keeps; org-node still dials none, and which returned values carry an address
-is LLR-ds228z's.
-
-*Note 2026-10-14 (S4, task T14 of `docs/plans/2026-10-06-org-io-transport.md`):*
-the claim is unchanged; its evidence moves to the extended absence test
-`org_node_holds_no_dialling_address` (`org-node/tests/absences.rs`): with the
-transport gone, org-node names no endpoint address type, no peer address and
-no function that builds an address to dial. `org_node_holds_no_invitation_exchange`
-keeps its own call-site check.
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-LLR-zj88e6 said `export_invite` carries the administrator Persona's device key
-so the joiner can pin the first admission's sender, and LLR-qezw3n that it
-carries the bound endpoint's address (the endpoint-bound-once report's
-reading side). The owner
-ruled that the invitation exchange belongs to the app, that nothing about a
-sender is checked, and that the Invite's dialling address leaves org-node. Both
-now state the absence, compile-enforced. That report's reading side goes with
-them; its sending side remains (the bind-once item). *(2026-10-13, S4 task
-T10: the report and the bind-once item moved to org-io, where one endpoint
-per Persona resolves the report.)*
-
-*Added 2026-10-05 by review round 8, which measured that emptying the address
-left the gate green. Both requirements now state an absence and are carried by
-`org_node_holds_no_invitation_exchange` (`org-node/tests/absences.rs`). The
-tests that carried the earlier statements — one round-tripping the out-of-band
-blobs, and review round 9's endpoint-bound-once pin on the Invite — were deleted
-2026-10-06 with the blobs (change `worktree-org-node-chain-authority`, T7).*
-
-**LLR-9zfnmb**: `expect_admission(rng, org_id)` records the Organisation in
-`expected_admissions` at most once — a repeated declaration for the same
-Organisation leaves one entry rather than appending, and another Organisation
-is a second entry — and the store is written before it returns, so the
-refusal LLR-s8xp7m performs has one answer and survives a restart.
-satisfies: REQ-8amu2a
-superseded-by: LLR-6acxu9
-
-*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
-This said `expect_admission(rng, org_id, invite_id)` recorded the pair of
-Organisation and invite identifier. The invite identifier no longer travels
-between peers (REQ-8amu2a as amended again), so the expectation is the
-Organisation alone, as before the re-trace note below.
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item ended ", so the cross-check LLR-j83kc8 performs has one answer and
-survives a restart". The Invite is no longer a cross-check.
-
-*Parent stale, noted 2026-10-05 by review round 4 (finding-5).* Since the
-amendment of 2026-10-05, REQ-xa6smf requires no Invite, so it does not imply
-this item, and `satisfies:` above names it only until the item is re-traced.
-By owner ruling of 2026-10-05 the re-trace is left to chain-authority's
-change 1.
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-This said `import_invite` records at most one pending Invite per Organisation,
-for the sender cross-check of LLR-j83kc8, and satisfied REQ-xa6smf. Invites
-leave org-node and the sender is not checked; what the joining node keeps
-instead is the app's declaration that it expects to join that Organisation
-(REQ-8amu2a, RC-2ferct), with the same at-most-once and written-before-return
-properties.
-
-*Re-traced and amended 2026-10-06 (change `worktree-org-node-chain-authority`,
-after the merge of master `5f7c177`).* The stale-parent note above is
-answered: the item already names REQ-8amu2a, the requirement it refines, and
-no longer REQ-xa6smf. By the owner's ruling on pre-emption (2026-10-06,
-REQ-8amu2a as amended) an expectation names the invite identifier of the
-Invite the user replied to as well as its Organisation; this said
-`expect_admission(rng, org_id)` recorded the Organisation alone.
-
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* the signature is
-`expect_admission(rng, persona_id, org_id) -> Result<StoreWrite, _>`: one
-store per Persona, so the expectation is recorded in that Persona's store, at
-most once, and "the store is written before it returns" becomes "returns that
-store's write", which org-io writes (LLR-bvt5up). `expected_admissions()`
-lists every store's, in store order.
+and `fn build_reply`, and the tests of LLR-h9f5c9's earlier form.
 
 **LLR-437fvx**: `persona_public_keys(persona_id)` returns the Persona's
 Member-as-a-group key and its DevicePublicKey as two distinct keys, each derived
 from that Persona's own seed, and no dialling address.
 satisfies: derived
 
-**LLR-836z24**: org-node has no `import_join_request` and decodes no Join
-request, so nothing the joiner composes reaches the inviter's store except
-through `admit_member`'s parsed `Joiner`.
-satisfies: derived
-superseded-by: LLR-96z2k5
-
-*Superseded 2026-10-21 (change `worktree-org-io-domain-api`, design gap G2
-of its plan):* `admit_member` and `Joiner` are removed; what a joiner
-composes now arrives as an admission request that the receive path keeps
-parsed (LLR-96z2k5), and org-node still has no Join-request import.
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-LLR-437fvx said `export_join_request` carries the Persona's two keys and the
-bound endpoint's address (the endpoint-bound-once report's reading side); LLR-836z24 that
-`import_join_request` stores nothing. The Join request leaves org-node for the
-app's Invite reply. The keys the reply needs come from `persona_public_keys`,
-which carries no address; LLR-836z24 states the absence, compile-enforced as
-it was before.
-
-## SDD-8cpyfa — The receive-and-commit path
+## The receive-and-commit path
 
 `org-node/src/service.rs` (`receive_and_verify`, `ReceiveOutcome`,
 `first_admission_base` *(added 2026-10-05, see below)*)
-
-**SDD-8cpyfa**: the commit path — accept one Wire message, or take one of the
-node's own provisional updates, run every check that needs no chain, read the
-chain once, verify against it, and commit, discarding the provisional updates
-the commit orphans. A first admission is attempted only for an Organisation the
-app declared it expects. Nothing about the sender is checked.
-traces: REQ-xa6smf, REQ-uk9rw7, REQ-nhe2zu, REQ-txvtm9, REQ-bvh8v6, REQ-d9g6nt, REQ-qn2erx, REQ-f2k4tr, REQ-8amu2a, REQ-tqap3r, REQ-uv3v5w, REQ-uxv2x2, REQ-kt877x, REQ-yp75u9, REQ-c29s93, REQ-bwx7eg, REQ-ju6vn2, REQ-3dsweu, REQ-vxqc5g, REQ-jy6ybw, REQ-tb4f8p, REQ-ps2gy2, REQ-ea4qs5, REQ-b462sh
-superseded-by: SDD-busuj3, SDD-kegag2
-
-*Superseded 2026-10-20 (change `worktree-org-io-domain-api`, dispatcher's
-resolution C6 of 2026-10-16):* there is no commit path. A received message
-is checked and kept, chain-free (SDD-busuj3, which also holds this item's
-chain-free checks), and only verification against a chain state the caller
-read adopts (SDD-kegag2).
-
-*Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
-One receive path, by values. The item's code is now `check_received`,
-`commit_checked`, `Checked`, `CheckedMessage`, `ReceiveKind`,
-`ReceiveOutcome` and `first_admission_base` (SDD-esg2kc states the two
-steps); `prepare_receive`, `apply_receive`, `prepare_self_delete`,
-`apply_self_delete`, `Prepared`, `PendingReceive` and `receive_message` are
-gone, and the transitional `receive_body` (removed in T14) hands org-io one
-undecoded body and its sender. *(Removed 2026-10-14, S4 task T14: org-io
-receives.)* The S3a note's "afterwards org-io passes it in
-with the message" is now the fact: org-io passes the authenticated sender to
-`check_received` with the body.
-
-*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
-who reads, not what is decided. "Read the chain once" reads "take the state
-org-io read once". `receive_and_verify` and
-`receive_and_self_delete_if_revoked` leave `OrgService` (org-io composes
-them): each receive splits into `receive_message` (transport, returning the
-sender with the message), the chain-free phase `prepare_receive` /
-`prepare_self_delete` (every check that needs no chain; an acknowledgement
-is decided there, `Prepared::Done`), and the apply phase `apply_receive` /
-`apply_self_delete`, given the state of the Organisation the pending value
-names. `commit_update` takes the state org-io read back after its write.
-The item's code is now `prepare_receive`, `apply_receive`,
-`prepare_self_delete`, `apply_self_delete`, `Prepared`, `PendingReceive`,
-`ReceiveOutcome` and `first_admission_base`.
-
-*Amended 2026-10-07 (owner rulings at the S3a close-out residual review, change
-`worktree-org-io-commit-workflow`; plan task T12a).* "Nothing about the sender
-is checked" above no longer holds for an Organisation the node holds: an
-update or a revocation from a Device the record does not list is refused
-before the chain read (LLR-2r2fha, LLR-kzgjz8; REQ-ztdza4 as amended,
-REQ-ea4qs5), and an acknowledgement is accepted only from the Device it names
-(LLR-3aysup, REQ-b462sh as amended). A first admission still checks nothing
-about the sender (REQ-xa6smf). Traces REQ-ea4qs5 and REQ-b462sh.
-
-*Amended 2026-10-06 (change `worktree-org-io-commit-workflow`, stage S3 of
-`docs/plans/2026-10-06-org-io-roadmap.md`).* Traces REQ-tb4f8p and REQ-ps2gy2 for the reconcile and the revocation
-notices a commit returns (LLR-gr8x3r, LLR-fm38ww, LLR-a8z7r5, in
-`2026-10-07-commit-workflow.md`). The reconcile
-selects a provisional update by root and Organisation public key, as the
-key-pair change's `commit_update` does (note below).
-*(Merged 2026-10-07 with the key-pair change's notes below, at this branch's
-merge of master `1f52c36`: the trace list is the union of both. The
-key-pair note's account of a received revocation — verified as an update,
-then refused or deleting the record — is superseded by LLR-pt32fx and
-LLR-38e2kn as amended on 2026-10-07: a revocation is decided by
-`revocation::accept`.)*
-
-*Amended 2026-10-06 (owner ruling on rotation, change
-`worktree-org-node-org-key-pair`):* traces REQ-jy6ybw. `commit_update`
-selects the node's provisional update by its root and its fresh Organisation
-public key, and on commit replaces the record's Organisation private key and
-public key with the update's (LLR-6s785x; LLR-cmdrp9 amended); a committed
-Organisation-information message sets the record's public key to the chain's
-(LLR-4kh9w9).
-
-*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
-The path now receives two kinds of Wire message. An Organisation-information
-message that does not decode is refused with a typed error before anything
-else (LLR-xn5pwc); one that verifies is refused when the X25519 public half
-of the Organisation private key it carries is not the `org_pub_key` read from
-the chain at verification (LLR-ba2ejp), and on commit its key is stored
-(LLR-ckk5nz amended). A revocation about an Organisation the node holds no
-record of is refused before the chain is read (LLR-38e2kn); one about a held
-Organisation is verified and then refused with `RevocationNotForThisDevice`
-unless it removes this node's own Device, in which case the record is deleted
-(LLR-pt32fx, owner ruling on relabelling), so no revocation commits into a
-record the node keeps. A first admission is matched by Organisation alone
-(LLR-s8xp7m amended). LLR-xn5pwc, LLR-ba2ejp, LLR-38e2kn and LLR-pt32fx are
-in
-`2026-10-07-org-key-pair.md`. The item traces
-REQ-c29s93, REQ-bwx7eg, REQ-ju6vn2, REQ-3dsweu and REQ-vxqc5g too.
-
-*Amended 2026-10-06 (change `worktree-org-node-chain-authority`, independent
-review round 1, finding-1):* traces REQ-yp75u9, for the rule that no commit
-path rebinds a Persona bound to another Organisation (LLR-eyc4ud, in
-`2026-10-06-chain-authority.md`).
-
-*Amended 2026-10-06 (owner ruling on pre-emption, change
-`worktree-org-node-chain-authority`):* traces REQ-kt877x, for the own-Persona
-rule on a first admission (LLR-3f5h7b).
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item owned the two sender cross-checks, the only place the transport's
-authenticated identity was compared with the membership record. Both are
-removed (REQ-xa6smf, REQ-ztdza4). LLR-rys5nx, in
-`2026-10-05-unsigned-envelope.md`, also refines this item.
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-This was "the member's side — accept one Wire message, establish who sent it,
-verify it against the chain, and commit", and owned "the two sender
-cross-checks". The owner ruled that nothing about an Envelope's sender is
-checked, that a node commits its own provisional update only once it verifies
-by the checks a received update passes, and that a commit discards the old
-record and the provisional updates it orphans. The item now also owns
-`commit_update` and the commit step the three commit paths share; its seven
-new requirements — LLR-9ew26y, LLR-s8xp7m, LLR-cmdrp9, LLR-ewkg85, LLR-4tcxsu,
-LLR-mkj4bz and LLR-b27jr6 — are in
-`2026-10-06-chain-authority.md`, so it traces
-REQ-f2k4tr, REQ-8amu2a, REQ-tqap3r, REQ-uv3v5w and REQ-uxv2x2 too.
-
-*(Amended 2026-10-05 by the org-node type-safety change, review round 7:
-`first_admission_base`, which only `receive_and_verify` calls and which no
-item named, is this item's. It is also constrained by LLR-8bum44, under
-SDD-af5vnt in `2026-10-04-type-safety.md`. A record snapshot holding a value
-its type's parse refuses fails as a whole with `InvalidField` naming the
-`member.…` field, and extends nothing. So the item traces REQ-qn2erx too.)*
 
 **LLR-j6j95z**: a first admission to an Organisation the node holds no record
 of is attempted only from an Organisation-information Wire message, whose
 record snapshot is required, so it always rebuilds from the snapshot of the
 Membership record the change extends (`first_admission_base(&[u8])`) and never
 from a reconstructed one; a body of that kind without a snapshot does not
-decode (LLR-js9dsu), and a revocation, which carries none, is refused
-(LLR-38e2kn).
+decode (LLR-xr88a8), and a revocation, which carries none, is refused
+(LLR-95av3e).
 satisfies: REQ-d9g6nt
 
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
@@ -2281,135 +1414,6 @@ snapshot", because the snapshot was optional. The Organisation-information
 kind requires it, so the absence is a decode refusal or a revocation's
 refusal, and `first_admission_base` takes the snapshot bytes, not an
 `Option`.
-
-**LLR-j83kc8**: a first admission to an expected Organisation that verifies
-against the chain and lists one of the node's own Personas is committed
-whichever DevicePublicKey the connection authenticated: no Invite and no
-sender key is consulted.
-satisfies: REQ-xa6smf
-superseded-by: LLR-q4puca
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item refused a first admission whose sender was not the Invite's administrator
-device.
-
-*Amended 2026-10-06 (owner ruling on pre-emption, change
-`worktree-org-node-chain-authority`).* "and lists one of the node's own
-Personas" is added: REQ-kt877x refuses a verified first admission that lists
-none (LLR-3f5h7b), and this item states only that the sender is not what
-decides.
-
-**LLR-u6rq4s**: on a Wire message about an Organisation already held, the
-Device key the connection authenticated is compared only with the node's
-current committed record, before the update is verified (LLR-2r2fha,
-LLR-kzgjz8): an Organisation-information update from a key that record lists
-and that verifies against the chain is committed whether or not that key is
-in the record after the update, and a revocation from such a key is accepted
-or refused (LLR-pt32fx) by the receiving node's own Device. The verified
-record after the update is never consulted about the sender.
-satisfies: REQ-uk9rw7
-superseded-by: LLR-283x6f
-
-*Superseded 2026-10-22 (change `worktree-org-io-domain-api`, plan detail
-pass, dispatcher decision):* the commit path is removed; the sender is
-judged on receipt against the current record alone, never against a record
-an update would lead to, and verification never consults the delivering
-Device (LLR-283x6f).
-
-*Amended 2026-10-07 (owner ruling R1 at the S3a close-out residual review,
-change `worktree-org-io-commit-workflow`; plan task T12a).* This said the key
-"is compared with no Membership record" and that an update is committed
-"whether that key is in the record before the update, after it, or in
-neither". The owner: "I agree with only accepting updates and revocations
-from members." The neither case is now refused as `SenderNotListed`.
-
-*Amended 2026-10-06 (owner ruling on relabelling, change
-`worktree-org-node-org-key-pair`).* This said "an update that verifies
-against the chain is committed". A revocation that leaves the receiving
-Device listed is now refused (LLR-pt32fx); what the item protects, that the
-sender's key decides nothing, is unchanged.
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item required that key to be in the trie the Envelope verified into, checked
-after verification.
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-LLR-j83kc8 required a first admission's sender to equal the administrator's
-DevicePublicKey a pending Invite named; LLR-u6rq4s required an update's sender to
-be in the verified trie. The owner ruled that nothing about the sender is
-checked (REQ-xa6smf and REQ-ztdza4 as amended): authority is the chain's, and a
-chain-valid update relayed by any peer is harmless. Both are rewritten to that
-rule. The two `BadSignature` refusals they described are removed.
-
-**LLR-37cj3n**: which Change set `receive_and_verify` commits, and the
-record it produces, are decided by the Organisation state it reads from the
-chain itself and by its own record, never by a value carried in the Wire
-message other than its Envelope, its Organisation private key (which becomes
-the record's key, and only when its public half is the chain's Organisation
-public key, LLR-ba2ejp, REQ-ju6vn2) and, on a first admission, its snapshot,
-and never by the device that delivered it. The Organisation state's
-Membership root and epoch decide the Change set; its Organisation public key
-decides only whether an Organisation-information message commits at all,
-through the check of the carried Organisation private key against it
-(LLR-ba2ejp).
-satisfies: REQ-nhe2zu
-superseded-by: LLR-8528ud
-
-*Superseded 2026-10-21 (change `worktree-org-io-domain-api`, design gap G2
-of its plan):* `receive_and_verify` is removed and receipt commits nothing;
-which record is adopted is decided at verification by the chain state and
-the held provisional organisations, never by the delivering Device
-(LLR-8528ud).
-
-*Amended 2026-10-07 (change `worktree-org-node-org-key-pair`, review round 1,
-finding-3).* This named the Envelope and, on a first admission, the snapshot
-as the only carried values that decide the record. Since this change the
-record's Organisation private key is the carried key, constrained by the
-chain's public key, so the carried key is named as the third input.
-
-*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
-This said a value carried in the Wire message never decides what is
-committed, and that the Organisation state contributes only its root and
-epoch, "so a state holding any Organisation public key commits the same
-Change set". The receipt check RC-9cefcn makes the chain's public key, and
-the private key the message carries, decide whether an Organisation-information
-message commits; neither changes which Change set does.
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item named the author key the signature was verified under. There is no author
-key.
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-This said the signature is verified under the Published signing key read from
-the chain. No signature is verified now; what remains true and testable is
-that the key field is not an input to the decision.
-
-**LLR-3wb7th**: an Organisation the chain holds no state for is refused with
-`OrgNotOnChain`, record unchanged — for an Organisation held, only after the
-chain-free checks have passed (LLR-9ew26y), and for a first admission only
-after the expectation check, the snapshot decode and the chain-free checks
-(LLR-s8xp7m).
-satisfies: REQ-bvh8v6
-superseded-by: LLR-rr558z
-
-*Superseded 2026-10-22 (change `worktree-org-io-domain-api`, dispatcher decision O4 of its plan assembly):*
-the Receive operations and the first-admission path this item ordered its
-refusal on are removed. `verify` refuses an Organisation the chain holds no
-state for (`None`) with `OrgNotOnChain`, changing nothing (LLR-rr558z,
-LLR-qvp7mq), and the chain-free checks are made on receipt, before anything
-is kept (LLR-76bhw9).
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-This said the refusal comes "before any local record is consulted", because the
-Receive operation read the chain first to obtain the signing key. RC-mj6gjq and
-RC-2ferct require the chain-free checks, which consult the local record, before
-any chain read, so the order is reversed.
 
 **LLR-cja9zv**: the record, the epoch, the sequence mark and the member
 snapshots are written together on an adoption by `verify`, in the one sealed
@@ -2423,8 +1427,8 @@ returned". org-node saves no store: `verify` returns the sealed change with
 the outcome and org-io writes it. It now reads as the note below says.
 
 *Re-pointed 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-round 2, finding-4).* This item satisfied REQ-nhe2zu and REQ-txvtm9 alone,
-both superseded by REQ-dwb9bq. It now satisfies REQ-dwb9bq (an adoption
+round 2, finding-4).* This item satisfied only two items REQ-dwb9bq replaced.
+It now satisfies REQ-dwb9bq (an adoption
 after verification against the chain) and REQ-x2dnee (the adopted record
 replaces the previous one); "after verification succeeds" reads "on an
 adoption by `verify`", whose one sealed change carries the record, its
@@ -2432,225 +1436,18 @@ epoch and its Sequence number together (LLR-34c5y3).
 
 *Annotated 2026-10-05 by review round 8.* This holds for a change that
 removes this node's own device key too: on this path that change is committed
-as an update, with nothing deleted. That is PR-322qst's defect, stated here
-and not endorsed, and the PR-322qst pin carried this requirement.
+as an update, with nothing deleted. That is the resolved problem report on an own revocation on the ordinary receive path's defect, stated here
+and not endorsed, and the resolved problem report on an own revocation on the ordinary receive path pin carried this requirement.
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 The annotation above no longer holds: a change that removes this node's own
 DevicePublicKey is not committed as an update on this path. Owner ruling 7 (an
-empty record on removal, REQ-uxv2x2) applies it on every commit path, so the
-record is deleted and the Personas revoked (LLR-b27jr6). The pin for PR-322qst
+empty record on removal, an earlier form of REQ-48zc3e) applies it on every commit path, so the
+record is deleted and the Personas revoked (an earlier form of LLR-jhy6t6). The pin for the resolved problem report on an own revocation on the ordinary receive path
 asserted the opposite; it reddened when this was implemented and was rewritten
 2026-10-06 as `an_own_revocation_on_the_ordinary_path_deletes_the_record`,
 which carries this requirement now.
 
-**LLR-mbjfq8**: a first admission to an Organisation the app declared it
-expects is accepted on the chain anchor, the check of the Organisation private
-key it carries against the chain (LLR-ba2ejp) and the own-Persona rule
-(LLR-3f5h7b) alone: no Invite, no invite identifier, no signature and no
-sender key is consulted.
-satisfies: REQ-xa6smf, REQ-8amu2a
-superseded-by: LLR-q4puca
-
-*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
-This said "under the invite identifier its Wire message carries". The invite
-identifier no longer travels between peers, and the receipt check (RC-9cefcn)
-is added to what the admission rests on.
-
-*Amended 2026-10-06 (owner ruling on pre-emption, change
-`worktree-org-node-chain-authority`).* This said "on the chain anchor alone"
-of an Organisation the app expects. The expectation now names an invite
-identifier too (REQ-8amu2a as amended), and a verified admission that lists
-none of the node's Personas is refused (REQ-kt877x).
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item said such an admission rests on the chain anchor and the signature alone,
-and that the Invite cross-check applies when an Invite exists. There is no
-signature and no cross-check.
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-This said a first admission with no imported Invite is accepted "on the chain
-anchor and the signature alone", and was derived. The signature and the
-Invite are gone; what now separates a first admission the node takes from one
-it refuses is the app's declared expectation (REQ-8amu2a, LLR-s8xp7m).
-
-*Added 2026-10-04 by review round 7, which measured that refusing such an
-admission left the gate green. It is stated as the code behaves, and
-`a_first_admission_to_an_expected_organisation_rests_on_the_chain_alone` pins it
-(renamed 2026-10-06 from `…_with_no_imported_invite_rests_on_the_chain_alone`).
-The trade-off is assessed under RC-b6mydy in the hazard analysis and in the
-derived-requirements risk file.*
-
-*Abnormal case added 2026-10-05 by review round 4 (finding-4).* "On the chain
-anchor alone" cuts both ways: such an admission that does not reach the
-chain's Membership root is refused with `RootMismatch` and commits nothing,
-marks no Persona and writes nothing to disk.
-`a_first_admission_that_misses_the_chain_root_commits_nothing` pins it (renamed
-2026-10-06, without "with no imported invite").
-
-**LLR-y2v8v2**: every record this path reads or writes is the one the received
-change's Organisation identifier names — the local Membership record it
-verifies against, the expectation it checks and clears, the record it commits
-into and the provisional updates it discards — so a node holding more than one
-Organisation leaves every other Organisation's record, Organisation private
-key, expectation and provisional updates exactly as they were.
-satisfies: REQ-nhe2zu, REQ-txvtm9, REQ-eqt23j
-superseded-by: LLR-f9x3vf
-
-*Superseded 2026-10-22 (change `worktree-org-io-domain-api`, dispatcher decision O4 of its plan assembly):*
-the receive path this item scoped is removed, and a store holds one
-Persona's view of one Organisation; each per-store operation reads and
-changes only the store its Device key names, so no other store's record,
-Organisation private key, expected admission or provisional changes is
-touched (LLR-f9x3vf).
-
-*Traces amended 2026-10-20 (change worktree-org-io-domain-api): REQ-xa6smf →
-REQ-eqt23j.*
-
-*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
-"secret" read the Organisation secret, which is removed; the record's
-Organisation private key takes its place.
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item also listed "the pending invite it cross-checks the sender against". The
-pending Invite is no longer compared with the sender; the one consumed is
-still the named Organisation's.
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-This named "the pending invite it cross-checks the sender against" and "the
-invite it consumes". Invites leave org-node and the sender is not checked; the
-records of the same kind this path now touches are the expected admission
-(LLR-s8xp7m, LLR-q8emds) and the provisional updates a commit discards
-(LLR-mkj4bz).
-
-*Narrowed 2026-10-04 by review round 5.* This requirement also claimed "the
-Persona it marks Active", and that clause was false. The Persona is chosen
-from every Persona whose device key is in the verified trie, whatever
-Organisation it is bound to, and is then rebound. A device holding two
-Organisations can have one Organisation's Persona moved to the other. That is
-PR-mdv38y, pinned by
-`pr_mdv38y_the_receive_path_rebinds_another_organisations_persona`. The clause
-is withdrawn here rather than left standing over a test that asserts its
-opposite. LLR-e5c9ud states what the selection does today.
-*Annotated 2026-10-06 (REQ-yp75u9).* PR-mdv38y is resolved: the selection is
-scoped by LLR-eyc4ud, and the pin is rewritten as
-`pr_mdv38y_an_update_enrolling_another_organisations_persona_does_not_rebind_it`.
-
-**LLR-xq9nrq**: on first admission the new Organisation record holds, as its
-Organisation public key, the value read from the chain, never a value carried
-in the Wire message, and holds no administrator key: `OrgRecord` has no
-`admin_member_key`.
-satisfies: derived
-superseded-by: LLR-q4puca
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item said the field holds the Published signing key, which was the
-administrator's Member-as-a-group key. The chain's key is now the Organisation
-public key, an X25519 key distinct from every member key (REQ-ech45n). A first
-admission no longer needs an Invite (REQ-xa6smf); by the owner's answer Q1 the
-field takes the imported Invite's administrator key when there is one, and the
-chain's key only when there is none. The field stays, as master left it, until
-chain-authority's change 1 removes every administrator field.
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-This said the record holds the Published signing key read from the chain "as
-its administrator's Member-as-a-group key". The owner ruled that there is no
-`admin_member_key` anywhere in org-node; the value read from the chain is kept
-in the record's `org_pub_key`, where it already was.
-
-**LLR-ckk5nz**: when `receive_and_verify` or
-`receive_and_self_delete_if_revoked` commits an Organisation-information Wire
-message that has passed the key check (LLR-ba2ejp), the record's
-`org_private_key` is the Organisation private key the message carries: the
-first admission creates the record with it, and an update replaces the stored
-key with it, in the same store save as the rest of the commit. A revocation
-never commits into a record the node keeps: it is refused unless it removes
-this node's own Device (LLR-pt32fx), and then, like any commit that is the
-node's own removal, it deletes the record, key included (LLR-b27jr6,
-LLR-6p4pj2). `commit_update`
-replaces the record's `org_private_key` with its provisional update's
-(LLR-6s785x), and `commit_genesis` stores the genesis provisional update's
-key (LLR-wzqqg9). `commit_held` draws no key of its own: it takes the
-Organisation key pair to store from its caller, as
-`commit_held(org_id, verified, org_private_key, org_pub_key)` —
-`commit_update` passes its provisional update's pair, and
-`commit_received` the carried private key with the Organisation public key
-of the chain state read. The record keeps only the current key.
-satisfies: REQ-ju6vn2, REQ-3dsweu
-superseded-by: LLR-34c5y3
-
-*Amended 2026-10-07 (change `worktree-org-node-org-key-pair`, review round 1,
-finding-2).* This said "`commit_held` takes no key or secret argument". Since
-rotation, `commit_held` writes the key pair its caller passes, so the item
-states that interface and where each caller's pair comes from.
-
-*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
-This stated, without endorsing it, that a later received update overwrote the
-stored Organisation secret with whatever the Wire message carried, including
-nothing (PR-xwek5e), and was derived. The owner ruled that the secret is
-replaced by the Organisation private key, which every Organisation-information
-message carries and a revocation never does (REQ-ju6vn2, REQ-3dsweu).
-PR-xwek5e is resolved by that ruling, and the item now satisfies those
-requirements. By the owner's later rulings the same day, `commit_update`
-replaces the record's key with its provisional update's (rotation,
-REQ-jy6ybw), where it had left the stored secret as it was; and a revocation
-is accepted only as the node's own removal (relabelling, REQ-3dsweu as
-rewritten), so no received revocation commits into a kept record, where an
-earlier draft of this change had it keep the stored key.
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-The last sentence is added: `commit_update` is a new commit path, and it
-carries no Wire message to take a secret from. The received-update clause is
-unchanged; the keep-or-clear rule that resolves PR-xwek5e belongs to the
-Organisation key-pair change.
-
-**LLR-e5c9ud**: the Persona marked Active is the first in the store whose
-DevicePublicKey is in the verified trie, among the Personas the commit may
-bind (LLR-eyc4ud: on a first admission the unbound ones, otherwise those bound
-to the received change's Organisation), and it is given the member id of the
-member holding that DevicePublicKey and the received change's Organisation.
-satisfies: derived
-superseded-by: LLR-exaa9u
-
-*Superseded 2026-10-22 (change `worktree-org-io-domain-api`, plan detail
-pass, dispatcher decision):* the commit is removed and a store holds one
-Persona; the first adoption in its store marks it Active and gives it the
-member id of the member holding its DevicePublicKey (LLR-exaa9u).
-
-*Amended 2026-10-06 (REQ-yp75u9, independent review round 1 of change
-`worktree-org-node-chain-authority`).* The selection ran over every Persona and
-the last sentences read "Which Organisation that Persona was bound to before
-is not consulted. That is PR-mdv38y." It is now scoped by LLR-eyc4ud, and
-PR-mdv38y is resolved.
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item compared the Persona's device key with the administrator's member key,
-correct only while both were one ed25519 key. The code compares the two
-Member-as-a-group keys. The last sentence follows the owner's answer Q1 on
-where the record's administrator key comes from.
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-This also excluded a Persona whose member was "the administrator's
-Member-as-a-group key" — the member whose key equalled the chain's Organisation
-public key. org-node has no administrator, so the exclusion goes; the
-evidence note below records that it was never evidenced.
-
-*LLR-xq9nrq, LLR-ckk5nz and LLR-e5c9ud were added 2026-10-04 by review round
-5, which found these writes stated by no requirement. Zeroing the administrator's
-Member-as-a-group key was green. The secret on first admission and the member id
-were already evidenced, by `a_receiver_holding_two_organisations…`,
-`five_stories_full_e2e` and `a_self_delete_reaches_the_revoked_nodes_disk`
-among others. All three are now carried by
-`a_first_admission_records_the_signing_key_the_secret_and_the_member`. The
-administrator-key exclusion in LLR-e5c9ud is part of PR-mdv38y's site and is
 **not** evidenced: removing it leaves the gate green. It is stated so that the
 fix has something to keep.*
 
@@ -2661,15 +1458,15 @@ renamed by review round 2. The administrator-key exclusion is evidenced since
 review round 1 of that change, by
 `the_administrators_own_persona_is_never_the_one_a_receive_marks`
 (`org-node/tests/admission_sender.rs`), which review round 3's mutation M14,
-removing the exclusion, turned red. PR-mdv38y, the unbound Persona selection, is
+removing the exclusion, turned red. The resolved problem report on the receive path rebinding Personas, the unbound Persona selection, is
 unchanged.)*
 
 *(Note 2026-10-06, change `worktree-org-node-chain-authority`: with the
 administrator gone the first test is now
 `a_first_admission_records_the_chains_key_the_secret_and_the_member` and
 `a_first_admission_records_the_chains_organisation_public_key` carries
-LLR-xq9nrq; the exclusion is removed, and its pin is rewritten to the amended
-LLR-e5c9ud as
+an earlier form of LLR-q4puca; the exclusion is removed, and its pin is rewritten to the amended
+earlier form of LLR-exaa9u as
 `the_persona_marked_active_is_the_first_whose_device_is_in_the_record`.)*
 
 *(Note 2026-10-06, change `worktree-org-node-org-key-pair`: the first test
@@ -2677,22 +1474,22 @@ named in the note above is now
 `a_first_admission_records_the_chains_key_the_private_key_and_the_member`,
 renamed with the Organisation secret's removal.)*
 
-*Re-traced 2026-10-04 by review round 6. All three said `satisfies:
-REQ-xa6smf`, which states only the first-admission sender check against the
+*Re-traced 2026-10-04 by review round 6. All three said they
+satisfied an earlier form of REQ-eqt23j, which stated only the first-admission sender check against the
 invite. None of the three refines that check: the secret overwrite on later
 updates, the Persona selection on every receive, and the administrator's Member-as-a-group key on the member's record. Tracing them there took them out of the derived-behaviour
 risk assessment. They are `derived` now, and assessed in
 `org-node/docs/risk/2026-10-03-architecture-derived.md`.*
 
-*Also noted by review round 6: REQ-uxv2x2, what a node does on committing a
+*Also noted by review round 6: an earlier form of REQ-48zc3e, what a node does on committing a
 Change set that removes its own Device key, is not scoped to a receive
 operation, and this item does not apply it. On this path the node's own
-removal is committed as an ordinary update. That is PR-322qst.* *(Resolved
-2026-10-06 by change `worktree-org-node-chain-authority`: REQ-uxv2x2 applies on
-every commit path (LLR-b27jr6), and the pin is rewritten as
+removal is committed as an ordinary update. That is the resolved problem report on an own revocation on the ordinary receive path.* *(Resolved
+2026-10-06 by change `worktree-org-node-chain-authority`: that earlier form applies on
+every commit path (an earlier form of LLR-jhy6t6), and the pin is rewritten as
 `an_own_revocation_on_the_ordinary_path_deletes_the_record`.)*
 
-*Added 2026-10-04 by review round 4. Round 3 wrote LLR-vdyu65 for this clause
+*Added 2026-10-04 by review round 4. Round 3 wrote an earlier form of LLR-f9x3vf for this clause
 on the administrator's side; round 4 found **thirteen** lookups on the two
 receive paths and in `import_invite` able to ignore their identifier with the
 whole gate green, because the test round 3 wrote gives the **receiving**
@@ -2713,12 +1510,12 @@ satisfies: REQ-8amu2a
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 This said the expectation matched was "its Organisation and its invite
 identifier", so a second Invite's expectation for the same Organisation
-stayed. An expectation names the Organisation alone now (LLR-9zfnmb), and at
+stayed. An expectation names the Organisation alone now (an earlier form of LLR-6acxu9), and at
 most one is held per Organisation.
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 This said a pending Invite is discarded only once the first admission has
-committed, and satisfied REQ-xa6smf. The Invite leaves org-node; the
+committed, and satisfied an earlier form of REQ-eqt23j. The Invite leaves org-node; the
 expectation the app declares takes its place (owner ruling 5), cleared at the
 same point.
 
@@ -2728,260 +1525,10 @@ Organisation has committed". An expectation names an invite identifier too,
 so only the matching one is cleared; another expectation for the same
 Organisation (a second Invite) stays.
 
-## SDD-72ddm6 — Revocation and self-delete
+## Revocation and self-delete
 
 `org-node/src/service.rs` (`revoke_member`,
 `receive_and_self_delete_if_revoked`, `SelfDeleteOutcome`)
-
-**SDD-72ddm6**: what a node does when the change it receives removes **it** —
-the one path where committing a verified change means deleting the record
-rather than updating it. The item also owns the revoking side, `revoke_member`,
-which builds that change. Nothing about the sender is checked on this path.
-traces: REQ-uxv2x2, REQ-nhe2zu, REQ-txvtm9, REQ-xs4ab8, REQ-tqap3r, REQ-uk9rw7, REQ-bwx7eg, REQ-ju6vn2, REQ-3dsweu, REQ-vxqc5g, REQ-stx9v3, REQ-em28bq, REQ-y99c9w, REQ-ea4qs5
-superseded-by: SDD-z4m57w
-
-*Superseded 2026-10-20 (change `worktree-org-io-domain-api`, owner ruling
-Q4' of 2026-10-16):* the node's own removal is decided by verification, not
-by a received change, and keeps the acknowledgements it must send
-(SDD-z4m57w); `revoke_member` is gone (provisional changes, SDD-hwax8v).
-
-*Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md;
-owner ruling D5).* The receiving half is no longer a path of its own:
-`receive_and_self_delete_if_revoked`, `prepare_self_delete`,
-`apply_self_delete` and `SelfDeleteOutcome` are gone, and the node's own
-removal is decided on the one receive path, `commit_checked` — an accepted
-notice as `ReceiveKind::Revoked`, Organisation information that no longer
-lists the node as `ReceiveKind::Removed`, both through the one removal step.
-What it decides is unchanged. The item's code is now `revoke_member` and
-`commit_checked`'s removal arms.
-
-*Amended 2026-10-07 (owner ruling R1, change `worktree-org-io-commit-workflow`;
-plan task T12a).* "Nothing about the sender is checked on this path" no
-longer holds: an update or a revocation from a Device the record does not
-list is refused before the chain read (LLR-2r2fha, LLR-kzgjz8). Traces
-REQ-ea4qs5.
-
-*Amended 2026-10-06 (change `worktree-org-io-commit-workflow`, stage S3 of
-`docs/plans/2026-10-06-org-io-roadmap.md`).* Traces REQ-em28bq and REQ-y99c9w: the node's own removal deletes the
-Organisation's data and its Personas only through `forget_organisation`
-(the removal item, superseded by LLR-jd82t6 in S4, task T9), after signing
-the acknowledgements (LLR-6p4pj2 as amended).
-*(Merged 2026-10-07 with the key-pair change's notes below, at this branch's
-merge of master `1f52c36`: the trace list is the union of both. Where the
-key-pair note says a received revocation is "verified" as an update and then
-deletes the record, S3 replaces that with the absence-proof decision of
-SDD-uck4tz; the key-pair text describes master's code until S3's code merges.)*
-
-*Amended 2026-10-06 (owner ruling on rotation, change
-`worktree-org-node-org-key-pair`):* traces REQ-stx9v3. `revoke_member` builds
-through `keep_change_set`, so a revocation draws a fresh Organisation key pair
-once its root is calculated (LLR-e2b7gv; LLR-tax3pm amended); the removed
-Device keeps only the key of the epoch before its removal.
-
-*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
-The receiving half now takes either kind of Wire message. On an
-Organisation-information message it applies the key check (LLR-ba2ejp) and,
-on an update branch, stores the received key (LLR-ckk5nz amended). A
-revocation it accepts only as this node's own removal, which deletes the
-record; one after whose verified record this node's Device is still listed
-is refused with `RevocationNotForThisDevice`, store unchanged (LLR-pt32fx,
-owner ruling on relabelling); and one about an Organisation not held is
-refused before the chain is read, as any such message is (the
-self-delete path's unheld-Organisation item, retired in S4; LLR-38e2kn). The revocation `send_update` sends a removed Device carries no
-Organisation private key (LLR-8hdu9x amended). The item traces REQ-bwx7eg,
-REQ-ju6vn2, REQ-3dsweu and REQ-vxqc5g too.
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item did not name the administrator's side, which its interface
-(`revoke_member`) already held, and said nothing of the sender. The owner
-ruled that nothing about the sender is checked on any Receive operation.
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-The receiving half is unchanged in what it decides, but it now reads the chain
-only after the chain-free checks (LLR-9ew26y) and checks nothing about the
-sender on either branch (LLR-3q63zv), and the deletion it performs is no longer
-its alone: every commit path deletes the node's record on its own removal
-(LLR-b27jr6). The revoking half, `revoke_member`, builds a revocation
-provisional update and nothing more; the app submits it through
-on-chain-client, `commit_update` commits it, and `send_update` sends it. The
-item traces REQ-xs4ab8, REQ-tqap3r and REQ-ztdza4 for those.
-
-**LLR-vw2jn6**: the change is verified against the chain **before** anything is
-decided about the node's own membership.
-satisfies: REQ-uxv2x2
-superseded-by: LLR-9jn3z8
-
-**LLR-6p4pj2**: when the node's own device key is absent from the verified
-trie, the node first signs one acknowledgement for each Persona bound to that
-Organisation against the verified chain state (`revocation::sign_acknowledgements`,
-LLR-hby4jr), then replaces its store with `forget_organisation(org_id)`
-(LLR-pba7yu) — the record, its kept Change set and keys, the provisional
-updates, the expected admissions and every Persona bound to that
-Organisation removed — and returns the acknowledgements to its caller.
-satisfies: REQ-uxv2x2, REQ-y99c9w
-superseded-by: LLR-2d5a7m
-
-*Amended 2026-10-06 (change `worktree-org-io-commit-workflow`; REQ-uxv2x2 as
-amended there, owner rulings 3 and 4 on the sweep of `fdf4e77`).* This said
-the record is deleted and every Persona bound to the Organisation is marked
-revoked. A Persona marked revoked kept its Device and Member secret keys;
-"delete everything" deletes it, after it has signed its acknowledgement.
-
-*Note 2026-10-07 (robustness, N/A):* no abnormal test of a signing refusal on this path: `receive_and_self_delete_if_revoked` takes its seeds from the bound Personas' own stored `device_seed`, from which `persona_device` derives each Device, so every bound Persona's seed is supplied by construction and the refusal is reached only at `revocation::accept` (LLR-r8qhky) and `reconcile::reconcile` (LLR-b27jr6).
-
-**LLR-jsx922**: when the device key of a Persona bound to this Organisation is
-still present after an Organisation-information message, the change is
-committed as an ordinary update and reported as such, with nothing deleted;
-a revocation never reaches this branch: it is decided by
-`revocation::accept`, whose absence proof does not verify for a Device the
-chain's record still lists, so it is refused with `RevocationProofRefused`,
-nothing committed or deleted (LLR-pt32fx, LLR-tx8ruv).
-satisfies: REQ-uxv2x2, REQ-3dsweu
-superseded-by: LLR-f9mcsq
-
-*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3).*
-This said that after a revocation the change is refused with
-`RevocationNotForThisDevice`; a revocation is no longer verified as a change.
-
-*Amended 2026-10-06 (owner ruling on relabelling, change
-`worktree-org-node-org-key-pair`).* This committed every verified change that
-left the node's Device listed. The owner ruled that a revocation is accepted
-only as the receiving Device's own removal, so a relabelled
-Organisation-information message cannot be committed as a keyless update; the
-item now scopes the update branch to Organisation information.
-
-*Clarified 2026-10-04 by review round 5. This read "the node's own device
-key", which is the property a reader wants and not the one the code checks.
-The code consults the Personas whose binding names this Organisation, and
-PR-mdv38y shows that binding can be rewritten by the other receive path, after
-which a node still in the trie self-deletes.*
-
-**LLR-sxd3tg**: in that update the record the change names takes the new root,
-epoch, sequence mark and member snapshots, and the store is saved before the
-outcome is returned.
-satisfies: REQ-uxv2x2
-superseded-by: LLR-34c5y3
-
-*Added 2026-10-04 by review round 5, which measured that dropping the
-sequence-mark write from this branch left the gate green. "Committed as an
-ordinary update" covered it in words only.*
-
-**LLR-3q63zv**: `receive_and_self_delete_if_revoked` checks the sender's
-authenticated Device key against its current committed record of the
-Organisation, and only that record, before it reads the chain, on the branch
-that deletes the record and on the branch that updates it alike (LLR-2r2fha,
-LLR-kzgjz8): a removal or an update delivered by a listed Device is acted on
-when it verifies against the chain; one delivered by any other Device is
-refused as `SenderNotListed`, nothing written.
-satisfies: REQ-uk9rw7
-superseded-by: LLR-283x6f
-
-*Superseded 2026-10-21 (change `worktree-org-io-domain-api`, design gap G2
-of its plan):* the self-delete path, `commit_checked` and its `ReceiveKind`
-branches are removed; the same check of the authenticated sender against the
-current record is made on receipt by `check_received`, before anything is
-kept (LLR-283x6f).
-
-*Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
-"This path" is the one receive path: the self-delete path folded into it.
-The sender arrives as `check_received`'s `sender` argument, from org-io, and
-the rule is applied there, before any chain read (LLR-2r2fha, LLR-kzgjz8);
-the update branch is `ReceiveKind::Updated`, the deletion branch
-`ReceiveKind::Removed`, both from `commit_checked`. The rule is unchanged.
-
-*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
-where the check runs, the rule unchanged. "Before it reads the chain" reads
-"in `prepare_self_delete`", the chain-free phase of the self-delete path,
-which takes the sender as a value and on a refusal hands org-io no
-Organisation to read; "`receive_and_self_delete_if_revoked`" reads "the
-self-delete path (`prepare_self_delete` then `apply_self_delete`)".
-
-*Amended 2026-10-07 (owner ruling R1 at the S3a close-out residual review,
-change `worktree-org-io-commit-workflow`; plan task T12a).* This said the path
-"does not check the sender's authenticated Device key" and that "a removal or
-an update relayed by any device is acted on". The owner reversed that for an
-Organisation the node holds; PR-u4c2vp's proposed fix (the membership
-cross-check on this path) is what this now states, against the record before
-the update rather than the one the Envelope produced.
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item said the path does not cross-check the sender because a node being
-removed cannot be required to find the remover in a record it is no longer
-part of, and booked the update branch's missing check as PR-u4c2vp. The owner
-ruled that nothing about the sender is checked on either branch, so PR-u4c2vp
-is resolved by that ruling.
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-This said the path does not cross-check the sender because a node being
-removed cannot find the remover in a record it has left, and that the missing
-check on the not-removed branch was PR-u4c2vp's defect; it was derived. The
-owner ruled that nothing about the sender is checked on any path
-(REQ-ztdza4 as amended), so the behaviour PR-u4c2vp pinned is now the required
-behaviour on both branches.
-
-**LLR-6qmq2g**: a change that fails verification leaves the Organisation record
-in place.
-satisfies: REQ-uxv2x2
-superseded-by: LLR-f9mcsq
-
-*Retired 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md,
-superseded in place, owner ruling D5; definition deleted in task T6 by the
-owner's ruling of 2026-10-13 on retired items).* The low-level requirement
-that stood here — a change about an Organisation the node holds no record of
-was refused with `OrgNotOnChain` on the self-delete path, before any chain
-read and writing nothing — is retired with that path. Its ID is listed in the
-S4 verification record. There is one receive path, `check_received` then
-`commit_checked` (LLR-zetn7a, LLR-6qjmhf); an unheld Organisation is refused
-as LLR-38e2kn states: a revocation about it with `RevocationNotHeld`, before
-the expectations are consulted; Organisation information about it is a first
-admission, refused with `AdmissionNotExpected` unless a store expects it
-(LLR-s8xp7m) — in either case before any chain read. Its one test was
-deleted in T4. Gap 20 of the 2026-10-03 verification record closes with it:
-the app's receiver takes first admissions on the one path.
-
-**LLR-jwhzh3**: this path acts only on the Organisation the received change
-names — the record it verifies against, the Personas whose binding names that
-Organisation (and only those) to decide whether the node is still a member,
-the record it deletes or updates, and the Personas it deletes — so a node
-revoked from one Organisation keeps every other Organisation's record,
-Organisation private key and Personas.
-satisfies: REQ-uxv2x2
-superseded-by: LLR-2d5a7m
-
-*Amended 2026-10-06 (change `worktree-org-io-commit-workflow`).* "The
-Personas it marks Revoked" reads "the Personas it deletes" (LLR-6p4pj2 as
-amended, LLR-pba7yu).
-
-*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
-"secret" read the Organisation secret, which is removed; the record's
-Organisation private key takes its place.
-*(Merged 2026-10-07 at this branch's merge of master `1f52c36`: both
-amendments apply, so the item reads "the Personas it deletes" and
-"Organisation private key".)*
-
-*Narrowed 2026-10-04 by review round 5.* This ended "and a Persona bound to
-another Organisation cannot keep it in this one". That is true of this path
-and false of the device. The binding this path consults is rewritten by
-`receive_and_verify` (PR-mdv38y), and once it has been, a Persona that was
-bound to another Organisation **does** keep the node in this one. Round 4's
-test delivered the enrolment through this path, which never rebinds, so it
-could not see that. The clause is withdrawn until PR-mdv38y is fixed.
-
-*Added 2026-10-04 by review round 4 with LLR-y2v8v2, and this is the half that
-was worst: `self.store.data_mut().orgs.retain(|_o| false)` — delete **every**
-Organisation record the node holds, rather than the one it was revoked from —
-was green, as were the lookups for the local Membership record, the update
-branch's record, the Personas to revoke, and the "am I still a member" test
-itself. The last of these needs a scenario to be observable at all: org 2's
-administrator enrolling the device key of B's **org 1** Persona, so that a test
-consulting every Persona finds B still present in an Organisation it was just
-removed from. That is also why the clause matters — without it an
-administrator could pin a member in place by enrolling a key the member uses
-elsewhere.*
 
 ### The administrator's half of the same item
 
@@ -2995,160 +1542,11 @@ ordering, sequencing and persistence clauses under SDD-rx2yvy; the revocation
 half stated not one of them, and the gate could not see the absence, because
 there is no rule that convicts an interface for being partly refined.*
 
-**LLR-6dc598**: `revoke_member(rng, org_id, member_id) ->
-Result<ProvisionalUpdate, OrgNodeError>` deletes the member from the trie
-rebuilt from the record and stores, through `insert_provisional`, a revocation
-provisional update; it calls no chain operation, binds no endpoint, sends
-nothing and leaves the record unchanged.
-satisfies: REQ-xs4ab8
-superseded-by: LLR-f3hru6
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item said the signed revocation.
-
-**LLR-tax3pm**: a revocation provisional update carries what LLR-ghja3x
-states for every provisional update — the record's root as base, the
-Sequence number the epoch the update produces on the chain, the record's
-epoch plus one (REQ-txvtm9), and the public key of a fresh Organisation key
-pair, whose private key it holds (LLR-e2b7gv) — and is signed by no key.
-satisfies: REQ-xs4ab8, REQ-stx9v3
-superseded-by: LLR-va2yqz
-
-*Amended 2026-10-06 (owner ruling on rotation, change
-`worktree-org-node-org-key-pair`).* This said the revocation carries "the
-record's Organisation public key", as LLR-ghja3x did. A revocation now
-rotates the Organisation key pair like every other update (REQ-stx9v3), so
-the removed Device's copy of the earlier key is not the Organisation's key
-once the revocation commits.
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item said the revocation is signed by the administrator's Member-as-a-group
-key and carries the last sequence number plus one.
-
-*Amended 2026-10-06 (merge of master `5f7c177`):* "one greater than the
-record's mark" reads "the record's epoch plus one", for the reason given
-under LLR-ghja3x.
-
-**LLR-qg9utu**: the revoking node's Organisation record takes the removal only
-through `commit_update`, once the revocation has verified against the chain,
-and is never changed by `revoke_member` or by `send_update`.
-satisfies: REQ-tqap3r
-superseded-by: LLR-34c5y3
-
-*Superseded 2026-10-21 (change `worktree-org-io-domain-api`, design gap G2
-of its plan):* `commit_update`, `revoke_member` and `send_update` are
-removed; the record takes a recorded revocation only through verification's
-adoption, and recording it, proposing the next epoch and building its
-messages leave the record unchanged (LLR-34c5y3).
-
-*Moved 2026-10-13 (S4, task T12 of `docs/plans/2026-10-06-org-io-transport.md`,
-ruling A):* the item that a Loopback send with no address is refused with a
-typed error, sending nothing, moved to org-io with the send, to
-`org-io/docs/architecture/2026-10-07-transport.md`
-("Moved from org-node: the Loopback dial"), re-parented there to org-io's
-Loopback-send requirement, with its history. *Amended 2026-10-05 (owner
-ruling, change `worktree-org-node-chain-authority`), as it read here:*
-LLR-6dc598 said `revoke_member` submits the new root on chain before the
-signed revocation is sent; LLR-tax3pm that the revocation is signed by the
-administrator's Member key; LLR-qg9utu that the administrator's record is
-updated after the send (PR-vt244s's order); the moved item that a Loopback
-revocation with no address is refused. All four were derived. org-node no
-longer writes to the chain, signs nothing and has no administrator. PR-b9wab3's
-mechanism — the address check sitting after `submit_update`, so a call with
-no address burned an epoch — no longer exists. org-node's transitional
-`send_body` still refuses so until task T14 deletes it. *(Deleted 2026-10-14,
-S4 task T14; `a_loopback_revocation_without_an_address_burns_no_epoch` keeps
-its annotation and its commit half, its send half dropped with a dated
-comment.)*
-
-**LLR-8hdu9x**: the Wire message `send_update` sends to the Device a
-committed update removed — which the previous record listed and the node's
-committed record no longer lists — is a `Revocation` holding that Device's
-notice from the commit outcome and nothing else: no Envelope, no Change set,
-no member snapshot and no Organisation private key (LLR-kr5t6f, LLR-dc45ur).
-Every Device the record still lists is sent an `OrgInformation` carrying the
-committed Envelope, the member snapshots as they were **before** the
-committed update, and the Organisation private key of the epoch the update
-reaches, as the node's record holds it (LLR-6ymd6d). A receiver accepts the
-revocation only when its absence proof verifies against the chain's current
-root for one of its own Personas (LLR-tx8ruv); a Device the chain's record
-still lists has no such proof.
-satisfies: REQ-3dsweu, REQ-szq3ud, REQ-ps2gy2
-superseded-by: LLR-degg8t
-
-*Superseded 2026-10-22 (change `worktree-org-io-domain-api`, plan detail
-pass, dispatcher decision):* `send_update` is removed; the bodies of the
-adopted epoch, a removed Device's notice and nothing else and every listed
-Device's Organisation information, are `messages_for_current_epoch`'s (LLR-
-degg8t), and the receiver's proof check is LLR-rhsfw9's.
-
-*Amended 2026-10-13 (S4, task T5 of `docs/plans/2026-10-06-org-io-transport.md`):*
-"the Wire message `send_update` sends" is now the body the commit builds for
-that Device and returns in `CommitOutcome.outgoing` (LLR-gdfqn9): the
-`Revocation` body holds the notice S3a's `notices_for` builds and nothing
-else, and comes after every Organisation-information body. The
-Organisation private key in an Organisation-information body is the one the
-commit stored, captured at commit (PR-gnh3j2), not the one the record holds
-at send time. The sending Persona's own Device gets no body.
-
-*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3;
-REQ-3dsweu as amended there, REQ-ps2gy2; the fix of PR-qmvj83).* This said the
-`Revocation` carries the committed Envelope and that a receiver whose Device
-is still listed refuses it after verifying it as an update. The Envelope's
-Change set, with a batch of more than one change, carried the leaves of other
-Members; the revocation now carries only the revoked Device's identity and an
-absence proof.
-
-*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
-This said the message carries exactly the Organisation secret the caller
-passes — none for a revocation — and that a receiver stored that absence
-over the secret it held (PR-xwek5e, stated and not endorsed); it was derived.
-The owner ruled that the kind of message depends on the recipient, that a
-revocation carries no key, and (later the same day, on relabelling) that a
-receiver accepts a revocation only as its own removal (REQ-3dsweu,
-REQ-szq3ud). PR-xwek5e is resolved by those rulings.
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item said the signed envelope.
-
-**LLR-drgdy8**: `revoke_member` neither reads nor changes the proxy account its
-Organisation record holds; the app reads it through `proxy_account`
-(LLR-3v5nu9) to submit the revocation.
-satisfies: derived
-superseded-by: LLR-x5asbx
-
-*Superseded 2026-10-21 (change `worktree-org-io-domain-api`, design gap G2
-of its plan):* `revoke_member` is removed; no proposal operation and no
-adoption reads or changes the proxy account, which org-io reads back to
-write each epoch (LLR-x5asbx).
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-LLR-8hdu9x described the message `revoke_member` sent, with a signed
-Envelope; the send is now `send_update`, the Envelope is unsigned, and the
-secret is whatever the caller passes (unchanged from `admit_member`'s
-`org_secret` argument until the Organisation key-pair change). LLR-drgdy8 said
-`revoke_member` submits with the proxy account; the app submits now, and
-org-node holds the account opaquely (owner ruling 6).
-
-*Added 2026-10-05 by review round 8, which measured that emptying the snapshot and passing no proxy account were both
-green, and that the absent secret was observed only by the PR-xwek5e pin.
-LLR-8hdu9x is carried by `a_revocation_reaches_the_administrators_disk`, and
-its receiver clause by the PR-xwek5e pin (review round 9), and
-LLR-drgdy8 by `the_proxy_account_from_genesis_is_kept_and_handed_back` (renamed
-2026-10-06 from `…_kept_and_passed_on_every_update`).*
-
 ## Endpoint lifecycle (moved)
 
 *Moved 2026-10-13 to org-io's design ledger
 (`org-io/docs/architecture/2026-10-07-transport.md`,
-"Moved from org-node with the transport"), S4 task T10 of
-`docs/plans/2026-10-06-org-io-transport.md`, ruling A:* the design item for
+"Moved from org-node with the transport"), S4 task T10, ruling A:* the design item for
 when the transport comes into existence and whose key it carries, with its
 three low-level items (bound once, rewritten there to once per Persona;
 bound from the named Persona's Device, rewritten there to its keychain item;
@@ -3167,7 +1565,7 @@ for the chain connection, the production read and the preflight, with its
 recorded deviation (no low-level requirements) and its size measurement, now
 re-measured over org-io's files. org-node has no chain-facing shell after
 ruling B: it takes the Organisation state as a value and reads no chain.
-Until task T6 of `docs/plans/2026-10-06-org-io-create.md` removes them,
+Until task T6 removes them,
 org-node's `chain_read.rs`, `preflight.rs`, `bin/preflight.rs`,
 `connect_chain_client` and `SubxtChainOps` are copies of what org-io now
 owns, described by no item here.*
@@ -3251,8 +1649,8 @@ Loopback path was, because `bind_with_mode(Networked)` uses `presets::N0` —
 n0's relay servers and DNS discovery — so a gated test of it would reach the
 public internet. What would close it is a `test-support` constructor taking an
 injected relay, the same seam `transport_networked` already uses at the
-endpoint layer but which `OrgService` does not expose. Booked in
-`docs/plans/2026-09-05-ratchet-setup.md`.
+endpoint layer but which `OrgService` does not expose. It is not yet
+written.
 
 **That `ensure_endpoint` binds in the mode the service holds.** The third
 behaviour, found by review round 2 and the same gap one layer down: replacing
@@ -3298,41 +1696,40 @@ construction while leaving the item's coverage complete. The pairs are:
 | One-sided LLR | Its other side |
 |---|---|
 | LLR-e58j8m (a keypair rebuilt from its persisted seed has the same public key) | — none in this file; SDD-sxp8hb's abnormal side is LLR-3jjgtw's refusals, in `2026-10-05-unsigned-envelope.md` |
-| LLR-p8uu47 (build sets the fields it is given, in a canonical encoding) | LLR-ybn5pr, LLR-cs4mpb, LLR-9sknpa (the receiver's own refusals of an altered field) |
+| LLR-p8uu47 (build sets the fields it is given, in a canonical encoding) | LLR-ybn5pr and earlier forms of LLR-76bhw9 (the receiver's own refusals of an altered field) |
 | LLR-er2x8n (a frame within the bound round-trips) | LLR-sc6zuh, LLR-8kh3zf (over the bound, both directions) |
 | the frame layout (org-io's since S4 task T10) | LLR-pkruy8 (bytes that are not a frame) |
-| LLR-kkj64b (the parsed `Joiner` is what is admitted) | LLR-tcft2r (a record snapshot that does not decode) |
+| an earlier form of LLR-bwtx3h (the parsed `Joiner` is what is admitted) | LLR-tcft2r (a record snapshot that does not decode) |
 | LLR-wusj89 (the file's layout) | LLR-q5n28x (a file too short to have one) |
 | LLR-t4u66w (the wrong passphrase yields an error) | LLR-wusj89 (the right one yields the data) |
 | LLR-wx3php (strictly greater is accepted) | — the same LLR states both sides |
-| LLR-jsx922 (still a member: update) | LLR-6p4pj2 (no longer a member: delete) |
-| LLR-6qmq2g (verification fails: record stands) | LLR-vw2jn6 (verification runs first) |
+| an earlier form of LLR-f9mcsq (still a member: update) | an earlier form of LLR-2d5a7m (no longer a member: delete) |
+| an earlier form of LLR-f9mcsq (verification fails: record stands) | an earlier form of LLR-9jn3z8 (verification runs first) |
 | org-io's absence-from-failure LLR (moved 2026-10-07) (absence from failure) | — the same LLR states both sides |
 
-*Amended 2026-10-05; reworded the same day by
-docs/plans/2026-10-05-switch-trim.md. The Envelope carries no signature
-(REQ-ag6kqm), so the first two rows above, and "SDD-sxp8hb's abnormal side is
-LLR-9fvb3y" below, describe texts since amended in place. LLR-9fvb3y, amended
-in place, now states that a relay by another device is not refused for that;
-LLR-ybn5pr, LLR-cs4mpb and LLR-9sknpa state the receiver's own refusals of an
+*Amended 2026-10-05; reworded the same day. The Envelope carries no signature
+(an earlier form of LLR-8528ud), so the first two rows above, and "SDD-sxp8hb's abnormal side is
+an earlier form of LLR-283x6f" below, describe texts since amended in place. That earlier form of LLR-283x6f, amended
+in place, stated that a relay by another device is not refused for that;
+LLR-ybn5pr and earlier forms of LLR-76bhw9 state the receiver's own refusals of an
 altered field. SDD-sxp8hb's abnormal side is LLR-3jjgtw's refusals, in
 `org-node/docs/architecture/2026-10-05-unsigned-envelope.md`.*
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 Three rows changed with the requirements they pair. The signature pair
-(LLR-na7p4w, LLR-9fvb3y) and the signed-transcript pair (LLR-p8uu47 against
+(earlier forms of LLR-8528ud and LLR-283x6f) and the signed-transcript pair (LLR-p8uu47 against
 the three tampering requirements) are now the seed round trip against another
 seed's keys, and the Change set `build` transmits against each field's
 alteration reaching the decoded value. The blob pair (the no-Invite item,
-retired in S4 T6, and LLR-kkj64b against LLR-8qxwst and LLR-tcft2r) is now
+retired in S4 T6, and an earlier form of LLR-bwtx3h against LLR-8qxwst and LLR-tcft2r) is now
 the parsed `Joiner` against a record snapshot that does not decode; the
 no-Invite item and LLR-8qxwst stated absences and had no other side.
-*(2026-10-13, S4 T6: the Blob-parse requirement under SDD-xshv5b pairs its
+*(2026-10-13, S4 T6: the Blob-parse requirement under the design item SDD-n2x3gb and SDD-42cjqk replaced pairs its
 round trip with its field-named refusals.)* The new requirements of
 `2026-10-06-chain-authority.md` pair as follows:
-LLR-cmdrp9 (a commit that verifies) against LLR-ewkg85 (one refused at any
-step); LLR-95753m (a provisional update kept) against LLR-jq7qh7 (one over the
-bound refused); LLR-s8xp7m states both sides of the expectation.
+LLR-34c5y3 (a commit that verifies) against LLR-qvp7mq (one refused at any
+step), and LLR-f5wrjx (a provisional update kept) against LLR-m76r4k (one over the
+bound refused), each then in an earlier form; an earlier form of LLR-e6w3nr stated both sides of the expectation.
 
 *Recomputed 2026-10-06 at the merge of master `5f7c177`.* The first two rows
 are re-derived from the merged texts, master's for both pairs: LLR-e58j8m has
@@ -3342,10 +1739,10 @@ LLR-p8uu47's other side is the receiver's refusals of an altered field. The
 still has ten LLRs here.
 
 **Items whose abnormal side is carried by another item.** SDD-na9nc3's ten
-LLRs in this file are *all* refusals except LLR-8n95rf, LLR-d6kvbx and, since
-2026-10-05, LLR-mcdh85; its normal case is
-REQ-nhe2zu's accept path, carried by `happy_path_commits_when_root_matches_chain`.
-SDD-sxp8hb's abnormal side is LLR-9fvb3y. SDD-swtd3w's constructor
+LLRs in this file are *all* refusals except earlier forms of LLR-8528ud, LLR-34c5y3 and, since
+2026-10-05, LLR-283x6f; its normal case is
+the accept path of an earlier form of REQ-dwb9bq, carried by `happy_path_commits_when_root_matches_chain`.
+SDD-sxp8hb's abnormal side is an earlier form of LLR-283x6f. SDD-swtd3w's constructor
 `OrgId::new` takes exactly twenty bytes and is total over that type, and its
 rejection vocabulary is output, not input. The one way untrusted bytes become
 an `OrgId` is serde decoding inside a Wire message, and that abnormal input is
@@ -3362,17 +1759,17 @@ of its two arguments claimed more than it could.*
 
 | Item | The abnormal input it does not test |
 |---|---|
-| SDD-89es4z | a Persona created with a handle org-members will not accept. *Amended 2026-10-05 by the org-node type-safety change: `create_persona` now takes a parsed `Handle`, `Name` and `Surname` (LLR-g76zqd), so this input can no longer be offered to it; the refusal moved to `PersonaDetails::parse` (LLR-q6n25z, under SDD-af5vnt in `2026-10-04-type-safety.md`), whose tests carry the abnormal case. The item's own interface still has none.* |
+| SDD-89es4z | a Persona created with a handle org-members will not accept. *Amended 2026-10-05 by the org-node type-safety change: `create_persona` now takes a parsed `Handle`, `Name` and `Surname` (an earlier form of LLR-pv2rdy), so this input can no longer be offered to it; the refusal moved to `PersonaDetails::parse` (an earlier form of LLR-rjphn4, under SDD-af5vnt in `2026-10-04-type-safety.md`), whose tests carry the abnormal case. The item's own interface still has none.* |
 | the endpoint lifecycle (org-io's since S4 task T10) | an endpoint bind that fails *(org-io's keychain-refused bind is tested since T10: `a_locked_keychain_refuses_the_bind`)* |
-| SDD-rx2yvy | `admit_member` given a malformed member or device key (→ `OrgNodeError::Chain("bad member key")`) or a handle already held (→ `OrgNodeError::Trie`) — **the most material of the seven**, because both are reachable from a join request a stranger composes. *Amended 2026-10-05 by the org-node type-safety change: `admit_member` now takes the parsed `JoinRequest`, and a malformed key or handle in a Join request is refused at `import_join_request` with `InvalidField` naming it (LLR-8bum44, under SDD-af5vnt in `2026-10-04-type-safety.md` — *amended 2026-10-05 by the org-node type-safety change, review round 7: it read "under SDD-vee2fq"*), so the first clause cannot reach `admit_member` and the `Chain("bad member key")` refusal no longer exists. A handle already held is still untested here.* *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`): `admit_member` takes a parsed `Joiner` built by the app from the Invite reply it parsed; a handle already held is still untested, and now reaches `admit_member` from the app's parse rather than from `import_join_request`.* |
-| SDD-ueh4tm | a `ChainOps` implementation whose `read_state` or `submit_update` fails. *Since review round 8 the item has one refusal case, the mock's wrong-epoch update (LLR-ryzr8m), but that is the mock refusing, not an implementation failing, so the line stands.* *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`): `submit_update` leaves the trait, so the owed case is a `read_state` that fails, as it reaches a commit (LLR-ewkg85 names it among the refusals).* |
+| SDD-rx2yvy | `admit_member` given a malformed member or device key (→ `OrgNodeError::Chain("bad member key")`) or a handle already held (→ `OrgNodeError::Trie`) — **the most material of the seven**, because both are reachable from a join request a stranger composes. *Amended 2026-10-05 by the org-node type-safety change: `admit_member` now takes the parsed `JoinRequest`, and a malformed key or handle in a Join request is refused at `import_join_request` with `InvalidField` naming it (an earlier form of LLR-7yu2xy, under SDD-af5vnt in `2026-10-04-type-safety.md` — *amended 2026-10-05 by the org-node type-safety change, review round 7: it read "under SDD-vee2fq"*), so the first clause cannot reach `admit_member` and the `Chain("bad member key")` refusal no longer exists. A handle already held is still untested here.* *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`): `admit_member` takes a parsed `Joiner` built by the app from the Invite reply it parsed; a handle already held is still untested, and now reaches `admit_member` from the app's parse rather than from `import_join_request`.* |
+| SDD-ueh4tm | a `ChainOps` implementation whose `read_state` or `submit_update` fails. *Since review round 8 the item has one refusal case, the mock's wrong-epoch update (LLR-ryzr8m), but that is the mock refusing, not an implementation failing, so the line stands.* *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`): `submit_update` leaves the trait, so the owed case is a `read_state` that fails, as it reaches a commit (an earlier form of LLR-qvp7mq names it among the refusals).* |
 | org-io's chain-connection item (moved 2026-10-07) | every abnormal case it has. The item has no gated test of any kind — that is the deviation recorded at the end of this file — so it has no abnormal one either, and listing it here is the honest bookkeeping |
 | SDD-msb6xh | none — `build_update_calldata` is total over its argument types, so there is no abnormal input to offer it. *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`): the item now states that org-node holds no calldata; with no interface left it has no input, normal or abnormal.* |
 | SDD-rq6nv4 | `multi_account_id` is total over its argument types. `build_dispatch_tx` is **not**: `runtime_call_to_tx` has three `WriteError::MalformedCall` arms, none of them tested, and this change made the function publicly reachable through `org_node::test_support`, so the abnormal input is now one line of test away. *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`): both functions leave org-node, and the untested `MalformedCall` arms go with them to on-chain-client's chain writer, where they are owed.* |
 
 **SDD-pa6p7w is no longer on this list.** Round 2 found it missing from it —
 nothing reachable at this gate could make `ChainReader::get_org_state` return
-`Err`, so the failure arm of LLR-8m99q2 and org-io's absence-from-failure LLR (moved 2026-10-07) was untested and
+`Err`, so the failure arm of an earlier form of LLR-rr558z and org-io's absence-from-failure LLR (moved 2026-10-07) was untested and
 untestable — and this change now carries `FailingChain` in
 `tests/verify_against_chain.rs` and
 `a_chain_read_that_fails_is_refused_as_chain_not_as_absence`, which pins the
@@ -3397,8 +1794,7 @@ which carries no low-level requirement, the command runs fourteen harnessed
 targets. *(Nineteen and twenty since the org-node type-safety change,
 2026-10-05, which added `encoding_golden`, `node_value_types`,
 `chain_read_state`, `persona_records`, `secret_redaction` and
-`calldata_typed`; its requirements' red-to-green record is in its own plan,
-`docs/plans/2026-10-04-org-node-type-safety.md`.)* *Corrected 2026-10-05 by review round 8, which counted thirteen in
+`calldata_typed`.)* *Corrected 2026-10-05 by review round 8, which counted thirteen in
 `org-node/tests`.*
 
 *Corrected 2026-10-04 by review round 1.* This paragraph used to say "eight
@@ -3417,8 +1813,8 @@ byte-identical afterwards by SHA-256. Those attestations are in this change's
 verification record, not here.
 
 *Two exceptions, both stated rather than counted, and both found by review
-round 2 when it checked this claim against the appendix.* **LLR-836z24** —
-`import_join_request` stores nothing — and **LLR-65py3d** — the chain seam is a
+round 2 when it checked this claim against the appendix.* **an earlier form of LLR-96z2k5** —
+`import_join_request` stores nothing — and **an earlier form of LLR-7en38k** — the chain seam is a
 trait object a substitute can stand in for — are true by the type system rather
 than by a red. The first takes no `&mut self`, the second is checked by
 `Box<dyn ChainOps>` compiling at all; no mutation can falsify either without
@@ -3428,7 +1824,7 @@ that implies a mutation nobody could write. LLR-f5kq88 and LLR-z8fubr's
 distinctness clause are compile-enforced in the same way; all four are listed
 together in Gap 4 of the verification record.
 
-**One clause of LLR-u6rq4s is not discharged, and the requirement keeps it
+**One clause of an earlier form of LLR-283x6f is not discharged, and the requirement keeps it
 anyway.** The sweep found two green; one has since been discharged:
 
 - *"the trie the message **verified into**"* — **discharged 2026-10-04 by
@@ -3446,16 +1842,15 @@ anyway.** The sweep found two green; one has since been discharged:
   too reddens nothing, because the administrator's device is in the trie it
   just admitted the node into, so the check would pass. The skip is therefore
   **unnecessary rather than merely unverified**, which is worth an owner's
-  ruling: removing it would make one rule apply to both paths. Booked in
-  `docs/plans/2026-09-05-ratchet-setup.md`.
+  ruling: removing it would make one rule apply to both paths.
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-The owner ruled the sender check out on both paths, so LLR-u6rq4s now states
+The owner ruled the sender check out on both paths, so an earlier form of LLR-283x6f then stated
 that an update is committed whoever relayed it, and both clauses above — the
 discharged one and the undischarged first-admission skip — describe a check
 that no longer exists. The new requirement is to be discharged by red in the
 usual way: reinstating the membership check must redden its test. The same
-holds for the administrator-key exclusion LLR-e5c9ud carried, which was never
+holds for the administrator-key exclusion an earlier form of LLR-exaa9u carried, which was never
 evidenced and is removed.
 
 **One low-level requirement cannot be discharged that way, and it is named
@@ -3467,5 +1862,4 @@ gated test can produce. `check-trace.sh` is green over it because MISSING-TEST
 is satisfied by the annotation alone, which is the third time this repository
 has recorded that property, now in a second unit. It is kept by the owner
 ruling that kept that requirement itself, and the `test-support` bind-address
-constructor that would close it is booked in
-`docs/plans/2026-09-05-ratchet-setup.md`.
+constructor that would close it is not yet written.

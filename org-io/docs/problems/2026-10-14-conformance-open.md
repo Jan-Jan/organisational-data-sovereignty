@@ -9,7 +9,7 @@ open.
 recipients but not their send failures: `reconcile` sends the late commit's
 bodies and returns `Reconciliation::Committed { recipients }`, whose
 recipients are the Devices sent to, with no word of a send that failed.
-affects: LLR-k5pzsz, REQ-by9k5q
+affects: LLR-t2pve7, REQ-bm4ppg
 opened: 2026-10-14
 status: open
 
@@ -40,7 +40,7 @@ refusal.
 reported as `TransportError::Malformed` ("malformed wire message"), which
 names neither the identity nor that the identity, not a message, was
 refused.
-affects: SDD-8uyg4s, SDD-v2bq89
+affects: SDD-8uyg4s, SDD-2bzgtp
 opened: 2026-10-14
 status: open
 
@@ -52,7 +52,7 @@ Finding-5 of the review (Errors 1).
 **PR-wayqj3**: `PeerAddr::to_hex` renders an address whose encoding fails
 as the empty string, which `parse_peer_addr` reads back as "no address"
 instead of a refusal.
-affects: REQ-n82q47, LLR-2b2ghe
+affects: SDD-2bzgtp
 opened: 2026-10-14
 status: open
 

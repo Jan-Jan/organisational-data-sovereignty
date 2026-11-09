@@ -1,24 +1,21 @@
 # Risk analysis — the commit workflow (org-node)
 
-Run 2026-10-06 for change `worktree-org-io-commit-workflow` (stage S3 of
-`docs/plans/2026-10-06-org-io-roadmap.md`), under IEC 62304 Class C and the
+Run 2026-10-06 for change `worktree-org-io-commit-workflow` (stage S3), under IEC 62304 Class C and the
 acceptability matrix in this ledger's README. The requirements are in
 `org-node/docs/requirements/2026-10-07-commit-workflow.md`;
-the org-io half of the workflow is proposed, unminted, in
-`docs/plans/2026-10-06-org-io-commit-workflow.md`. This analysis builds on
+the org-io half of the workflow is org-io's. This analysis builds on
 change `worktree-org-node-org-key-pair` (a fresh key pair per update;
 `WireMessage` of two kinds), merged to master as `1f52c36` and into this
 branch on 2026-10-07.
 
 Residuals below are stated as severity and probability. The README's matrix
 governs: S3 is unacceptable at every probability, P1 included (owner ruling D
-of 2026-10-06, `docs/plans/2026-10-06-org-io-roadmap.md`, section "Owner's
-rulings on the S2–S4 design drafts"). No S3 residual in this file is
+of 2026-10-06 on the S2–S4 design drafts). No S3 residual in this file is
 therefore "acceptable under the matrix". Each one that remains is stated
 with the benefit-risk case for accepting it rather than refusing the
 function that carries it. The owner reviewed each residual individually at
 the S3a close-out residual review on 2026-10-07 (rulings R1 to R6, decision
-16 of `docs/plans/2026-10-06-org-io-commit-workflow.md`); each ruling is
+16); each ruling is
 recorded below beside the residual it rules on, and the chain-authority
 residual's (R6) beside it in `org-node/docs/risk/2026-10-06-chain-authority.md`.
 
@@ -33,7 +30,8 @@ decodes and the record is found, before it reads the chain, decodes the
 Change set or obtains a Device secret key, and refuses without writing. It
 does not apply to a first admission, which has no record to check against
 and is verified against the chain alone, nor to an acknowledgement, whose
-sender rule is RC-eydn8t's. mitigates: HAZ-bedm57, HAZ-p6xkuz, HAZ-ep6uzs
+sender rule is RC-eydn8t's.
+mitigates: HAZ-bedm57, HAZ-p6xkuz, HAZ-ep6uzs
 
 *Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
 "before it reads the chain" reads "before it takes any chain state, so that
@@ -64,7 +62,7 @@ HAZ-p6xkuz, a revocation, and an Organisation-information message that
 removes the node, now has to come from a Device the node itself still counts
 as a Member, so a deletion needs both a listed sender and a proof (or a
 record) that verifies against the chain (RC-ub82my). Implemented by
-REQ-ztdza4 (as amended 2026-10-07) and REQ-ea4qs5. *(Added 2026-10-07,
+an earlier form of REQ-uk9rw7 (as amended 2026-10-07) and REQ-ea4qs5. *(Added 2026-10-07,
 review round 1 finding-4.)* For HAZ-ep6uzs, a non-member's message can no
 longer shape the record of a held Organisation: it is refused before
 anything is decoded; what remains of that hazard is first admission alone,
@@ -95,17 +93,18 @@ stand unchanged.
 absence proof for its own MemberId and DevicePublicKey, produced from the
 committed record: no Change set, no record snapshot and no Organisation
 private key, so the proof carries no data of any Member other than the
-revoked Device's own Member (org-members REQ-yyuxh8). mitigates: HAZ-vxabf9
+revoked Device's own Member (org-members REQ-yyuxh8).
+mitigates: HAZ-vxabf9
 
 What it changes for HAZ-vxabf9. Before S3 the revocation carried the
 committed Envelope. The key-pair change already removed the member snapshots
 and the key from it, but the Change set stayed: with batched updates it
 carries every other leaf the batch upserts, and the revoked Device could
 verify it only from the record the Change set was based on, while the chain
-still held that update's root (REQ-txvtm9). A Device that missed one update
+still held that update's root (an earlier form of REQ-dwb9bq). A Device that missed one update
 could therefore never verify its own revocation. An absence proof verifies
 against whatever root the chain holds now, so a Device any number of epochs
-behind can act on it. This closes PR-qmvj83.
+behind can act on it. This closes the resolved problem report on the membership snapshot sent to a revoked device.
 
 What it breaks: nothing a correct node does. The revoked Device learns that
 it is out and nothing else.
@@ -132,11 +131,12 @@ rating before controls is unchanged.)*
 Membership record, or an absence proof for its own MemberId and
 DevicePublicKey, verified against an Organisation state from the chain whose
 epoch is not lower than its record's; it refuses every other trigger, and it
-refuses to reconcile against such an older state. mitigates: HAZ-p6xkuz
+refuses to reconcile against such an older state.
+mitigates: HAZ-p6xkuz
 
 This is the consumer's half of org-members' caller duty §12 and of the
 verification control in `org-members/docs/risk/2026-10-06-absence-proofs.md`
-(exported as REQ-tk2qqj): org-members verifies a proof against the root it is
+(exported as REQ-65xrgh): org-members verifies a proof against the root it is
 given; org-node makes sure the root is not older than what the device
 already knows. An equal epoch is accepted because the chain changes its root
 only with a new epoch: at its record's own epoch a listed Device has no valid
@@ -149,7 +149,7 @@ supplies — would have passed the epoch check and had the proof checked
 against its root, so a removal could be acted on against a state the record
 contradicts. Under owner ruling R3 (false deletion extremely unlikely)
 `revocation::accept` now refuses that state as `ChainStateConflict`, as
-`reconcile` already did (LLR-tx8ruv as amended, LLR-gr8x3r). At an equal
+`reconcile` already did (an earlier form of LLR-rhsfw9 as amended, an earlier form of LLR-rr558z). At an equal
 epoch only the record's own root passes, and under it the proof is refused,
 so a revocation is acted on only against a chain state of a later epoch.
 The control's statement above is unchanged; the deletion path is now no
@@ -161,7 +161,7 @@ supplies no state, and with no state org-node deletes and commits nothing:
 the device keeps its last verified record, which org-io reports to the app as
 unverified (owner ruling of 2026-10-06 on the plan's decision 5).
 
-*Assessed 2026-10-13 (S4, task T9 of docs/plans/2026-10-06-org-io-transport.md;
+*Assessed 2026-10-13 (S4, task T9;
 owner ruling of that day, option A): `OrgService::restore_store` and
 `OrgService::drop_store` against this control.* org-io writes each store
 change to the Persona's store file. When that write fails, it puts the
@@ -177,9 +177,9 @@ trigger this control has to refuse:
   stay, and the Persona returns on the next `OrgIo::open`.
 - `restore_store` adds or replaces one store with the sealed copy on disk;
   it removes no store.
-So the data the device holds, the sealed stores on disk (REQ-em28bq's
+So the data the device holds, the sealed stores on disk (an earlier form of REQ-y9p27b's
 clarification of 2026-10-13), is deleted only as before. The exempt removal
-places are named in the superseding item LLR-jd82t6, and the `absences`
+places are named in the superseding item (an earlier form of LLR-9jn3z8), and the `absences`
 scan pins them. What it breaks: after a failed reload, the Persona is
 missing from the running node until the next open. That is the conservative
 direction, since a store that cannot be reread is not acted on. No new
@@ -216,7 +216,7 @@ one of two routes:
 - (b) **The node's own commit or reconcile** (`commit_update`, `reconcile`
   through `commit_step`). No sender is involved. The precondition is that the
   chain carries a provisional update this node itself built and still holds
-  — chosen by the chain's root and Organisation public key (REQ-tb4f8p) —
+  — chosen by the chain's root and Organisation public key (an earlier form of REQ-dwb9bq) —
   and that the record it commits no longer lists the device; reconcile also
   refuses a chain state older than the record (RC-ub82my). A wrong deletion
   by this route needs a forged chain state carrying the root of an update
@@ -241,7 +241,7 @@ sender (RC-u7kdam), a well-formed message (decode), and a proof or record
 that verifies against a chain state not older than the record (RC-ub82my);
 on route (b), two — a provisional update the node itself built and holds,
 and a chain state that carries it, not older than the record (RC-ub82my,
-REQ-tb4f8p). Benefit-risk case put to
+an earlier form of REQ-dwb9bq). Benefit-risk case put to
 the owner before the ruling:
 the alternative to acting on a verified revocation is never deleting on one,
 which leaves every lost or stolen Device holding the Organisation's records
@@ -279,7 +279,8 @@ names, checked before the signature; when the DevicePublicKey it names is not
 in the node's current record; and when its signature verifies, under the
 acknowledgement's own domain, with that DevicePublicKey, the signed
 statement binding the Organisation, the MemberId and the epoch and root of
-the revocation. mitigates: HAZ-7ubhwz
+the revocation.
+mitigates: HAZ-7ubhwz
 
 *Amended 2026-10-07 (owner ruling at the S3a close-out residual review).*
 The sender clause is new: "Acknowledgements of revocations will be sent from
@@ -305,7 +306,7 @@ entry is pruned, for every entry alike, is S5's to assess.
 
 What it does not cover, and cannot: a revoked Device altered to sign the
 acknowledgement without deleting anything. The acknowledgement is the
-Device's statement, not evidence of erasure; RC-wqgm2p is cooperative and so
+Device's statement, not evidence of erasure; an earlier form of RC-5jkcxz is cooperative and so
 is this. No retention rule may treat an acknowledgement as proof that the
 data is gone, and by ruling R4 none does. A signature by a key that was
 never a Member's adds an entry only for that key, which its own holder
@@ -339,123 +340,6 @@ Device. Severity: S3. Probability: P2.
 P2: a lost or stolen Device is the ordinary case of a revocation
 (HAZ-vxabf9).
 
-**RC-44vvjp**: the node signs each acknowledgement before it deletes the
-Organisation's data, with the Device secret key its caller gives it for that
-one operation and keeps nowhere afterwards; deletes the Persona with every
-key the store holds for it in the same sealed store image as the rest; and
-returns the acknowledgements to its caller holding no key and no other
-Organisation data, leaving in the store no tombstone, marker or copy of an
-acknowledgement for that Organisation. mitigates: HAZ-h6b34a
-superseded-by: RC-45k3zg
-
-*Superseded 2026-10-20 (owner ruling Q4' of 2026-10-16, change
-`worktree-org-io-domain-api`):* the node still signs each acknowledgement
-before the deletion with a Device secret key it keeps nowhere, but now keeps
-the signed acknowledgements in the store — three, two, one or none by the
-Devices it knows — each with its recipient's key and addresses, deletes each
-once its recipient accepts it, and leaves the rest to be deleted 7 days after
-the verification (RC-45k3zg, with HAZ-h6b34a's residual re-estimated, in
-`org-node/docs/risk/2026-10-15-domain-api.md`).
-
-*Revised 2026-10-07 (owner rulings of 2026-10-06 recorded by stage S4,
-`docs/plans/2026-10-06-org-io-transport.md` §13–§15 on branch
-`worktree-org-io-transport`).* This said the node deletes "the Persona's
-Device and Member secret keys" in the store image. The device seed lives only
-in the OS keychain and org-node is given it transiently; after S4 the store
-holds the Device public key, not the seed. The Device secret key is
-destroyed by org-io deleting the Persona's keychain item, in the same step as
-it writes the store image and before it sends anything (the plan's proposed
-7). Until S4, the seed is in the store and goes with the Persona.
-
-*Ruling B (2026-10-06):* org-node writes no file. "The same sealed store
-image" is the one set of store bytes org-node returns, which org-io writes
-in one step; a caller that wrote the acknowledgements without that image
-would still hold the keys, so org-io's proposed 7 writes the image before it
-sends anything.
-
-With RC-44vvjp, org-node keeps nothing: `forget_organisation` leaves no
-tombstone, marker or copy of an acknowledgement (LLR-pba7yu). What the caller
-(org-io) keeps to deliver the acknowledgement, and for how long, was ruled by
-the owner on 2026-10-06 (ruling C, and the plan's decision 1 as corrected by
-the owner's ruling on retention: "Once the device has deleted all the local
-org related data and sent back the signed acknowledgement, it should keep
-nothing with regards to that org anymore."), and revised by the owner on
-2026-10-07 (ruling R5 and the acknowledgement sender rule, below). These
-become org-io requirements once S2 creates the unit (the plan's proposed 7,
-8 and 11), with org-io's own control for this hazard minted there.
-
-*Revised 2026-10-07 (owner ruling R5 and the acknowledgement sender rule,
-S3a close-out residual review).* This said the caller keeps only the
-acknowledgement, the address of the one peer that delivered the revocation
-and the retry limit, retries from a fresh endpoint identity, and that the
-Device secret key is gone before the first send. Two rulings change that:
-
-- R5: "After delivering the acknowledgement, the local device should delete
-  all the information. To be sure of delivery, the device delivers the
-  acknowledgement to 2 more peers (if they have as many peers)." The device
-  delivers to up to three distinct Member Devices in all — the one that
-  delivered the revocation and up to two more — fewer if fewer exist.
-- The sender rule (RC-eydn8t as amended): "Acknowledgements of revocations
-  will be sent from devices on the revocation list, so their ids can be
-  checked before accepting." A receiver accepts an acknowledgement only over
-  a connection authenticated as the Device it names, so the revoked Device
-  sends under its own endpoint identity, never from a fresh one, and needs
-  its Device secret key until delivery ends.
-
-What the caller keeps, therefore: the acknowledgement, the Device secret key
-(the Persona's keychain item, used only to open these connections), the
-DevicePublicKeys (iroh endpoint ids) of up to three distinct Member Devices
-taken from the record before it is deleted — the delivering peer first — and
-the retry limit. It connects directly to each in turn, no relay, so each
-receiver sees the revoked Device as the sender; a peer that has not yet
-committed the revocation still lists the Device and refuses
-(`AcknowledgementForListedDevice`), and the device tries the next retained
-address. When three have accepted, or every retained address has been tried
-and refused or the Organisation's acknowledgement retry limit has passed
-(set by the Organisation, 2 months by default, ruling C), whichever comes
-first, it deletes all of it — the Device secret key, the acknowledgement,
-the addresses and the limit — and from then on holds nothing about the
-Organisation. Everything else is deleted before the first send, as before
-(proposed 7). A Member Device must accept an inbound connection from a
-Device it holds as removed, for an acknowledgement only; that is a transport
-requirement for S4 and S3b-io (the plan's proposed 9).
-
-Residual, restated 2026-10-07 with that in place: between the deletion and
-the end of delivery — never longer than the retry limit — a lost or stolen
-revoked Device holds up to three other Devices' endpoint ids (each a
-DevicePublicKey, which names no person by itself), its own signed
-acknowledgement (the Organisation identifier, its own MemberId and the root
-it was revoked at), and its own Device secret key. With that key its holder
-can connect to those Devices as the revoked Device, and every Member Device
-refuses from it anything but an acknowledgement: it is listed in no
-receiver's record, so its updates and revocations fail RC-u7kdam, and its
-key was removed from the record, so it reaches no Organisation data. The
-window ends at delivery to three or at the limit. Severity S3, probability
-P1: unacceptable under the README's matrix (ruling D). *Owner ruling R5
-(2026-10-07): residual accepted* on the delivery design above, bounded by
-the Organisation's limit (ruling C, default 2 months). The owner's words:
-"After delivering the acknowledgement, the local device should delete all
-the information. To be sure of delivery, the device delivers the
-acknowledgement to 2 more peers (if they have as many peers)." Benefit-risk
-case put to the owner before the ruling: without the retained addresses and
-acknowledgement a revoked Device that loses its connection mid-send can
-never report that it cleared itself, and the Organisation cannot tell a
-cleared Device from a silent one; three deliveries make the report survive
-the loss of one peer, at the cost of two more endpoint ids held for the same
-bounded window. An Organisation that weighs the exposure higher sets a
-shorter limit.
-
-*Owner ruling 2026-10-07 on the key window (S3a close-out).* Because an
-acknowledgement is accepted only from the Device it names (RC-eydn8t's
-sender clause), the revoked Device keeps its Device secret key — the
-Persona's OS keychain item — until delivery to three peers ends or the
-Organisation's limit expires, whichever comes first, and then deletes it
-with everything else listed above. Until then, whoever holds the lost or
-stolen Device holds that key and can connect as the revoked Device, from
-which every Member Device accepts nothing but an acknowledgement
-(RC-u7kdam). *Residual accepted by the owner, 2026-10-07*, as part of the
-residual restated above.
-
 ## Derived requirements assessment
 
 **REQ-ps2gy2** realises RC-r8bp43; assessed above.
@@ -467,23 +351,23 @@ REQ-ea4qs5 a stranger no longer costs a chain read at all; only a Device the
 record lists reaches the read.)* No new hazard.
 
 **REQ-ea4qs5** (a revocation is acted on only from a Device the current
-record lists, before any chain read) and **REQ-ztdza4** (amended 2026-10-07:
+record lists, before any chain read) and **an earlier form of REQ-uk9rw7** (amended 2026-10-07:
 an update for a held Organisation is committed only from such a Device)
 realise RC-u7kdam; assessed above under "A message is acted on only when a
 member sent it", including what they break. No new hazard: the refusal
 writes nothing and reads no chain, so its worst case is a genuine message
 from a Device the receiver's record does not yet list, which waits for a
-Device both records list (a delay, not a loss). REQ-xa6smf is unchanged (a
+Device both records list (a delay, not a loss). An earlier form of REQ-eqt23j is unchanged (a
 first admission from any sender), and its residual — a new joiner held up by
 strangers — is owner-accepted (R1 and R6, 2026-10-07).
 
-**REQ-m2xh8q, REQ-em28bq, REQ-tb4f8p** realise RC-ub82my; assessed above.
-REQ-tb4f8p's commit chooses the provisional update by the chain's root and
+**REQ-m2xh8q, earlier forms of REQ-y9p27b and REQ-dwb9bq** realise RC-ub82my; assessed above.
+An earlier form of REQ-dwb9bq's commit chooses the provisional update by the chain's root and
 Organisation public key, as `commit_update` does after the key-pair change,
 so a reconcile commits only what the chain holds. Its "behind" outcome
-deletes and commits nothing (REQ-em28bq).
+deletes and commits nothing (an earlier form of REQ-y9p27b).
 
-**REQ-y99c9w** realises RC-44vvjp; assessed above. Taking the Device secret
+**An earlier form of REQ-h29c8e** realises an earlier form of RC-45k3zg; assessed above. Taking the Device secret
 key from the caller for one operation (revised 2026-10-07) adds no exposure:
 org-node holds the seed no longer than the signing, and a caller that gives
 no seed gets a refusal with nothing deleted, so a missing keychain item never
@@ -514,28 +398,28 @@ lists does not verify. No new hazard.
 an acknowledgement costs a stranger no chain read; since 2026-10-07 one from
 any Device but the one it names is refused before the signature check.
 
-**REQ-uv3v5w** (amended: the record keeps the Change set that produced it):
+**An earlier form of REQ-x2dnee** (amended: the record keeps the Change set that produced it):
 the kept Change set holds the leaves it upserted, which is Member data
 already in the record it produced; it lives in the encrypted store
 (RC-jjsz97), is bounded by the 1 MiB frame, and is sent to nobody in this
 change (stage S6 sends it only to a requester in good standing). No new
 hazard.
 
-**REQ-uxv2x2** (amended: deletion covers everything, the Persona with its
+**An earlier form of REQ-48zc3e** (amended: deletion covers everything, the Persona with its
 keys included, on either verified path): narrows HAZ-vxabf9 and HAZ-45ucqx on
 a cooperating revoked Device, which no longer keeps keys that could act as
 it. What it breaks: a wrong deletion is now unrecoverable, which is why
 HAZ-p6xkuz rates S3 and why RC-ub82my and RC-u7kdam are the only doors to it.
 
-assesses: REQ-ps2gy2, REQ-qrtsc9, REQ-m2xh8q, REQ-em28bq, REQ-y99c9w, REQ-b462sh, REQ-tb4f8p, REQ-uv3v5w, REQ-uxv2x2, REQ-3dsweu, REQ-ea4qs5, REQ-ztdza4
+assesses: REQ-ps2gy2, REQ-qrtsc9, REQ-m2xh8q, REQ-b462sh, REQ-3dsweu, REQ-ea4qs5
 
 *Added 2026-10-08 (change `worktree-org-io-create`, owner's hybrid ruling on
-PR-zf924s).* **REQ-uk9rw7** supersedes REQ-ztdza4: it states the rule
-REQ-ztdza4 carried after its 2026-10-07 amendment (an update for a held
+the resolved problem report on amendment in place instead of supersession).* **REQ-uk9rw7** supersedes the item it replaced: it states the rule
+that item carried after its 2026-10-07 amendment (an update for a held
 Organisation is committed only from a Device the current record lists),
 under its own ID, with ruling B's wording of the order ("before it takes any
 chain state, so that none is read for it"). It realises RC-u7kdam as
-REQ-ztdza4 did, and the assessment above holds for it unchanged: the refusal
+that item did, and the assessment above holds for it unchanged: the refusal
 writes nothing and asks for no chain state, and its worst case is a delay.
 No new hazard.
 

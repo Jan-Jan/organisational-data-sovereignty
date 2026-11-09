@@ -2,9 +2,12 @@
 
 This directory is a per-change ledger: each change contributes one dated
 file, `YYYY-MM-DD-<slug>.md`, dated the day the change creates it and never
-renamed. **Edit existing items in the file that defines them.** This README
-contains the project-wide acceptability matrix; the dated files contain
-hazards, controls, derived assessments, and residual-risk statements.
+renamed. **Edit existing items in the file that defines them.** A reworded
+item keeps its ID; a changed hazard or control gets a new ID and the old item
+is deleted; a dropped item is deleted. The squash message records each under
+`Items:`. This README contains the project-wide acceptability matrix; the
+dated files contain hazards, controls, derived assessments, and residual-risk
+statements.
 
 <!--
 Item grammar (enforced by .guardrails/scripts/check-trace.sh):
@@ -14,11 +17,12 @@ Item grammar (enforced by .guardrails/scripts/check-trace.sh):
 
   **RC-NNNNNN**: <risk control measure>. mitigates: HAZ-NNNNNN
 
+- An item is terse: no rationale, history or implementation detail.
 - Every hazard must have at least one risk control that `mitigates:` it.
   `mitigates:` is read only inside the RC's block: on the definition line, as
-  above, or on a line below it before the block closes. A block closes at the
-  next markdown heading, the next bold line that contains an ASCII colon, or
-  the end of the file. A `mitigates:` anywhere else mitigates nothing, so the
+  above, or at the start of a line below it before the block closes. A block
+  closes at the next markdown heading, the next bold line that contains an
+  ASCII colon, or the end of the file. A `mitigates:` anywhere else mitigates nothing, so the
   hazard reports UNMITIGATED-HAZARD; at column one, after any list markers,
   the line also reports ORPHAN-ANNOTATION.
 - Every risk control must be implemented by at least one requirement containing
@@ -78,8 +82,8 @@ already treated every route to serious injury as intolerable. What changed is
 that such routes turned out to exist.
 
 Copied into this unit on 2026-10-06, when org-io was created. The owner ruled
-the same day (ruling D, `docs/plans/2026-10-06-org-io-roadmap.md`, "Owner's
-rulings on the S2–S4 design drafts") that this matrix wins over any draft that
+the same day (ruling D of the owner's rulings on the S2–S4 design drafts)
+that this matrix wins over any draft that
 reads it otherwise: S3 is unacceptable at every probability. A residual this
 unit records at S3 after its controls is therefore never "acceptable under
 the matrix". It is stated as risk the owner accepted, with the date and the

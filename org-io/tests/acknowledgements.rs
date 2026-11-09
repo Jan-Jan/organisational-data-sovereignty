@@ -1476,7 +1476,7 @@ async fn a_leftover_is_retried_hourly_though_the_listing_failed_when_receiving_s
     ack_until(NET, || !removed_file.exists() && !item_held(&keychain, &leftover)).await;
 }
 
-// Abnormal (PR-yng83g): `open` finds a removal past its deadline and its
+// Abnormal: `open` finds a removal past its deadline and its
 // rename fails (the data directory read-only while it opens; a directory
 // standing at the removed name would be taken for a leftover by open's
 // first step). The Persona stays with its file and item and the failure is
@@ -1531,7 +1531,7 @@ async fn a_failed_deletion_at_open_is_retried_hourly_once_receiving_starts() {
     assert!(item_held(&keychain, &admin.device_key), "no other Persona's item touched");
 }
 
-// Abnormal (PR-wch3zu): a `removed-<key>.store` beside a live `persona-<key>.store` of the same
+// Abnormal: a `removed-<key>.store` beside a live `persona-<key>.store` of the same
 // key, which org-io's own deletion never leaves (it renames the store before the item goes) but
 // a restored backup or a copied directory can. `open` leaves both files and the keychain item,
 // opens the Persona, and reports the leftover as not finished; an hour after receiving starts,
@@ -1937,7 +1937,8 @@ async fn a_refused_removal_of_the_renamed_file_is_reported_and_retried_hourly() 
     assert!(bob.io.acknowledgement_report(admin.org).await.is_none(), "no report once deleted");
 }
 
-// Abnormal (PR-yng83g's retry, `start_receiving` called twice): a deletion
+// Abnormal (the hourly retry of a deletion that failed at open,
+// `start_receiving` called twice): a deletion
 // that failed at open is retried by one task, not one per call. With the
 // keychain refusing at the retry, the hour's retry asks the keychain once.
 // verifies: LLR-3fxxpp

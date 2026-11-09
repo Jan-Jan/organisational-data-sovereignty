@@ -13,6 +13,5 @@ org-node's own independent-root control, because a consumer may not cite a
 provider's controls. This file is kept so that the ledger's history reads
 chronologically; it defines no item. (Corrected 2026-09-10: an earlier
 wording also claimed the 2026-09-02 verification record's reference to this
-file still resolves through it. That record
-(`docs/verification/2026-09-02-worktree-risk-membership.md`) names the report
+file still resolves through it. That record names the report
 by its identifier, never by this file, so the claim supported nothing. The chronology is the whole of the reason.)

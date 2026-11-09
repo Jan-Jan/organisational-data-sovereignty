@@ -1,19 +1,8 @@
 # Problem reports — org-node, an update overwrites the Organisation secret
 
-Opened by the architecture tooth
-(`docs/plans/2026-10-03-org-node-architecture.md`) from review round 5, which
+Opened by the architecture tooth from review round 5, which
 found the overwrite stated by no low-level requirement and evidenced by
 nothing.
-
-**PR-xwek5e**: when `receive_and_verify` commits into an existing Organisation
-record, it overwrites the stored Organisation secret with whatever the Wire
-message carries. `revoke_member` always sends `org_secret: None`. So a member
-that receives another member's revocation on this path loses the Organisation
-secret while remaining a member.
-affects: SDD-8cpyfa, SDD-72ddm6, LLR-ckk5nz, LLR-8hdu9x
-opened: 2026-10-04
-status: resolved
-resolution: the Organisation secret is replaced by the Organisation private key, which every Organisation-information message carries (REQ-szq3ud) and a revocation — sent only to a Device the committed record no longer lists — never does (REQ-3dsweu), and a revocation is accepted only as the receiver's own removal (LLR-pt32fx); reproduced by `pr_xwek5e_another_members_removal_leaves_the_receiver_holding_the_organisations_key` and `a_revocation_that_leaves_this_device_listed_is_refused_on_both_paths` (org-node/tests/admission_sender.rs), red before, green after.
 
 ## What was observed
 
@@ -49,11 +38,11 @@ purpose. It writes through whatever the Wire message carries, and a revocation
 happens to carry `None`. The ruling belongs to the owner. The fix and the
 requirement follow from it, in a change of their own.
 
-*Annotated 2026-10-05 by review round 8.* The sending side is LLR-8hdu9x:
+*Annotated 2026-10-05 by review round 8.* The sending side is an earlier form of LLR-degg8t:
 `revoke_member`'s Wire message carries no secret. Whichever reading is ruled,
 the fix is on one side or the other, so both requirements are named.
 
 *Annotated 2026-10-05 by review round 1 of `worktree-worktree-person-shared-types`
-(finding-6); reworded the same day by docs/plans/2026-10-05-switch-trim.md.* The
+(finding-6); reworded the same day.* The
 items the `affects:` line names are amended in place on that branch rather
 than superseded, so the line names them alone.

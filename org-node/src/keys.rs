@@ -103,7 +103,7 @@ impl DeviceSecret {
     /// LLR-yp69jg: the one way the bytes leave the value. `write` is called
     /// exactly once, and its result is returned: `Ok(())`, or an error bound
     /// to `std::error::Error`, which no byte array implements, so neither
-    /// `|s| *s` nor `|s| Err(*s)` compiles (PR-aa7prn, LLR-37k2s3). The bound
+    /// `|s| *s` nor `|s| Err(*s)` compiles (LLR-37k2s3). The bound
     /// does not stop a caller-defined error type that wraps the bytes; that
     /// case rests on review, as LLR-yp69jg's correction of 2026-10-15 says.
     pub fn lend_to_keychain<E: std::error::Error>(

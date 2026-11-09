@@ -57,21 +57,30 @@ check scripts in `.guardrails/scripts/`. Configuration: `.guardrails/config.yaml
 2. **Integration is a signed squash merge** performed by the `merge-change`
    skill. The base branch receives exactly one signed commit per change.
    Intermediate worktree commits may be unsigned; the squash commit must be
-   signed and carry a `Gate-tree:` trailer naming the tree the gate measured,
-   and `finish-merge.sh` verifies both before the worktree is cleaned up.
+   signed and carry its verification record in its message, with a
+   `Gate-tree:` trailer naming the tree the gate measured, and
+   `finish-merge.sh` verifies both before the worktree is cleaned up.
    There is no unsigned fallback.
 3. **Traceability is mechanical.** A new requirement/hazard/control/design/
    problem item gets its ID the moment it is written: run
    `.guardrails/scripts/new-id.sh <PREFIX>` and paste what it prints. The ID
-   is a random six-character token — `a3k9z2`, say — allocated against nothing,
-   so two worktrees and two GitHub PRs never contend for one and nothing is
-   renumbered at merge. Never invent an ID by hand. A change names each ledger
+   is a random six-character token — `a3k9z2`, say — and nothing is
+   renumbered at merge. Two worktrees or two GitHub PRs can mint the same one;
+   that is improbable, and `DUPLICATE-ID` detects it at merge rather than
+   preventing it. Never invent an ID by hand. A change names each ledger
    file it creates `docs/<area>/<YYYY-MM-DD>-<slug>.md`, dated the day it
    creates it, and nothing renames it; existing items are edited in the dated
    file that defines them. Every new test declares
    what it verifies
    (`verifies: <IDs>` — annotate the lowest level present: LLR where one
    exists, else REQ/RC; the parent REQ is covered transitively).
+   Every item in a ledger is in force. Same behavior reworded: edit in place,
+   keep the ID. Behavior changed: a new ID from `new-id.sh`, the old item
+   deleted, `old → new` under `Items:` in the squash message. Behavior gone:
+   delete the item and give the reason there. Never write `supersedes:`,
+   `superseded-by:` or `retired:` (`SUPERSESSION-ANNOTATION`). A test still
+   naming a deleted ID is `DANGLING-REF`: delete it, or point it at the new
+   ID and list it as `inherited: <test> — from <old ID>`.
    `check-trace.sh` and `check-ids.sh` must pass before any merge.
 
 ## Verification rigor (by safety class, from config)
@@ -87,8 +96,11 @@ system needs are marked `satisfies: derived` and must be assessed in the risk
 management file, on a passage that contains `assesses: <ID>`
 (UNANALYZED-DERIVED otherwise). Every bug becomes a problem report
 (`resolve-problem` skill) in the log at `doc_problems` (config), with an
-`opened:` date while it is open; open PRs are listed at each merge with their
-age, and past the config's `problem_age_days` or `problem_open_max` the list
+`opened:` date while it is open, and `status: open` or `accepted`. The change
+that fixes a problem deletes its report and names it in the squash message's
+`Resolves:`; the regression test verifies the lowest-level item the defect
+broke: the LLR where one exists, else the REQ (or the RC's implementing REQ),
+never the PR. Open PRs are listed at each merge with their age, and past the config's `problem_age_days` or `problem_open_max` the list
 stops being a warning and fails the merge. The coverage gate runs the config's
 `coverage_command` when one is configured — projects without one document why
 in their setup notes.
@@ -112,7 +124,7 @@ in their setup notes.
 ## Check scripts (run from repo root)
 
 - `.guardrails/scripts/new-id.sh PREFIX [COUNT]` — mint item IDs
-- `.guardrails/scripts/find-items.sh list [--kind PREFIX]... [--status open|accepted|resolved] | show ID | refs ID`
+- `.guardrails/scripts/find-items.sh list [--kind PREFIX]... [--status open|accepted] | show ID | refs ID`
   — find an item without reading a ledger file: `list` prints one line per
   item (ID, status, `file:line`, the rest of the definition line), and a
   repeated `--kind` keeps the items of each prefix it names; `show` prints
@@ -123,16 +135,15 @@ in their setup notes.
 - `.guardrails/scripts/check-ids.sh` — draft IDs, draft-named files,
   duplicate and malformed IDs
 - `.guardrails/scripts/check-trace.sh` — traceability gates
-- `.guardrails/scripts/check-review.sh [--branch NAME]` — the change under merge
-  has a verification record, written by this change, naming a reviewer, a
-  verdict, what was reproduced, and a disposition per finding. Run from the
-  change worktree (merge-change step 6c); on the base branch it exits 2, never 0
+- `.guardrails/scripts/check-review.sh [--message FILE] [--cite]` — the
+  change's squash message, its verification record, names a reviewer, a
+  verdict, what was reproduced, a disposition per finding, and passing
+  `Tests:` for the tree `Gate-tree:` names. Run from the change worktree
+  (merge-change step 6c); on the base branch it exits 2, never 0
 - `.guardrails/scripts/check-signing.sh [--strict] [RANGE]` — signature verification
-- `.guardrails/scripts/prune-plans.sh [--dry-run] [--all] [--base REF]` —
-  replace each code block in a plan's task sections with a one-line pointer
-  naming its line count and the task's Files touched value (merge-change
-  step 1); `--all` takes every plan, not only this change's;
-  `--base` names the ref this change's plans are diffed against
+- `.guardrails/scripts/drop-plans.sh --base REF` — remove the plans this
+  change added and restore the base's version of each it edited, in one
+  commit (merge-change step 5)
 - `.guardrails/scripts/merge-preflight.sh [--before-review] [--local-base] BRANCH`
   — the mechanical merge checks, stopping at the first failure; `--local-base`
   checks the local base branch only, not `origin/<base>`, for a project that

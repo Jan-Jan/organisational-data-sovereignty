@@ -43,7 +43,7 @@
 	$effect(() => {
 		loadOrgs();
 
-		// REQ-rq8g2v / PR-u34uqm: the cleanup cancels the subscription even when
+		// REQ-rq8g2v: the cleanup cancels the subscription even when
 		// the component is destroyed while `listen` is still pending. Assigning
 		// `unlisten` after an un-awaited `await` left the teardown with nothing to
 		// call and the listener attached to a destroyed component.

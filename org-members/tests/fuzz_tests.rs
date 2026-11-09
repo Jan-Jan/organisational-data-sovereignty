@@ -605,7 +605,7 @@ proptest! {
 // ============================================================
 // Device-removal key replacement: removing a device or isolating
 // a member must replace the member-as-a-group key, or change
-// nothing (PR-zz4exm). Routine rotation is held to the same
+// nothing (REQ-ewdg2q). Routine rotation is held to the same
 // contract (LLR-k89ahd, owner ruling 2026-10-03).
 // ============================================================
 

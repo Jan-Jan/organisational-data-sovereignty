@@ -7,17 +7,16 @@ and the controls in `person/docs/risk/2026-10-06-person-hazards.md`.
 
 ## What this builds on
 
-The change that moves the shared types (`docs/plans/2026-10-04-person-sequencing.md`,
-change 1, merged as master f688a3c) brought `Name`, `Surname`,
+The change that moves the shared types (merged as master f688a3c) brought `Name`, `Surname`,
 `DevicePublicKey`, `PersonPublicKey`, `DeviceSlots`, the depth-2 device
 sub-trie and the `DeviceTrieHasher` trait into this unit, with their own design
 items in `person/docs/architecture/2026-10-04-identity-types.md`: SDD-k5ee9x
-(the value types; LLR-ayu93n, LLR-7guspr, LLR-vs7etb, LLR-9p34cv, LLR-sjrh7z),
-SDD-7r833z (the device sub-trie; LLR-4vsm8d, LLR-6ezhw7) and SDD-u9cddc (the
+(the value types; LLR-ayu93n, LLR-7guspr, LLR-vs7etb, LLR-sjrh7z),
+SDD-7r833z (the device sub-trie) and SDD-u9cddc (the
 one error type, `IdentityError`, LLR-eeq89n, and the crate discipline,
 LLR-64muuw). The items below use those types by name; they do not redefine
 them. The device sub-trie's sentinel and domain keys are already parameters,
-supplied by the implementor of `DeviceTrieHasher`, which LLR-edn55h relies on.
+supplied by the implementor of `DeviceTrieHasher`, which the V1 encoding relies on.
 Every Person operation rejects with `IdentityError`, extended by this change
 (LLR-3n3kxx).
 
@@ -50,13 +49,13 @@ between them is claimed or needed. `person` depends on no unit.
 **SDD-4r2x79**: Person definition — the validated `Person` value: a `Name`, a
 `Surname`, an optional `PersonPublicKey`, and device slots of `DevicePublicKey`s;
 one constructor enforces every rule a definition must satisfy, and it is the
-only path to a `Person`, deserialisation included. traces: REQ-ht3x78,
-REQ-7qgx2q, REQ-7ymek3, REQ-4szc22, REQ-tq4ms4
+only path to a `Person`, deserialisation included.
+traces: REQ-ht3x78, REQ-7qgx2q, REQ-7ymek3, REQ-4szc22, REQ-tq4ms4
 
 **LLR-4ku56h**: `Person` holds its device keys as a `DeviceSlots`, so a
 `Person` holds at most `MAX_DEVICES` (4) `DevicePublicKey`s, sorted, with no key
 twice: building the slots from more keys is refused with `DeviceSlotsFull` and
-from a key given twice with `DuplicateDevice` (LLR-9p34cv), before any `Person`
+from a key given twice with `DuplicateDevice` (LLR-xsx6gg), before any `Person`
 exists, and decoding a `Person` decodes its slots through LLR-sjrh7z.
 satisfies: REQ-4szc22, REQ-tq4ms4
 
@@ -77,7 +76,7 @@ risk file's assessment of REQ-7qgx2q). This rule and LLR-sjkmr6's are one
 public function, `check_group_key(group_key: Option<&PersonPublicKey>, devices:
 &DeviceSlots) -> Result<(), IdentityError>` in `person/src/group_key.rs`, which
 `Person::new` calls and which org-members can call for the member-as-a-group
-key (change 3 of `docs/plans/2026-10-04-person-sequencing.md`).
+key.
 satisfies: REQ-7qgx2q
 
 **LLR-63pkfc**: `Person`'s `Deserialize` implementation, compiled only with
@@ -92,39 +91,24 @@ a refusal surfaces through the deserializer's error with the message of the
 `IdentityError` that `Person::new` or the field's `parse` returned; a missing
 or unknown field is refused. With the same feature a `Person` serialises as a
 struct of the four fields in this order — `name`, `surname`, `person_key` (an
-option), `devices` — each in its own type's form (LLR-5za6mp).
+option), `devices` — each in its own type's form (LLR-cyx9a3).
 satisfies: REQ-7ymek3
 
 **LLR-dtwpr8**: The `Debug` form of a `Person` shows neither its Name nor its
 Surname, whatever their value: it carries them in their own redacted `Debug`
-form (LLR-fbqs2r). satisfies: derived
+form (LLR-fbqs2r).
+satisfies: derived
 
 **SDD-v32mqh**: Person hash — encodes a `Person` under an `EncodingVersion`,
 hashes the encoding, and checks a supplied hash against a definition; holds no
-state between calls. traces: REQ-9m5pq2, REQ-7n4g8b, REQ-wg7z4s
+state between calls.
+traces: REQ-9m5pq2, REQ-7n4g8b, REQ-wg7z4s
 
 **LLR-rde6tk**: `EncodingVersion` is a closed enum whose only variant is `V1`;
 `EncodingVersion::try_from(u16)` maps 1 to `V1` and refuses every other value
 with `IdentityError::UnsupportedEncodingVersion(value)`, before any encoding or
 hashing.
 satisfies: REQ-wg7z4s
-
-**LLR-edn55h**: The `V1` encoding is, in order: the NFC name's byte length as a
-4-byte little-endian `u32`, then its bytes; the same for the surname; one byte,
-`0x00` when the `PersonPublicKey` is absent and `0x01` when present, followed in
-the second case by its 32 bytes; then the 32-byte device root
-`compute_device_root::<PersonDeviceHasher>(&devices)` (LLR-6ezhw7).
-`PersonDeviceHasher` is this unit's own, Person-specific implementation of
-`DeviceTrieHasher` (LLR-4vsm8d): `hash_device_leaf` is `blake3::keyed_hash`
-under the leaf domain key `person::device-leaf` and `hash_device_node` is
-`blake3::keyed_hash`, under the node domain key `person::device-node`, of the
-two children's 32 bytes concatenated, each key padded with `_` to 32 bytes
-(`person::device-leaf_____________`, `person::device-node_____________`); its
-`DEVICE_EMPTY_SENTINEL` is the 31 ASCII bytes `EMPTY_SENTINEL_PERSON_DEVICE_V1`.
-Neither its domain keys nor its sentinel are org-members'
-(`org-members::device-leaf________`, `org-members::device-node________`,
-`EMPTY_SENTINEL_ORG_MEMBERS_DEVICE_V1`). satisfies: REQ-9m5pq2
-superseded-by: LLR-qwp8d7
 
 **LLR-4ebtn4**: The `V1` hash is `blake3::keyed_hash` of the `V1` encoding under
 the 32-byte key `person::definition::v1`, padded with `_` to 32 bytes
@@ -135,7 +119,8 @@ version as the `u16` published beside the hash, parses it with
 bytes, unvalidated, built by `PersonHash::new` and `From<[u8; 32]>` and read
 by `as_bytes`, whose `Debug` form is `PersonHash(` and the first four bytes in
 lowercase hex and `..)`, and which with the `serde` feature serialises as its
-32 bytes. satisfies: REQ-9m5pq2, REQ-wg7z4s
+32 bytes.
+satisfies: REQ-9m5pq2, REQ-wg7z4s
 
 **LLR-tf45kx**: `verify(person, version, hash)` — `version` the `u16` encoding
 version, `hash` a `PersonHash` — returns `Ok(true)` exactly when
@@ -146,13 +131,15 @@ item has no `static`, global, cache or interior-mutable state.
 satisfies: REQ-7n4g8b, REQ-r4keha
 
 **SDD-9hej83**: Successor check — decides whether one definition may follow
-another. traces: REQ-bhez2u
+another.
+traces: REQ-bhez2u
 
 **LLR-wqha8d**: `check_successor(previous, next)` refuses, with
 `PersonKeyNotRotated`, a `next` whose sorted device keys differ from
 `previous`'s while its `PersonPublicKey` equals `previous`'s (both `Some` and
 equal), and returns `Ok(())` in every other case — a key change with unchanged
-device keys included. satisfies: REQ-bhez2u
+device keys included.
+satisfies: REQ-bhez2u
 
 ### Errors (SDD-u9cddc, amended)
 
@@ -172,4 +159,5 @@ DevicePublicKeys changed and whose PersonPublicKey did not) and
 own refusal keeps its existing variant — `FieldTooLong`, `InvalidDeviceKey`,
 `InvalidPersonKey`, `DeviceSlotsFull`, `DuplicateDevice` — and there is no
 decoding variant: decoding a `Person` fails through the deserializer's error,
-with the `IdentityError` message (LLR-63pkfc). satisfies: REQ-r4keha
+with the `IdentityError` message (LLR-63pkfc).
+satisfies: REQ-r4keha

@@ -14,7 +14,7 @@ document to cite. Each is assessed in the risk ledger
 (`docs/risk/2026-08-31-membership-derived.md`) as
 `check-trace.sh` requires.
 
-Every item also carries `(implements: RC-...)`, added on 2026-09-02 when the
+Every item also carries `implements: RC-...`, added on 2026-09-02 when the
 hazard analysis in `docs/risk/2026-09-02-membership-hazards.md` enumerated the
 hazards these rules were reasoned toward and minted the risk controls they
 realise. The items stay `satisfies: derived`. Finding the hazard a rule
@@ -22,10 +22,11 @@ addresses gives the rule a justification, not a parent in system needs, and the
 derived assessments remain the assessment of record. No requirement text changed
 with the annotation: each control was worded from the behaviour the requirement
 already stated, and where the software falls short of that behaviour it is the
-residual risk that says so (REQ-ewdg2q, PR-zz4exm). (Corrected 2026-10-03:
-PR-zz4exm is resolved; REQ-ewdg2q's remaining shortfalls are the wire path,
-PR-z463w5 and PR-fzu25w — see the note under REQ-ewdg2q; the owner has since
-resolved both by ruling, which moves those checks to the caller (security
+residual risk that says so (REQ-ewdg2q). (Corrected 2026-10-03:
+the replacement-key check is in the software; REQ-ewdg2q's remaining
+shortfalls are the wire path, a removal installing a key held earlier, and a
+removal by delete-and-re-add — see the note under REQ-ewdg2q; the owner has
+since resolved the last two by ruling, which moves those checks to the caller (security
 check 11 in `org-members/README.md`) rather than removing them, and leaves the
 wire path as the one gap in the software.)
 
@@ -35,13 +36,13 @@ wire path as the one gap in the software.)
 does not change when that member's handle changes or when any of that member's
 keys are replaced, and shall reject an attempt to admit a member whose
 identifier is already present in the organisation.
-(implements: RC-4u22ba)
+implements: RC-4u22ba
 satisfies: derived
 exported: yes
 
 **REQ-kmvc96**: The software shall reject an attempt to admit or rename a
 member to a handle already held by another member of the organisation.
-(implements: RC-n2taat)
+implements: RC-n2taat
 satisfies: derived
 exported: yes
 
@@ -50,7 +51,7 @@ shall reject a handle that, after normalization, is empty, exceeds 128 bytes,
 contains an uppercase character, contains `.`, contains a character not
 permitted in identifiers by UTS#39 (the Unicode General Security Profile) other
 than `-`, or mixes Unicode scripts (`-` being permitted alongside any script).
-(implements: RC-n2taat)
+implements: RC-n2taat
 satisfies: derived
 exported: yes
 
@@ -60,7 +61,7 @@ since 2026-05-12 is now stated (owner ruling).)
 **REQ-m8aexh**: The software shall reject a member handle whose UTS#39
 confusable skeleton matches that of a handle already held by another member,
 so that two members cannot hold handles that render alike.
-(implements: RC-n2taat)
+implements: RC-n2taat
 satisfies: derived
 exported: yes
 
@@ -69,15 +70,15 @@ exported: yes
 **REQ-xdx2c2**: The software shall bound the number of device keys a member may
 hold, shall reject an attempt to add a device key the member already holds, and
 shall reject an attempt to add a device key to a member already at that bound.
-(implements: RC-3ppkf6)
+implements: RC-3ppkf6
 satisfies: derived
 exported: yes
 
 The bound is 4 today, and that number is deliberately NOT stated in the
 requirement: it follows from the fixed depth-2 device sub-trie, so it is design
 data. It belongs in a low-level requirement under the software item that owns
-the sub-trie, which does not exist yet — the architecture ledger is tooth 6 of
-`docs/plans/2026-08-26-ratchet-gap-analysis.md`. Until that LLR is written the
+the sub-trie, which did not exist yet when this was written: the architecture
+ledger had not been started. Until that LLR is written the
 number lives only in places no gate reads: `MAX_DEVICES` in
 `org-members/src/types.rs`, a doc-comment in `org-members/src/trie.rs` that
 restates it as "`MAX_DEVICES` (4)", the test that exercises it, the crate's own
@@ -95,29 +96,29 @@ design of that change.
 the same operation that removes a device key from that member, and shall reject
 a removal whose replacement key is the key being replaced, so that a removed
 device cannot derive access from the key it held while enrolled.
-(implements: RC-mqtks7)
+implements: RC-mqtks7
 satisfies: derived
 exported: yes
 
 The second clause is **not met today**: the replacement key is stored without
 being compared to the outgoing one, so a caller that passes the current key back
-removes the device and leaves its access intact. Recorded as PR-zz4exm rather
+removes the device and leaves its access intact. Recorded as a problem report rather
 than softened away, because the intent is not in doubt — the operation exists to
 cut off the removed device. The requirement states the behaviour the software is
 supposed to have; the problem report tracks the distance to it.
 
 Met on the direct API as of 2026-10-03: `delete_p2p_device` and
 `emergency_isolate_member` refuse a replacement key equal to the current key
-with `P2pKeyNotReplaced` and change nothing (LLR-s97ywt, LLR-w92psx; PR-zz4exm
-resolved). Three gaps remain open and are not closed by this: the wire path,
+with `P2pKeyNotReplaced` and change nothing (LLR-s97ywt, LLR-w92psx; the
+problem report is resolved). Three gaps remain open and are not closed by this: the wire path,
 where `apply_delta` still accepts a leaf with a device removed and the key
 unchanged (the hazard register's not-minted control 2; org-node's REQ-q92yac);
-a removal that installs a key the removed device held *earlier* (PR-z463w5);
+a removal that installs a key the removed device held *earlier*;
 and a device removed by `delete_member` followed by `add_member` with the same
-key, which no device-removal operation sees (PR-fzu25w). "Met" here means met
+key, which no device-removal operation sees. "Met" here means met
 by the two device-removal operations, not by every route to the same state.
 (Ruled 2026-10-03 by the owner: a key no longer held is not refused, and a
-deleted `MemberId` is never legitimately re-added; PR-z463w5 and PR-fzu25w are
+deleted `MemberId` is never legitimately re-added; those two gaps are
 resolved by ruling. Every key still held anywhere in the organisation is
 refused, the removed device's own included — `DuplicateKey`, LLR-fym7dy, a
 later decision the same day. The requirement's purpose — a removed device
@@ -143,7 +144,7 @@ by org-node; the administrator who admits or rotates carries them.)
 device key from a member and replaces that member's member-as-a-group key in one step,
 shall retain the member in the organisation when it does so, and shall restore
 the member's access when a device key is next added.
-(implements: RC-sq3yhp)
+implements: RC-sq3yhp
 satisfies: derived
 exported: yes
 
@@ -152,7 +153,7 @@ exported: yes
 **REQ-avmu3j**: The software shall not report a membership root value for a
 membership record whose hashes have not been computed since its last
 modification, reporting an error instead.
-(implements: RC-ty8qdw)
+implements: RC-ty8qdw
 satisfies: derived
 exported: yes
 
@@ -160,7 +161,7 @@ exported: yes
 unchanged when a modification is applied, producing the modified membership as
 a separate value, so that a record already published cannot be altered in
 place.
-(implements: RC-3qn5xg)
+implements: RC-3qn5xg
 satisfies: derived
 exported: yes
 
@@ -168,7 +169,7 @@ exported: yes
 declared base does not match the membership record it is applied to, and shall
 reject the result of applying a change set whose membership root does not
 match the root the change set was expected to produce.
-(implements: RC-9z65hw)
+implements: RC-9z65hw
 satisfies: derived
 exported: yes
 
@@ -177,7 +178,7 @@ key set that it receives from outside the process — handle validity per
 REQ-h5ret5, and a device key set that is sorted, free of duplicates, and within
 the bound of REQ-xdx2c2 — so that a serialized membership record cannot
 introduce a member whose handle or device set the software would refuse.
-(implements: RC-4apk6w)
+implements: RC-4apk6w
 
 Deliberately NOT "the same rules as a member admitted directly": the wire path
 accepts an empty device key set where direct admission requires at least one,
@@ -193,6 +194,6 @@ exported: yes
 **REQ-ds8ryr**: The software shall report every rejected membership operation
 as an error and shall not panic, for any input, including input that is
 malformed, hostile, or exceeds a documented limit.
-(implements: RC-c4truv)
+implements: RC-c4truv
 satisfies: derived
 exported: yes

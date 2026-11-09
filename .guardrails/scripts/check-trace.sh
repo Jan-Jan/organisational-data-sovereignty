@@ -10,19 +10,10 @@
 #                              Never annotate a test that does not verify the
 #                              behavior. Put an LLR test at the software item's
 #                              own interface.
-#                              An out-of-force REQ or LLR owes no test, and a
-#                              tested out-of-force LLR covers no REQ: see
-#                              OUT-OF-FORCE-VERIFIES for the definition.
 #   UNMITIGATED-HAZARD ID    — HAZ with no `mitigates:` line naming it
 #                              inside an RC's block.
 #                              Instead of a new RC, record the acceptability
 #                              rationale and control in the RMF.
-#                              A `mitigates:` in an out-of-force RC's block
-#                              mitigates nothing. An out-of-force HAZ owes
-#                              none: a HAZ superseded by a reciprocal pair
-#                              with another HAZ, as for an RC below. A pair
-#                              takes an item out of force only within one of
-#                              three families: RC, HAZ, REQ/LLR.
 #   UNIMPLEMENTED-CONTROL ID — RC with no `implements:` line naming it
 #                              inside a REQ's block. A line in no block,
 #                              under a heading or bold-colon line that closed
@@ -30,14 +21,6 @@
 #                              For a non-software control, note the external
 #                              implementation in the RMF item. Add an
 #                              implementing REQ only if software is part of it.
-#                              An out-of-force RC owes none: an RC whose block
-#                              contains a superseded-by: answered by another
-#                              RC's supersedes:, the chain terminating as for
-#                              a REQ (OUT-OF-FORCE-VERIFIES). A retired: on an
-#                              RC retires nothing. docs/plans/
-#                              2026-10-11-superseded-risk-controls.md.
-#                              An implements: inside an out-of-force REQ's
-#                              block implements nothing.
 #   UNTRACED-DESIGN ID       — SDD whose block has no `traces:` REQ reference
 #   UNSATISFIED-LLR ID       — LLR whose block has no `satisfies:` naming a
 #                              REQ and is not marked `satisfies: derived`
@@ -59,6 +42,13 @@
 #                              passes. A bare name resolves against this unit's
 #                              ledger directories only; across units, write the
 #                              path.
+#   HISTORY-CITATION FILE:LINE — a ledger, strict_paths or test_paths line
+#                              naming a dated file under docs/plans/ or
+#                              docs/verification/: a plan file or
+#                              docs/verification file, which leaves the base
+#                              branch (ADR-k3nkv3). A bare directory or a
+#                              placeholder names no file. A file inside either
+#                              directory, at any depth, is not scanned.
 #   MISPLACED-ITEM ID        — item defined outside the document configured
 #                              for its prefix. Adding the stray file to
 #                              strict_paths does not fix it. A doc_* directory
@@ -68,20 +58,15 @@
 #                              inline. Never leave a definition form such as
 #                              `**REQ-NNN**:` at the start of a line: that is
 #                              MALFORMED-ID (check-ids.sh).
-#   NON-RECIPROCAL-SUPERSESSION ID — `supersedes: Y` with no `superseded-by:`
-#                              naming it back on Y, or the reverse. The pair
-#                              merge-change step 4 prescribes, and ONLY the
-#                              pair: this is not a sweep for stale references
-#                              to a superseded ID, and existence is
-#                              DANGLING-REF's. Each predecessor in a list is
-#                              judged alone. If the two IDs are not a
-#                              replacement pair, remove both halves and state
-#                              the relationship in prose.
 #   ORPHAN-ANNOTATION FILE:LINE — a status:/opened:/disposition:/traces:/
-#                              satisfies:/supersedes:/superseded-by:/retired:/
-#                              implements:/mitigates: line at column one, or
-#                              at column one after a list marker, that
-#                              belongs to no item block. Wider than every
+#                              satisfies:/implements:/mitigates: line at
+#                              column one, or at column one after a run of
+#                              list markers, task-list boxes (`[x]`) and
+#                              blockquote markers (`>`), that belongs to no
+#                              item block; and a traces:/satisfies:/
+#                              implements:/mitigates: line after such a run
+#                              INSIDE its item block, which no gate reads
+#                              there (gr_annotation). Wider than every
 #                              reader on purpose: a form no reader takes is
 #                              still reported where it is orphaned.
 #                              Three cases: before the first item in the file;
@@ -89,16 +74,26 @@
 #                              block whose prefix's gate does not read the
 #                              keyword, usually the wrong item. Move a
 #                              separating heading before the item, or drop it.
-#                              Indent an illustrative line with no list marker,
-#                              or keep it inline in backticks. Reported per
+#                              Inside a block, drop the lead and start the
+#                              line at column one. Indent an illustrative
+#                              line with no lead, or keep it inline in
+#                              backticks. Reported per
 #                              ledger: status:/opened:/disposition: in
 #                              doc_problems, traces: in doc_sad, satisfies: in
-#                              doc_sad and doc_srs, supersedes:/superseded-by:
-#                              in every ledger, retired: in doc_srs and doc_sad
-#                              on REQ and LLR blocks, implements: in doc_srs
+#                              doc_sad and doc_srs, implements: in doc_srs
 #                              on REQ blocks, mitigates: in doc_rmf on RC
 #                              blocks. verifies: and assesses: are read
 #                              line-wise and cannot be orphaned.
+#                              supersedes:, superseded-by: and retired: are
+#                              SUPERSESSION-ANNOTATION's, in a block or not.
+#   SUPERSESSION-ANNOTATION FILE:LINE — a supersedes:, superseded-by: or
+#                              retired: line at column one, or at column one
+#                              after a list marker, in any ledger file, inside
+#                              an item block or not. Every item in a ledger is
+#                              in force: an item whose behavior is gone or
+#                              changed is deleted, and the squash message
+#                              records old → new, or the reason, under Items:
+#                              (ADR-k3nkv3).
 #   UNRESOLVED-PR ID         — problem report with status: open, with its age.
 #                              WARNING only: listed for review,
 #                              never fails the check on its own
@@ -114,12 +109,13 @@
 #                              bulleted one is not read, and is not a status —
 #                              an OPEN one with no opened:, or an ACCEPTED one
 #                              with no disposition: or no opened: (a keyword
-#                              with an empty value counts as absent). A
-#                              resolved item needs no opened:, so in an
-#                              existing ledger backfill it on open and accepted
-#                              items only.
-#   MALFORMED-STATUS ID      — status: whose value is not one of open,
-#                              accepted or resolved
+#                              with an empty value counts as absent).
+#   RESOLVED-PROBLEM ID      — PR with status: resolved. A resolved problem
+#                              report is deleted by the change that fixes it,
+#                              and that change's squash message names it in
+#                              Resolves: (ADR-k3nkv3). Fails the run; the item
+#                              leaves the roll-call and counts toward nothing.
+#   MALFORMED-STATUS ID      — status: whose value is not open or accepted
 #   MALFORMED-DATE ID        — an open or accepted PR whose opened: is not a
 #                              YYYY-MM-DD calendar date, or is more than a day
 #                              ahead of today (one day is allowed for clock
@@ -128,48 +124,6 @@
 #                              raised, and the roll-call prints it. The age
 #                              is computed in local time from
 #                              `date +%Y-%m-%d`; tomorrow counts as 0 days old.
-#   MALFORMED-SUPERSESSION ID — a column-one supersedes: or superseded-by: in
-#                              an item block whose value contains no item ID,
-#                              the empty value included, OR whose list contains
-#                              a token in a declared prefix that is not an ID
-#                              beside ones that are. Reported rather than read
-#                              as no supersession — or as half of one. Prose
-#                              or a parenthetical after the ID list ends the
-#                              list and is not reported.
-#                              Also a REQ, LLR, RC or HAZ whose reciprocal
-#                              pairs never reach a successor in force or
-#                              validly retired — the self-pair and cycle
-#                              reports are not filtered by prefix, so a HAZ
-#                              reaches them too:
-#                              `(supersedes itself)` for a self-pair,
-#                              `(supersession cycle with no successor in force
-#                              or retired: <IDs>)` for a cycle, naming the
-#                              item and every item its chain reaches. Such an
-#                              item stays in force and owes its test
-#                              (OUT-OF-FORCE-VERIFIES, below), or, for an RC,
-#                              its implementing REQ, or, for a HAZ, a
-#                              `mitigates:` in an RC's block.
-#   MALFORMED-RETIREMENT ID  — a column-one retired: in a REQ or LLR block
-#                              whose value is not a YYYY-MM-DD calendar date
-#                              at most a day ahead (the opened: rule), a
-#                              separator (an em dash, -, : or whitespace) and
-#                              a reason, the empty value included; or a
-#                              retired: beside a superseded-by: in one block.
-#                              An item is retired or superseded, not both:
-#                              retire when the behavior is gone with no
-#                              successor, supersede when one states what it
-#                              became. A malformed retirement retires nothing.
-#   OUT-OF-FORCE-VERIFIES FILE:LINE — a verifies: line in test_paths whose
-#                              every ID names an out-of-force item. Out of
-#                              force: a REQ or LLR whose block contains a
-#                              superseded-by: answered by its successor's
-#                              supersedes:, where that successor is another
-#                              item that is in force, validly retired, or out
-#                              of force by the same rule — the chain
-#                              terminates — or a well-formed retired:. A line
-#                              naming an in-force item beside one is history
-#                              and is not reported. docs/plans/
-#                              2026-10-08-out-of-force-items.md, D1 to D5.
 #   STALE-PROBLEM ID         — open longer than problem_age_days (more than).
 #                              Set accepted where the item is real but its fix
 #                              belongs to another change; resolve-problem
@@ -185,9 +139,7 @@
 #   UNDECLARED-DEPENDENCY ID — reference to (or expects: naming) a unit that
 #                              is not in this unit's depends_on
 #   UNMET-EXPECTATION        — an expects: REQ its provider has not yet
-#                              answered with an exported satisfies: REQ in
-#                              force there: an out-of-force export answers
-#                              nothing (OUT-OF-FORCE-VERIFIES, below).
+#                              answered with an exported satisfies: REQ.
 #                              Advisory inside its aging budget; exit 1 past
 #                              expectation_age_days, and on every run when the
 #                              expectation implements a risk control
@@ -226,8 +178,10 @@
 # Annotation rule: for verifies:/mitigates:/implements:/satisfies:/traces:/assesses:,
 # only the ID list immediately following the FIRST occurrence of the keyword
 # counts. The run ends at the first character that is not an ID, comma or
-# space, so `verifies: REQ-001 (was REQ-042)` credits REQ-001 alone. The rule
-# has exactly one definition — GR_AWK_ID_RUN in lib.sh.
+# space, so `verifies: <ID> (was <older ID>)` credits the first ID alone. The rule
+# has exactly one definition — GR_AWK_ID_RUN in lib.sh. Inside an item block,
+# where the keyword starts an annotation has one definition too —
+# gr_annotation in lib.sh: at column one, or on the item's definition line.
 #
 # Every run ends with `checked:` (items found per prefix), `problems:` (open
 # count, accepted count, oldest open item, and both triage limits — whether or
@@ -242,7 +196,7 @@
 #
 # After the violation lines and before `checked:`, one `fix <RULE>: <remedy>`
 # line per rule that fired, warnings included, in the order the rules first
-# fired (D8 of docs/plans/2026-09-28-agent-first-skills.md).
+# fired.
 # check_trace_remedy below is the remedy table; tests/remedies.bats checks that
 # it has one entry per report in the roster above.
 #
@@ -258,19 +212,18 @@ check_trace_remedy() {
         (UNTRACED-DESIGN) echo 'Add a traces: line naming the REQ the design item serves; where no REQ exists, delete the item or grill the requirement first.' ;;
         (UNSATISFIED-LLR) echo 'Add satisfies: <REQ> to the LLR block, or mark it satisfies: derived and assess it with analyze-risks.' ;;
         (UNANALYZED-DERIVED) echo 'Run analyze-risks and put assesses: <ID> on its own line under the RMF derived-requirements heading; a mention elsewhere does not count.' ;;
-        (DANGLING-REF) echo 'Correct the typo in the reference, or remove every reference to a deleted item — see the script header.' ;;
+        (DANGLING-REF) echo 'Correct the typo; for a deleted item, remove the reference, or point the test at its successor and list it as inherited: <test> — from <old ID>.' ;;
         (DANGLING-FILE) echo 'Write the name the file has now: the dated name a draft-named ledger file was renamed to. Never delete the reference to pass the gate — see the script header.' ;;
+        (HISTORY-CITATION) echo 'State the reason in the comment, or cite the ADR that records the trade-off; never cite a plan file or a docs/verification file (ADR-k3nkv3).' ;;
         (MISPLACED-ITEM) echo 'Move the definition into the document configured for its prefix: REQ doc_srs, HAZ and RC doc_rmf, SDD and LLR doc_sad, PR doc_problems.' ;;
-        (NON-RECIPROCAL-SUPERSESSION) echo 'Add the missing half at column one inside the named item block; never delete the half that is present.' ;;
-        (ORPHAN-ANNOTATION) echo 'Move the line into the item block it describes, at column one with no list marker — see the script header.' ;;
+        (ORPHAN-ANNOTATION) echo 'Start the line at column one, with no list marker, task-list box or quote marker, inside the item block it describes — see the script header.' ;;
+        (SUPERSESSION-ANNOTATION) echo 'Delete the item marked superseded-by: or retired:, drop supersedes: from its successor, and record old → new or the reason under Items: in the squash message (ADR-k3nkv3).' ;;
         (UNRESOLVED-PR) echo 'Review the open item: fix it under resolve-problem, or leave it open knowingly.' ;;
         (ACCEPTED-PR) echo 'Check that the ruling in disposition: still stands; where it does not, set status: open or fix the item under resolve-problem.' ;;
         (INCOMPLETE-PROBLEM) echo 'Add the missing status:, opened: (YYYY-MM-DD) or disposition: at column one inside the item block, with no list marker.' ;;
-        (MALFORMED-STATUS) echo 'Set status: to open, accepted (with a disposition:) or resolved.' ;;
+        (RESOLVED-PROBLEM) echo "Delete the item; the fixing change's squash message names it in Resolves: and gives cause → fix under Problems: (ADR-k3nkv3)." ;;
+        (MALFORMED-STATUS) echo 'Set status: to open, or to accepted with a disposition:.' ;;
         (MALFORMED-DATE) echo 'Write opened: as a YYYY-MM-DD calendar date no later than tomorrow; where the clock or timezone is wrong, correct that.' ;;
-        (MALFORMED-SUPERSESSION) echo 'Write the item ID the annotation means, or delete the line where no supersession happened; never widen the form to accept the token.' ;;
-        (MALFORMED-RETIREMENT) echo 'Write retired: YYYY-MM-DD — <reason> at column one in the item block; where a successor states what the behavior became, supersede instead and drop retired:.' ;;
-        (OUT-OF-FORCE-VERIFIES) echo 'Delete the test, or point it at the item in force and list it as inherited: <test name> — from <old ID> (verify-before-merge check 4).' ;;
         (STALE-PROBLEM) echo 'Resolve the item, rule on it as status: accepted with a disposition: (resolve-problem), or raise problem_age_days deliberately.' ;;
         (PROBLEM-BACKLOG) echo 'Resolve open items or rule on them as status: accepted with a disposition: (resolve-problem), or raise problem_open_max deliberately.' ;;
         (NON-EXPORTED-REF) echo 'Reference only exported items of a dependency, or have its unit mark the item exported: yes.' ;;
@@ -291,13 +244,14 @@ check_trace_remedy() {
 gr_repo_root=$(gr_root) || exit 2
 cd "$gr_repo_root" || exit 2
 
-# The engagement rule (architecture item 2): with no manifest this is a
+# The engagement rule: with no manifest this is a
 # no-op and everything below is exactly the single-unit script. Engaged,
 # GR_UNIT names the unit whose config this run reads, and the scoped
 # machinery at the bottom of this file switches on.
 gr_unit_engage
 
 gr_check_config
+gr_check_examples
 
 # Read beside gr_check_config, and for its reason: every other config
 # invariant in this toolkit is settled BEFORE any gate runs, so that a typo is
@@ -338,6 +292,18 @@ soup_files=$(gr_doc_files doc_soup) || exit 2
 problems_files=$(gr_doc_files doc_problems) || exit 2
 test_paths=$(cfg_list test_paths)
 strict_paths=$(cfg_list strict_paths)
+# The example files: no definition, reference or citation is read from them,
+# except the IDs on a line-start `verifies:` line (VERIFIES_LINE_RE).
+# `example_excludes` holds one `:(exclude)` pathspec per entry, passed beside
+# the scope of each scan that skips them.
+example_paths=$(cfg_list example_paths) || exit 2
+example_excludes=$(gr_example_excludes) || exit 2
+# VERIFIES_LINE_RE — a `verifies:` keyword preceded on its line only by
+# blanks and comment leaders (`#`, `/`, `-`, `;`, `*`). In an example file this
+# is the one line form still read: a test file's own annotation is written so,
+# a heredoc that writes a fixture's annotation copies it so, and a `printf` or
+# an assertion that merely quotes the keyword does not start the line with it.
+VERIFIES_LINE_RE='^[[:blank:]#/;*-]*verifies:'
 
 # Every list above is newline-separated, so split on newlines alone: a path or
 # filename containing a space must reach git grep as one argument, and must be
@@ -357,50 +323,16 @@ IFS='
 set -f
 
 # A configured path that does not exist makes every gate that reads it a
-# silent no-op. Fail as an environment error instead of passing vacuously.
+# silent no-op: gr_require_paths fails it as an environment error instead.
 #
 # The list expansions here and at the scan sites below are deliberately
 # unquoted so the newline-separated lists split into separate arguments —
 # never so the shell can expand a pattern. `set -f` above guarantees it does
-# not: every entry reaches git verbatim as a pathspec. An entry matching no
-# file at all scans no file, and that is what must be an error.
-require_paths() {
-    _key="$1"
-    shift
-    for _d in "$@"; do
-        [ -n "$_d" ] || continue
-        # No `[ -e ] && continue` short-circuit: an empty directory exists but
-        # contains nothing to scan, and passing it here would report `strict 1`
-        # in the summary for a source that read nothing — the exact false green
-        # the summary exists to expose. Every entry must match a FILE.
-        #
-        # The entry may be a plain path or a git pathspec: `*_test.sh`
-        # matches recursively for git, and git grep — which is what actually
-        # scans these — accepts it. So ask git. Only an entry matching no file
-        # at all is an error. NB git's `*` crosses `/` where a shell glob does
-        # not, so `src/*.c` reaches into subdirectories.
-        # Counted, never parsed. git ls-files C-quotes any path with a
-        # non-ASCII byte, a quote, a tab or a newline (core.quotePath), so
-        # testing [ -e ] on each returned name rejects a directory like
-        # `tésts/` that git grep scans perfectly well. Counting lines is
-        # immune to the quoting, and a quoted embedded newline still counts
-        # as the one line it is printed as.
-        #
-        # The match must also still be present in the working tree — git grep
-        # scans the tree, so a path that is tracked but deleted on disk would
-        # pass this check while scanning nothing. cached minus deleted, plus
-        # untracked-but-not-ignored, is exactly "matches a file that is there".
-        _cached=$(git ls-files --cached -- "$_d" 2>/dev/null | grep -c .)
-        _gone=$(git ls-files --deleted -- "$_d" 2>/dev/null | grep -c .)
-        _new=$(git ls-files --others --exclude-standard -- "$_d" 2>/dev/null | grep -c .)
-        [ $((_cached - _gone + _new)) -gt 0 ] && continue
-        gr_die "$_key entry matches no file present in the working tree: $_d"
-    done
-}
+# not: every entry reaches git verbatim as a pathspec.
 # shellcheck disable=SC2086
-require_paths strict_paths $strict_paths
+gr_require_paths strict_paths $strict_paths
 # shellcheck disable=SC2086
-require_paths test_paths $test_paths
+gr_require_paths test_paths $test_paths
 
 # Every violation line from here to the summary goes through print_violations,
 # which prints it at once and adds its rule (the first word) to fired_rules.
@@ -447,80 +379,18 @@ $(printf '%s\n' "$_cs" | awk -F'\t' -v me="$GR_UNIT" \
     set -f
 fi
 
-# --- Out-of-force items: docs/plans/2026-10-08-out-of-force-items.md -------
-# A REQ or LLR is OUT OF FORCE when its block contains a column-one
-# `superseded-by:` naming a successor whose own block names it back with
-# `supersedes:` and whose chain terminates (see END below), or a well-formed
-# column-one `retired:` (D1, D5). An
-# out-of-force item owes no test (D2), discharges nothing — neither a REQ
-# through its `satisfies:` nor a control through its `implements:` — (D3), and
-# a `verifies:` line naming nothing else is reported (D4).
-#
-# RECIPROCATED, not merely present, and that is what keeps the exemption from
-# being one line long. A `superseded-by:` alone is NON-RECIPROCAL-SUPERSESSION,
-# so the run is red either way; but were the one half enough to exempt, the
-# predecessor would leave MISSING-TEST on a line no other gate has yet
-# accepted. Keying the exemption on the pair keys it on exactly what the two
-# supersession reports check, so it is granted only where they are green.
-# The same reasoning makes a MALFORMED-RETIREMENT exempt nothing: the run is
-# red for the form, and the item keeps its obligation until the form is right.
-#
-# ONE PASS over the SRS and then the SAD files the SRS list does not already
-# contain — doc_srs and doc_sad may resolve to one directory, and reading a
-# file twice would print its MALFORMED-RETIREMENT lines twice. stdin is
-# /dev/null so a config with neither document cannot leave awk reading the
-# terminal.
-#
-# Blocks open on REQ, LLR, RC and HAZ. A `retired:` is read in a REQ or LLR
-# block only, the two prefixes that owe MISSING-TEST, so one in an SDD, RC or
-# HAZ block is read by nothing — and in the SRS and SAD ORPHAN-ANNOTATION
-# reports it, because the backstop opens on REQ and LLR alone.
-#
-# RC AND HAZ ARE TAKEN OUT OF FORCE BY SUPERSESSION ALONE (PR-x63ejd, docs/
-# plans/2026-10-11-superseded-risk-controls.md). An out-of-force RC owes no
-# `implements:` and its `mitigates:` mitigates nothing, so a control
-# superseded together with its implementing REQ owes no in-force REQ for a
-# behavior the software deliberately no longer has. An out-of-force HAZ owes
-# no `mitigates:`, so a hazard reworded together with its control does not
-# leave the old hazard unmitigated; its successor owes one.
-#
-# THREE FAMILIES: RC, HAZ, and REQ/LLR. A pair takes an item out of force only
-# within its family, so a control is replaced by a control, a hazard by a
-# hazard, and a requirement by a requirement or an LLR. A pair across
-# families takes nothing out of force.
-#
-# THIS SCAN REPORTS WHICH ITEMS ARE OUT OF FORCE AND NOTHING ABOUT CREDITS.
-# The `implements:` and `mitigates:` lines are read once, by credit_scan (D2
-# of the block-attributed-credits change): one reader per keyword, so no two
-# gates can disagree on what a line credits. The gates below intersect
-# credit_scan's records with the IDs this scan reports.
-#
-# oof_scan SRS_FILES SAD_FILES [RMF_FILES] — the scan's raw lines, one per
-# fact:
-#   O <ID>                   the item (REQ, LLR, RC or HAZ) is out of force
-#   MALFORMED-RETIREMENT …   a report line, ready to print
-#   MALFORMED-SUPERSESSION … a self-pair or a chain that never terminates
-#                            (review round 3, finding-1), ready to print
-# Every argument is a newline-separated file list. A FUNCTION, because two
-# ledgers are read with it: this run's, at the out-of-force section below, and
-# a provider unit's, where an expectation is judged met — an out-of-force
-# exported REQ meets no `expects:` (D3, extended on review round 2,
-# finding-2). One definition, so the two cannot disagree on what out of force
-# means. The provider's call passes no RMF_FILES: an expectation is met by a
-# REQ, never by a control. The awk status is the function's status; callers
-# keep it.
-#
 # unignored_files LIST — LIST's files that git does not ignore, one per line.
-# THE FILES GIT GREP READS, and no others (review round 3, finding-3). The
+# THE FILES GIT GREP READS, and no others. The
 # definition readers — ids_defined and its kin — read through `git grep
 # --untracked`, which skips a file git ignores; a block pass that read the
-# file system instead credited an ignored file's lines. Shared by oof_scan and
-# credit_scan, so every block pass over the ledgers drops the same files.
+# file system instead credited an ignored file's lines. Used by credit_scan
+# alone: its credit passes drop the files git grep skips, and every other
+# block pass reads them.
 # check-ignore, not an ls-files allowlist: it names what to DROP, so a path it
 # prints quoted is kept and read, as before, rather than missed. With the
 # index (no --no-index), a tracked file is never ignored, as git grep searches
 # it. Exit 1 is "nothing ignored". No files, no call: `git check-ignore --`
-# with no path exits 128 (review round 4, finding-1). Status 2 when git fails.
+# with no path exits 128. Status 2 when git fails.
 unignored_files() {
     [ -n "$1" ] || return 0
     # shellcheck disable=SC2086
@@ -530,212 +400,23 @@ unignored_files() {
         gr_contains "$_unignored_dropped" "$_unignored_file" || printf '%s\n' "$_unignored_file"
     done
 }
-oof_scan() {
-    _oof_srs="$1"
-    _oof_rmf="${3:-}"
-    _oof_sad_only=""
-    for _oof_f in $2; do
-        gr_contains "$_oof_srs" "$_oof_f" || _oof_sad_only="${_oof_sad_only}${_oof_sad_only:+
-}$_oof_f"
-    done
-    _oof_rmf_only=""
-    for _oof_f in $_oof_rmf; do
-        gr_contains "$_oof_srs" "$_oof_f" || gr_contains "$_oof_sad_only" "$_oof_f" \
-            || _oof_rmf_only="${_oof_rmf_only}${_oof_rmf_only:+
-}$_oof_f"
-    done
-    _oof_srs=$(unignored_files "$_oof_srs") || return 2
-    _oof_sad_only=$(unignored_files "$_oof_sad_only") || return 2
-    _oof_rmf_only=$(unignored_files "$_oof_rmf_only") || return 2
-    [ -n "$_oof_srs$_oof_sad_only$_oof_rmf_only" ] || return 0
-    # shellcheck disable=SC2086
-    LC_ALL=C awk -v body="$GR_ID_BODY" -v today="$today" \
-        "$GR_AWK_ID_RUN$GR_AWK_ITEM_BLOCK$GR_AWK_CIVIL"'
-        # D5: a calendar date, at most ONE day ahead — the tolerance
-        # `opened:` allows, for the reason it gives — then a separator,
-        # then a reason. The separator is required so that a date running
-        # straight into text is not read as a date and a reason. The em
-        # dash is three bytes under LC_ALL=C, spelled in octal as the BOM
-        # strip spells its bytes.
-        function retire_ok(value,   rest) {
-            if (!gr_date_ok(substr(value, 1, 10))) return 0
-            if (todaydays - GR_DATE_DAYS < -1) return 0
-            rest = substr(value, 11)
-            if (rest !~ /^([ \t:-]|\342\200\224)/) return 0
-            while (sub(/^([ \t:-]|\342\200\224)/, "", rest) > 0) { }
-            return (rest != "")
-        }
-        function flush(   ok) {
-            if (cur == "" || !ret_seen) return
-            ok = retire_ok(ret)
-            if (!ok)
-                printf "MALFORMED-RETIREMENT %s (retired:%s — needs a YYYY-MM-DD date and a reason)\n", cur, (ret == "" ? "" : " " ret)
-            if (sb_seen) {
-                printf "MALFORMED-RETIREMENT %s (retired: and superseded-by: %s — an item is retired or superseded, not both)\n", cur, (sb_ids != "" ? sb_ids : sb_raw)
-                # A malformed retirement retires nothing, and the
-                # supersession beside it takes nothing out of force either:
-                # the item owes its test (review round 4, finding-4a).
-                both_forms[cur] = 1
-            }
-            else if (ok)
-                out_of_force[cur] = 1
-        }
-        # The supersession family of an ID: RC, HAZ, or REQ for REQ and LLR.
-        function item_family(id) {
-            if (id ~ /^RC-/) return "RC"
-            if (id ~ /^HAZ-/) return "HAZ"
-            return "REQ"
-        }
-        function open_block(id) {
-            cur = id
-            ret = ""; ret_seen = 0
-            sb_ids = ""; sb_raw = ""; sb_seen = 0
-        }
-        BEGIN {
-            gr_block_init("REQ|LLR|RC|HAZ", body)
-            gr_date_ok(today)   # validated in the shell above
-            todaydays = GR_DATE_DAYS
-        }
-        FNR == 1 { sub(/^\357\273\277/, "") }
-        { line = $0; sub(/\r$/, "", line) }
-        # A block cannot span files. Without this the block open at the
-        # end of one file ran on into the next, and a `retired:` in the
-        # front matter of that file was read as belonging to the last
-        # REQ, while the orphan backstop, which skips front matter,
-        # reported nothing: exit 0 on an untested REQ (review round 2,
-        # finding-1).
-        #
-        # Front matter is NOT skipped here, unlike check_orphans and
-        # credit_scan. After this reset a YAML key line in front matter
-        # reaches no block, since it opens none. A definition line inside
-        # front matter does open one, and a retired: under it retires that
-        # REQ; the block-attributed-credits plan records it as a follow-up.
-        FNR == 1 { flush(); open_block("") }
-        # No `next`: a header line usually carries its own annotation.
-        gr_block_closes(line) {
-            flush()
-            open_block(gr_block_opens(line) ? gr_block_id(line) : "")
-        }
-        # First occurrence wins, as for every scalar annotation. An RC or a
-        # HAZ is not retired this way: its retired: is read by nothing.
-        cur ~ /^(REQ|LLR)-/ && !ret_seen && gr_kw_here(line, "retired:") {
-            ret_seen = 1; ret = gr_value(line, "retired:")
-        }
-        # Both halves ACCUMULATE, as in the supersession scan: either is a
-        # list, and an item may replace more than one predecessor.
-        cur != "" && gr_kw_here(line, "supersedes:") {
-            id_count = split(gr_id_run(line, "supersedes:"), named_ids, " ")
-            for (id_index = 1; id_index <= id_count; id_index++)
-                sup[cur "\t" named_ids[id_index]] = 1
-        }
-        cur != "" && gr_kw_here(line, "superseded-by:") {
-            run = gr_id_run(line, "superseded-by:")
-            if (!sb_seen) sb_raw = gr_value(line, "superseded-by:")
-            sb_seen = 1
-            if (run != "") sb_ids = sb_ids (sb_ids == "" ? "" : " ") run
-            id_count = split(run, named_ids, " ")
-            for (id_index = 1; id_index <= id_count; id_index++)
-                by[cur "\t" named_ids[id_index]] = 1
-        }
-        # The IDs of reached[], sorted and space-separated. Insertion sort:
-        # the set is one cycle and what leads into it, a handful of IDs.
-        function reached_list(   member, sorted, sorted_count, slot, joined) {
-            sorted_count = 0
-            for (member in reached) {
-                slot = ++sorted_count
-                while (slot > 1 && sorted[slot - 1] > member) {
-                    sorted[slot] = sorted[slot - 1]; slot--
-                }
-                sorted[slot] = member
-            }
-            joined = ""
-            for (slot = 1; slot <= sorted_count; slot++)
-                joined = joined (slot > 1 ? " " : "") sorted[slot]
-            return joined
-        }
-        END {
-            flush()
-            # THE CHAIN MUST TERMINATE (review round 3, finding-1). by holds
-            # OLD<TAB>NEW and sup holds NEW<TAB>OLD; an edge is a pair both
-            # halves state. A self-pair and a cycle are reciprocal on every
-            # edge, so neither supersession report fires on them, and were an
-            # edge enough an item could take itself out of force: a run red
-            # for its MISSING-TEST went green. So an edge takes OLD out of
-            # force only when NEW is a different item that is ANCHORED — the
-            # predecessor of no other item, so in force or validly retired —
-            # or is itself out of force by this rule. A fixpoint: each sweep
-            # adds what the last one made reachable, out_of_force only grows,
-            # so it stops within one sweep per item.
-            for (pair_key in by) {
-                split(pair_key, ends, "\t")
-                if (!((ends[2] "\t" ends[1]) in sup)) continue
-                if (ends[1] == ends[2]) { self_pair[ends[1]] = 1; continue }
-                # One family: a control is replaced by a control, a hazard by
-                # a hazard, and a requirement by a requirement or an LLR
-                # (PR-x63ejd, D3).
-                if (item_family(ends[1]) != item_family(ends[2])) continue
-                if (ends[1] in both_forms) continue
-                edge[pair_key] = 1
-                has_successor[ends[1]] = 1
-            }
-            changed = 1
-            while (changed) {
-                changed = 0
-                for (pair_key in edge) {
-                    split(pair_key, ends, "\t")
-                    if (ends[1] in out_of_force) continue
-                    if (!(ends[2] in has_successor) || (ends[2] in out_of_force)) {
-                        out_of_force[ends[1]] = 1; changed = 1
-                    }
-                }
-            }
-            for (item in out_of_force) print "O " item
-            # An item that stays in force for this reason is REPORTED: it owes
-            # its test, MISSING-TEST says so, and this says why. Once per
-            # item; a self-pair is named first, being the plainer defect.
-            for (item in self_pair)
-                printf "MALFORMED-SUPERSESSION %s (supersedes itself)\n", item
-            for (item in has_successor) {
-                if ((item in out_of_force) || (item in self_pair)) continue
-                # The item and every item its chain reaches. None of them is
-                # anchored — an anchor in reach would have ended the chain —
-                # so this is the cycle and the items that lead into it.
-                split("", reached)
-                reached[item] = 1
-                grew = 1
-                while (grew) {
-                    grew = 0
-                    for (pair_key in edge) {
-                        split(pair_key, ends, "\t")
-                        if ((ends[1] in reached) && !(ends[2] in reached)) {
-                            reached[ends[2]] = 1; grew = 1
-                        }
-                    }
-                }
-                printf "MALFORMED-SUPERSESSION %s (supersession cycle with no successor in force or retired: %s)\n", item, reached_list()
-            }
-        }
-    ' $_oof_srs $_oof_sad_only $_oof_rmf_only < /dev/null
-}
-
-# --- Credits: docs/plans/2026-10-08-block-attributed-credits.md ------------
-# A credit belongs to the block it is written in (D1). `implements: RC-…`
+# --- Credits ----------------------------------------------------------------
+# A credit belongs to the block it is written in. `implements: RC-…`
 # credits the RC only on a line inside a REQ block of doc_srs, and
 # `mitigates: HAZ-…` the HAZ only on a line inside an RC block of doc_rmf. The
-# keyword may sit anywhere on that line — the inline `(implements: RC-…)` on
-# the definition line is the shipped form — and the ID run after its first
-# occurrence is read by gr_id_run, the one annotation rule. A line in no block
+# keyword starts its annotation where gr_annotation says, at column one or on
+# the definition line — the inline `(implements: RC-…)` there is the shipped
+# form — and the ID run after it is read by gr_id_run. A line in no block
 # credits nothing: before the first item, after a heading or a bold-colon line
 # that closed the item, or in front matter, which is skipped by
 # GR_AWK_FRONT_MATTER so that not even a definition line in it opens a block.
 # A block cannot span files, so the open block is dropped at each file's
 # first line.
 #
-# ONE reader per keyword (D2): every consumer reads these records, so no two
-# gates can disagree on what a line credits. Until this pass, a line-wise
-# reader credited a line in no block, while the block readers did not:
-# UNIMPLEMENTED-CONTROL and UNMITIGATED-HAZARD passed on a credit no item
-# made, and the expectation severity disagreed with them.
+# ONE reader per keyword: every consumer reads these records, so no two
+# gates can disagree on what a line credits. A second, line-wise reader
+# would credit a line in no block, and UNIMPLEMENTED-CONTROL or
+# UNMITIGATED-HAZARD would pass on a credit no item made.
 #
 # credit_scan KEYWORD OWNER TARGET FILES — one `<owner> <ID>` line per credit:
 # an ID of prefix TARGET named by KEYWORD inside a block of prefix OWNER.
@@ -777,11 +458,14 @@ $_credit_file"
         { line = $0; sub(/\r$/, "", line) }
         # No `next`: the definition line carries the inline form.
         gr_block_closes(line) { cur = gr_block_opens(line) ? gr_block_id(line) : "" }
-        cur != "" && index(line, kw) > 0 {
-            id_count = split(gr_id_run(line, kw), named_ids, " ")
-            for (id_index = 1; id_index <= id_count; id_index++)
-                if (index(named_ids[id_index], target) == 1)
-                    print cur " " named_ids[id_index]
+        cur != "" {
+            annotation = gr_annotation(line, kw)
+            if (annotation != "") {
+                id_count = split(gr_id_run(annotation, kw), named_ids, " ")
+                for (id_index = 1; id_index <= id_count; id_index++)
+                    if (index(named_ids[id_index], target) == 1)
+                        print cur " " named_ids[id_index]
+            }
         }
     ' $_credit_twice < /dev/null
 }
@@ -794,7 +478,7 @@ if [ -n "$srs_files" ]; then
         || gr_die "implements: scan failed"
 fi
 
-# --- Unit annotations and expectations (architecture items 3 and 4) ----------
+# --- Unit annotations and expectations ---------------------------------------
 # Scoped runs only. exported:/expects:/opened: are read by gr_req_scan under
 # the same column-one, first-occurrence, block-attributed rules as status:,
 # and the ORPHAN-ANNOTATION backstop below is extended to match.
@@ -804,7 +488,7 @@ if [ -n "$GR_UNIT" ]; then
     # shellcheck disable=SC2086
     own_scan=$(gr_req_scan $srs_files $rmf_files $sad_files $problems_files) || exit 2
 
-    # MISEXPORTED-ITEM: only `exported: yes` on a REQ is an export (D8). A
+    # MISEXPORTED-ITEM: only `exported: yes` on a REQ is an export. A
     # misspelled value would read as "not exported" and strand every consumer
     # silently, so any other value — empty included — convicts, as does the
     # annotation on a non-REQ block.
@@ -854,32 +538,16 @@ if [ -n "$GR_UNIT" ]; then
             continue
         fi
         # met iff the named provider defines an EXPORTED REQ containing
-        # satisfies: <this ID> — both conditions (D11; obligation
-        # expectation-met-requires-export).
-        # And the REQ is in force in the provider's own ledger: an
-        # out-of-force item discharges nothing (D3, extended on review round
-        # 2, finding-2), so a retired or superseded export is no answer. Read
-        # by oof_scan over the provider's SRS and SAD, the files its own run
-        # reads; the provider's MALFORMED-RETIREMENT lines are its own run's
-        # to report, and are dropped here.
+        # satisfies: <this ID> — both conditions.
         # Globbing back on for the provider scan, as at the foreign/reverse
         # computation above and for the same *.md-glob reason.
         set +f
         _pscan=$(gr_unit_req_scan "$_etgt") || exit 2
-        _psrs=$(gr_unit_srs "$_etgt") || exit 2
-        # A provider SAD configured but missing is exit 2 naming the unit and
-        # doc_sad, as a missing provider doc_srs is on the line above: the
-        # SAD is read because a provider LLR's supersedes: can take an
-        # exported REQ out of force (review round 3, finding-2).
-        _psad=$(gr_unit_doc_files "$_etgt" doc_sad) || exit 2
         set -f
-        _poof=$(oof_scan "$_psrs" "$_psad") || gr_die "out-of-force scan failed on unit $_etgt"
-        # Flattened for `awk -v`, as oof_flat is below.
-        _poof_flat=" $(printf '%s\n' "$_poof" | awk '$1 == "O" { print $2 }' | tr '\n' ' ')"
-        _met=$(printf '%s\n' "$_pscan" | awk -F'\t' -v want="$_eid" -v oof="$_poof_flat" '
+        _met=$(printf '%s\n' "$_pscan" | awk -F'\t' -v want="$_eid" '
             $3 == "EXP" && $4 == "yes" { expd[$1] = 1 }
             $3 == "SAT" && $4 == want  { sat[$1] = 1 }
-            END { for (req in sat) if ((req in expd) && index(oof, " " req " ") == 0) { print "met"; exit } }')
+            END { for (req in sat) if (req in expd) { print "met"; exit } }')
         if [ "$_met" = "met" ]; then
             continue          # an ordinary REQ again; MISSING-TEST applies
         fi
@@ -915,14 +583,23 @@ fi
 # items (they neither owe MISSING-TEST here nor discharge anything —
 # obligation reverse-edge-discharges-nothing generalizes to every foreign
 # definition), and MISPLACED-ITEM must never see them at all.
+#
+# Status checked and stderr not suppressed, as ids_verified does: an errored
+# scan finds no definition, which reads as a tree with no items. Not a
+# pipeline, so $? is git's. A caller in $(...) adds `|| exit 2`.
 ids_defined() {
     if [ -n "$GR_UNIT" ]; then
-        git grep -h --untracked -oE "$(gr_def_re "$1")" -- "$GR_UNIT" 2>/dev/null \
-            | sed 's/[*:]//g' | sort -u
+        # shellcheck disable=SC2086
+        _dlines=$(git grep -h --untracked -oE "$(gr_def_re "$1")" -- "$GR_UNIT" $example_excludes)
+        _dst=$?
     else
-        git grep -h --untracked -oE "$(gr_def_re "$1")" -- . "$GR_SCAN_EXCLUDE" 2>/dev/null \
-            | sed 's/[*:]//g' | sort -u
+        # shellcheck disable=SC2086
+        _dlines=$(git grep -h --untracked -oE "$(gr_def_re "$1")" -- . "$GR_SCAN_EXCLUDE" $example_excludes)
+        _dst=$?
     fi
+    [ "$_dst" -le 1 ] || gr_die "$1 definition scan failed (git grep exit $_dst)"
+    [ -n "$_dlines" ] || return 0
+    printf '%s\n' "$_dlines" | sed 's/[*:]//g' | sort -u
 }
 
 # ids_defined_in PREFIX FILES… — definitions of PREFIX inside the given files.
@@ -942,14 +619,43 @@ ids_defined_in() {
 
 # ids_matching KEYWORD PREFIX PATHS… — IDs of PREFIX in the ID list that
 # immediately follows KEYWORD (see the annotation rule above).
+#
+# Status checked and stderr not suppressed, as ids_defined does: an errored
+# scan finds no annotation, which reads as an untested or unassessed item.
+# Not a pipeline, so $? is git's. A caller in $(...) adds `|| exit 2`.
 ids_matching() {
     _kw="$1"
     _pfx="$2"
     shift 2
     [ $# -gt 0 ] || return 0
-    git grep -hI --untracked -F "$_kw" -- "$@" 2>/dev/null \
+    _mlines=$(git grep -hI --untracked -F "$_kw" -- "$@")
+    _mst=$?
+    [ "$_mst" -le 1 ] || gr_die "$_kw annotation scan failed (git grep exit $_mst)"
+    [ -n "$_mlines" ] || return 0
+    printf '%s\n' "$_mlines" \
         | gr_id_run "$_kw" \
         | grep -xE "${_pfx}-${GR_ID_BODY}" | sort -u
+}
+
+# ids_verified PREFIX — IDs of PREFIX a `verifies:` annotation in test_paths
+# names. An example file's annotation counts only in the line-start form: a
+# printf or an assertion quoting the keyword verifies nothing. The second scan
+# reads every test file, but outside the example files its lines are a subset
+# of the first scan's, so the union adds only the example files' annotations.
+ids_verified() {
+    # shellcheck disable=SC2086
+    ids_matching 'verifies:' "$1" $test_paths $example_excludes
+    [ -n "$example_excludes" ] || return 0
+    # Status checked and stderr not suppressed, as the reference scan does:
+    # an errored scan finds no annotation, which reads as an untested item.
+    # Not a pipeline, so $? is git's.
+    # shellcheck disable=SC2086
+    _vlines=$(git grep -hI --untracked -E "$VERIFIES_LINE_RE" -- $test_paths)
+    _st=$?
+    [ "$_st" -le 1 ] || gr_die "verifies: annotation scan failed (git grep exit $_st)"
+    printf '%s\n' "$_vlines" \
+        | gr_id_run 'verifies:' \
+        | grep -xE "${1}-${GR_ID_BODY}" | sort -u
 }
 
 # --- LLR block parse: "<id> <REQ,REQ|derived|->" per LLR in the SAD files ---
@@ -978,9 +684,10 @@ parse_llr_file() {
             sat = ""; der = 0
         }
         cur != "" {
-            if ($0 ~ /satisfies:[ \t]*derived/) der = 1
+            annotation = gr_annotation($0, "satisfies:")
+            if (annotation ~ /^satisfies:[ \t]*derived/) der = 1
             else {
-                run = gr_id_run($0, "satisfies:")
+                run = gr_id_run(annotation, "satisfies:")
                 n = split(run, a, " ")
                 for (i = 1; i <= n; i++)
                     if (a[i] ~ /^REQ-/) sat = sat (sat == "" ? "" : ",") a[i]
@@ -1047,7 +754,8 @@ check_placement() {
     # _inside produces. Skipping instead would be the silent exemption this
     # gate exists to remove.
     _inside=$(ids_defined_in "$_pfx" "$@")
-    for _id in $(ids_defined "$_pfx"); do
+    _defs=$(ids_defined "$_pfx") || exit 2
+    for _id in $_defs; do
         gr_contains "$_inside" "$_id" || {
             print_violations "MISPLACED-ITEM $_id (must be defined in the files $_key resolves to)"
             fail=1
@@ -1067,119 +775,32 @@ for _pfx in $prefixes; do
     esac
 done
 
-# --- Out-of-force items: this run's ledger (oof_scan, above) ----------------
-# The awk status is kept, and the split into lines is a second step for the
-# reason the supersession scan gives: an `awk | ...` pipeline reports the last
-# command's status, so an awk that exited 2 would read as a tree with nothing
-# out of force and nothing malformed. Placed here, ahead of every reader of
-# its result, which also makes it the first awk over a working-tree SAD file
-# WHOSE STATUS IS KEPT — parse_llr_file reads them earlier and drops its status
-# into a command substitution; see the NON-RECIPROCAL-SUPERSESSION scan for why
-# that matters.
-_oof_raw=$(oof_scan "$srs_files" "$sad_files" "$rmf_files") || gr_die "out-of-force scan failed"
-# sort -u: the reciprocity loop in oof_scan walks an array, whose order is
-# unspecified, and an item superseded by two successors prints twice.
-# out_of_force holds REQ and LLR, the items every test-side reader asks
-# about; rc_out_of_force holds the controls, read by UNIMPLEMENTED-CONTROL
-# and UNMITIGATED-HAZARD alone (PR-x63ejd); hz_out_of_force holds the
-# hazards, read by UNMITIGATED-HAZARD alone (D3).
-# oof_ids PREFIXES — the out-of-force IDs whose prefix is one of the
-# alternation PREFIXES, sorted and unique.
-oof_ids() {
-    printf '%s\n' "$_oof_raw" \
-        | awk -v prefixes="$1" '$1 == "O" && $2 ~ ("^(" prefixes ")-") { print $2 }' \
-        | LC_ALL=C sort -u
-}
-# oof_flatten LIST — LIST on one line, every ID between spaces. The flattened
-# form is what crosses `awk -v` below: a value with a literal newline in it
-# stops BWK awk before its program runs.
-oof_flatten() {
-    printf ' %s' "$(printf '%s\n' "$1" | tr '\n' ' ')"
-}
-out_of_force=$(oof_ids 'REQ|LLR')
-rc_out_of_force=$(oof_ids RC)
-hz_out_of_force=$(oof_ids HAZ)
-oof_flat=$(oof_flatten "$out_of_force")
-rc_oof_flat=$(oof_flatten "$rc_out_of_force")
-_retire=$(printf '%s\n' "$_oof_raw" | grep '^MALFORMED-RETIREMENT ')
-if [ -n "$_retire" ]; then
-    print_violations "$_retire"
-    fail=1
-fi
-# Reported here and not by the supersession scan below, because it is the
-# out-of-force rule that decides whether a chain terminates: one definition of
-# a reciprocal pair, not two. Sorted for the reason that scan sorts: the lines
-# come from walking arrays, whose order is unspecified.
-_cycles=$(printf '%s\n' "$_oof_raw" | grep '^MALFORMED-SUPERSESSION ' | LC_ALL=C sort)
-if [ -n "$_cycles" ]; then
-    print_violations "$_cycles"
-    fail=1
-fi
-
-# --- MISSING-TEST: every REQ and LLR in force needs a verifies: reference ---
+# --- MISSING-TEST: every REQ and LLR needs a verifies: reference -----------
 if [ -n "$test_paths" ]; then
-    # shellcheck disable=SC2086
-    verified_llr=$(ids_matching 'verifies:' LLR $test_paths)
-    for id in $(ids_defined LLR); do
-        gr_contains "$out_of_force" "$id" && continue
+    verified_llr=$(ids_verified LLR) || exit 2
+    defined_llr=$(ids_defined LLR) || exit 2
+    for id in $defined_llr; do
         gr_contains "$verified_llr" "$id" || { print_violations "MISSING-TEST $id (no 'verifies:' reference in test paths)"; fail=1; }
     done
 
-    # REQ coverage: direct verifies:, plus satisfies: lists of tested LLRs in
-    # force. A test of an out-of-force LLR verifies behavior that no longer
-    # stands, so it covers nothing (D3).
-    # shellcheck disable=SC2086
-    covered=$(ids_matching 'verifies:' REQ $test_paths)
+    # REQ coverage: direct verifies:, plus satisfies: lists of tested LLRs.
+    covered=$(ids_verified REQ) || exit 2
     for llr in $verified_llr; do
-        gr_contains "$out_of_force" "$llr" && continue
         sats=$(printf '%s\n' "$llr_info" \
             | awk -v l="$llr" '$1 == l && $2 != "-" && $2 != "derived" { print $2 }' \
             | tr ',' '\n')
         covered="$covered
 $sats"
     done
-    for id in $(ids_defined REQ); do
-        # A valid UNMET expectation is exempt (D10): it cannot have a
+    defined_req=$(ids_defined REQ) || exit 2
+    for id in $defined_req; do
+        # A valid UNMET expectation is exempt: it cannot have a
         # verifying test yet and is already reported once, accurately, by
         # UNMET-EXPECTATION above. Met, it is an ordinary REQ again.
         gr_contains "$exempt_expect" "$id" && continue
-        gr_contains "$out_of_force" "$id" && continue
         gr_contains "$covered" "$id" || { print_violations "MISSING-TEST $id (no direct 'verifies:' and no tested LLR satisfies it)"; fail=1; }
     done
 
-    # --- OUT-OF-FORCE-VERIFIES: a test that verifies nothing in force -------
-    # Every ID on the line out of force, and only then (D4). A line naming an
-    # in-force item beside an out-of-force one is history — the dual-ID form
-    # the supersession rule used to prescribe — and is left alone, so a tree
-    # that followed that rule stays green. A line naming no ID at all is not
-    # this report's: it credits nothing, and MISSING-TEST already says so.
-    #
-    # git grep's status is checked for the reason the reference scan states:
-    # an errored scan finds nothing. FILE:LINE is split at the first two
-    # colons, as DANGLING-FILE splits it; a path containing a colon is
-    # misreported, not missed.
-    if [ -n "$out_of_force" ]; then
-        # shellcheck disable=SC2086
-        _vlines=$(git grep -nI --untracked -F 'verifies:' -- $test_paths)
-        _st=$?
-        [ "$_st" -le 1 ] || gr_die "verifies: scan failed (git grep exit $_st)"
-        _oofv=$(printf '%s\n' "$_vlines" | LC_ALL=C awk -v oof="$oof_flat" "$GR_AWK_ID_RUN"'
-            NF == 0 { next }
-            {
-                colon = index($0, ":"); file = substr($0, 1, colon - 1); rest = substr($0, colon + 1)
-                colon = index(rest, ":"); lno = substr(rest, 1, colon - 1); text = substr(rest, colon + 1)
-                run = gr_id_run(text, "verifies:")
-                if (run == "") next
-                id_count = split(run, named_ids, " ")
-                for (id_index = 1; id_index <= id_count; id_index++)
-                    if (index(oof, " " named_ids[id_index] " ") == 0) next
-                printf "OUT-OF-FORCE-VERIFIES %s:%s (verifies: names only out-of-force items: %s)\n", file, lno, run
-            }') || gr_die "verifies: scan failed"
-        if [ -n "$_oofv" ]; then
-            print_violations "$_oofv"
-            fail=1
-        fi
-    fi
 fi
 
 # --- UNMITIGATED-HAZARD: every HAZ needs an RC that mitigates it ------------
@@ -1188,17 +809,13 @@ fi
 if [ -n "$rmf_files" ]; then
     mitigates_records=$(credit_scan 'mitigates:' RC HAZ "$rmf_files") \
         || gr_die "mitigates: scan failed"
-    defined_rc_flat=" $(ids_defined RC | tr '\n' ' ')"
-    # An out-of-force RC's `mitigates:` mitigates nothing (PR-x63ejd), as an
-    # out-of-force REQ's `implements:` implements nothing (D3). Without this a
-    # control superseded by a narrower one that drops a hazard leaves the
-    # hazard green on a control no longer in force.
+    defined_rc=$(ids_defined RC) || exit 2
+    defined_rc_flat=" $(printf '%s\n' "$defined_rc" | tr '\n' ' ')"
     mitigated=$(printf '%s\n' "$mitigates_records" \
-        | awk -v defined="$defined_rc_flat" -v oof="$rc_oof_flat" \
-            'NF == 2 && index(defined, " " $1 " ") > 0 && index(oof, " " $1 " ") == 0 { print $2 }')
-    for id in $(ids_defined HAZ); do
-        # An out-of-force HAZ owes no mitigates:; its successor does (D3).
-        gr_contains "$hz_out_of_force" "$id" && continue
+        | awk -v defined="$defined_rc_flat" \
+            'NF == 2 && index(defined, " " $1 " ") > 0 { print $2 }')
+    defined_haz=$(ids_defined HAZ) || exit 2
+    for id in $defined_haz; do
         gr_contains "$mitigated" "$id" && continue
         { print_violations "UNMITIGATED-HAZARD $id (no risk control 'mitigates:' it)"; fail=1; }
     done
@@ -1206,21 +823,16 @@ fi
 
 # --- UNIMPLEMENTED-CONTROL: every RC needs a REQ that implements it ---------
 # Credited by credit_scan: an `implements:` inside the block of a REQ that
-# ids_defined reports and that is in force. D3 of the out-of-force change: an
-# `implements:` inside an out-of-force REQ's block implements nothing, so
-# retiring the only REQ that implements a control cannot leave this gate
-# green on a control no test verifies any more. A line in no REQ block
-# implements nothing (D1 of the block-attributed-credits change).
+# ids_defined reports. A line in no REQ block implements nothing.
 if [ -n "$srs_files" ]; then
-    defined_req_flat=" $(ids_defined REQ | tr '\n' ' ')"
-    implemented_in_force=$(printf '%s\n' "$implements_records" \
-        | awk -v oof="$oof_flat" -v defined="$defined_req_flat" \
-            'NF == 2 && index(oof, " " $1 " ") == 0 && index(defined, " " $1 " ") > 0 { print $2 }')
-    for id in $(ids_defined RC); do
-        # An out-of-force RC owes no implementing REQ; its successor does
-        # (PR-x63ejd).
-        gr_contains "$rc_out_of_force" "$id" && continue
-        gr_contains "$implemented_in_force" "$id" && continue
+    defined_req=$(ids_defined REQ) || exit 2
+    defined_req_flat=" $(printf '%s\n' "$defined_req" | tr '\n' ' ')"
+    implemented=$(printf '%s\n' "$implements_records" \
+        | awk -v defined="$defined_req_flat" \
+            'NF == 2 && index(defined, " " $1 " ") > 0 { print $2 }')
+    defined_rc=$(ids_defined RC) || exit 2
+    for id in $defined_rc; do
+        gr_contains "$implemented" "$id" && continue
         { print_violations "UNIMPLEMENTED-CONTROL $id (no requirement 'implements:' it)"; fail=1; }
     done
 fi
@@ -1238,7 +850,7 @@ for f in $sad_files; do
             ok = 0
         }
         cur != "" {
-            run = gr_id_run($0, "traces:")
+            run = gr_id_run(gr_annotation($0, "traces:"), "traces:")
             n = split(run, a, " ")
             for (i = 1; i <= n; i++) if (a[i] ~ /^REQ-/) ok = 1
         }
@@ -1263,17 +875,14 @@ for f in $srs_files; do
 $(LC_ALL=C awk -v body="$GR_ID_BODY" "$GR_AWK_ITEM_BLOCK"'
         BEGIN { gr_block_init("REQ", body) }
         gr_block_closes($0) { cur = gr_block_opens($0) ? gr_block_id($0) : "" }
-        cur != "" && /satisfies:[ \t]*derived/ { print cur; cur = "" }
+        cur != "" && gr_annotation($0, "satisfies:") ~ /^satisfies:[ \t]*derived/ { print cur; cur = "" }
     ' "$f")"
 done
-# The assessment is DECLARED, not inferred. Until 2026-09-08 this was one
-# free-text `git grep` per derived ID over $rmf_files, so an ID in a
-# verification table, a scope note or a parenthetical read as an assessment.
-# The ID is exactly what an author produces anyway — a derived item is
-# normally named in the same file's verification table — so the gate could
-# not tell the failure it exists to detect from compliance. Measured on one
-# downstream project: 26 derived items, 25 genuinely assessed, one credited
-# on a parenthetical inside a blockquote (PR-n274s7).
+# The assessment is DECLARED, not inferred. A free-text search for a derived
+# ID over $rmf_files would read an ID in a verification table, a scope note
+# or a parenthetical as an assessment, and a derived item is normally named
+# in its file's verification table, so such a gate could not tell the
+# failure it exists to detect from compliance.
 #
 # `assesses:` is read line-wise by ids_matching through GR_AWK_ID_RUN, unlike
 # mitigates: and implements:, which credit_scan reads by block. The run ends
@@ -1286,8 +895,11 @@ done
 # Nothing here judges the assessment. It requires the author to state which
 # items a passage assesses — the standard every other annotation meets.
 # shellcheck disable=SC2086
-assessed="$(ids_matching 'assesses:' REQ $rmf_files)
-$(ids_matching 'assesses:' LLR $rmf_files)"
+assessed_req=$(ids_matching 'assesses:' REQ $rmf_files) || exit 2
+# shellcheck disable=SC2086
+assessed_llr=$(ids_matching 'assesses:' LLR $rmf_files) || exit 2
+assessed="$assessed_req
+$assessed_llr"
 for id in $derived_ids; do
     gr_contains "$assessed" "$id" && continue
     print_violations "UNANALYZED-DERIVED $id (no 'assesses:' line in the RMF names it)"
@@ -1310,7 +922,12 @@ done
 # export it); a disclaimed definition never outranks either.
 classify_unresolved() {
     _cid="$1"
-    _sites=$(git grep -l --untracked -E "^\\*\\*${_cid}\\*\\*:" -- . "$GR_SCAN_EXCLUDE" 2>/dev/null)
+    # shellcheck disable=SC2086
+    _sites=$(git grep -l --untracked -E "^\\*\\*${_cid}\\*\\*:" -- . "$GR_SCAN_EXCLUDE" $example_excludes)
+    _st=$?
+    # Status checked, stderr kept: an errored scan finds no site, which
+    # classifies the ID as DANGLING-REF rather than reporting the failure.
+    [ "$_st" -le 1 ] || gr_die "definition-site scan for $_cid failed (git grep exit $_st)"
     _v=""
     _d=""
     for _sf in $_sites; do
@@ -1337,22 +954,39 @@ classify_unresolved() {
 }
 if [ -n "$scope" ]; then
     # The trailing boundary is matched and then stripped: without it a mention
-    # of REQ-a3k9z2x harvests its first six characters and is reported against
-    # REQ-a3k9z2 — which, being defined, is not reported at all. A token can
-    # never end in a non-alphanumeric, so the strip cannot damage a real ID.
+    # of a defined ID with one character appended harvests its first six
+    # characters and is reported against that ID — which, being defined, is
+    # not reported at all. A token can never end in a non-alphanumeric, so the
+    # strip cannot damage a real ID.
     #
     # Status checked and stderr not suppressed: this scan is the whole input to
     # DANGLING-REF, and an errored scan finds nothing, which is exactly what a
     # tree with no bad references looks like. Not a pipeline, so $? is git's.
     # shellcheck disable=SC2086
-    _refs=$(git grep -h --untracked -oE "(${P})-${GR_ID_BODY}(${GR_ID_TAIL}|\$)" -- $scope)
+    _refs=$(git grep -h --untracked -oE "(${P})-${GR_ID_BODY}(${GR_ID_TAIL}|\$)" -- $scope $example_excludes)
     _st=$?
     [ "$_st" -le 1 ] || gr_die "reference scan failed (git grep exit $_st)"
+    # An example file's references are read from its line-start `verifies:`
+    # lines alone. The scan reads the whole scope, as ids_verified's does, for
+    # the same reason. With -o and --and git prints the matches of both
+    # patterns, so the keyword's match is dropped by the ID filter.
+    if [ -n "$example_excludes" ]; then
+        # shellcheck disable=SC2086
+        _vrefs=$(git grep -h --untracked -oE -e "(${P})-${GR_ID_BODY}(${GR_ID_TAIL}|\$)" \
+            --and -e "$VERIFIES_LINE_RE" -- $scope)
+        _st=$?
+        [ "$_st" -le 1 ] || gr_die "verifies: reference scan failed (git grep exit $_st)"
+        # grep exits 1 on no match, which means no reference, not a failure,
+        # and it cannot fail on in-memory input; its status is not read.
+        _refs="$_refs
+$(printf '%s\n' "$_vrefs" | grep -E "^(${P})-")"
+    fi
     referenced=$(printf '%s\n' "$_refs" | sed "s/${GR_ID_TAIL}\$//" | sort -u)
     defined=""
     for pfx in $prefixes; do
+        _defs=$(ids_defined "$pfx") || exit 2
         defined="$defined
-$(ids_defined "$pfx")"
+$_defs"
     done
     for id in $referenced; do
         gr_contains "$defined" "$id" && continue
@@ -1376,30 +1010,28 @@ fi
 # is a change not yet renamed, and a gate on the prefix alone is DRAFT-FILE's
 # job, not this one's.
 #
-# Scope is the doc_* files and the SOUP file, not strict_paths (D3,
-# 2026-09-08): plans and verification records narrate history, and "created
-# as DRAFT-x.md" is a true sentence that must stay true. The token must look
-# like a real file name, so the grammar placeholder
-# `DRAFT-<branch>-<slug>.md`, which the ledger READMEs carried before
-# ADR-cy7ahd and an older adopter's copy may still carry, matches nothing. A
-# path-shaped reference resolves from the repository root and then from the
-# referencing file's own directory, so the relative link a markdown renderer
-# actually follows is not convicted while its target exists (review finding
-# 4). Each arm's message names the places it looked rather than asserting the
-# file exists nowhere:
+# Scope is the doc_* files and the SOUP file, not strict_paths: a plan or a
+# change record may narrate history, and "created as DRAFT-x.md" is a true
+# sentence that must stay true. The token must look like a real file name, so
+# the grammar placeholder `DRAFT-<branch>-<slug>.md`, which an adopter's
+# ledger README may carry, matches nothing. A path-shaped reference resolves
+# from the repository root and then from the referencing file's own
+# directory, so the relative link a markdown renderer actually follows is not
+# convicted while its target exists. Each arm's message names the places it
+# looked rather than asserting the file exists nowhere:
 # in a manifest repository a path written relative to another unit's root
-# resolves against neither root, and "does not exist" would be false of it
-# (findings 19 and 22). A bare basename resolves against every ledger
+# resolves against neither root, and "does not exist" would be false of it.
+# A bare basename resolves against every ledger
 # directory, because a bare name is how authors cite a sibling ledger.
 #
 # The token class is the ledger grammar's — letters, digits, underscore, dot,
 # hyphen — so a draft named outside it (a + or @ in the slug) is not looked
 # for; DRAFT-FILE convicts any DRAFT- name, so this is narrower than that gate,
-# deliberately: widening it to any non-space character makes prose match
-# (review finding 18). A bare name resolves against THIS config's ledger
+# deliberately: widening it to any non-space character makes prose match.
+# A bare name resolves against THIS config's ledger
 # directories: in a manifest repository a bare reference to another unit's
 # draft is reported even while that draft exists, because a bare name across
-# units is ambiguous — the path form resolves (finding 19).
+# units is ambiguous — the path form resolves.
 file_scope=""
 for f in $srs_files $rmf_files $sad_files $soup_files $problems_files; do
     [ -n "$f" ] && file_scope="${file_scope}${file_scope:+
@@ -1441,37 +1073,69 @@ if [ -n "$file_scope" ]; then
     done
 fi
 
+# --- HISTORY-CITATION: a plan or docs/verification file is history git keeps
+# The squash message is the record. The base branch keeps neither a plan file
+# nor a docs/verification file (ADR-k3nkv3), so a dated one named on a line in
+# DANGLING-REF's scope cites history that is gone. Only a dated name is a
+# citation: a bare directory or a <date>-<slug> placeholder names no file.
+# Status checked, as the reference scan's is: an errored scan finds nothing,
+# which is what a tree with no citation looks like. A file inside a
+# docs/plans/ or docs/verification/ directory, at any depth, is not scanned:
+# it is the change's own plan, or history a later change deletes. A
+# sentence's closing period is not part of the name. A docs/ directory starts
+# a line, follows a /, or follows a character no path component name holds:
+# xdocs/plans/ is no docs/plans/ directory. That character is matched and
+# dropped from the reported name.
+if [ -n "$scope" ]; then
+    # shellcheck disable=SC2086
+    _hrefs=$(git grep -n --untracked -oE '(^|[^A-Za-z0-9_.-])docs/(plans|verification)/[0-9]{4}-[0-9]{2}-[0-9]{2}-[A-Za-z0-9_.-]+' -- $scope \
+        ':(exclude,glob)**/docs/plans/**' ':(exclude,glob)**/docs/verification/**' $example_excludes)
+    _st=$?
+    [ "$_st" -le 1 ] || gr_die "history citation scan failed (git grep exit $_st)"
+    for _hr in $_hrefs; do
+        _hfile=${_hr%%:*}
+        _hrest=${_hr#*:}
+        _href=${_hrest#*:}
+        case $_href in
+            (docs/*) ;;
+            (*) _href=${_href#?} ;;
+        esac
+        _href=${_href%.}
+        print_violations "HISTORY-CITATION $_hfile:${_hrest%%:*} ($_href)"
+        fail=1
+    done
+fi
+
 # --- Problem-report triage --------------------------------------------------
 # UNRESOLVED-PR is the roll-call and stays a WARNING: the known-problem review
 # it serves is a review, not a prohibition, and an item under the configured
 # limits does not fail the run. What DOES fail is an item the roll-call cannot
 # state truthfully, and a backlog past a limit the project set for itself.
 #
-# The reader was rewritten here for one reason. It used to be
+# The reader is anchored for one reason. An unanchored one such as
 #
 #     cur != "" && /status:[ \t]*open/ { open = 1 }
 #
-# — unanchored, matched anywhere in the line, and therefore reading a `status:`
+# matches anywhere in the line, and therefore reads a `status:`
 # occurrence that check_orphans below CANNOT SEE, because that backstop reports
 # a keyword only where a keyword could be read at all. ORPHAN-ANNOTATION
 # exists to catch annotations belonging to no item; a reader looking where the
 # backstop does not reopens the hole it closed. Worse, an item whose `status:`
-# line the pattern missed — `Status: open`, `status : open`, no `status:` line
-# at all — read as RESOLVED and vanished from the roll-call: an open problem no
-# merge would ever see. Measured on a real ledger, one item in 159 was in
-# exactly that state.
+# line such a pattern misses — `Status: open`, `status : open`, no `status:`
+# line at all — reads as RESOLVED and vanishes from the roll-call: an open
+# problem no merge would ever see.
 #
 # So: gr_kw_here — column one and nothing else, first occurrence in the block
 # wins, value from a closed set. Anchoring alone would move the false green
-# rather than remove it, which is why the missing-status: violation ships in
-# the same change.
+# rather than remove it, which is why the missing-status: violation goes with
+# it.
 #
 # COLUMN ONE AND NOTHING ELSE is what the rule rests on, and the pairing with first
 # occurrence is what makes it so. A reader that also accepted a leading list
-# marker was tried and rejected in review: a block quoting `- status: resolved`
-# in its prose, above its own column-one `status: open`, handed the reader the
-# quotation, and the open item left this roll-call at exit 0 — the very failure
-# the rewrite above removed, restored by the widening. check_orphans below is
+# marker is rejected: a block quoting `- status: resolved` in its prose, above
+# its own column-one `status: open`, would hand the reader the quotation, and
+# the open item would leave this roll-call at exit 0 — the very failure the
+# anchoring removes, restored by the widening. check_orphans below is
 # wider, and that direction is safe: it reports, it does not read. The
 # invariant, stated once in lib.sh at gr_kw_here, is backstop-contains-reader.
 #
@@ -1504,11 +1168,18 @@ _prs=$(
                     printf "F 0 INCOMPLETE-PROBLEM %s (no status: line in its block)\n", cur
                     return
                 }
-                if (st != "open" && st != "accepted" && st != "resolved") {
-                    printf "F 0 MALFORMED-STATUS %s (status: %s — expected open, accepted or resolved)\n", cur, st
+                # A resolved problem report is deleted by the change that
+                # fixes it, so no item in a ledger is resolved (ADR-k3nkv3).
+                # Like the two above, it leaves the roll-call and counts
+                # toward nothing: the run is already red for this item.
+                if (st == "resolved") {
+                    printf "F 0 RESOLVED-PROBLEM %s (status: resolved — a resolved problem report is deleted)\n", cur
                     return
                 }
-                if (st == "resolved") return
+                if (st != "open" && st != "accepted") {
+                    printf "F 0 MALFORMED-STATUS %s (status: %s — expected open or accepted)\n", cur, st
+                    return
+                }
 
                 # ACCEPTED — a problem the project investigated and ruled on.
                 # Exempt from STALE-PROBLEM and from problem_open_max: neither
@@ -1606,25 +1277,22 @@ _prs=$(
             }
             FNR == 1 { sub(/^\357\273\277/, "") }
             # NO front-matter skip here, and that is a decision, not an
-            # omission. The first version of this scan skipped front matter
-            # "so the reader and the backstop agree", and the independent
-            # review reproduced what that costs: GR_AWK_FRONT_MATTER treats ANY
-            # `---` on line 1 as opening a header block, so a leading
-            # horizontal rule swallowed every ITEM DEFINITION up to the next
-            # `---`. An open problem 236 days old vanished from the roll-call,
-            # `problem_open_max` did not apply, and the run exited 0 — every
-            # failure this gate exists to prevent, introduced by the gate.
+            # omission. Skipping front matter "so the reader and the backstop
+            # agree" costs this: a leading `---` taken for a header block
+            # swallows every ITEM DEFINITION up to the next `---`, so an open
+            # problem vanishes from the roll-call, `problem_open_max` does not
+            # apply, and the run exits 0 — every failure this gate exists to
+            # prevent, introduced by the gate.
             #
             # The backstop reads ANNOTATIONS, where skipping a real header
             # block is right; this scan reads DEFINITIONS, and the rule for
             # those is already settled across the toolkit — a definition form
             # at column one is judged wherever it appears, fenced block or not.
             #
-            # That is not the whole story, and the rest was found by the same
-            # review: the backstop could not tell a header from a horizontal
-            # rule either, so a leading `---` switched IT off for the same span
-            # and dropped every annotation in it. GR_AWK_FRONT_MATTER now
-            # requires a key on line 2, which fixes both. One disagreement
+            # The backstop must tell a header from a horizontal rule too, or
+            # a leading `---` switches IT off for the same span and drops
+            # every annotation in it. GR_AWK_FRONT_MATTER requires a key on
+            # line 2 for that reason. One disagreement
             # remains and is fail-loud: an item definition pasted INSIDE a
             # genuine header block is read here and invisible to the backstop,
             # so its own fields are reported as orphans. A contrived document,
@@ -1663,11 +1331,10 @@ _undatable_n=$(printf '%s\n' "$_prs" | grep -c '^W -1 ' || true)
 # subtraction somebody has to remember to keep in step.
 _accepted_n=$(printf '%s\n' "$_prs" | grep -c '^A ' || true)
 # m starts at -1, which is also what an undatable item reports, so "no age
-# known" and "the maximum age" are the same value and need no second flag. The
-# first version seeded the maximum from awk's uninitialised 0 and kept a `seen`
-# flag: an age of 0 is the one age that does not exceed 0, so a ledger whose
-# only open item was opened TODAY reported `oldest n/a` — an item counted as
-# open and absent from the age.
+# known" and "the maximum age" are the same value and need no second flag.
+# NOT seeded from awk's uninitialised 0: an age of 0 is the one age that does
+# not exceed 0, so a ledger whose only open item was opened TODAY would report
+# `oldest n/a` — an item counted as open and absent from the age.
 _oldest=$(printf '%s\n' "$_prs" | LC_ALL=C awk 'BEGIN { m = -1 } $1 == "W" && $2 + 0 > m { m = $2 + 0 } END { print m }')
 if [ -n "$_prs" ]; then
     print_violations "$(printf '%s\n' "$_prs" | cut -d' ' -f3-)"
@@ -1682,13 +1349,12 @@ fi
 
 # --- ORPHAN-ANNOTATION: an annotation that belongs to no item --------------
 # The backstop to the block rule, and the reason that rule can be relaxed
-# safely. Blocks now end at a header shape rather than at any bold line,
-# which fixes the case that was reported — but every termination rule has an
-# outside, and the outside is where this defect lived. An annotation before the
-# first item in a file, or under a heading with no item since, belongs to
-# nothing under ANY rule. Until this gate it was read, matched, and dropped in
-# silence: `status: open` on such a line left the item open in the ledger and
-# absent from the known-problem review, with the run still exiting 0.
+# safely. Blocks end at a header shape rather than at any bold line, but
+# every termination rule has an outside. An annotation before the first item
+# in a file, or under a heading with no item since, belongs to nothing under
+# ANY rule. Without this gate it is read, matched, and dropped in silence:
+# `status: open` on such a line leaves the item open in the ledger and absent
+# from the known-problem review, with the run still exiting 0.
 #
 # Scope is per keyword, and only where that keyword is BLOCK-parsed:
 # `verifies:` and `assesses:` are read line-wise by ids_matching, never against
@@ -1697,8 +1363,8 @@ fi
 # is what teaches people to read past the output. `implements:` and
 # `mitigates:` are block-parsed by credit_scan, so they are covered.
 #
-# Column one, or column one after one or more list markers, bulleted or
-# ordered: gr_kw_orphan_here, which is WIDER than the gr_kw_here every reader
+# Column one, or column one after a run of list markers, task-list boxes and
+# blockquote markers: gr_kw_orphan_here, which is WIDER than the gr_kw_here every reader
 # uses, and deliberately so. The invariant is a containment — the backstop must
 # see at least what every reader sees — and never an equality. Widening the
 # readers to match this instead was tried and rejected: the readers are
@@ -1708,9 +1374,10 @@ fi
 #
 # Wider costs nothing here. This gate REPORTS; it takes no value and decides
 # no item's state, so a bulleted annotation outside every block is reported
-# whether or not a reader would have taken it — which is the PR-h3wujj defect,
-# since gr_id_run reads `- satisfies: REQ-001` inside a block and nothing at
-# all saw it outside one.
+# although no reader would take it. Inside a block, gr_annotation takes an
+# ID-list keyword only at column one or on the definition line, so the same
+# lead there is reported too: `- satisfies: derived` on a REQ would otherwise
+# leave it out of UNANALYZED-DERIVED at exit 0.
 #
 # A line with NO marker is tested unchanged, and that is what keeps the
 # indented item grammar shipped in templates/problems.md inert — the property
@@ -1721,6 +1388,14 @@ check_orphans() {
     _kw="$1"
     _open="$2"
     shift 2
+    # The ID-list keywords gr_annotation reads inside a block are also
+    # reported there, where a lead hides them from it. The scalar fields are
+    # not: a quoted `- status: resolved` in a problem's prose is not a field,
+    # and INCOMPLETE-PROBLEM already reports one written that way.
+    case "$_kw" in
+        (satisfies:|traces:|implements:|mitigates:) _idlist=1 ;;
+        (*) _idlist=0 ;;
+    esac
     for _f in "$@"; do
         [ -n "$_f" ] || continue
         # LC_ALL=C: defence in depth, and honestly weak — the close and the
@@ -1730,7 +1405,7 @@ check_orphans() {
         # or busybox awk; it is kept because the escapes are byte values and
         # some awk in some locale will read them as characters.
         LC_ALL=C awk -v body="$GR_ID_BODY" -v popen="$_open" -v kw="$_kw" -v fname="$_f" \
-            "$GR_AWK_ITEM_BLOCK$GR_AWK_FRONT_MATTER"'
+            -v idlist="$_idlist" "$GR_AWK_ITEM_BLOCK$GR_AWK_FRONT_MATTER"'
             # The opening prefix is the reader of THIS keyword, never every
             # declared prefix. Opening on all of them left a third state the
             # gates do not have: inside another prefix block, where the reader
@@ -1746,11 +1421,14 @@ check_orphans() {
             FNR == 1 { sub(/^\357\273\277/, "") }
             # Front matter is skipped, bounded, in two passes. The rule has ONE
             # definition — GR_AWK_FRONT_MATTER in lib.sh — because
-            # check-review.sh reads it too, and a second reader of a hand-copied
-            # rule is how the item-block defect of 2026-08-22 happened.
+            # check-review.sh reads it too, and two hand-copied versions of a rule
+            # drift apart and then read one file two ways.
             FNR == NR { gr_fm_scan($0, FNR); next }
             gr_fm_skip(FNR) { next }
-            gr_block_closes($0) { inblock = gr_block_opens($0) }
+            gr_block_closes($0) {
+                inblock = gr_block_opens($0)
+                cur = inblock ? substr($0, 3, index(substr($0, 3), "**") - 1) : ""
+            }
             !inblock && gr_kw_orphan_here($0, kw) {
                 # FNR, never NR: the file is read TWICE (see the
                 # front-matter pass above), so NR is offset by the whole first
@@ -1758,15 +1436,21 @@ check_orphans() {
                 printf "ORPHAN-ANNOTATION %s:%d (%s belongs to no item)\n", \
                     fname, FNR, kw
             }
+            # Inside the block, an ID-list keyword the backstop sees but
+            # gr_annotation does not take: the item made no annotation, and
+            # nothing else says so for satisfies: derived on a REQ.
+            inblock && idlist && gr_kw_orphan_here($0, kw) && gr_annotation($0, kw) == "" {
+                printf "ORPHAN-ANNOTATION %s:%d (%s inside %s is not at column one; no gate reads it)\n", \
+                    fname, FNR, kw, cur
+            }
         ' "$_f" "$_f" || gr_die "orphan scan failed on $_f"
     done
 }
 # shellcheck disable=SC2086
 _sat_files=$(printf '%s\n' $sad_files $srs_files | sort -u)
-# The union both halves of the supersession pair are read in — by the backstop
-# just below and by the NON-RECIPROCAL-SUPERSESSION scan further down. One
-# assignment, because a backstop reading a different file list from the reader
-# it backs is not a backstop.
+# One list of every ledger kind, so the SUPERSESSION-ANNOTATION scan below
+# reads every ledger file, and a file two ledger settings share only once:
+# its findings are not reported twice.
 # shellcheck disable=SC2086
 _sup_files=$(printf '%s\n' $srs_files $rmf_files $sad_files $problems_files | sort -u)
 # shellcheck disable=SC2086
@@ -1776,15 +1460,11 @@ _orphans=$(
     # too: under a looser block rule an orphaned opened: is credited to the
     # item above, and an undated item then reads as dated.
     check_orphans 'opened:' PR $problems_files
-    # Block-parsed as of PR-4fwfjp, so the backstop covers it: an orphaned
+    # Block-parsed, so the backstop covers it: an orphaned
     # disposition: would otherwise be credited to nothing while the accepted
     # item above it reads as undisposed.
     #
-    # Scoped to the problems ledger, where this scan reads it. `disposition:`
-    # is also the review artefact's word — check-review.sh reads it on a
-    # `**finding-N**:` block and has its own ORPHAN-DISPOSITION for the same
-    # hole — and those records are not $problems_files, so the two gates do
-    # not report each other's files.
+    # Scoped to the problems ledger, the one place this scan reads it.
     check_orphans 'disposition:' PR $problems_files
     check_orphans 'traces:' SDD $sad_files
     # ONE scan over the union, opening on BOTH prefixes that read `satisfies:`.
@@ -1795,19 +1475,6 @@ _orphans=$(
     # that is misplaced in that document costs nothing — MISPLACED-ITEM is
     # already red for it.
     check_orphans 'satisfies:' 'LLR|REQ' $_sat_files
-    # Block-parsed as of PR-zt5c2v, so the backstop covers both halves: an
-    # orphaned `supersedes:` would otherwise be read, matched and dropped
-    # while the item it was meant for reads as never superseded — and a gate
-    # whose reader looks where its backstop cannot see is how the `status:`
-    # reader drifted. Opening on every prefix, because the reader above does:
-    # any item may replace any other of its own kind.
-    check_orphans 'supersedes:'    'REQ|HAZ|RC|SDD|LLR|PR' $_sup_files
-    check_orphans 'superseded-by:' 'REQ|HAZ|RC|SDD|LLR|PR' $_sup_files
-    # `retired:` is read on REQ and LLR blocks alone, over the SRS and SAD,
-    # by the out-of-force scan, so the backstop opens on those two prefixes
-    # over those files: a `retired:` under an SDD header retires nothing, and
-    # is reported here rather than read as the LLR above it retiring.
-    check_orphans 'retired:' 'REQ|LLR' $_sat_files
     # credit_scan reads `implements:` on REQ blocks of doc_srs and
     # `mitigates:` on RC blocks of doc_rmf, so the backstop opens on the same
     # prefix over the same files: a stray column-one line credits nothing, and
@@ -1834,197 +1501,39 @@ if [ -n "$GR_UNIT" ]; then
     fi
 fi
 
-# --- NON-RECIPROCAL-SUPERSESSION: the pair merge-change already prescribes --
-# merge-change step 4 prescribes `supersedes:` on the replacement and
-# `superseded-by:` on the replaced item, and no script read either word: a
-# half-applied supersession was found by a human reading every site that named
-# the old ID, or not at all. On the change that first used the form downstream,
-# six sites were half-applied and it took two review rounds to find them.
+# --- SUPERSESSION-ANNOTATION: supersession is deletion (ADR-k3nkv3) --------
+# Every item in a ledger is in force. An item whose behavior changed is
+# replaced by a new item under a new ID and deleted; an item whose behavior
+# is gone is deleted; the squash message records old → new, or the reason,
+# under Items:. So a supersedes:, superseded-by: or retired: line states
+# something no gate reads, and it is reported wherever it stands.
 #
-# Reciprocity is the half a gate can prove. This is NOT a sweep for stale
-# references to a superseded ID — an `affects:` line may name an old ID as
-# history, so that has no unambiguous verdict — and existence is already
-# DANGLING-REF's job, which scans every doc_* file.
+# The orphan backstop's position, gr_kw_orphan_here: column one, or column one
+# after list markers. A line with no marker, indented or mid-line, is prose.
+# The awk opens no block and skips nothing, front matter included: the
+# finding does not depend on which item, if any, the line sits in.
 #
-# Column-one keyword via gr_kw_here, IDs via gr_id_run: the same pairing
-# status:/opened: use, so this is a READER and stays narrow. The
-# ORPHAN-ANNOTATION backstop reads these two keywords wider — column one after
-# one or more list markers as well — which is the containment lib.sh states at
-# gr_kw_here and not a disagreement: a bulleted `- supersedes: REQ-001`, or an
-# ordered `1. supersedes: REQ-001`, records no supersession here, and is
-# reported where it belongs to no item at all.
-#
-# Occurrences ACCUMULATE within a block rather than first-one-wins — the
-# annotation is a LIST and a second such line in the same block adds to it —
-# because an item may replace more than one predecessor, and each predecessor
-# is judged on its own: one applied half must not answer for a missing one.
-# Downstream, five of six sites were correct.
-#
-# `supersedes:` is not a prefix of `superseded-by:` — they part at the ninth
-# character — so neither keyword's index() test can read the other's line.
-#
-# The canonical key is REPLACEMENT<TAB>REPLACED, built from both directions,
-# which is the whole reason the two relations are comparable at all.
-#
-# PLACED LAST, after the triage scan and the orphan backstop, and that is not
-# arbitrary. This scan opens every file both of those open, and an unreadable
-# ledger is a hard exit 2 in whichever scan reaches it first. Three tests pin
-# WHICH scan names it — "an unreadable problems ledger fails the run rather
-# than finding nothing" wants the triage scan's message; "an unreadable
-# architecture ledger fails the out-of-force scan" wants that scan's, which
-# is the first to open a SAD file; and "an unreadable risk ledger fails the
-# orphan scan" wants the backstop's, on the one file no other working-tree
-# reader opens. Running this earlier answered the first and third with
-# `supersession scan failed` and left both error paths uncovered.
+# The awk status is kept, and that is why the lines are taken before they are
+# printed: an `awk | ...` pipeline reports the last command's status, so an awk
+# that exited 2 would read as a tree with no supersession annotation in it.
+# The lines come out in file order, then line order: _sup_files is sorted.
 if [ -n "$_sup_files" ]; then
-    # The awk status is kept, and that is why the sort is a SECOND step: a
-    # `awk | sort` pipeline reports sort's status, so an awk that exited 2 —
-    # which is exactly what BWK awk does when a -v value contains a newline —
-    # would read as a tree with no half-applied supersession in it.
     # shellcheck disable=SC2086
     _sup_raw=$(
-        LC_ALL=C awk -v body="$GR_ID_BODY" \
-            "$GR_AWK_ID_RUN$GR_AWK_ITEM_BLOCK"'
-            # The IDs of one annotation line, and a REPORT when it contains
-            # none. Without this, `split(gr_id_run(...))` over a run with no
-            # readable ID recorded no key at all: NON-RECIPROCAL-SUPERSESSION
-            # could not fire on a key that does not exist, and
-            # ORPHAN-ANNOTATION could not either, because that backstop sees
-            # only annotations OUTSIDE an item block. `supersedes: the old
-            # requirement`, a mistyped ID, or a bare `supersedes:` therefore
-            # read as NO SUPERSESSION AT ALL — a half-applied supersession
-            # passing green, which is the case this gate exists to remove.
-            #
-            # MALFORMED, not INCOMPLETE: an empty value counts as absent
-            # elsewhere in this file, and absent is exactly the false green
-            # here. The keyword is present and states something unreadable,
-            # which is what MALFORMED-STATUS and MALFORMED-DATE also name.
-            # A TOKEN THAT WAS TRYING TO BE AN ID AND FAILED — the half
-            # sup_run below could not see. gr_id_run returns the IDs it can
-            # read and DISCARDS the rest, so ONE good ID beside ONE mistyped
-            # ID left the run non-empty and this report silent:
-            # `supersedes: REQ-m7dq3v, REQ-a3k9z2x` and
-            # `supersedes: REQ-m7dq3v, REQ-nope` each recorded half a
-            # supersession, reported nothing, and exited 0 — the very case the
-            # report was added to close, one keystroke away from the all-empty
-            # case it did catch. Found by the independent field review.
-            #
-            # THE RULE, and it is check-ids.sh MALFORMED-ID drawn at the
-            # REFERENCE instead of the definition, not a second rule invented
-            # here: LOOSE MINUS STRICT over the DECLARED prefixes, walked from
-            # the head of the value along the same [ \t,] separators gr_id_run
-            # walks. A token in LIST POSITION that opens
-            # <DECLARED-PREFIX>-<alphanumerics, POSSIBLY NONE> and is not a
-            # valid ID is reported. The walk STOPS at the first position that
-            # opens no such token, because that is where the list ends and
-            # commentary begins.
-            #
-            # POSSIBLY NONE is critical, and the field review had to state
-            # it twice. The loose form first demanded at least one body
-            # character, which made a PREFIX TRUNCATED TO ITS HYPHEN in list
-            # position invisible: `supersedes: REQ-m7dq3v, REQ-` matched
-            # nothing at the second entry, so the walk simply ended, the run
-            # came back non-empty and the all-empty backstop below never fired
-            # either — exit 0, in total silence, on half a supersession. The
-            # SAME token ALONE was reported all along, so the gate called one
-            # truncation a defect and the identical truncation beside a good
-            # ID nothing at all. That is finding-8 recurring inside its own
-            # fix. It is also what the definition rule already does:
-            # gr_def_re_loose uses [^*]* and would convict `**REQ-**:`, and a
-            # rule drawn at the reference has to match the one drawn at the
-            # definition. Widening to * disturbs no boundary below — every
-            # guard there stops on a position that opens no DECLARED PREFIX
-            # AND HYPHEN at all, which an empty body does not reach — and the
-            # prefix plus hyphen is at least THREE characters — RC- and PR-
-            # are the shortest of the six — so RLENGTH is never zero, the
-            # walk always advances, and it terminates. Three, not four: an
-            # earlier version of this comment stated four and was wrong about
-            # the shortest token it has to handle, which is the kind of
-            # false lower bound a maintainer would re-check against after
-            # adding or shortening a prefix.
-            #
-            # WHAT IT DELIBERATELY DOES NOT CATCH, and must not:
-            #   * prose after the list. `supersedes: REQ-m7dq3v — the original
-            #     dosing requirement` stops at the dash.
-            #   * a parenthetical. `verifies: REQ-001 (was REQ-042)` credits
-            #     REQ-001 alone everywhere in this toolkit, and the walk stops
-            #     at the parenthesis for the same reason. Reporting either
-            #     would convict ledgers already correctly written, which is
-            #     the pattern-widening pressure MALFORMED-ID stays narrow to
-            #     reject.
-            #   * an undeclared prefix. `supersedes: FOO-nope` is another
-            #     vocabulary, exactly as MALFORMED-ID leaves **ADR-abcdef**:
-            #     alone.
-            #   * a mistyped ID that appears AFTER prose has begun, which is
-            #     unreachable once the walk has stopped.
-            # The residue is a prose word in list position opening with a
-            # declared prefix and a hyphen, e.g. `supersedes: REQ-001,
-            # RC-related work`. That is the price of the boundary and it is
-            # the same one MALFORMED-ID pays.
-            function sup_malformed(line, kw,   v, tok, hits) {
-                v = gr_value(line, kw)
-                hits = 0
-                while (match(v, /^[ \t,]*(REQ|HAZ|RC|SDD|LLR|PR)-[0-9A-Za-z]*/)) {
-                    tok = substr(v, RSTART, RLENGTH)
-                    v = substr(v, RSTART + RLENGTH)
-                    sub(/^[ \t,]*/, "", tok)
-                    if (tok !~ "^(REQ|HAZ|RC|SDD|LLR|PR)-" body "$") {
-                        printf "MALFORMED-SUPERSESSION %s (%s %s — not an item ID)\n", cur, kw, tok
-                        hits++
-                    }
-                }
-                return hits
-            }
-            function sup_run(line, kw,   run, v) {
-                run = gr_id_run(line, kw)
-                # THE WALK SPEAKS FIRST, and the early return is what keeps it
-                # to one line. `supersedes: REQ-` now falls inside BOTH paths
-                # — the walk convicts the token, and the backstop below still
-                # sees an empty run — and two reports naming one annotation
-                # would be a regression, not twice the coverage. The walk wins
-                # because it names the token that is wrong; the backstop can
-                # only echo the whole value back.
-                if (sup_malformed(line, kw) > 0) return run
-                if (run != "") return run
-                v = gr_value(line, kw)
-                printf "MALFORMED-SUPERSESSION %s (%s %s)\n", cur, kw, (v == "" ? "has no value" : v " — no item ID in it")
-                return ""
-            }
-            BEGIN { gr_block_init("REQ|HAZ|RC|SDD|LLR|PR", body) }
+        LC_ALL=C awk "$GR_AWK_ITEM_BLOCK"'
             FNR == 1 { sub(/^\357\273\277/, "") }
-            { line = $0; sub(/\r$/, "", line) }
-            # A block cannot span files, as in the out-of-force scan: a half
-            # in the front matter of the next file was read as the last item and
-            # completed a pair that does not exist (review round 2, finding-1).
-            FNR == 1 { cur = "" }
-            gr_block_closes(line) {
-                cur = gr_block_opens(line) ? gr_block_id(line) : ""
+            {
+                line = $0; sub(/\r$/, "", line)
+                if (gr_kw_orphan_here(line, "supersedes:")) kw = "supersedes:"
+                else if (gr_kw_orphan_here(line, "superseded-by:")) kw = "superseded-by:"
+                else if (gr_kw_orphan_here(line, "retired:")) kw = "retired:"
+                else next
+                printf "SUPERSESSION-ANNOTATION %s:%d (%s)\n", FILENAME, FNR, kw
             }
-            cur != "" && gr_kw_here(line, "supersedes:") {
-                n = split(sup_run(line, "supersedes:"), a, " ")
-                for (i = 1; i <= n; i++) if (a[i] != "") sup[cur "\t" a[i]] = 1
-            }
-            cur != "" && gr_kw_here(line, "superseded-by:") {
-                n = split(sup_run(line, "superseded-by:"), a, " ")
-                for (i = 1; i <= n; i++) if (a[i] != "") by[a[i] "\t" cur] = 1
-            }
-            END {
-                for (k in sup) if (!(k in by)) {
-                    split(k, p, "\t")
-                    printf "NON-RECIPROCAL-SUPERSESSION %s (supersedes: %s, which contains no superseded-by: %s)\n", p[1], p[2], p[1]
-                }
-                for (k in by) if (!(k in sup)) {
-                    split(k, p, "\t")
-                    printf "NON-RECIPROCAL-SUPERSESSION %s (superseded-by: %s, which contains no supersedes: %s)\n", p[2], p[1], p[2]
-                }
-            }
-        ' $_sup_files
+        ' $_sup_files < /dev/null
     ) || gr_die "supersession scan failed"
     if [ -n "$_sup_raw" ]; then
-        # `for (k in arr)` has unspecified order, so without this the report's
-        # line order varies between awks and between runs — green on one
-        # implementation and flaky on the next. Critical, not cosmetic.
-        print_violations "$(printf '%s\n' "$_sup_raw" | LC_ALL=C sort)"
+        print_violations "$_sup_raw"
         fail=1
     fi
 fi
@@ -2040,8 +1549,9 @@ count_lines() {
 
 summary=""
 for pfx in $prefixes; do
-    n=$(ids_defined "$pfx" | grep -c .) || true
-    summary="${summary}${summary:+, }${pfx} ${n}"
+    _defs=$(ids_defined "$pfx") || exit 2
+    def_count=$(count_lines "$_defs")
+    summary="${summary}${summary:+, }${pfx} ${def_count}"
 done
 
 # One remedy line per rule, in the order the rules first fired.
@@ -2072,22 +1582,20 @@ echo "problems: open $_open_n, accepted $_accepted_n, oldest $_oldest_txt; limit
 if [ -n "$GR_UNIT" ]; then
     echo "scope: unit $GR_UNIT; foreign $(count_lines "$foreign"), reverse $(count_lines "$reverse")"
     [ -n "$exp_summary" ] && echo "$exp_summary"
-    # The D10 advisory: the open expectations standing against THIS unit,
+    # The provider-side advisory: the open expectations standing against THIS unit,
     # computed from the reverse edge and our own exports. Exit 0 — the
     # consumer's aging budget is the gate; this is the courtesy on top.
-    # Our own out-of-force exports answer nothing, as on the consumer's side
-    # of the edge (D3), so the two runs count the same expectations open.
     _against=0
     for _rid in $reverse; do
         [ -n "$_rid" ] || continue
-        _ans=$(printf '%s\n' "$own_scan" | awk -F'\t' -v want="$_rid" -v oof="$oof_flat" '
+        _ans=$(printf '%s\n' "$own_scan" | awk -F'\t' -v want="$_rid" '
             $3 == "EXP" && $4 == "yes" { expd[$1] = 1 }
             $3 == "SAT" && $4 == want  { sat[$1] = 1 }
-            END { for (req in sat) if ((req in expd) && index(oof, " " req " ") == 0) { print "met"; exit } }')
+            END { for (req in sat) if (req in expd) { print "met"; exit } }')
         [ "$_ans" = "met" ] || _against=$((_against + 1))
     done
     echo "expectations against this unit: $_against open"
 fi
-echo "sources: srs $(count_lines "$srs_files"), rmf $(count_lines "$rmf_files"), sad $(count_lines "$sad_files"), soup $(count_lines "$soup_files"), problems $(count_lines "$problems_files"); strict $(count_lines "$strict_paths"), tests $(count_lines "$test_paths")"
+echo "sources: srs $(count_lines "$srs_files"), rmf $(count_lines "$rmf_files"), sad $(count_lines "$sad_files"), soup $(count_lines "$soup_files"), problems $(count_lines "$problems_files"); strict $(count_lines "$strict_paths"), tests $(count_lines "$test_paths"), examples $(count_lines "$example_paths")"
 
 exit $fail

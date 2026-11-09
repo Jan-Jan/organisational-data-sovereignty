@@ -3,7 +3,7 @@
 First items in org-node's requirements ledger. Both are **expectations**
 (`expects:`, guardrails D10): behaviour org-node relies on that neither
 provider states as a requirement of its own. Each was found by the dependency
-assessment recorded in `docs/plans/2026-09-06-dependency-edges.md`, made when
+assessment made when
 the edges org-node → org-members and org-node → on-chain-client were declared
 in `org-node/.guardrails/config.yaml`.
 
@@ -22,7 +22,7 @@ not from a written system-needs document. The assessment is
 `org-node/docs/risk/2026-09-06-dependency-expectations.md`.
 
 Neither implements a risk control of org-node's: org-node has no risk analysis
-yet (tooth 3 of `docs/plans/2026-09-05-ratchet-gap-analysis.md`). When that
+yet (tooth 3). When that
 analysis is written, both items are candidates for `(implements: RC-…)`, and
 an unmet expectation that implements a control fails the run outright — which
 is the intended escalation.
@@ -77,9 +77,8 @@ wire path — its "controls identified but not minted" list carries this as
 item 2, *relate a leaf's device set to its member-as-a-group key in delta
 validation*. Whether the wire path is inside REQ-ewdg2q or outside it is
 exactly the ambiguity this expectation resolves from the consumer's side. The
-direct-API half is tracked as an open problem report in
-`org-members/docs/problems/2026-08-31-device-removal-key-check.md` (corrected
-2026-10-03: resolved — the direct API now refuses an unchanged replacement
+direct-API half was tracked as a problem report in org-members (corrected
+2026-10-03: a resolved org-members problem report — the direct API now refuses an unchanged replacement
 key; the wire path this item is about is unchanged). org-node
 is the unit that takes the wire path, so the gap is org-node's exposure, and
 this item is how a consumer states a need on its provider without filing it

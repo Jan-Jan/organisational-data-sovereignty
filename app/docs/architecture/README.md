@@ -2,9 +2,11 @@
 
 This directory is a per-change ledger: each change contributes one dated
 file, `YYYY-MM-DD-<slug>.md`, dated the day the change creates it and never
-renamed. **Edit existing items in the file that defines them.** Use this
-README's Overview section for the system-wide decomposition picture; `soup.md`
-(single file) contains the SOUP inventory.
+renamed. **Edit existing items in the file that defines them.** A reworded
+item keeps its ID; a changed behavior gets a new ID and the old item is
+deleted; a dropped item is deleted. The squash message records each under
+`Items:`. Use this README's Overview section for the system-wide decomposition
+picture; `soup.md` (single file) contains the SOUP inventory.
 
 <!--
 Item grammar (enforced by .guardrails/scripts/check-trace.sh):
@@ -17,6 +19,7 @@ the high-level REQs), written under the software item they belong to:
   **LLR-NNNNNN**: <directly codeable behavior>. satisfies: REQ-NNNNNN[, REQ-...]
   **LLR-NNNNNN**: <behavior with no parent requirement>. satisfies: derived
 
+- An item is terse: no rationale, history or implementation detail.
 - Every design item must trace to at least one requirement.
 - Every LLR satisfies a REQ or is marked derived; derived LLRs must be
   assessed in the risk ledger, where an `assesses:` line names them.
@@ -45,8 +48,7 @@ the high-level REQs), written under the software item they belong to:
 <!-- System decomposition, key interfaces, and the segregation rationale
      between items of different safety classes (if any). -->
 
-*First written 2026-10-05 by the architecture tooth
-(`docs/plans/2026-10-05-app-architecture.md`). This section is the standing
+*First written 2026-10-05 by the architecture tooth. This section is the standing
 picture; each change amends it rather than restating it in a dated file. The
 items, their low-level requirements and their tests are in
 `app/docs/architecture/2026-10-05-decomposition.md`.*
@@ -78,21 +80,20 @@ the half of the process they live in.
 | **Untested shell** | SDD-6g3wnh | Everything above, wired together at its call sites, that no gated test reaches |
 
 *Amended 2026-10-20 (change `worktree-org-io-domain-api`, consistency
-pass):* the table is brought up to the in-force items. SDD-rmbr3t is
-superseded by SDD-6pjvhc (the commands carry org-io's domain-surface names),
-SDD-jx363y by SDD-ckqyh3 (the warning before the first admission request
-replaces the Loopback address check), and SDD-huk773 by SDD-ktsgh5; SDD-tgu7dp
-(periodic verification) and SDD-xg4nj7 (the admission and notices view) are
-new, all in `2026-10-16-domain-api.md`. Since that
+pass):* the table is brought up to the in-force items. SDD-6pjvhc replaces
+the earlier command surface (the commands carry org-io's domain-surface
+names), the warning before the first admission request replaces the Loopback
+address check, and the verification view replaces the reconcile view;
+SDD-tgu7dp (periodic verification) and SDD-xg4nj7 (the admission and notices
+view) are new, all in `2026-10-16-domain-api.md`. Since that
 change the Rust half drives org-io, not org-node: the app names no org-node
 item, and org-io holds the node, the chain connection and the transport.
-Where the text below names SDD-rmbr3t or SDD-jx363y, read their successors.
 
 *Amended 2026-10-28 (change `worktree-org-io-domain-api`, round 3 review
-AR3-5 and AR3-6):* SDD-ktsgh5 is superseded by SDD-swt9fs (the display) and
-SDD-ua2d9b (when the webview asks), SDD-ckqyh3 by SDD-czjf2c (the revocation
-input) and SDD-7aq69w (the admission-request confirmation), each for holding
-two responsibilities; SDD-g5wmxt (the creation form's refused-Person
+AR3-5 and AR3-6):* the verification view's item is split into SDD-swt9fs
+(the display) and SDD-ua2d9b (when the webview asks), and the pre-command
+input decisions' item into SDD-czjf2c (the revocation input) and SDD-7aq69w
+(the admission-request confirmation), each for holding two responsibilities; SDD-g5wmxt (the creation form's refused-Person
 decision) is new.
 
 *Amended 2026-10-30 (change `worktree-org-io-domain-api`, merge review
@@ -110,11 +111,11 @@ or a running application.
 The two halves meet only over Tauri IPC, in two directions.
 
 - **Webview to Rust: commands.** The frontend invokes the commands of
-  SDD-rmbr3t's surface by their snake_case names (those whose success needs a
+  SDD-6pjvhc's surface by their snake_case names (those whose success needs a
   chain are SDD-6g3wnh's), through the wrappers in
   `app/src/lib/api.ts` (SDD-6g3wnh). This is the trust edge: SDD-2pa6h6 parses
   the identifiers, addresses and secrets those commands take again on the
-  Rust side, whatever the webview checked first, so SDD-jx363y's checks are
+  Rust side, whatever the webview checked first, so SDD-czjf2c's and SDD-7aq69w's checks are
   the operator's convenience and not the unit's protection. What crosses back is a DTO that carries no secret key
   material.
 - **Rust to webview: events.** The receiver loop (SDD-6g3wnh) classifies each

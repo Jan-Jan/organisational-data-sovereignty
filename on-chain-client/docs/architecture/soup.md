@@ -71,8 +71,8 @@ This unit's own `on-chain-client/Cargo.lock`, which governs its own gate,
 resolves `subxt-signer` at **0.50.1** (and `subxt` at 0.50.1, as the row above
 says), not 0.50.3. The two lockfiles disagree today, as they already did for
 `subxt`; the writer's gated evidence is taken from this unit's lock (0.50.1),
-the shipped build from the app's (0.50.3); aligning them is an owner decision
-(docs/plans/2026-10-05-chain-authority.md, Open questions).
+the shipped build from the app's (0.50.3); aligning them is an owner decision,
+still open.
 
 **Closure with `write` on** *(measured 2026-10-06 against
 `on-chain-client/Cargo.lock`)*: `cargo tree --manifest-path

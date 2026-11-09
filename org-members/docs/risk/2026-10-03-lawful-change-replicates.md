@@ -3,7 +3,7 @@
 Assesses the one derived requirement written by the change recorded in
 `docs/adr/2026-10-03-quint-conformance-gate.md`. **No hazard and no risk
 control is minted here**: the owner decided on 2026-10-03 (`analyze-risks`
-interview) that the pathway PR-vf5hdm describes is a cause of an existing
+interview) that the pathway the handle-handover problem report describes is a cause of an existing
 hazard, HAZ-y8h835, and amended that hazard's text in its defining file
 (`2026-09-02-membership-hazards.md`) rather than founding a new one.
 
@@ -16,7 +16,7 @@ assesses: REQ-wx3wpv
 Affects an existing hazardous situation; introduces no new hazard; changes no
 control's stated effectiveness.
 
-**HAZ-y8h835 (views diverge) — reduced.** PR-vf5hdm is a cause of that hazard
+**HAZ-y8h835 (views diverge) — reduced.** the handle-handover problem report is a cause of that hazard
 with no adversary and no fault: `apply_delta` refuses, with
 `DuplicateHandle`, a delta this crate's own `recalculate()` or
 `calculate_delta` produced, when it moves a handle between two members who are

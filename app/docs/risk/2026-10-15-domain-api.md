@@ -18,7 +18,8 @@ invitee name they typed for the Invite beside the request's name, surname and
 DevicePublicKey, and proposes it only once the Admin confirms; and when the
 invitee's admission request is refused because another Device used the
 invite, the app shows the invitee a prominent error telling them to contact
-the inviter. mitigates: HAZ-ycntg7
+the inviter.
+mitigates: HAZ-ycntg7
 
 What this control breaks: nothing; it adds one confirmation per admission and
 one error the invitee only sees when something is wrong.
@@ -36,8 +37,15 @@ request, the app tells the user that nothing has verified who sent the
 Invite or the Organisation name it states, and that the request reveals the
 name, surname and preferred Handles entered to the Device the Invite names, and has
 it sent only once the user confirms; a retry of that same request asks
-nothing again. mitigates: HAZ-qfb95k
-supersedes: RC-wzb48r
+nothing again.
+mitigates: HAZ-qfb95k
+
+This is information for safety, the lowest rank in ISO 14971's order, and the
+owner chose it knowingly (2026-10-05). A design control would need to show the
+invitee that the Invite's sender is a Member or a signatory of the
+Organisation's multisig; that needs the inviter's signatory set, which an
+Invite does not carry and the chain cannot list (it can confirm a signatory
+set, not list one), so the inviter's status cannot be checked.
 
 Reworded 2026-10-15 (change `worktree-org-io-domain-api`): the Invite reply
 Blob is gone, and the admission request over iroh now carries what the reply
@@ -47,7 +55,13 @@ same, apart from preferred Handles taking the place of the one handle, and so
 is the moment: before anything leaves the device. A retry discloses nothing
 new to the same Devices, so not asking again leaves the control's effect as
 it was. It remains information for safety, chosen knowingly by the owner
-(2026-10-05). The residual is as RC-wzb48r recorded it.
+(2026-10-05).
+
+**Residual risk.** S2 / P2, **accepted by owner ruling (2026-10-05)** on the
+grounds that the invitee chose the channel, chose the name details, and is
+told before anything is sent what the request reveals. The matrix places
+S2/P2 in the unacceptable region; this is a deliberate acceptance, recorded
+as such.
 
 ## A discarded change the Admin is not shown
 
@@ -63,7 +77,8 @@ hazard from its side and the same owner ruling).
 
 **RC-8h344c**: the app shows the Admin each discarded provisional change
 prominently, naming the Member and the kind of change, until the Admin
-dismisses it, and offers to propose it again. mitigates: HAZ-x4k8tt
+dismisses it, and offers to propose it again.
+mitigates: HAZ-x4k8tt
 
 What this control breaks: nothing; it adds a notice that appears only when
 another Admin's epoch left a change out.
@@ -85,19 +100,6 @@ S2 because the removed Device still never receives the new epoch's
 Organisation private key, so it reads nothing granted after the removal; what
 it keeps is what it already held.
 
-**RC-526ayz**: when verification reports adopted an epoch this node wrote,
-the app asks org-io to send it at once, with no user step, and shows the
-Admin each Device whose send failed with a way to send to it again.
-mitigates: HAZ-49x93v
-superseded-by: RC-c5tpre
-
-What this control breaks: nothing the journey relies on; the first send
-happens without the Admin, and only retries are manual.
-
-**Residual risk.** S2 / P1 — acceptable under the matrix: a removed Device
-that is offline throughout, and to which the Admin never retries, stays
-untold.
-
 **RC-c5tpre**: when verification reports adopted an epoch this node wrote,
 the app asks org-io once, with no user step, to send it to every Device it
 concerns, and shows the Admin each Device's outcome; while it runs, the app
@@ -106,8 +108,8 @@ interval, as well as at start and on request, and when a verification
 reports an Organisation behind, asks org-io to request it from its Members
 with no user step, again each interval until it is in step or adopted —
 a request from a revoked Device being answered with its revocation notice,
-as org-io's ledger states. mitigates: HAZ-49x93v
-supersedes: RC-526ayz
+as org-io's ledger states.
+mitigates: HAZ-49x93v
 
 Re-assessed 2026-10-16 (owner rulings Q1, Q2 and Q5, change
 `worktree-org-io-domain-api`): the Admin's manual retries are replaced by
@@ -127,7 +129,8 @@ a revoked Device gets the notice when it asks. What remains is a removed
 Device that never runs again while able to reach a Member Device — a
 stolen Device kept offline — which keeps what it already held and, as
 before, never the new epoch's Organisation private key. This is no worse
-than RC-526ayz's residual, where such a Device also stayed untold, and it
+than the residual of the control it replaced (one send at once, then the
+Admin's manual retries), where such a Device also stayed untold, and it
 no longer depends on the Admin retrying.
 
 *Realised 2026-10-20 (the app's architecture of this change,
@@ -187,12 +190,13 @@ assesses: REQ-88npkt, REQ-s3vnmh, REQ-pe2c7u, REQ-qv4d2z
 
 ### After S4: the warning, the decisions and verifying on receipt
 
-REQ-2yh3c8 keeps RC-wzb48r in force for HAZ-qfb95k: the user is told,
+REQ-2yh3c8 implements RC-dfzb5q for HAZ-qfb95k: the user is told,
 before anything is revealed, that neither the Invite's sender nor its
 Organisation name is verified and what the first admission request reveals,
 and the request is sent only once they confirm; a retry of that same request
 reveals nothing more, so it needs no second confirmation. REQ-vb5pag makes
-the same kind of decisions at the user's commands as the item it supersedes;
+the same kind of decisions at the user's commands as the app's earlier
+submission decision did;
 the split into proposing, writing, verifying and sending is assessed in
 org-io's and org-node's ledgers, and the send of an adopted epoch is
 HAZ-49x93v's control. REQ-k7ay5b asks for verification at once and shows its
@@ -217,28 +221,25 @@ assesses: REQ-2yh3c8, REQ-vb5pag, REQ-k7ay5b
 Written 2026-10-15 with the app's architecture of this change
 (`app/docs/architecture/2026-10-16-domain-api.md`).
 
-The command surface's renames and parses. The handler list (LLR-kk8gc7)
-keeps its predecessor's rule and refuses the five old names, so no stale
+The command surface's renames and parses. The handler list keeps its
+predecessor's rule and refuses the old names, so no stale
 webview call reaches an old behaviour. The Invite read stores nothing
 (LLR-b7ywy4), so reading an Invite changes no state before the user
 proposes a Member. The admission's arguments (LLR-gmb4p8) still carry no
 secret or key, as its predecessor's did. The member identifier's parse
-(LLR-7n4hgr), the invite identifier's parse (LLR-r8jeu8) and the send
-address's decode (LLR-4jggyx) refuse rather than truncate or drop, so a
-malformed value addresses no other Member, invite or Device; the decode
-keeps the predecessor's rules, and org-io's Loopback identity check still
-refuses an address naming another Device. Cancelling an invite
+(LLR-7n4hgr) and the invite identifier's parse (LLR-r8jeu8) refuse rather
+than truncate or drop, so a malformed value addresses no other Member or
+invite. Cancelling an invite
 (LLR-vqz4s6) only removes what org-io holds for it; an impostor's kept
 request is then gone with it. No new hazard.
-assesses: LLR-kk8gc7, LLR-b7ywy4, LLR-gmb4p8, LLR-7n4hgr, LLR-r8jeu8, LLR-4jggyx, LLR-vqz4s6
+assesses: LLR-b7ywy4, LLR-gmb4p8, LLR-7n4hgr, LLR-r8jeu8, LLR-vqz4s6
 
 *Re-assessed 2026-10-20 (owner rulings Q1, Q2 and answers A2, A3 of
-2026-10-16):* LLR-4jggyx is retired with the pasted address (requests carry
-the sender's own addresses, kept by org-io for the Device's key and still
-checked by org-io's Loopback identity check); its assessment stays as
-history; the
-app now decodes no address at all, which removes the malformed-address
-input rather than weakening its refusal. LLR-kk8gc7's set loses
+2026-10-16):* the pasted address is gone (requests carry the sender's own
+addresses, kept by org-io for the Device's key and still checked by
+org-io's Loopback identity check); the app now decodes no address at all,
+which removes the malformed-address input rather than weakening its
+refusal. The handler list's set loses
 `send_organisation` and `request_organisation`, now refused like the other
 old names, and gains `list_admission_requests`, which changes nothing
 (LLR-y7nc6x): the only send of an adopted epoch is the automatic one, which
@@ -256,7 +257,7 @@ assesses: LLR-e7bbm5
 
 Verifying after an included write. LLR-k4rhbs asks for verification as soon
 as a write is included, so the adoption, and with it the send of an epoch
-this node wrote (RC-526ayz, superseded 2026-10-16 by RC-c5tpre), follows the write with no user step; it
+this node wrote (RC-c5tpre), follows the write with no user step; it
 narrows HAZ-49x93v's window between writing and sending and adopts nothing
 verification would not adopt at start. No new hazard.
 assesses: LLR-k4rhbs

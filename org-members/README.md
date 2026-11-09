@@ -151,7 +151,7 @@ Deleting a member is permanent. A `MemberId` is a fresh random value chosen by t
 
 `AbsenceProof::verify` accepts a proof that resolves to the root you pass. It cannot know whether that root is current. A proof that was genuine under an older root fails against a newer one (`AbsenceProofRootMismatch`). But a proof checked against a stale root that predates a device's admission says "absent" truthfully, and a device that acts on it deletes its data while it is still a member (HAZ-adm7gv). Pass only the latest finalised on-chain root, read by the caller at the moment of checking.
 
-A proof that a Device key is absent from a Member who remains (a Held proof) carries that Member's MemberId, handle, Member-as-a-group key, name, surname and device root — but no `DevicePublicKey` (HAZ-gwbn5n, HAZ-r5tc4m, RC-5nka8z). `prove_absent` cannot know who is asking. Produce a proof only for a requester whose authenticated Device key and supplied MemberId match a pair on your revoked-device list, and send it only over the connection that authenticated that key.
+A proof that a Device key is absent from a Member who remains (a Held proof) carries that Member's MemberId, handle, Member-as-a-group key, name, surname and device root — but no `DevicePublicKey` (HAZ-r5tc4m, RC-5nka8z). `prove_absent` cannot know who is asking. Produce a proof only for a requester whose authenticated Device key and supplied MemberId match a pair on your revoked-device list, and send it only over the connection that authenticated that key.
 
 `prove_absent` does not refuse a Device key that another Member holds. Keeping a revoked Device key from ever being admitted again, to any Member, is the duty of whoever keeps the revoked-device list.
 

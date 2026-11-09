@@ -52,8 +52,8 @@ async fn received_while<F: std::future::Future<Output = ()>>(io: &OrgIo, send: F
 
 // A command that needs the node, a query and a mutating call, completes
 // while `next_received` waits with no peer sending (the reproduction of
-// the app's receiver holding the lock, PR-7v8anh).
-// verifies: LLR-eeh4pq, PR-7v8anh
+// the app's receiver holding the lock).
+// verifies: LLR-eeh4pq
 #[tokio::test(flavor = "multi_thread")]
 async fn a_command_completes_while_the_receiver_waits() {
     let (_guard, _keychain) = fresh_keychain();

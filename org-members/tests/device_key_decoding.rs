@@ -4,7 +4,7 @@
 //! refused on every path a key enters org-members by: the public constructor
 //! and its `TryFrom` impls, and decoding a DevicePublicKey, a set of
 //! DevicePublicKeys, a member record and a change set off the wire
-//! (PR-b7khyw, LLR-z954wj).
+//! (LLR-z954wj).
 //!
 //! Every case but the off-curve one is one that
 //! `ed25519_dalek::VerifyingKey::from_bytes` accepts, and `refused_keys`

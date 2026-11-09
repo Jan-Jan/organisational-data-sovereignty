@@ -50,14 +50,16 @@ by construction.
 check that needs no chain — the Organisation named, the Sequence number, the
 Envelope and Change set decoding, and the Change set's base against its
 record's Membership root — before it reads the chain, and refuses without
-reading the chain an Envelope that fails any of them. mitigates: HAZ-bedm57
+reading the chain an Envelope that fails any of them.
+mitigates: HAZ-bedm57
 
 **RC-2ferct**: for a first admission, the node reads the chain only when the
 Organisation named is one the app has declared it expects to join, because
 its user entered an Invite for it, and refuses any other first admission
-without reading the chain. mitigates: HAZ-bedm57
+without reading the chain.
+mitigates: HAZ-bedm57
 
-*Note 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md),
+*Note 2026-10-13 (S4, task T4),
 on HAZ-bedm57, RC-mj6gjq and RC-2ferct.* The two units now share the
 controls: org-node's `check_received` runs every check that needs no chain
 state (RC-mj6gjq) and the expectation gate (RC-2ferct), and returns a
@@ -79,8 +81,7 @@ to join; the first is known to every Member, the second to the inviter.
 Severity S3, probability **P1**: acceptable under the matrix.
 
 *Note 2026-10-07 (S3a close-out residual review, change
-`worktree-org-io-commit-workflow`; owner rulings R1 and R6, decision 16 of
-`docs/plans/2026-10-06-org-io-commit-workflow.md`).* Under owner ruling D of
+`worktree-org-io-commit-workflow`; owner rulings R1 and R6, decision 16).* Under owner ruling D of
 2026-10-06 the README's matrix governs and S3 is unacceptable at every
 probability, so "acceptable under the matrix" above is restated as S3/P1 —
 unacceptable under the matrix (ruling D). A new control now stands beside
@@ -138,47 +139,47 @@ Organisation that node's user entered an Invite for.
 
 ## Derived requirements assessment
 
-**REQ-ag6kqm, REQ-nhe2zu** (amended: no signature; the chain alone decides):
+**Earlier forms of LLR-8528ud and REQ-dwb9bq** (amended: no signature; the chain alone decides):
 remove a control's clause, assessed above under HAZ-tawvm2. No new hazard:
 the remaining controls cover the hazardous situation the signature did. The
 loss of the cheap refusal is HAZ-bedm57.
 
-**REQ-xa6smf, REQ-ztdza4** (amended: commit whoever sent it): remove
+**Earlier forms of REQ-eqt23j and REQ-uk9rw7** (amended: commit whoever sent it): remove
 RC-b6mydy's two clauses, assessed above under HAZ-ep6uzs and HAZ-vxabf9.
 HAZ-ep6uzs's residual worsens until the key-pair change (owner-accepted).
 
 *Note 2026-10-07 (owner ruling R1, change
-`worktree-org-io-commit-workflow`).* REQ-ztdza4 is amended again: an update
+`worktree-org-io-commit-workflow`).* An earlier form of REQ-uk9rw7 is amended again: an update
 for an Organisation the node holds is committed only from a Device listed in
-its current record (RC-u7kdam); REQ-xa6smf is unchanged. The assessment of
+its current record (RC-u7kdam); an earlier form of REQ-eqt23j is unchanged. The assessment of
 that amendment is in
 `org-node/docs/risk/2026-10-07-commit-workflow.md`.
 
-**REQ-d9g6nt** (amended: "founding Member") and **REQ-qn2erx** (amended:
+**REQ-d9g6nt** (amended: "founding Member") and **an earlier form of REQ-kd34f5** (amended:
 the Join request and Invite imports leave org-node): no hazard impact. The
 first is wording; the second moves the parse of those two inputs to the app,
 whose register assesses it.
 
-**REQ-xs4ab8** (provisional updates, no chain write): no new hazard. It removes
+**The item REQ-dhr58q and REQ-4qh2h8 replaced** (provisional updates, no chain write): no new hazard. It removes
 one: the node no longer holds the multisig signatory key, so a compromise of
 its store no longer yields the power to change the chain.
 
 **REQ-tqap3r** (the node commits its own provisional update only after it
 verifies against the chain): no new hazard, and it narrows the
-publish-before-persist hazard filed as PR-vt244s. A sender's record no longer
+publish-before-persist hazard filed as the resolved problem report on the publish path writing the chain before the record. A sender's record no longer
 runs ahead of the chain, and once the chain carries the root the sender
 commits by the same checks a receiver uses, so its record is not left an epoch
 behind by a failed send, provided the commit does not wait on the send (a
 design constraint for `design-architecture`).
 
-**REQ-uv3v5w** (a commit discards the old record and every provisional update
-it orphans) and **REQ-fwfku9** (provisional updates bounded at 1 MiB per
-Organisation): no new hazard. Persisting provisional updates (REQ-xs4ab8 as
+**An earlier form of REQ-x2dnee** (a commit discards the old record and every provisional update
+it orphans) and **an earlier form of REQ-g2537c** (provisional updates bounded at 1 MiB per
+Organisation): no new hazard. Persisting provisional updates (the item REQ-dhr58q and REQ-4qh2h8 replaced, as
 amended) puts more of a Persona store's contents in the encrypted file, under
 RC-jjsz97 like the rest; discarding the orphans keeps a node from offering an
 update that can no longer apply, and the bound keeps the store from growing
 without limit. Persisting also means a restart between the app's submission
-and the node's commit no longer loses the update; PR-vt244s nonetheless stays
+and the node's commit no longer loses the update; the resolved problem report on the publish path writing the chain before the record nonetheless stays
 open by owner ruling (2026-10-05).
 
 **REQ-f2k4tr, REQ-8amu2a** realise RC-mj6gjq and RC-2ferct; assessed above
@@ -197,7 +198,7 @@ Denial of one's own admission delays a Member's access; it exposes nothing.
 The refusal keeps the expectation, so the genuine admission still commits
 when it arrives.
 
-assesses: REQ-ag6kqm, REQ-nhe2zu, REQ-xa6smf, REQ-ztdza4, REQ-d9g6nt, REQ-qn2erx, REQ-xs4ab8, REQ-tqap3r, REQ-f2k4tr, REQ-8amu2a, REQ-uv3v5w, REQ-fwfku9, REQ-kt877x
+assesses: REQ-d9g6nt, REQ-tqap3r, REQ-f2k4tr, REQ-8amu2a, REQ-kt877x
 
 ## Derived low-level requirements of the design (design-architecture, 2026-10-05)
 
@@ -207,7 +208,7 @@ twenty-nine derived ones in place
 `2026-10-03-decomposition.md`, `2026-10-04-type-safety.md`). Every other new
 or rewritten requirement satisfies one of the requirements assessed above.
 
-**LLR-2xzys9** (`send_update` binds the endpoint from the first Persona bound
+**An earlier form of LLR-degg8t** (`send_update` binds the endpoint from the first Persona bound
 to the Organisation the Envelope names): no new hazard. It replaces the
 administrator-Persona lookup by key, which the owner removed; the endpoint's
 identity is not an input to any receiver's decision now (nothing about a
@@ -216,49 +217,49 @@ could misroute a send but not make a receiver commit anything the chain does
 not carry. The endpoint-bound-once report's defect is unchanged. *(It moved
 to org-io and is resolved there, 2026-10-13, S4 task T10.)*
 
-**LLR-e58j8m, LLR-9fvb3y** (a keypair rebuilt from its seed has the same keys;
+**LLR-e58j8m, an earlier form of LLR-283x6f** (a keypair rebuilt from its seed has the same keys;
 another seed's has different ones): no hazard impact. They state the custody
 property the signature requirements used to carry, now that nothing signs;
 they constrain the seeds the store already protects (RC-jjsz97).
 
 **LLR-rv4vux, LLR-rc74nq, LLR-txqmz4, LLR-66h529, LLR-463d89, LLR-8m3bwj,
-LLR-f74xwb, LLR-65py3d** (org-node holds no calldata, no multisig, no chain
+LLR-f74xwb, an earlier form of LLR-7en38k** (org-node holds no calldata, no multisig, no chain
 write): no new hazard in this unit; each removes code. The behaviour moves to
 on-chain-client, whose register assesses it
 (`on-chain-client/docs/risk/2026-10-06-chain-write.md`).
 Removing the signatory key from org-node's store is a reduction, as assessed
-under REQ-xs4ab8 above.
+above under the item REQ-dhr58q and REQ-4qh2h8 replaced.
 
 **LLR-ryzr8m** (the mock's compare-and-swap, now on inherent methods): no
 hazard impact; a test stand-in, unchanged in what it imitates.
 
-**LLR-w3fhhg, LLR-dzte8x, LLR-q3aj8z** (the record's creation, Persona
+**Earlier forms of LLR-exaa9u, LLR-x5asbx and LLR-gcm7bq** (the record's creation, Persona
 binding and proxy account move from `create_organisation` to
 `commit_genesis`): no new hazard. They now happen only after the genesis has
 verified against the chain (REQ-tqap3r), which narrows the window in which a
 record exists that the chain does not. The proxy account is opaque data the
 app supplies and org-node never interprets; a wrong one is a failed
 submission in the app, not a wrong commit, because every commit is checked
-against the chain. PR-mdv38y's second writer is unchanged *(closed 2026-10-06
+against the chain. The resolved problem report on the receive path rebinding Personas's second writer is unchanged *(closed 2026-10-06
 by REQ-yp75u9; see below)*.
 
-**LLR-vdyu65, LLR-3v5nu9, LLR-drgdy8** (admission and revocation act on the
+**Earlier forms of LLR-f9x3vf and LLR-x5asbx** (admission and revocation act on the
 named Organisation; the proxy account is handed back, unused): no new hazard;
-the wrong-record hazard LLR-vdyu65 was written for is unchanged in kind.
+the wrong-record hazard an earlier form of LLR-f9x3vf was written for is unchanged in kind.
 
-**LLR-zj88e6, LLR-qezw3n, LLR-437fvx, LLR-836z24** (no Invite, no dialling
+**LLR-zj88e6, an earlier form of LLR-ds228z, LLR-437fvx, an earlier form of LLR-96z2k5** (no Invite, no dialling
 address, no Join request; `persona_public_keys` returns the two keys): no new
 hazard in this unit. The parse of the Invite and its reply moves to the app's
 edge, which the app's register assesses; the dialling address that
 the endpoint-bound-once report's reading side concerned no longer exists.
 
-**LLR-xq9nrq, LLR-e5c9ud** (no administrator key in the record; the Persona
+**Earlier forms of LLR-q4puca and LLR-exaa9u** (no administrator key in the record; the Persona
 marked Active is the first whose DevicePublicKey is in the trie): no new hazard.
 The administrator-key exclusion was never evidenced and selected nothing a
-device holding one Persona per Organisation could observe; PR-mdv38y's
+device holding one Persona per Organisation could observe; the resolved problem report on the receive path rebinding Personas's
 selection defect is unchanged *(closed 2026-10-06 by REQ-yp75u9; see below)*.
 
-**LLR-ckk5nz** (secret overwritten on a received update; kept on a node's own
+**An earlier form of LLR-34c5y3** (secret overwritten on a received update; kept on a node's own
 commit): HAZ-ep6uzs's residual is as assessed above (owner-accepted until the
 key-pair change); keeping the node's own secret on its own commit removes no
 control.
@@ -268,46 +269,46 @@ refused on that path before any chain read) realised RC-mj6gjq's intent on
 that path; no new hazard. *(Retired 2026-10-13 with the self-delete path, S4
 task T4; its `assesses:` entry below deleted in task T6 by the owner's ruling
 of that day, its ID listed in the S4 verification record. On the one receive
-path an unheld Organisation is refused before any chain read as LLR-38e2kn
-and LLR-s8xp7m state, so RC-mj6gjq's intent holds there.)*
+path an unheld Organisation is refused before any chain read as earlier forms of LLR-95av3e
+and LLR-e6w3nr state, so RC-mj6gjq's intent holds there.)*
 
-**LLR-8hdu9x**, with the Loopback-address refusal item (the send refuses a
+**An earlier form of LLR-degg8t**, with the Loopback-address refusal item (the send refuses a
 Loopback call with no address; it carries the secret its caller passes): no
 new hazard. The refusal now follows a commit the chain already agrees with,
-so it can no longer burn an epoch (PR-b9wab3's mechanism); the secret carried
+so it can no longer burn an epoch (the resolved problem report on the revocation precondition order's mechanism); the secret carried
 is as it was. *(2026-10-13, S4 task T12: the refusal item moved to org-io
 with the send, its assessment with it, to
 `org-io/docs/risk/2026-10-06-transport.md`; its ID left
 the `assesses:` line below.)*
 
-**LLR-s7whrn, LLR-ayrdr8** (the chain account is opaque in org-node; the
+**LLR-s7whrn, an earlier form of LLR-mkvx2k** (the chain account is opaque in org-node; the
 golden encodings drop the Invite, the Join request and the calldata): no
 hazard impact; both restate the types and encodings that remain.
 
-assesses: LLR-2xzys9, LLR-e58j8m, LLR-9fvb3y, LLR-rv4vux, LLR-rc74nq, LLR-txqmz4, LLR-66h529, LLR-463d89, LLR-8m3bwj, LLR-f74xwb, LLR-65py3d, LLR-ryzr8m, LLR-w3fhhg, LLR-dzte8x, LLR-q3aj8z, LLR-vdyu65, LLR-3v5nu9, LLR-drgdy8, LLR-zj88e6, LLR-qezw3n, LLR-437fvx, LLR-836z24, LLR-xq9nrq, LLR-e5c9ud, LLR-ckk5nz, LLR-8hdu9x, LLR-s7whrn, LLR-ayrdr8
+assesses: LLR-e58j8m, LLR-rv4vux, LLR-rc74nq, LLR-txqmz4, LLR-66h529, LLR-463d89, LLR-8m3bwj, LLR-f74xwb, LLR-ryzr8m, LLR-zj88e6, LLR-437fvx, LLR-s7whrn
 
 ## Derived low-level requirements re-traced or amended after the merge of master (2026-10-06)
 
 Master `5f7c177` (the person-types switch) was merged into this change; the
 design was revised against it
 (`org-node/docs/architecture/2026-10-06-chain-authority.md`,
-note of 2026-10-06). The four requirements it adds — LLR-ms8njy and LLR-48jakr
-(the invite identifier on the wire, REQ-8amu2a), LLR-3f5h7b (REQ-kt877x) and
-LLR-qjz3q4 (the genesis provisional update keeps the Organisation private key
+note of 2026-10-06). The four requirements it adds — earlier forms of LLR-g3wmen and LLR-degg8t
+(the invite identifier on the wire, REQ-8amu2a), an earlier form of LLR-q4puca (REQ-kt877x) and
+an earlier form of LLR-qw8tyu (the genesis provisional update keeps the Organisation private key
 until it commits, REQ-ech45n) — each satisfy a requirement assessed above or
-in `org-node/docs/risk/2026-10-05-envelope-authenticity.md`. LLR-qjz3q4 puts
+in `org-node/docs/risk/2026-10-05-envelope-authenticity.md`. An earlier form of LLR-qw8tyu puts
 the Organisation private key in one more place in the store, under the same
 encryption (RC-jjsz97) and the same redacted secret type as the record's copy
 (LLR-322xfu); a genesis never committed takes the key with it when its update
 is discarded, so no key outlives the Organisation it was drawn for.
-LLR-2xzys9, assessed above, only gains the invite identifier among its
+An earlier form of LLR-degg8t, assessed above, only gains the invite identifier among its
 arguments; its assessment stands.
 
 **LLR-ctzkv7** (a Persona's member key is the X25519 key of its member seed,
 its DevicePublicKey the ed25519 key of its device seed), re-traced to derived: no
 hazard impact. It states how two keys the store already protects are
 computed; the X25519 rule is `person`'s, assessed there, and no decision of
-this unit rests on a sender's key any more (REQ-ztdza4 as amended).
+this unit rests on a sender's key any more (an earlier form of REQ-uk9rw7 as amended).
 
 The no-Invite item (org-node defines no Invite), re-traced to derived: no new
 hazard in this unit. It removes code; the Invite's parse moves to the app's
@@ -317,7 +318,7 @@ an expectation in its place (RC-2ferct, assessed above). *(Retired
 2026-10-13, S4 task T6: the Invite returns to org-node; its `assesses:` entry
 below is deleted by the owner's ruling of that day and its ID listed in the
 S4 verification record. Its replacement, the Blob-parse requirement, is
-assessed with REQ-yazum3 at the end of this file.)*
+assessed with an earlier form of REQ-9xf99q at the end of this file.)*
 
 **LLR-rys5nx** (a first admission's record holds the chain's Organisation
 public key and no administrator key), amended: no new hazard. Dropping the
@@ -327,7 +328,7 @@ Wire message, as master's assessment of this item relied on.
 
 assesses: LLR-ctzkv7, LLR-rys5nx
 
-**REQ-hhva9d** (discard a provisional update on request, refusing an unknown
+**An earlier form of REQ-x2dnee** (discard a provisional update on request, refusing an unknown
 one): no new hazard, and it narrows one. Without it a genesis that is never
 written to the chain keeps its Organisation private key in the encrypted store
 indefinitely, under RC-jjsz97 but for no purpose; discarding removes it. The
@@ -338,7 +339,7 @@ only means the app must build it again. Late genesis (owner ruling
 commit it and joins as any Member does; that delays the founder's own record
 and exposes nothing.
 
-assesses: REQ-hhva9d
+
 
 **REQ-yp75u9** (one Persona, one Organisation; added after independent review
 round 1, finding-1): no new hazard, and it removes one this change had
@@ -352,27 +353,27 @@ Organisation's on-chain write capability and of the key every Member needs,
 with no attacker required. Refusing reuse at creation, and never rebinding on
 admission or commit, makes that path unreachable. What it breaks: founding a
 second Organisation needs a new Persona first, which is the owner's model
-(keys per Organisation). It also closes PR-mdv38y.
+(keys per Organisation). It also closes the resolved problem report on the receive path rebinding Personas.
 
 assesses: REQ-yp75u9
 
-LLR-6z5xya and LLR-eyc4ud refine REQ-yp75u9 and are not derived. The derived
-items they change, amended in place on 2026-10-06 (task R1a):
+Earlier forms of LLR-qqqg4b refined REQ-yp75u9 and were not derived. The derived
+items they changed, amended in place on 2026-10-06 (task R1a):
 
-**LLR-w3fhhg, LLR-q3aj8z, LLR-e5c9ud** (`commit_genesis` binds only an
+**Earlier forms of LLR-exaa9u and LLR-gcm7bq** (`commit_genesis` binds only an
 unbound Persona, whose member id is therefore none; a receive marks only a
 Persona the commit may bind): no new hazard. Each loses the clause that
-stated PR-mdv38y's rebinding, which is the hazardous path REQ-yp75u9 closes;
+stated the resolved problem report on the receive path rebinding Personas's rebinding, which is the hazardous path REQ-yp75u9 closes;
 what remains selects and binds a strict subset of what it did. The one new
 outcome is a refusal: a first admission that lists only Personas bound
 elsewhere is refused as `AdmissionNotOurs` instead of committed, which leaves
 the node out of that Organisation until it replies with an unbound Persona —
 a delay the app can show, not a loss.
 
-assesses: LLR-w3fhhg, LLR-q3aj8z, LLR-e5c9ud
 
-*Added 2026-10-13 (S4, task T6 of docs/plans/2026-10-06-org-io-transport.md;
-analyze-risks pass before LLR-yexf5m's tests).* **REQ-uy7kfq** (at most one of
+
+*Added 2026-10-13 (S4, task T6;
+analyze-risks pass before an earlier form of LLR-w2uyyh's tests).* **REQ-uy7kfq** (at most one of
 a node's Personas belongs to, or awaits admission to, any one Organisation;
 owner ruling 2026-10-13) is the other direction of REQ-yp75u9. Assessed
 against the existing hazards:
@@ -381,19 +382,19 @@ against the existing hazards:
   Personas of one node in one Organisation would each hold a copy of its
   record and its Organisation private key, while every received update, and
   every verified revocation, commits into one store only. The other copy goes
-  stale. That touches HAZ-vxabf9: RC-wqgm2p deletes "every Persona bound to"
+  stale. That touches HAZ-vxabf9: the control RC-5jkcxz replaced deleted "every Persona bound to"
   the Organisation, but a deletion made in one store leaves the other store's
   copy, with a record that still lists the removed Device and an earlier
   epoch's key, on the node. It also touches HAZ-tawvm2 only as a delay: an
   update built from the stale copy names a base root the chain no longer
   holds and is refused by RC-6a2dke, so nothing is committed on its word.
-  REQ-uy7kfq makes the state unreachable on a node, so RC-wqgm2p's deletion
+  REQ-uy7kfq makes the state unreachable on a node, so RC-5jkcxz's deletion
   and RC-ub82my's single trigger act on the only copy there is. It narrows
   HAZ-vxabf9 and changes no control's effectiveness otherwise; no rating
   changes.
 - *The refusal itself.* A person who wants a second Persona in an
   Organisation they already belong to, or already await, on the same node is
-  refused with a typed error, and nothing is written (LLR-yexf5m). That is a
+  refused with a typed error, and nothing is written (an earlier form of LLR-w2uyyh). That is a
   delay the app can show, not a loss: the first Persona already gives them
   the membership. The rule is enforced within one node only; a second node is
   a second Device under its own keys and stores, which the owner accepted as
@@ -402,8 +403,8 @@ against the existing hazards:
 assesses: REQ-uy7kfq
 
 *Moved 2026-10-13 from app (`app/docs/risk/2026-10-06-invitation.md`), plan
-task T6 of docs/plans/2026-10-06-org-io-transport.md (ruling A).*
-**REQ-yazum3** (refuse an Invite or reply that does not parse, naming the
+task T6 (ruling A).*
+**An earlier form of REQ-9xf99q** (refuse an Invite or reply that does not parse, naming the
 field): no hazard impact; it is the parse-at-the-system-edge rule at the
 invitation Blob edge, now org-node's again, and refusing acts on nothing (the
 parse is pure and returns nothing to act on). The Blob decodes untrusted text
@@ -411,4 +412,4 @@ pasted by the user (HAZ-5f9jcm's malformed-input pathway): a decode failure
 is a typed refusal, never a panic, which the bolero target
 `fuzz_invitation_parse` exercises.
 
-assesses: REQ-yazum3
+

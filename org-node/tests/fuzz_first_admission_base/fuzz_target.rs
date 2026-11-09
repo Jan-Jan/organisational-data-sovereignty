@@ -9,7 +9,7 @@
 //! come from the fuzz input, so the key parse — the snapshot's decode into
 //! its typed record, which refuses with
 //! `InvalidField { field: "member.member_key" | "member.device_keys", .. }`
-//! (LLR-8bum44) — is reached on every iteration. Those are the
+//! (LLR-7yu2xy) — is reached on every iteration. Those are the
 //! abnormal-input arms SDD-rx2yvy's robustness entry names.
 //!
 //! `harness = false` binary: a panic (the bolero failure signal) exits
@@ -22,11 +22,11 @@ use org_node::service::first_admission_base;
 use serde::Serialize;
 
 /// A member snapshot as it is encoded, with its fields plain.
-/// `store::MemberSnapshot` holds parsed keys (LLR-g76zqd), so it cannot carry
+/// `store::MemberSnapshot` holds parsed keys (LLR-pv2rdy), so it cannot carry
 /// the arbitrary key bytes shape 2 exists to deliver. This mirror has the same field order and
 /// plain types, so it encodes to the bytes a `MemberSnapshot` would
-/// (LLR-ayrdr8), and `first_admission_base` parses them through its own
-/// `Raw…` mirror (LLR-8bum44).
+/// (LLR-mkvx2k), and `first_admission_base` parses them through its own
+/// `Raw…` mirror (LLR-7yu2xy).
 #[derive(Serialize)]
 struct PlainSnapshot {
     id: [u8; 32],
@@ -59,7 +59,7 @@ fn snapshot_from(bytes: &[u8]) -> PlainSnapshot {
 
 // Abnormal case of REQ-d9g6nt over arbitrary input: arbitrary snapshot bytes
 // never panic. (A first admission without a snapshot cannot be expressed:
-// Organisation information requires one, LLR-js9dsu, LLR-j6j95z.)
+// Organisation information requires one, LLR-xr88a8, LLR-j6j95z.)
 // verifies: REQ-d9g6nt
 fn main() {
     bolero::check!().for_each(|bytes: &[u8]| {

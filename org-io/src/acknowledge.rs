@@ -207,8 +207,8 @@ pub(crate) async fn start(context: Context, device_key: DevicePublicKey) {
 /// keeps a removal whose deadline the clock has not reached (LLR-5rxqr8);
 /// its rounds stay anchored at the kept verification time. A removal past
 /// its deadline still held here is one whose deletion at open failed: its
-/// deletion is tried again an hour later, then hourly (LLR-3fxxpp,
-/// PR-yng83g), with no round. One keeping no acknowledgement is started,
+/// deletion is tried again an hour later, then hourly (LLR-3fxxpp),
+/// with no round. One keeping no acknowledgement is started,
 /// and its task deletes it at once (LLR-n649th). With the clock reading
 /// before the Unix epoch no deadline is judged: each is started, and its
 /// task reports the condition as its round's failure (LLR-bv6wkz).

@@ -1,107 +1,16 @@
 # Problem reports — on-chain-client's ledger opens
 
-Five reports, all found by the code survey behind this unit's first hazard
+Reports found by the code survey behind this unit's first hazard
 analysis
 (`on-chain-client/docs/risk/2026-09-10-on-chain-client-hazards.md`)
 rather than by a failing test. Each was recorded before anyone investigated a
 fix, as `resolve-problem` requires.
 
-**One of the five is fixed in this change** and is marked resolved below. That
-is a departure from the call org-node's half of this tooth made, which left all
-of its reports open on the grounds that changing `service.rs` under a register
-written the same day mixes two jobs. The owner decided on 2026-09-10 that the
-event-filter defect is different in two respects: the control the register mints
-for it, RC-5e3bdk, is **unimplementable** without the fix — there was no
-behaviour to word a requirement from — and the fix is small, local to the
-decoder and its one caller, and directly reachable by a gated test. Leaving it
-open would have meant minting a control against behaviour that did not exist, or
-minting no control at all for the register's most probable hazard.
-
-The other four stay open, for the reason the org-node half gave: they are in
-`client.rs`'s async paths and in `verify.rs`, and fixing them under a hazard
-analysis would mix a register with a change to the code it assesses. Each has a
-dated item on the setup checklist (`docs/plans/2026-09-05-ratchet-setup.md`)
-with an age limit of 2026-10-10 under `problem_age_days: 30`. Four open against
-`problem_open_max: 10`.
-
-## Events were never filtered by the contract that emitted them
-
-**PR-p5ngya**: `OrgRegistryClient` delivered every `Revive::ContractEmitted` log
-whose first topic matched an `OrgRegistry` event signature to its subscribers,
-whatever contract emitted it, while the doc-comment on the field holding the
-configured address stated that "Events from other contract addresses are
-filtered out before reaching subscribers" — so any account could deploy a
-contract, emit a log carrying the `GenesisInitialized` or `RootUpdated`
-signature hash and a victim Organisation's indexed admin, both of which are
-public on-chain, and every subscriber of that Organisation would receive it as a
-genuine event with an attacker-chosen Membership root and epoch.
-affects: RC-5e3bdk
-status: resolved
-
-Root cause: the decoder discarded the one field that could have answered the
-question and the caller's check was a stub. `parse_revive_event` decoded the
-`ContractEmitted` payload's `contract` field into `let _contract` and dropped
-it, and `event_matches_contract` was `let _ = (ev, contract); true` — it
-returned `true` for every log from every contract. Fixed in commit `62e1607`
-(merged as `8bf3445`): the address is carried out of the decoder as
-`on_chain_client::state::EmittedEvent`
-(`on-chain-client/src/state.rs:45-54`), bound at
-`on-chain-client/src/decode/v_paseo_ah.rs:98` and returned at `:119`; the stub
-is deleted; and the comparison is made in the caller. Reproducing tests:
-`on-chain-client/tests/contract_address_filter.rs` (three cases, including a
-log from a different contract carrying a *valid* signature and a valid indexed
-admin — the spoofing attempt) and
-`on-chain-client/tests/log_ownership.rs` (seven cases over the extracted
-decision). Both run at the gate.
-
-**The fix needed a second commit, and the reason is the part of this report
-worth keeping.** With `62e1607` in place the prescribed red-by-mutation was run
-— disable the `emitted.contract != contract` comparison, watch the spoofing
-case fail — and it **did not fail**: `--test contract_address_filter` still
-reported 3 passed with the comparison switched off. The three tests verify the
-decoder's half, which is real and necessary; the caller's half sat inside
-`async fn decode_contract_events`, which needs a chain, and every one of the
-five ungated targets that constructs an `OrgRegistryClient` deploys exactly one
-`OrgRegistry` and hands its address to `from_client`, so no gated test could
-reach the comparison and none of the ungated ones had a second contract to
-spoof from either. (**Corrected 2026-09-28 by the review sweep of the change
-`worktree-guardrails-on-chain-client-arch`:** this said "the nine chopsticks
-targets". Nine is the count of ungated targets; five —
-`off_chain_genesis_ceremony`, `p_address_is_orgid`, `reorg_cancels_proposed`,
-`scenario_a_full`, `two_orgs_one_watcher` — is the count that constructs a
-client, and five is the number this argument needs.) The fix would have
-closed the hole and left its decisive line unguarded: anyone could have deleted
-it and every gate would have stayed green.
-
-So the decision was extracted into `internals::log_is_ours`
-(`on-chain-client/src/client.rs:508-520`) in commit `0801aa1` (merged as
-`db3bbb0`), where a test reaches it without a chain, and
-`decode_contract_events` now makes one call
-(`on-chain-client/src/client.rs:680-682`) where it previously made two checks;
-behaviour is identical, the contract check having already preceded the admin
-check. The mutation is now observable three ways, all measured: the comparison
-inverted reds 6 of 7 cases; the check **deleted outright** — the "anyone could
-delete the line" case the first commit could not detect — reds exactly the
-three rejection cases and leaves every acceptance case green; and the admin
-filter ignored reds one.
-
-What is **not** closed, and is recorded in the register as HAZ-werm85's residual
-rather than here: no test in this repository exercises the real
-`decode_contract_events` path. `log_is_ours` is pinned; the wiring from
-`from_client`'s address to that call site is established by reading. Closing it
-needs a chopsticks fixture with two deployed contracts, which is a not-minted
-control.
-
-The doc-comment quoted above (`on-chain-client/src/client.rs:108-109`) is
-unchanged and is now true. Two other doc-comments that the defect left false
-were corrected in the same commit: `parse_revive_event`'s description of what
-`Ok(None)` means, in `on-chain-client/src/decode/mod.rs:23-29` and
-`on-chain-client/src/decode/v_paseo_ah.rs:12-20`, which had attributed
-contract filtering to a signature-hash mismatch. And one inline test was
-renamed — `parse_event_from_other_contract_returns_none` to
-`parse_event_with_unknown_signature_returns_none` — because the old name
-asserted precisely the false belief the defect rested on, and leaving it would
-have re-stated the defect inside the suite.
+The first four below were left open by that analysis, for the reason the
+org-node half gave: they are in `client.rs`'s async paths and in `verify.rs`,
+and fixing them under a hazard analysis would mix a register with a change to
+the code it assesses. Each of those four now carries the owner's ruling in its
+`disposition:`. The last, PR-hj4wwd, was found later, while a merge was being recorded.
 
 ## The decoder is pinned at construction and never re-checked
 
@@ -204,8 +113,8 @@ root path by nothing here.
 
 The fix, in outline (not-minted control 6): either implement the module — which
 means taking `org-members` as a dependency, declaring the edge in
-`on-chain-client/.guardrails/config.yaml` after the dependency assessment
-`docs/plans/2026-09-06-dependency-edges.md` prescribes, and writing the
+`on-chain-client/.guardrails/config.yaml` after assessing the new edge (a
+dependency edge is declared only once its assessment is done), and writing the
 comparison with a gated test — or delete the module and move its promise into
 the design, where a reader will not mistake it for shipped code. Either closes
 the report. What is not acceptable is a module whose header describes in the

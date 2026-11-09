@@ -14,7 +14,7 @@
 //! adopted through the handle. The outstanding pairs live in each Persona's
 //! sealed store, so "reopen" reads the store files back, and the refusals
 //! are org-node's typed errors in `ExchangeError::Node`; no
-//! outstanding-invites file is read (LLR-f35pda).
+//! outstanding-invites file is read (LLR-95e3jx).
 //!
 //! The chain is a substitute (`test_support::FakeChain`); every Persona's
 //! device secret is in the in-memory keychain (`test_support::MemoryKeychain`).

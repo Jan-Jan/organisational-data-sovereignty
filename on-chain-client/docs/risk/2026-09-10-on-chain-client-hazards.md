@@ -2,9 +2,8 @@
 
 on-chain-client's first hazard enumeration, run under IEC 62304 **Class C**
 (`docs/adr/2026-09-05-units-and-per-unit-classes.md`) and evaluated against the
-acceptability matrix in this ledger's README. It is the second half of tooth 3
-of `docs/plans/2026-09-05-ratchet-gap-analysis.md`; the plan for the change is
-`docs/plans/2026-09-10-on-chain-client-risk-analysis.md`. The first half, which
+acceptability matrix in this ledger's README. It is the second half of the
+project's hazard-analysis step for its units. The first half, which
 merged on 2026-09-09, is org-node's register
 (`org-node/docs/risk/2026-09-09-org-node-hazards.md`), and this file follows its
 form deliberately: the two units are the two halves of one question, and a
@@ -45,8 +44,8 @@ the best lane's step rule. The async subxt code that surrounds them —
 stream plumbing, `from_client`'s construction — acquires no requirement of its
 own here, because no gated test reaches it (see "Where the evidence is, and
 where it is not"). Stating what that code shall do, and the unit's low-level
-requirements throughout, is tooth 4 of
-`docs/plans/2026-09-05-ratchet-gap-analysis.md`.
+requirements throughout, was left to a later change (the unit's architecture
+ledger).
 
 Deliberately **outside** this analysis, and not to be read as assessed:
 
@@ -387,7 +386,8 @@ re-established, under HAZ-95sc43.
 
 Nine controls are minted below. Each is worded from behaviour the crate already
 has — with one exception, RC-5e3bdk, whose behaviour did not exist and was
-written in this change as the fix for PR-p5ngya — and **every clause of every
+written in this change as the fix for a defect, events never filtered by the
+contract that emitted them — and **every clause of every
 one of them is realised by a requirement in**
 `on-chain-client/docs/requirements/2026-09-10-chain-reading.md`
 carrying `(implements: RC-…)`, **with two exceptions, named here rather than
@@ -548,7 +548,7 @@ says, "Events from other contract addresses are filtered out before reaching
 subscribers" (`on-chain-client/src/client.rs:108-109`); before this change that
 sentence was false. Any contract could emit a log with the OrgRegistry signature
 hash and a victim's indexed admin and every subscriber received it as genuine.
-That is **PR-p5ngya**, and it is resolved by this change: the stub is deleted,
+That defect is resolved by this change: the stub is deleted,
 the address is carried, and the doc-comment is true.
 
 Residual risk: reduced, **not acceptable**, and the reason is measured rather
@@ -644,7 +644,8 @@ mapping convention itself, and a release alone does not produce it.
 `spec_version` the chain reported, by exact match against the versions compiled
 in; and a `spec_version` for which no decoder is compiled in is refused with a
 typed error naming the version asked for, rather than served by the nearest
-decoder or by a default. mitigates: HAZ-8s5chy
+decoder or by a default.
+mitigates: HAZ-8s5chy
 
 **What this control does not claim**, stated at the control rather than left to
 the residual, because review round 2 (finding-1) found the claim being made and
@@ -856,9 +857,8 @@ at all about how large an allocation a hostile length prefix can provoke.
 It is a SOUP item, and it is recorded **nowhere else**:
 `on-chain-client/docs/architecture/soup.md` is still the empty template, so this
 unit's SOUP inventory names neither `parity-scale-codec`, nor its version, nor
-what this register relies on it for. Filling that template is tooth 4 of
-`docs/plans/2026-09-05-ratchet-gap-analysis.md` and an open item on
-`docs/plans/2026-09-05-ratchet-setup.md`; this change does not touch it, and the
+what this register relies on it for. Filling that template is owed to a later
+change; this change does not touch it, and the
 gap is pre-existing rather than introduced here. Until it is filled, the
 paragraph above is the only place in this unit's documents where the dependency
 is written down. ISO 14971 permits a control whose implementation lies outside
@@ -948,7 +948,8 @@ this scale, which review round 1's finding-11 caught.)
 exactly one of pallet-revive's two documented cases — the reverse case when all
 twelve marker bytes are the EVM-fallback marker, the forward case otherwise —
 with the choice made on the full twelve-byte marker window and never on a
-prefix of it. mitigates: HAZ-v2cmtx
+prefix of it.
+mitigates: HAZ-v2cmtx
 
 **RC-5ejucb**: the storage key for an Organisation's slot is derived by the
 Solidity mapping formula over the left-padded admin address and the map's
@@ -962,7 +963,8 @@ that event's canonical Solidity signature string, so that a first topic is
 matched against a value derived from the contract's ABI rather than against a
 constant of unstated provenance — and a drift between the two is detected by an
 independently recomputed comparison rather than silently changing which logs
-this reader treats as the Organisation's. mitigates: HAZ-v2cmtx
+this reader treats as the Organisation's.
+mitigates: HAZ-v2cmtx
 
 How it sits in the code. The two constants are byte arrays in `src`, each
 documented with the canonical string it is the hash of —
@@ -1121,7 +1123,8 @@ exactly the expected width, refused with a typed error naming both the expected
 and the actual length otherwise, an epoch whose value does not fit the
 representable range is refused rather than truncated to it, and the public
 newtypes those bytes are decoded into hold exactly the widths the contract's
-ABI gives them. mitigates: HAZ-xfg9cz
+ABI gives them.
+mitigates: HAZ-xfg9cz
 
 How it sits in the code, at three levels. The widths first, because the other
 two are written against them: `OrgAdmin` wraps `[u8; 20]`, `OnChainRootHash` and
@@ -1131,17 +1134,11 @@ which is why a three-slot blob is 96 bytes and why every fixed-width
 `copy_from_slice` in the
 state decoder is the length it is. (Line numbers re-resolved 2026-10-05: the
 `OrgPubKey` and `Epoch` lines were `:29` and `:34` before the doc comment on
-`OrgPubKey` grew on 2026-10-05.) That is REQ-2qa5r5, and its evidence is
+`OrgPubKey` grew on 2026-10-05.) That is REQ-54txzh
+(`2026-10-05-organisation-public-key.md`), and its evidence is
 `on-chain-client/tests/type_widths.rs`, relocated in this change's fix round
 out of a `#[cfg(test)]` module in `types.rs` where no gate could read its
 annotation.
-*(Note 2026-10-05, review round 3, finding-13, change
-`worktree-person-shared-types`: REQ-2qa5r5 is superseded by REQ-54txzh
-(`2026-10-05-organisation-public-key.md`), which states the same widths and
-calls the thirty-two-byte key field the Organisation public key. What is
-said here of REQ-2qa5r5 holds for REQ-54txzh, which carries this exemption
-and this evidence; REQ-2qa5r5 is named as the record of the earlier text. The same holds for the
-next paragraph's exemption.)*
 
 **What that test gates, and what it does not — both measured.** It gates the
 four widths, and it reds honestly on each of them. The obvious mutation
@@ -1152,7 +1149,7 @@ past the ABI field without changing the inner array's type. Applied once per
 width it produced `left: 32 / right: 20` on `OrgAdmin`, `64 / 32` on
 `OnChainRootHash`, `64 / 32` on `OrgPubKey` and `16 / 8` on `Epoch`, with
 `epoch_display_is_the_inner_value` green throughout. There is no abnormal-input
-case beside those four and there is not meant to be: REQ-2qa5r5 constrains a
+case beside those four and there is not meant to be: REQ-54txzh constrains a
 declaration, so it has no runtime input domain — the only thing there is to
 malform is the type itself, which is what the four mutations above do. That
 exemption is recorded at review round 2 (finding-5), which found this the one
@@ -1171,10 +1168,6 @@ reading: shifting both regions in
 `decode_uint256_to_u64` from `bytes[..24]`/`bytes[24..32]` to
 `bytes[..16]`/`bytes[16..24]`, each keeping its width so the crate still
 compiles — left `type_widths` **green, 2 passed**.
-
-*(Note 2026-10-05, review round 3, finding-13: the REQ-2qa5r5 of this
-paragraph is superseded by REQ-54txzh, which the same test verifies; see the
-note above.)*
 
 **That is a documentation-accuracy point and not a coverage hole**, and the same
 negative control is what establishes the difference rather than asserting it:
@@ -1302,7 +1295,8 @@ to the consumer as a reorganisation carrying the identity — hash and number
 both — of the head that was discarded; every height between the last head
 processed and the new one is read, in ascending order, so that no block's events
 are silently omitted; and a head already processed is not reported a second
-time. mitigates: HAZ-xd4urb
+time.
+mitigates: HAZ-xd4urb
 
 **What this control no longer says**, narrowed at review round 3 (finding-1) and
 recorded at the control rather than left to the residual. It opened, until that
@@ -2085,10 +2079,10 @@ assesses: REQ-xudf25
 
 assesses: REQ-4astjb
 
-- **REQ-2qa5r5** (the public newtypes representing an Organisation state's
+- **REQ-54txzh** (the public newtypes representing an Organisation state's
   fields, and the Organisation admin its slot is keyed on, have exactly the
   widths the contract's ABI gives them: Membership root 32 bytes, the
-  Organisation's signing key 32, Epoch 8, Organisation admin 20 —
+  Organisation public key 32, Epoch 8, Organisation admin 20 —
   `OnChainRootHash`, `OrgPubKey`, `Epoch`, `OrgAdmin`): realises RC-sxjnx9
   against HAZ-xfg9cz. No
   hazard impact — it constrains a declaration, not a behaviour — but it is the
@@ -2126,11 +2120,12 @@ assesses: REQ-4astjb
   not true now. The owner ruled (2026-10-04) that the field is the
   Organisation's X25519 key-agreement key and never a signing key. The root
   `docs/CONTEXT.md` now defines *Organisation public key* for it, and both
-  glossaries use that term. REQ-54txzh supersedes REQ-2qa5r5 with that term
-  and is assessed in `on-chain-client/docs/risk/2026-10-05-organisation-public-key.md`.
-  This assessment stays as the record of REQ-2qa5r5.
+  glossaries use that term, and the requirement now states the field with it
+  (`on-chain-client/docs/requirements/2026-10-05-organisation-public-key.md`;
+  the rename is assessed in
+  `on-chain-client/docs/risk/2026-10-05-organisation-public-key.md`).
 
-assesses: REQ-2qa5r5
+assesses: REQ-54txzh
 
 - **REQ-9wwenn** (refuse an epoch whose value does not fit the representable
   range rather than truncating it): realises RC-sxjnx9 against HAZ-xfg9cz. No

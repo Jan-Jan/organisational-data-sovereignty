@@ -2,7 +2,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Revocation notices and removal acknowledgements: the notices a removal
 //! produces, the decision on a received notice, and the check of a received
-//! acknowledgement. A store holds one current record (LLR-d925uu), and
+//! acknowledgement. A store holds one current record (LLR-f5wrjx), and
 //! `accept` decides but deletes nothing (the removal is `verify`'s).
 
 mod support;
@@ -156,9 +156,9 @@ fn acknowledgement_signed_bytes_are_the_domain_then_the_postcard_tuple() {
     assert_eq!(ACK_DOMAIN, b"ods/org-node/revocation-acknowledgement/v1");
 }
 
-/// verifies: LLR-bs6yxf, PR-y6ay44
+/// verifies: LLR-bs6yxf
 ///
-/// PR-y6ay44: the signed bytes are the domain, then exactly the tuple's
+/// Regression: the signed bytes are the domain, then exactly the tuple's
 /// postcard encoding. Boundary: the epoch's varint at one byte (127), two
 /// bytes (128, 300) and its longest (`u64::MAX`, ten bytes).
 #[test]

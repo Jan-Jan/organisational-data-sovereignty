@@ -9,7 +9,8 @@
 # break every `verifies:` and `traces:` reference pointing at it.
 #
 # Nothing allocates these against a base branch, which is the whole point:
-# two worktrees, or two GitHub PRs, mint independently and never contend.
+# two worktrees, or two GitHub PRs, mint independently and wait on nothing.
+# They can mint the same ID; that is improbable.
 #
 # Collisions are DETECTED, not prevented. A candidate already present anywhere
 # in this tree — tracked or untracked, definition or reference — is discarded
@@ -30,7 +31,7 @@ set -u
 # inference below must never override an explicit choice.
 gr_config_env="${GR_CONFIG:-}"
 # The caller's directory, captured before the cd to the repository root: it is
-# the unit-selection signal (architecture item 7) and exists nowhere else.
+# the unit-selection signal and exists nowhere else.
 caller_pwd=$(pwd -P)
 
 . "$(dirname "$0")/lib.sh"
@@ -48,7 +49,7 @@ if [ "${1:-}" = "--unit" ]; then
     shift 2
 fi
 
-# Unit selection (architecture item 7). In a manifest repository an ID must
+# Unit selection. In a manifest repository an ID must
 # be minted against SOME unit's config — the gates that will ever check the
 # item are that unit's. Inside a unit, the caller's cwd states which; --unit
 # states it explicitly; nothing else is inferred, because a wrong guess mints
@@ -153,7 +154,7 @@ draw() {
     # returning short — /dev/random on an entropy-starved host — still waits
     # here, because one dd is still one blocking read(). That is the documented
     # behaviour of such a device and not something to work around without a
-    # portable timeout; it is recorded as a gap in the verification record. A
+    # portable timeout, so it is a known gap: no portable sh bounds the wait. A
     # FIFO, the other blocking case, is rejected above.
     #
     # One 4 KiB
@@ -192,9 +193,8 @@ while [ "$n" -lt "$count" ]; do
         gr_contains "$minted" "$cand" && continue
         # Status checked, stderr not suppressed: a scan that errors finds
         # nothing, and "found nothing" is exactly what a free token looks like.
-        # Tree-wide even under scope — IDs are one global namespace
-        # (architecture item 5's DUPLICATE-ID reasoning applies at mint time
-        # identically).
+        # Tree-wide even under scope — IDs are one global namespace, as
+        # check-ids.sh's DUPLICATE-ID reads them.
         git grep -q --untracked -F -e "$cand" -- . "$GR_SCAN_EXCLUDE"
         _st=$?
         [ "$_st" -le 1 ] || gr_die "scanning for an existing $cand failed (git grep exit $_st)"

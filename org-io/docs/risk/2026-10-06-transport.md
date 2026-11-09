@@ -47,7 +47,8 @@ buffer, builds iroh's secret key from it, moves that key into the endpoint
 builder and zeroises the buffer before returning; iroh's secret-key type is
 named nowhere else in org-io; org-io never clones, renders, serialises, logs
 or stores the seed or the key, never calls the endpoint's secret-key
-accessor, and never hands an endpoint to the app. mitigates: HAZ-v9bu8b
+accessor, and never hands an endpoint to the app.
+mitigates: HAZ-v9bu8b
 
 *Rewritten 2026-10-06 before first merge (owner ruling of that day):* the
 first design had org-node convert the seed into iroh's key through an
@@ -77,7 +78,8 @@ non-cloneable, non-printable device-secret value, and on write the bytes are
 lent to the keychain call only inside that value's single scoped write; org-io
 never clones, compares, renders, logs, serialises or stores the bytes or the
 value, keeps neither beyond the one org-node operation it was read for, and
-writes the secret nowhere but the keychain. mitigates: HAZ-v9bu8b
+writes the secret nowhere but the keychain.
+mitigates: HAZ-v9bu8b
 
 The second named move-only path (owner ruling, 2026-10-06), built the same
 way as RC-pt49zn: the type removes the routes out, and the source scan pins
@@ -125,17 +127,17 @@ accepted").
 ### One stalled connection
 
 *Added 2026-10-15 before first merge (S4 review round 2, finding 1;
-PR-d2p5y2; owner ruling of that day: fix the mediums).* HAZ-4n7pss bounds
+owner ruling of that day: fix the mediums).* HAZ-4n7pss bounds
 what one stream can make the node buffer; it says nothing of how long one
 connection can hold the accept path, and the round-2 review found that one
 connection could hold it for ever.
 
-**HAZ-4hj5m9**: a Persona's endpoint reads one inbound connection at a time with no time limit, so any peer that completes the QUIC handshake (LLR-wvgec4 takes every one) and then opens no stream, or never finishes its body, holds the endpoint's only accept loop; while it holds it, no other connection to that Persona's Device is accepted, and a Member does not receive a membership change, a revocation among them, when a decision needs it. Severity: S3. Probability: P2.
+**HAZ-4hj5m9**: a Persona's endpoint reads one inbound connection at a time with no time limit, so any peer that completes the QUIC handshake (the accept path takes every one) and then opens no stream, or never finishes its body, holds the endpoint's only accept loop; while it holds it, no other connection to that Persona's Device is accepted, and a Member does not receive a membership change, a revocation among them, when a decision needs it. Severity: S3. Probability: P2.
 
 S3 as HAZ-4n7pss: the harm is the same, a Member unable to receive a
 membership change. P2: it needs no flood and no skill, one idle connection
 from anything that can reach the endpoint, and the code before the fix
-offered no bound at all (PR-d2p5y2).
+offered no bound at all.
 
 **RC-96w7nf**: org-io reads each inbound connection in a task of its own and drops it, with a typed failure, when its handshake, its stream's open and its body have not completed within a fixed time limit (`CONNECTION_TIME_LIMIT`, 30 s); an endpoint reads at most a fixed number of connections at once (`CONNECTIONS_AT_ONCE`, 16), so a connection that stalls holds one slot, for at most the limit, and the bodies in flight stay bounded. mitigates: HAZ-4hj5m9
 
@@ -183,7 +185,8 @@ receiver holding the lock, filed 2026-10-06).
 **RC-97kdfv**: org-io's receive loop waits for connections and reads streams
 holding no lock on the service state or the store, and takes that state only
 for the synchronous org-node calls that judge and commit a received message
-and for the store write after them. mitigates: HAZ-esd966
+and for the store write after them.
+mitigates: HAZ-esd966
 
 Inherent safety by design: there is no lock to hold while waiting, because
 the wait and the judgement are separated by ruling B. Implemented by
@@ -246,7 +249,8 @@ and "create when absent" is the natural first implementation.
 is missing, with a typed error naming the Persona, leaves the store file
 untouched, and never creates a new device secret, store or Persona in its
 place; a new Persona is created only by the explicit create operation, for
-a Persona that has no store. mitigates: HAZ-eyene4
+a Persona that has no store.
+mitigates: HAZ-eyene4
 
 Implemented by REQ-fh5gsq. Verified by a test against the mock keychain:
 remove the item, try to open, see the refusal and the store file's bytes
@@ -330,10 +334,11 @@ one other Device the rest are always stale.
 **RC-wbs9ch**: in Networked mode, org-io sends every committed update to
 every Device the committed record lists other than its own, and a
 revocation to every Device the update removed, attempting each whatever
-happened to the others and reporting each outcome. mitigates: HAZ-5qk64w
+happened to the others and reporting each outcome.
+mitigates: HAZ-5qk64w
 
-Implemented by REQ-6skn67, with the per-recipient messages provided by
-org-node (REQ-jxyh9c). Verified by an end-to-end test over two or more
+Implemented by REQ-nactq6, with the per-recipient messages provided by
+org-node (REQ-u894ty). Verified by an end-to-end test over two or more
 recipient endpoints, one of them unreachable, in which every reachable
 Device commits and the unreachable one is reported.
 
@@ -366,8 +371,8 @@ traffic. Severity: S3. Probability: P2.
 P2: the address is copy-pasted between people, and nothing upstream
 detects the alteration (org-node's open problem report on loopback sends to
 an unchecked address, opened 2026-09-09, which moves here). *(Moved and
-resolved 2026-10-13, S4 task T12: PR-2dmjzj, by the address check of
-LLR-r9sh6k; reproduced by
+resolved 2026-10-13, S4 task T12, by the address check now stated by
+LLR-34tfm8; reproduced by
 `loopback_to_an_address_of_no_recipient_is_refused_and_sends_nothing`.)*
 
 **RC-d6f25u**: org-io sends in Loopback mode only to an address whose
@@ -384,8 +389,7 @@ owner on 2026-10-06** under ruling D (see "Residuals the owner accepted").
 
 ## A revoked Device's inbound connection
 
-*Added 2026-10-07 before first merge (owner ruling 8 of that day, plan
-`docs/plans/2026-10-06-org-io-transport.md`).* Members accept inbound
+*Added 2026-10-07 before first merge (owner ruling 8 of that day).* Members accept inbound
 connections from Devices they hold as revoked, for acknowledgements only.
 
 **HAZ-abm3xs**: a Device a Member holds as revoked opens a connection to that
@@ -403,35 +407,6 @@ on its removal. Severity: S3. Probability: P2.
 P2: the inbound side is the first thing a removed Device reaches, and both
 mistakes are easy: a reply written "to be helpful" on the same stream, or an
 allow-list added to cut connection floods.
-
-**RC-b4m5sj**: org-io accepts an inbound connection from any Device whose
-handshake completes, with no accept-time allow-list and whether the path is
-direct or relayed; it hands each message to org-node's single receive path
-with the connection's authenticated DevicePublicKey, so org-node's
-member-sender rule (owner ruling R1; org-node's controls in its
-`risk/2026-10-07-commit-workflow.md`)
-decides it and only an acknowledgement from a revoked Device can be acted
-on; and it writes on an inbound connection only one verdict byte, accepted
-or refused, never Organisation data. mitigates: HAZ-abm3xs
-superseded-by: RC-6m89tr
-
-Implemented by REQ-ur7z4a (with REQ-fnsjb6, which hands the sender over).
-Verified in develop (plan task T11a) by a normal-case test (a revoked
-Device's acknowledgement over a direct connection is accepted and answered
-"accepted") and abnormal-input tests (the same Device's Organisation
-information, revocation or undecodable bytes are refused with no chain read,
-no store write and nothing on the connection but "refused"; an
-acknowledgement a Member still listing the Device refuses, and one relayed
-by another Device, are answered "refused"), and by source scans of the
-accept path and the verdict write.
-
-Residual: Severity S3, probability P1 after the control: a defect in
-org-node's member-sender rule itself is org-node's hazard, analysed in
-its risk file with that rule's control; connection floods from revoked
-Devices are HAZ-4n7pss's residual. ~~Not accepted: pending the owner's
-benefit-risk ruling (ruling D; plan §16.4).~~ **Accepted by the owner on
-2026-10-08** under ruling D (plan §16.4 point 2; see "Residuals the owner
-accepted").
 
 ## Residuals the owner accepted (2026-10-06)
 
@@ -485,7 +460,7 @@ HAZ-v9bu8b is not a risk put to acceptance (the never-expose ruling).
 
 Accepted 2026-10-08 (owner ruling on plan §16.4 point 2):
 
-- **HAZ-abm3xs under RC-b4m5sj, accepted.** Benefit: a revoked Device can
+- **HAZ-abm3xs under the revoked-Device inbound control (now RC-6m89tr), accepted.** Benefit: a revoked Device can
   deliver its signed acknowledgement directly to a Member, so the
   Organisation learns that the removal was acted on, and the revoked Device
   can end its delivery and delete its Device secret and kept addresses as
@@ -530,28 +505,6 @@ UI reports the receiver as running, so updates stop arriving unnoticed. A
 typed condition makes stopping a decision on a type, which a test pins.
 
 assesses: REQ-8e57wm
-
-### REQ-fnsjb6 (one receive path, chain read after the checks)
-
-No new hazard; it closes two. One path means a first admission the user
-declared is committed (before S4 it was refused, so an admitted invitee
-never joined) and that no message kind can fall through a path that does
-not handle it. Reading the chain only after the chain-free checks keeps a
-peer from driving chain reads by sending garbage, and at most once per
-message bounds the reads a peer can cause to its accepted messages.
-
-assesses: REQ-fnsjb6
-
-### REQ-ur7z4a (a revoked Device may connect, for its acknowledgement only)
-
-Assessed with RC-b4m5sj above, which it implements (added 2026-10-07, owner
-ruling 8). It adds no message kind and no path by which a removed Device can
-change a record: what it accepts is decided by org-node's member-sender rule,
-and what it returns is one verdict byte. Its benefit is that a revoked
-Device can end its acknowledgement delivery, and so delete its Device secret
-and kept addresses, as soon as three Members have accepted (S3 proposed 8).
-
-assesses: REQ-ur7z4a
 
 ### REQ-g9cu2c (only sealed bytes, written before success)
 
@@ -632,18 +585,6 @@ RC-5wz559 unchanged). No new hazard and no new control.
 
 assesses: LLR-2smrvx
 
-### REQ-a2a6rm (the admission sequence)
-
-No new hazard: the order is the one the app ran (write, then commit, then
-send, then settle), now in one unit. Settling after the commit whether or not
-a send succeeded stops the same reply from being admitted twice, which would
-otherwise build a second admission for a Member already admitted; a failed
-send is reported and the joiner's Device is reached by the fan-out's
-residual route (S6, S7). Stopping before the chain write when the build fails
-means no chain state exists that no record matches.
-
-assesses: REQ-a2a6rm
-
 ### REQ-pnr6kh (outstanding invites only in the sealed store)
 
 No hazard impact beyond a benefit: the plain file disclosed which
@@ -654,115 +595,20 @@ inviter issues a new Invite.
 
 assesses: REQ-pnr6kh
 
-### The invitation requirements and the bound-Persona refusal (moved, S4 task T13)
-
-*Moved 2026-10-14, plan task T13 (ruling A), with the items, from the app's
-invitation assessment (`app/docs/risk/2026-10-06-invitation.md`) and its
-key-pair assessment (`app/docs/risk/2026-10-07-org-key-pair.md`), and
-assessed again against org-io's hazards.* There: producing an Invite with
-32 random bytes as its identifier, and refusing a reply naming no
-identifier outstanding, make a reply that names one a reply to that Invite
-and keep an unsolicited reply from reaching an admission; review round 2
-(2026-10-06) found an identifier was outstanding for every Organisation, so
-a reply echoing one Invite's identifier could reach an admission to another
-Organisation the device holds, and the refusal was narrowed to the pair
-(Organisation, identifier), after which no new hazard was recorded. The
-reply is the disclosure the app's hazard on an unverified Invite analyses,
-controlled by the app's confirmation; the declaration realises org-node's
-control on first admissions, and a stale declaration only lets a
-chain-valid admission for that Organisation be read; the key-pair change's
-amendment (the declaration names the Organisation alone) left that
-residual unchanged. The bound-Persona refusal removes a hazard: a Persona
-bound to one Organisation could found a second or reply to an Invite to
-one, and a commit could then rebind it silently; refusing before the chain
-is written and before an expectation is declared acts on nothing.
-
-Against org-io's hazards: the outstanding pairs and the expectation are now
-in the sealed store (REQ-pnr6kh) and each is written before the Blob is
-returned (LLR-h9qf3s, LLR-9cb443), so a failed write returns no Blob and
-reloads the Persona from its file (RC-37y46c's reload, through LLR-murjr6):
-an Invite whose identifier was not kept is never handed out, and a reply
-whose expectation was not kept is never sent. The settle follows the commit
-(REQ-a2a6rm, assessed above). The confirmation is checked before anything
-is parsed or written. None of the four bears on the device secret, the
-stream, the chain read or the fan-out. No new hazard and no new control.
-
-assesses: REQ-prjja8, REQ-tcutr6, REQ-65xqp8, LLR-rt8gdz
-
-### REQ-n82q47 (the total peer-address parse)
-
-No hazard beyond availability, and that is removed: a parse that panics on
-hostile text would take the node down from the UI. Totality is fuzzed.
-Where the parsed address sends is RC-d6f25u's matter, not the parse's.
-
-assesses: REQ-n82q47
-
-### The Loopback dial and the peer-address parse (moved, S4 task T12)
-
-*Moved 2026-10-13, plan task T12 (ruling A), with the items, from org-node's
-architecture-derived assessment and its chain-authority assessment (the
-revocation dial's refusal without an address) and from the app's derived and
-invitation assessments (the revocation's and the admission's peer-address
-decode).* The three items were derived there; here each is re-parented
-(LLR-pw369n to REQ-8trkps; the revocation's and the admission's decode items
-to REQ-n82q47), so the assessments are carried for the record and assessed
-again against org-io's hazards.
-
-*Moved back to the app 2026-10-15 (S4, TEST conformance review finding-4):*
-the two peer-address decode items returned to the app's design ledger,
-derived again there, because they state what the app's commands do with the
-peer-address text; their assessments are in force again in the app's risk
-ledger (`app/docs/risk/2026-10-05-derived.md` and the invitation
-assessment), and they left the `assesses:` line below. What is said of them
-here is kept as history; REQ-n82q47's own assessment above still covers the
-parse.
-
-There, the refusal of a Loopback revocation with no address was first
-assessed as fail-closed, then corrected when org-node's revocation-order
-report showed the check sat after the chain write and burned an epoch; since
-2026-10-05 the refusal follows a commit the chain already agrees with, so it
-costs no epoch, and the administrator is told the revocation's message was
-not sent. The decode was assessed against the app's hazard of a revocation
-the form blocks: an empty address is absent, a supplied one that does not
-decode is refused rather than dropped, visibly, and the operator can correct
-it. Neither minted a hazard or a control.
-
-Against org-io's hazards: LLR-pw369n is now one of RC-d6f25u's two refusals
-(no address), with the address check of LLR-r9sh6k beside it, and the commit
-stands whatever the send did (RC-wbs9ch's "leave the committed record in
-place"); a recipient not sent to stays on the earlier record, which is
-HAZ-5qk64w's accepted Loopback residual. The parse items state what
-REQ-n82q47 states, totality fuzzed; where a parsed address sends is
-RC-d6f25u's. No new hazard and no new control.
-
-assesses: LLR-pw369n
-
-### LLR-nqdr97 (a refused update changes nothing)
-
-*Added 2026-10-15 (S4, owner ruling of that day).* No new hazard; it closes
-one path to an existing one. A revocation org-node refuses to build (a
-Member id the record does not hold) leaves the record, the held provisional
-updates, the chain and every Device exactly as they were. Against HAZ-5qk64w
-nothing is sent, so no Device moves to a record others do not hold; against
-HAZ-dd78f9 the refusal returns before any store write is made, so no store
-replacement is started. Whether to build the update is org-node's judgment
-and stays in org-node's risk file. No change to any control's effectiveness.
-
-assesses: LLR-nqdr97
-
-### The expectations on org-node (REQ-x6kdse, REQ-tzr3dk, REQ-jxyh9c, REQ-txkm94, REQ-v6r2gd, REQ-qza96g)
+### The expectations on org-node (REQ-x6kdse, REQ-v6r2gd, REQ-qza96g)
 
 These state what org-io relies on org-node for under ruling B; each is met
 by an exported org-node requirement. (A fifth, for an endpoint-secret type in
 org-node, was dropped before first merge by the owner's ruling of 2026-10-06
-that org-io builds the endpoint key itself.) For the first four: no new
+that org-io builds the endpoint key itself.) For REQ-x6kdse, and for S4's three other expectations (since replaced by
+the domain API's REQ-2yw5y3, REQ-u894ty and REQ-2xgsbn): no new
 hazard. They move
 behaviour that org-node already had behind IO calls to the same behaviour
 returning values; the hazards of building, sealing, judging and committing
 stay org-node's analysis. Their safety value is the split itself: org-io
 cannot interpret the store (REQ-x6kdse), cannot choose recipients or message
-kinds (REQ-jxyh9c), cannot bypass the single receive path (REQ-tzr3dk), and
-cannot forge an Invite or settle one outside the store (REQ-txkm94).
+kinds, cannot bypass the single receive path, and cannot forge an Invite or
+settle one outside the store.
 
 The two keychain expectations, added 2026-10-06 with the owner's keychain
 rulings: REQ-v6r2gd (the transient device-secret value) is assessed with
@@ -770,4 +616,4 @@ RC-jgyd6m, and REQ-qza96g (the device-keyed store, no passphrase) with
 RC-d8dbxs, both of which they help implement. REQ-x6kdse's "transient device
 secret" replaces its passphrase; its assessment above is unchanged.
 
-assesses: REQ-x6kdse, REQ-tzr3dk, REQ-jxyh9c, REQ-txkm94, REQ-v6r2gd, REQ-qza96g
+assesses: REQ-x6kdse, REQ-v6r2gd, REQ-qza96g

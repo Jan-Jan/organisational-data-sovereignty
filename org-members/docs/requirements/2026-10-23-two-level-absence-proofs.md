@@ -1,17 +1,16 @@
 # Two-level absence proofs
 
 A revocation proof hides the holder's other DevicePublicKeys (owner ruling
-2026-10-22). The absence proof of
-`2026-10-06-absence-proofs.md` ends in the Member's whole leaf, its
-DevicePublicKeys included; its successor shows a DevicePublicKey's absence in
+2026-10-22). The first absence proof ended in the Member's whole leaf, its
+DevicePublicKeys included; this one shows a DevicePublicKey's absence in
 two steps, both built on the sparse Merkle tree of the `sparse-merkle-tree`
 unit (owner ruling 2026-10-23): the Member's leaf, which commits to its device
 root and holds no DevicePublicKey, is included under the membership root, and
 the DevicePublicKey is absent under that device root. A MemberId that holds
 no Member is shown, as before, by its absence under the membership root.
 
-REQ-yyuxh8 (no other Member's data) and the refusals of the old items carry
-over unchanged.
+REQ-yyuxh8 (no other Member's data) and the refusals of the first proof's
+requirements carry over unchanged.
 
 ## Production
 
@@ -23,8 +22,7 @@ leaf included under the membership root and the DevicePublicKey's absence
 under that leaf's device root; it shall include no DevicePublicKey other than
 the given one, and shall refuse, with an error that says which, when the record
 is not calculated or when that Member holds that DevicePublicKey.
-supersedes: REQ-535jcd
-(implements: RC-5nka8z)
+implements: RC-5nka8z
 satisfies: derived
 exported: yes
 
@@ -36,8 +34,7 @@ that the MemberId holds no Member, or that the Member's leaf under that MemberId
 is included and that the DevicePublicKey is absent under that leaf's device
 root; it shall reject every other proof with an error that says which of these
 failed.
-supersedes: REQ-tk2qqj
-(implements: RC-j2znx8)
+implements: RC-j2znx8
 satisfies: derived
 exported: yes
 

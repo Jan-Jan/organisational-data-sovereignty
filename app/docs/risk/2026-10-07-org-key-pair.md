@@ -6,8 +6,8 @@ Class C. The owner's rulings are in
 
 ## Derived requirements assessment
 
-*Moved 2026-10-14 (S4, task T13 of docs/plans/2026-10-06-org-io-transport.md,
-ruling A).* The assessment that stood here, of the reply requirement as the
+*Moved 2026-10-14 (change `worktree-org-io-transport`, S4 task T13;
+ruling A: an item moves with the code that realises it and keeps its ID).* The assessment that stood here, of the reply requirement as the
 key-pair change amended it (the expectation names the Organisation alone; no
 new hazard), moved with the requirement to org-io's risk ledger
 (`org-io/docs/risk/`, the transport file of change

@@ -50,16 +50,6 @@ error a caller of the client surface is handed, and the stream those
 observations arrive on.
 traces: REQ-54txzh, REQ-5upq6n, REQ-ntn4ss
 
-*Traces amended 2026-10-20 (change worktree-org-io-domain-api): REQ-2qa5r5 →
-REQ-54txzh (already traced).*
-
-(Note, 2026-10-05: REQ-2qa5r5 is superseded by REQ-54txzh, which names the
-second field the Organisation public key. It stays in the trace above as
-history, beside its replacement. *Corrected 2026-10-30 (merge review round 1
-of change worktree-org-io-domain-api):* it no longer stays there. The
-2026-10-20 amendment above removed REQ-2qa5r5 from the trace, which keeps
-its replacement REQ-54txzh.)
-
 `SubscribedEvent` distinguishes an observation taken from a best block from one
 taken from a finalised block. That distinction is carried by the type but
 **required by nothing** — this unit's SRS explicitly declines to state it (see
@@ -71,11 +61,8 @@ requirement here. An LLR must refine a requirement; there is none to refine.
 **LLR-xv7auy**: each on-chain field is a public, distinct newtype whose width is
 the ABI's — `OnChainRootHash` and `OrgPubKey` thirty-two bytes, `Epoch` a
 `u64`, `OrgAdmin` twenty — so that two fields of equal width cannot be
-substituted for one another. satisfies: REQ-2qa5r5, REQ-54txzh
-
-(Note, 2026-10-05: LLR-xv7auy satisfies REQ-54txzh. REQ-2qa5r5, which
-REQ-54txzh supersedes, stays in the line above as history, beside its
-replacement.)
+substituted for one another.
+satisfies: REQ-54txzh
 
 **LLR-z8rrkr**: a decoded event is carried together with the twenty-byte
 address of the contract that emitted it, as one value, so that the address
@@ -83,7 +70,8 @@ cannot be dropped between decoding and the admission decision that needs it.
 satisfies: REQ-5upq6n
 
 **LLR-b4p32h**: a head is carried as a reference holding both its hash and its
-number, so that a discarded head can be named by both. satisfies: REQ-ntn4ss
+number, so that a discarded head can be named by both.
+satisfies: REQ-ntn4ss
 
 ## SDD-5b8wxs — Account-to-address derivation
 
@@ -100,11 +88,13 @@ satisfies: REQ-tkhe3u
 
 **LLR-3bkhuc**: `h160_of` returns the last twenty bytes of the keccak-256 of
 the whole thirty-two byte identifier whenever any one marker position does not
-hold the marker byte. satisfies: REQ-rz7fja
+hold the marker byte.
+satisfies: REQ-rz7fja
 
 **LLR-7pjzjn**: the marker positions are bytes twenty through thirty-one
 inclusive and the marker byte is `0xEE`, so the branch is decided by those
-twelve bytes and no others. satisfies: REQ-tkhe3u, REQ-rz7fja
+twelve bytes and no others.
+satisfies: REQ-tkhe3u, REQ-rz7fja
 
 ## SDD-bw7v5x — Solidity storage-slot derivation
 
@@ -123,14 +113,17 @@ satisfies: REQ-9m2rnd
 
 **LLR-62tqnv**: the map's slot index occupies the low eight bytes of that
 second word, big-endian, so a different declared map slot yields a different
-key for the same Organisation admin. satisfies: REQ-9m2rnd
+key for the same Organisation admin.
+satisfies: REQ-9m2rnd
 
 **LLR-bhwsn6**: `increment_slot` adds its offset to a thirty-two byte
 big-endian slot identifier, propagating carry from the least significant
-byte upward. satisfies: REQ-xudf25
+byte upward.
+satisfies: REQ-xudf25
 
 **LLR-2y9qdc**: an increment that carries out of the most significant byte
-wraps to zero rather than panicking or saturating. satisfies: derived
+wraps to zero rather than panicking or saturating.
+satisfies: derived
 
 **LLR-v62yjq**: the base Slot key and the two keys above it, at which an
 Organisation slot's three fields live, are consecutive and pairwise distinct.
@@ -152,7 +145,8 @@ satisfies: REQ-hd6m9d
 **LLR-u8ajby**: `for_runtime` returns `UnsupportedRuntime` naming the version it
 was asked about for every other Runtime spec version, including the ones
 immediately below and above the pinned one and the extremes of the range —
-never a nearest match and never a default. satisfies: REQ-hd6m9d
+never a nearest match and never a default.
+satisfies: REQ-hd6m9d
 
 ## SDD-d5jh6t — The event log decoder
 
@@ -167,11 +161,13 @@ traces: REQ-52uc8f, REQ-5upq6n, REQ-wnjz9j, REQ-n6v896, REQ-88fp2h, REQ-twdu84, 
 
 **LLR-e6skvu**: exactly two Event signature values are recognised, each the
 keccak-256 of one of the two canonical Solidity signature strings the deployed
-contract declares. satisfies: REQ-52uc8f
+contract declares.
+satisfies: REQ-52uc8f
 
 **LLR-u2e389**: the Emitting contract is read from the `ContractEmitted`
 payload and returned to the caller alongside the decoded event rather than
-dropped. satisfies: REQ-5upq6n
+dropped.
+satisfies: REQ-5upq6n
 
 **LLR-rjcqg3**: a log whose first topic matches neither recognised signature,
 and a log carrying no topics at all, yield no event and no error.
@@ -180,26 +176,32 @@ satisfies: REQ-wnjz9j
 **LLR-n6gghu**: `GenesisInitialized` requires exactly two topics and sixty-four
 data bytes and `RootUpdated` exactly three topics and ninety-six; any other
 count or length is refused with a typed error naming the event, the expected
-value and the actual. satisfies: REQ-88fp2h
+value and the actual.
+satisfies: REQ-88fp2h
 
 **LLR-89pdz9**: an indexed address topic is refused when any of its twelve
 leading pad bytes is non-zero, and yields the topic's low twenty bytes when all
-twelve are zero. satisfies: REQ-twdu84
+twelve are zero.
+satisfies: REQ-twdu84
 
 **LLR-8242kq**: a payload carrying bytes beyond the three fields it declares is
 refused naming the trailing count, and one ending inside a field or inside a
-field's own length prefix is refused. satisfies: REQ-axcxf7
+field's own length prefix is refused.
+satisfies: REQ-axcxf7
 
 **LLR-6tjhgk**: a structurally valid event decodes back to every field it
 carried — both event shapes, the Emitting contract included — without loss,
-reordering or defaulting. satisfies: REQ-n6v896
+reordering or defaulting.
+satisfies: REQ-n6v896
 
 **LLR-2v5u4d**: no sequence of bytes offered to this decoder causes a panic or
-an abort; every rejection is a typed error. satisfies: REQ-sx5b6g
+an abort; every rejection is a typed error.
+satisfies: REQ-sx5b6g
 
 **LLR-mzh8df**: `RootUpdated`'s indexed Epoch topic is bounded to the range
 this reader represents, so an on-chain Epoch above it is refused rather than
-truncated to it. satisfies: REQ-9wwenn
+truncated to it.
+satisfies: REQ-9wwenn
 
 ## SDD-f2s7bx — The Organisation state decoder
 
@@ -216,17 +218,14 @@ every other length — shorter, longer, empty, or a whole number of slots other
 than three — with a typed error naming both the expected and the actual length.
 satisfies: REQ-4astjb
 
-**LLR-nq7nhg**: the ninety-six bytes are read as the Membership root in the
-first slot, the Organisation's signing key in the second and the Epoch in the
-third, each at its own thirty-two byte offset. satisfies: REQ-4astjb
-superseded-by: LLR-hezpr7
-
 **LLR-emp3g9**: the Epoch slot is a big-endian `uint256` whose high twenty-four
 bytes must all be zero; a non-zero byte anywhere in them is refused, never
-truncated to the low eight. satisfies: REQ-9wwenn
+truncated to the low eight.
+satisfies: REQ-9wwenn
 
 **LLR-yhw34z**: no sequence of bytes offered to this decoder causes a panic or
-an abort; every rejection is a typed error. satisfies: REQ-sx5b6g
+an abort; every rejection is a typed error.
+satisfies: REQ-sx5b6g
 
 ## SDD-4z3k2u — Subscriber admission
 
@@ -234,18 +233,22 @@ an abort; every rejection is a typed error. satisfies: REQ-sx5b6g
 
 **SDD-4z3k2u**: the decision whether a decoded log belongs to the organisation
 this reader watches — the contract that emitted it, and the Organisation admin
-a subscription filters on. traces: REQ-9vwcwc, REQ-nygs7k
+a subscription filters on.
+traces: REQ-9vwcwc, REQ-nygs7k
 
 **LLR-2znra8**: a decoded log is refused unless the contract that emitted it is
 the one the reader was constructed for, so that a matching Organisation admin
-never rescues a foreign log. satisfies: REQ-9vwcwc
+never rescues a foreign log.
+satisfies: REQ-9vwcwc
 
 **LLR-kfr75c**: with no admin filter set every log from the configured contract
 is admitted; with one set, only a log whose Organisation admin equals the named
-one is. satisfies: REQ-9vwcwc, REQ-nygs7k
+one is.
+satisfies: REQ-9vwcwc, REQ-nygs7k
 
 **LLR-9qp3k7**: the Organisation admin compared against the filter is read from
-both event shapes alike. satisfies: REQ-nygs7k
+both event shapes alike.
+satisfies: REQ-nygs7k
 
 ## SDD-m59zrg — The best-head scan and reorg rule
 
@@ -258,17 +261,20 @@ traces: REQ-ntn4ss, REQ-gr2ver, REQ-5zux82
 
 **LLR-d3ef7s**: a notification whose hash equals the last processed head's
 yields nothing and leaves the last processed head unchanged, whatever number it
-carries. satisfies: REQ-gr2ver
+carries.
+satisfies: REQ-gr2ver
 
 **LLR-56bzcj**: a reorg is reported when a head has already been processed, the
 new head's hash differs from that head's, and the new head is either at or
 below its height or at the next height with a parent other than it — and not
-otherwise, the first notification included. satisfies: REQ-ntn4ss
+otherwise, the first notification included.
+satisfies: REQ-ntn4ss
 
 **LLR-48ygak**: the heights read for a new head are the one after the last
 processed head up to and including the new head's, or the new head's height
 alone when it is at or below the last processed head's or none has been
-processed, and the span is always ascending. satisfies: REQ-5zux82
+processed, and the span is always ascending.
+satisfies: REQ-5zux82
 
 ## SDD-3b8zef — The chain-facing transport shell
 
@@ -379,8 +385,8 @@ exists anywhere in this ledger to follow** — SDD-v2rtka's two are both about
 earlier draft of this paragraph cited SDD-v2rtka as already carrying one for
 `DecodeError`; it does not, and the comparison is withdrawn. It is **not
 written here**: minting it needs a new gated cargo test target, and this tooth
-writes no new cargo targets, so it is filed as an owner item instead, alongside
-the open SDD-3b8zef entry in `docs/plans/2026-09-05-ratchet-setup.md`. This was
+writes no new cargo targets, so it is left as an owner item instead, beside
+the SDD-3b8zef gap this section records. This was
 found by the independent review of this change, not by its author.
 
 **What was already extracted, and why that is the precedent rather than the
@@ -458,9 +464,8 @@ What remains is the erasability argument above, and it is sufficient on its own.
 **Nothing is filed for this, and that is stated rather than implied.** An
 earlier draft of this passage said the option was "filed as an owner item rather
 than settled by the author". It was not filed, and declining it *is* settling
-it. The register entry now exists — `docs/plans/2026-09-05-ratchet-setup.md`,
-under the SDD-3b8zef gap — and it records the option, the erasability objection,
-and the fact that the author of this change declined it. A reader who thinks the
+it. This section is the record: the option, the erasability objection, and the
+fact that the author of this change declined it. A reader who thinks the
 judgement is wrong should be able to find the judgement, not a claim that
 somebody else will make it.
 
@@ -494,10 +499,10 @@ an annotation to a target that actually ran — not merely none inside
 decisions in the shell are chain-free and verifiable at this unit's gate, or
 the gate gains a harness that can run the chopsticks targets. Both are code or
 infrastructure changes owed their own red-first cycle, and neither belongs in a
-documentation tooth. The item is filed in
-`docs/plans/2026-09-05-ratchet-setup.md` alongside the coverage shortfall it is
-the other face of — 16.37% of `client.rs` uncovered and SDD-3b8zef having no
-verifiable LLR are the same gap measured two ways, and the register says so.
+documentation tooth. The gap is the other face of the unit's recorded coverage
+shortfall (`on-chain-client/.guardrails/config.yaml`, beside
+`coverage_command`) — 16.37% of `client.rs` uncovered and SDD-3b8zef having no
+verifiable LLR are the same gap measured two ways.
 
 ## What is not an item
 
@@ -547,10 +552,7 @@ subagent while running the gate**, which found **eighteen of the thirty-two
 carry both sides and fourteen carry one**. That count is reported here rather
 than left for a reader to rediscover, and the fourteen are argued rather than
 closed by inventing cases — the same course this unit's requirements ledger
-took for REQ-2qa5r5 and REQ-n6v896.
-*(Note 2026-10-05, review round 3, finding-13: REQ-2qa5r5 is superseded by
-REQ-54txzh, which carries the same exemption in
-`../requirements/2026-10-05-organisation-public-key.md`.)*
+took for REQ-54txzh and REQ-n6v896.
 
 **Twelve of the fourteen have their other side inside the same software
 item, carried by a sibling LLR.** That is an artifact of how these LLRs are
@@ -563,8 +565,7 @@ exactly as complete.
 | One-sided LLR | Its other side |
 |---|---|
 | LLR-b3s7st (resolves the pinned version) | LLR-u8ajby (refuses every other) — and the reverse |
-| LLR-nq7nhg (decodes the three fields) | LLR-sq76u3 (refuses every other length) — and the reverse |
-| LLR-hezpr7 (decodes the three fields, the second as the Organisation public key; supersedes LLR-nq7nhg) | LLR-sq76u3 (refuses every other length) — and the reverse |
+| LLR-hezpr7 (decodes the three fields, the second as the Organisation public key) | LLR-sq76u3 (refuses every other length) — and the reverse |
 | LLR-9qp3k7 (the admin is read from both shapes) | LLR-kfr75c (a non-matching admin is refused) |
 | LLR-u2e389 (the Emitting contract is returned) | LLR-8242kq, LLR-n6gghu (malformed payloads refused) |
 | LLR-rjcqg3 (unknown topic yields nothing) | LLR-6tjhgk (a known one round-trips every field) |
@@ -572,12 +573,6 @@ exactly as complete.
 | LLR-mzh8df (an Epoch above range is refused) | LLR-6tjhgk's `root_updated_round_trips_every_field` (an in-range Epoch decodes) |
 | LLR-2y9qdc (the wrap at the top of the space) | LLR-bhwsn6 (ordinary carry, four cases) |
 | LLR-v62yjq (three consecutive distinct keys) | LLR-2y9qdc (the boundary of the same arithmetic) |
-
-(Amended 2026-10-05: LLR-nq7nhg is superseded by LLR-hezpr7
-(`2026-10-05-organisation-public-key.md`), which restates the same decoding
-with the second field named the Organisation public key. LLR-hezpr7 takes
-LLR-nq7nhg's pairing with LLR-sq76u3; the LLR-nq7nhg row is kept as the record
-of the count above.)
 
 **The other two have no sibling at all, and their exemptions differ from each
 other.**
@@ -614,10 +609,8 @@ on `OrgAdmin` widens `size_of` to 32 and fails the width assertion at
 `OnChainRootHash` and on `OrgPubKey`, and `align(16)` on `Epoch`, reds the same
 test at `:166`, `:167` and `:175`. All four were re-run in the 2026-09-28
 falsifiability sweep. This is the same argument, on the same grounds, that this
-unit's requirements ledger records for REQ-2qa5r5, the high-level requirement
+unit's requirements ledger records for REQ-54txzh, the high-level requirement
 LLR-xv7auy refines.
-*(Note 2026-10-05, review round 3, finding-13: LLR-xv7auy also satisfies
-REQ-54txzh, which supersedes REQ-2qa5r5 and carries the same argument.)*
 
 The same holds for its **distinctness** clause, which the falsifiability sweep
 cut on 2026-09-28 and review round 5 restored on 2026-09-29 after measuring a
@@ -775,14 +768,8 @@ route exists for each, and both red this unit's gate.
   **six** integration targets: `contract_address_filter`, `storage_slot_layout`,
   `decode_revive_event`, `log_ownership`, `fuzz_event_round_trip`, and,
   decisively, **`type_widths`** — the very target annotated
-  `verifies: REQ-2qa5r5, LLR-xv7auy`. The claim is evidence-bearing at this
+  `verifies: REQ-54txzh, LLR-xv7auy`. The claim is evidence-bearing at this
   unit's own gate, through its own carrier.
-  *(Note 2026-10-05, review round 3, finding-13: the annotation now reads
-  `verifies: REQ-2qa5r5, REQ-54txzh, LLR-xv7auy`; REQ-54txzh supersedes
-  REQ-2qa5r5, which the test still verifies under its earlier name.)*
-  *(Note 2026-11-09, change `worktree-org-io-publish-2`, merge review MR1-C1:
-  the annotation now reads `verifies: REQ-54txzh, LLR-xv7auy`; the superseded
-  REQ-2qa5r5 is no longer cited.)*
 
 * **LLR-z8rrkr — "as one value", and the mutation round 4 offered for it was
   the wrong one.** Round 4 re-typed `parse_revive_event` to return
@@ -838,5 +825,4 @@ the two exceptions named above, both marked rather than assumed. It does **not**
 claim the unit is exhaustively tested, and it does not touch the shortfalls this
 file already records: SDD-3b8zef's absent LLRs and `client.rs`'s 16.37% line
 coverage. No production code was changed by the sweep; its outputs are this
-section, the two cuts, and the findings rows in
-`docs/plans/2026-09-28-on-chain-client-architecture.md`.
+section and the two cuts.

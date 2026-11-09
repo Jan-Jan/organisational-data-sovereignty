@@ -24,7 +24,7 @@ use support::sweep;
 
 // The Organisation private key never reaches a log: the record's Debug output
 // names the field and does not print the key. The key is held in a redacted
-// secret type (PR-hqwpg9), so the assertion reads the key's bytes, not its
+// secret type (REQ-y7tsft), so the assertion reads the key's bytes, not its
 // `Debug`. REQ-ech45n says nothing of how a record renders, so the test
 // verifies the derived LLR only.
 // verifies: LLR-2dvhz8

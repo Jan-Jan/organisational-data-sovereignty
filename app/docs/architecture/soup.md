@@ -92,7 +92,7 @@ Requirements are from `app/docs/requirements/`.
 | `serde` | normal | 1.0.229 | Derive layer for IPC payloads and event structs. `commands.rs`, `events.rs`, `policy.rs` | REQ-645jq9, REQ-affyf5, REQ-dp95pv, REQ-tw4cb5, REQ-kn5rtx | Derive-only. |
 | `serde_json` | normal | 1.0.151 | `serde_json::Value` event payloads emitted to the webview. `events.rs` | REQ-affyf5, REQ-dp95pv, REQ-tw4cb5, REQ-kn5rtx, REQ-jfxah3 | `events.rs:180` `.expect`s `to_value`; it relies on every payload being a plain struct of owned scalars. |
 | `tokio` | normal | 1.53.1 | `tokio::sync::Mutex` around the org-io handle (`state.rs`; around `OrgService` until 2026-10-08); `tokio::spawn` of the receiver loop (`commands.rs`, `start_receiver`); `tokio::time::interval_at` with `MissedTickBehavior::Delay` for the periodic verification (`periodic.rs`), spawned from `run`'s setup through `tauri::async_runtime::spawn` onto the same runtime | REQ-3hfggn, REQ-6hgm8r, REQ-jfxah3, REQ-5q7nyg | `sync`, `rt-multi-thread`, `macros`, `time`. The mutex serialises every command's access to the service. The dev build adds `test-util` (tokio's paused clock, for `tests/periodic.rs`). |
-| `hex` | normal | 0.4.3 | Hex encoding and decoding of keys, ids and addresses crossing IPC. `commands.rs`, `parsing.rs`, `state.rs` | REQ-sjkp8z (REQ-vgr7s2 retired 2026-10-20, change `worktree-org-io-domain-api`) | Unlike org-node, the app **parses** hex from untrusted input: `parsing.rs` and the revoke and admit handlers decode strings from the webview, and `state.rs` decodes `ODS_*` environment values. |
+| `hex` | normal | 0.4.3 | Hex encoding and decoding of keys, ids and addresses crossing IPC. `commands.rs`, `parsing.rs`, `state.rs` | REQ-sjkp8z (the peer-address requirement retired 2026-10-20, change `worktree-org-io-domain-api`) | Unlike org-node, the app **parses** hex from untrusted input: `parsing.rs` and the revoke and admit handlers decode strings from the webview, and `state.rs` decodes `ODS_*` environment values. |
 | `tauri` (`test`) | dev | 2.11.5 | `tauri::test::mock_builder`, `mock_context`, `get_ipc_response` in `tests/ipc.rs` | — | Feature unification means a dev build of the lib also sees `test`. |
 | `tempfile` | dev | 3.27.0 | Temporary data directories in `tests/ipc.rs` (`tests/state_assembly.rs`, which also used it, deleted 2026-10-15) | — | Test-only. |
 
@@ -101,7 +101,7 @@ Requirements are from `app/docs/requirements/`.
 declared only to unify features, with no code reference in
 `app/src-tauri/src`. The app now enables on-chain-client's `write` feature and
 is the one build that does — it submits every genesis and update through on-chain-client's chain writer
-(`submit.rs`, `state.rs`; REQ-nfr3n2) — and it holds the sr25519 signatory key
+(`submit.rs`, `state.rs`; the submission requirement) — and it holds the sr25519 signatory key
 (`subxt-signer`, from `ODS_ADMIN_SEED`) that it passes to the writer on each
 call. The writer stores no key. The `write` feature's two dependencies,
 `subxt-signer` and `blake2`, are recorded in on-chain-client's inventory at
@@ -119,7 +119,7 @@ signatory key are org-io's (`org-io/docs/architecture/soup.md` records
 `subxt`, `subxt-signer`, `zeroize`, `tokio`, `async-trait` and `hex` for
 org-io's use). The paragraph above is history: the app no longer enables
 on-chain-client's `write` feature, holds no signatory key, and submits
-nothing itself; org-io does, and REQ-nfr3n2 is org-io's. The app's own
+nothing itself; org-io does, and the submission requirement is org-io's. The app's own
 `dev-seed` feature only enables org-io's.
 
 *Amended 2026-10-14 (change `worktree-org-io-transport`, S4 task T15).* The

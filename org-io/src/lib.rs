@@ -304,7 +304,7 @@ impl std::error::Error for OpenError {
     }
 }
 
-/// A store change that was not written (LLR-murjr6, LLR-amv4mb): the
+/// A store change that was not written (LLR-murjr6): the
 /// operation's change was made in memory, and the Persona was reloaded from
 /// its file, or, when that failed too, dropped from the service.
 #[derive(Debug)]
@@ -427,7 +427,7 @@ pub(crate) fn write_not_held(formatter: &mut std::fmt::Formatter<'_>, org_id: &O
     write!(formatter, "no Persona here holds Organisation {}", hex::encode(org_id.as_bytes()))
 }
 
-/// Why a Persona or a Person was not created (LLR-n9dnm4): org-node
+/// Why a Persona or a Person was not created (LLR-kna4zj): org-node
 /// refused, the keychain refused the secret (no file is written), or the
 /// store file was not written.
 #[derive(Debug)]
@@ -555,7 +555,7 @@ impl OrgIo {
         // Every deletion a `removed-` file records is finished before the
         // Persona files are listed, unsealing nothing (LLR-upqj5g).
         // A leftover beside a live store of its key is kept, and reported
-        // once the stores are open (PR-wch3zu).
+        // once the stores are open (LLR-upqj5g).
         let kept_leftovers = retention::finish_leftovers(data_dir);
         let keychain = Keychain;
         // Two or more Person files are refused before any file is read

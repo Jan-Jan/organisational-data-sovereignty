@@ -20,7 +20,8 @@ is reachable by anything that can hand it bytes.
 **RC-ja7gx3**: a proof under a Person hash is accepted only when the Person
 hash recomputed from the proof's encoded fields and device root, under the
 stated encoding version, equals the given one, and the DevicePublicKey's
-absence under that device root verifies. mitigates: HAZ-2mwaad
+absence under that device root verifies.
+mitigates: HAZ-2mwaad
 
 The device-root step rests on sparse-merkle-tree's control of an unsound
 proof (`sparse-merkle-tree/docs/risk/2026-10-23-sparse-merkle-tree.md`).
@@ -43,7 +44,8 @@ probability 7/16.
 
 **RC-5d9qxe**: a collision is reported for a candidate key before it is added,
 and an attempt to add a colliding key is refused with an error of its own, so
-the device that generated the key generates another. mitigates: HAZ-vjm5fg
+the device that generated the key generates another.
+mitigates: HAZ-vjm5fg
 
 Residual risk: a retry of a local key generation, S1/P2, **acceptable**
 (owner ruling 2026-10-23: the friction is rare and stays on the generating

@@ -6,7 +6,7 @@ No new software item, no new SOUP. Decided 2026-10-03 (`design-architecture`),
 for the change recorded by `docs/adr/2026-10-03-quint-conformance-gate.md`.
 
 LLR-juxk9q stays as written: it states *when* the check runs (at apply, not at
-decode), which this change does not alter. What PR-vf5hdm found missing is
+decode), which this change does not alter. What the handle-handover problem report found missing is
 *what the check is against* — the check was sound leaf by leaf and unsound over
 the set — and that is this item.
 

@@ -317,23 +317,11 @@ jobs:
       - if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         run: .guardrails/scripts/check-signing.sh
 
-      # The verification-record gate. It asks about the change under review, so
-      # it can only run on a pull request; on a push to the base branch it
-      # exits 2, there being no change under review there.
-      #
-      # History worth keeping, because it explains why this step was added:
-      # under guardrails 0.4.0 this gate could not run on macOS at all —
-      # check-review.sh passed a newline-separated list through `awk -v`, which
-      # the BWK awk shipped with macOS rejects — so CI was the only place it
-      # could execute. The 0.5.1 upgrade fixed that, and it now runs locally at
-      # merge-change step 6c.
-      #
-      # The catch that remains: this project's working practice is a local
-      # signed squash merge straight onto master, with no pull request, so this
-      # step never fires. That is no longer a gap in enforcement (step 6c
-      # covers it on the merging machine) but it does mean CI provides no
-      # independent backstop for the review evidence — which matters more under
-      # class C, where the review must be thorough. Adopting pull
-      # requests is what would close that.
-      - if: github.event_name == 'pull_request'
-        run: .guardrails/scripts/check-review.sh --branch "${{ github.head_ref }}"
+      # No verification-record step. Since guardrails d6e285e the record is
+      # the change's signed squash commit message: check-review.sh reads it
+      # from the change worktree at merge-change step 6c, before the
+      # hand-over, and finish-merge.sh guard 5 reads it again from the signed
+      # squash. A pull-request run has no squash message to read, and
+      # check-review.sh refuses the old --branch flag (exit 2), so the step
+      # that ran here was removed. CI therefore provides no independent
+      # backstop for the review evidence; the two local checks are the gate.

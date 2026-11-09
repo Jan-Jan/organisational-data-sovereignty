@@ -292,7 +292,7 @@ module membership_mbt {
   run scenarioApplyStale = initWith(TWO).then(doRotateKey("a", key("a", 2))).then(applyStale("true"))
   run scenarioApplyVerifyFail = initWith(TWO).then(applyHonest([hop("a", "h3")], "wrong"))
 
-  // PR-vf5hdm: a handle moved between two present members in one delta, in
+  // Regression: a handle moved between two present members in one delta, in
   // both identifier orders, and a two-way swap (REQ-wx3wpv, LLR-n5t6bn).
   run scenarioHandoverAtoB = initWith(TWO).then(applyHonest([hop("a", "h3"), hop("b", "h1")], "true"))
   run scenarioHandoverBtoA = initWith(TWO).then(applyHonest([hop("b", "h3"), hop("a", "h2")], "true"))

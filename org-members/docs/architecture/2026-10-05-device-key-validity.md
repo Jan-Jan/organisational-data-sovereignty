@@ -92,16 +92,14 @@ sorted, refuse more than `MAX_DEVICES` keys with
 `DuplicateDevice`, which `From` maps to org-members' variants of the same
 names, and accept the empty list.
 satisfies: REQ-xdx2c2
-supersedes: LLR-t3p9zk
 
-LLR-st6j2r replaces master's LLR-t3p9zk (`2026-10-04-key-parse.md`), which
-names `P2pDeviceSlots`, a type this change deletes (owner, 2026-10-05:
-supersede and resolve). LLR-st6j2r is LLR-t3p9zk renamed: the behaviour is the
-same, and only the error type changed, to `person`'s, mapped by `From`. The
-tests that verified the old item carry both IDs
+LLR-st6j2r replaces the earlier item on `P2pDeviceSlots`, a type this change
+deletes (owner, 2026-10-05: supersede and resolve). The behaviour is the same,
+and only the error type changed, to `person`'s, mapped by `From`
 (`org-members/tests/newtypes.rs`).
 
-*Amended 2026-10-05 (owner answer Q4 to docs/plans/2026-10-05-switch-trim.md).*
+*Amended 2026-10-05 (owner ruling that day, during the switch to `person`'s
+types).*
 This section also held an item that superseded master's LLR-k6dhz7, the key
 constructors, and narrowed it: decoding no longer accepts a small-order or
 non-canonical key, so LLR-k6dhz7's last clause and its single `InvalidKey` no

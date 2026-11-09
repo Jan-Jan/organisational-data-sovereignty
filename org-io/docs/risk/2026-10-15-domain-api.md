@@ -26,7 +26,6 @@ received, or refused because the invite was used by another Device — never
 Organisation data, every answer to an organisation request from a listed
 Device going out on a new connection through the send path.
 mitigates: HAZ-abm3xs
-supersedes: RC-b4m5sj
 
 Reworded 2026-10-15 (owner rulings R2, R3, R6 and R7 of the post-S4
 interview, change `worktree-org-io-domain-api`): the admission request comes
@@ -39,8 +38,8 @@ the impostor hazard org-node's ledger already analyses. No answer travels on
 the inbound connection, so that connection still carries no Organisation
 data.
 
-**Residual.** S3/P1, unchanged. The owner accepted it for RC-b4m5sj on
-2026-10-08 under ruling D, and on 2026-10-15 **accepted it for this
+**Residual.** S3/P1, unchanged. The owner accepted it for the predecessor control (S4's revoked-Device
+inbound control) on 2026-10-08 under ruling D, and on 2026-10-15 **accepted it for this
 successor**, narrowed so that unlisted Devices send admission requests only,
 never organisation requests, and so that the admission request is one the
 receiving Device expects because it issued the invite.
@@ -131,7 +130,7 @@ the inbound side writes. No new hazard.
 
 Reporting a write deprecated, with the Organisation behind, when the chain
 has moved to or past the expected epoch with another root (R5) removes the
-false "not executed" of PR-9q5ems: a write that may have executed is no
+false "not executed" that S4's review round 2 found in the settle: a write that may have executed is no
 longer reported as one that did not, so no rebuild is invited on that false
 ground, and "not executed" is kept for a finalised block past the write's
 window with the Organisation still at its base epoch. The provisional
@@ -154,7 +153,8 @@ assesses: REQ-ek652a
 
 ### Inbound connections and the receive path
 
-REQ-xd5a2d implements RC-6m89tr, RC-b4m5sj's successor: every handshake is still accepted with
+REQ-xd5a2d implements RC-6m89tr, the successor of S4's revoked-Device
+inbound control: every handshake is still accepted with
 no allow-list, every message still goes to org-node's receive path with the
 authenticated DevicePublicKey, a Device no record lists is still refused
 everything org-node does not accept before any chain read or store write,
@@ -231,9 +231,10 @@ record at the same proxy is refused by the chain's expected-epoch check. The
 proxy address is a public chain address, as already assessed.
 assesses: REQ-qfnx94, REQ-wd683g
 
-### A proxy creation that times out (PR-8ghk9s)
+### A proxy creation that times out
 
-*Assessed 2026-10-24 (owner decision on PR-8ghk9s).* A founding's
+*Assessed 2026-10-24 (owner decision on the founding's `create_proxy`
+timeout).* A founding's
 `create_proxy` that times out, or otherwise fails before a proxy address is
 known, records no unknown write and stores nothing; the next write creates
 the proxy again. No new hazard: if the timed-out call did execute, the cost

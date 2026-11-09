@@ -482,7 +482,7 @@ async fn a_failed_create_proxy_stores_no_proxy() {
 // Abnormal: `create_proxy` never returns, so the 90-second bound elapses before any proxy is
 // known. No unknown write is recorded for the founding, which has no proxy a verification could
 // settle it at, so the next write is not refused and creates the proxy again.
-// verifies: LLR-sq5pbq, LLR-d3farr, PR-8ghk9s
+// verifies: LLR-sq5pbq, LLR-d3farr
 #[tokio::test(flavor = "current_thread")]
 async fn a_create_proxy_timeout_records_no_unknown_write_and_the_next_write_creates_again() {
     let (_guard, _keychain) = fresh_keychain();

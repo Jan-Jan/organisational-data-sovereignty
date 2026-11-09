@@ -1,11 +1,14 @@
 # The Organisation public key, by its name — derived requirement assessment
 
-REQ-54txzh supersedes REQ-2qa5r5 by renaming one field, the Organisation's
-"signing key", to the *Organisation public key* (owner, 2026-10-04: the field
-is the Organisation's X25519 key-agreement key and never a signing key). The
-widths it requires are unchanged, so it realises RC-sxjnx9 against the same
-hazard exactly as REQ-2qa5r5 did, and the test that verified REQ-2qa5r5 now
-verifies both. No hazard impact: the change is to a name, not to what the
+REQ-54txzh states the widths of an Organisation state's fields with the
+second field named the *Organisation public key*; it had been called the
+Organisation's "signing key" (owner, 2026-10-04: the field is the
+Organisation's X25519 key-agreement key and never a signing key). The widths
+did not change with the name, so it realises RC-sxjnx9 against HAZ-xfg9cz as
+the width requirement always did (assessed in full in
+`2026-09-10-on-chain-client-hazards.md`), and the same test,
+`on-chain-client/tests/type_widths.rs`, verifies it. No hazard impact of the
+rename: the change is to a name, not to what the
 software reads, refuses or reports. This unit never interpreted the field, so
 the key's change of scheme from ed25519 to X25519 reaches no code here. The
 validity check belongs to org-node, and it covers state reads only: org-node
@@ -22,7 +25,4 @@ it returned. It is a diagnostic of reachability, it acts on nothing it read,
 and the key never leaves it, so no unchecked key reaches a decision there
 either.
 
-*Note 2026-11-09 (change `worktree-org-io-publish-2`, merge review MR1-C1):*
-that test (`on-chain-client/tests/type_widths.rs`) now cites only REQ-54txzh,
-not the superseded REQ-2qa5r5; what it verifies is unchanged.
 assesses: REQ-54txzh

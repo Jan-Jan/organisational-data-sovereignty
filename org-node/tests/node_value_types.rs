@@ -97,7 +97,7 @@ fn a_seed_yields_its_key_pair_and_a_key_pair_its_seed() {
     );
 }
 
-// Nothing signs with these key pairs (REQ-ag6kqm). Each seed at the byte
+// Nothing signs with these key pairs (LLR-e7s4ye). Each seed at the byte
 // bounds yields a key pair whose public key is valid in its role.
 /// verifies: LLR-56hc77
 #[test]

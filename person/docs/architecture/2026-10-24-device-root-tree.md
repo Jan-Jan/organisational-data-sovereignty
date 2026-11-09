@@ -9,8 +9,7 @@ root becomes the root of the device root tree, a sparse Merkle tree of depth 4 b
 the new device root (owner ruling 2026-10-23); the bound on DevicePublicKeys
 becomes 8.
 
-Superseded here: LLR-4vsm8d, LLR-6ezhw7, LLR-9p34cv, LLR-edn55h. Retired:
-LLR-z99qee. SDD-7r833z and SDD-k5ee9x are amended in place.
+SDD-7r833z and SDD-k5ee9x are amended in place.
 
 ## Device root
 
@@ -23,7 +22,6 @@ in `2026-10-04-identity-types.md`).
 `device_content_hash() -> NodeHash`, each under a domain the implementor chooses,
 and an associated `DEVICE_EMPTY_SENTINEL: &'static [u8]` whose hash under the
 leaf domain is `empty_leaf()`.
-supersedes: LLR-4vsm8d
 satisfies: REQ-mu3qgz, REQ-aj6x3n
 
 **LLR-8y8tqr**: the device root tree of a `&[DevicePublicKey]` is built,
@@ -39,7 +37,6 @@ DevicePublicKey, its identity hash `H::device_identity_hash` of the key's 32
 bytes, its content hash `H::device_content_hash()`, and its position bytes
 `device_position_bytes(key)` (LLR-exwx4n). The keys of a `DeviceSlots`, which
 admits no two keys of one position (LLR-xsx6gg), are never refused.
-supersedes: LLR-6ezhw7
 satisfies: REQ-mu3qgz, REQ-aj6x3n
 
 **LLR-exwx4n**: `device_position_bytes(&DevicePublicKey) -> [u8; 32]`, a
@@ -50,7 +47,8 @@ key's position bytes, is
 2026-10-24), of which the tree reads the first 4 bits. The device root tree's
 `same_device_position(&DevicePublicKey, &DevicePublicKey) -> bool` compares
 two keys' device positions: true exactly when the first 4 bits of their
-position bytes are equal. satisfies: REQ-9sh8qb
+position bytes are equal.
+satisfies: REQ-9sh8qb
 
 **LLR-vraz7n**: `DeviceSlots::position_taken(&candidate) -> bool` is true when
 a key of the set other than `candidate` has the same first 4 bits of
@@ -74,7 +72,6 @@ set is accepted. `add_device` fails with `DeviceSlotsFull` at the bound,
 a key not in the set; each returns a new set and leaves the receiver
 unchanged. `devices` returns the keys in sorted order, `device_count` their
 number, and `has_device` whether a given key is in the set.
-supersedes: LLR-9p34cv
 satisfies: REQ-4szc22, REQ-4e23xr
 
 `MAX_DEVICES` is 8 (owner ruling 2026-10-23), held below the tree's 16
@@ -85,7 +82,8 @@ nothing more.
 
 **LLR-pjf9qn**: `DeviceSlots`' `Deserialize` impl rejects a sequence two of
 whose keys share a position, as `parse` does, besides what LLR-sjrh7z
-rejects. satisfies: REQ-4e23xr, REQ-vxx8k3
+rejects.
+satisfies: REQ-4e23xr, REQ-vxx8k3
 
 **LLR-cyx9a3**: With the `serde` feature, a `DevicePublicKey` and a
 `PersonPublicKey` serialise as their 32 bytes (a fixed-length byte array, no
@@ -94,7 +92,6 @@ a `DeviceSlots` as the sequence of its keys in sorted order. Decoding a
 `DeviceSlots` from anything other than a sequence fails with an error that
 names the expected form, `at most 8 DevicePublicKeys in strictly increasing
 order, at distinct device positions`.
-supersedes: LLR-5za6mp
 satisfies: derived
 
 ## Person hash
@@ -116,14 +113,14 @@ key's 32 bytes, content `person::device-content__________` over no bytes —
 and its `DEVICE_EMPTY_SENTINEL` is the 31 ASCII bytes
 `EMPTY_SENTINEL_PERSON_DEVICE_V1`. None of its domain keys or its sentinel is
 org-members'.
-supersedes: LLR-edn55h
 satisfies: REQ-9m5pq2
 
 ## Proofs under a Person hash
 
 **SDD-bx9mm6**: Person absence proof — the stateless proof that a
 DevicePublicKey is not held under a Person hash, from its production to its
-check. traces: REQ-5kvqcf, REQ-uh2bzg
+check.
+traces: REQ-5kvqcf, REQ-uh2bzg
 
 **LLR-985v9t**: a `PersonAbsenceProof` holds exactly: the `EncodingVersion`,
 the `Name`, the `Surname`, the optional `PersonPublicKey`, the device root,
@@ -131,12 +128,14 @@ and a `sparse_merkle_tree::AbsenceProof<4>`; it holds no DevicePublicKey.
 Its fields are private, and it is obtained only from
 `prove_device_absent` or by parsing, which goes through each field's
 validating constructor and the absence proof's bounded parse (in
-`sparse-merkle-tree/docs/architecture/2026-10-24-sparse-merkle-tree.md`). satisfies: REQ-5kvqcf, REQ-uh2bzg
+`sparse-merkle-tree/docs/architecture/2026-10-24-sparse-merkle-tree.md`).
+satisfies: REQ-5kvqcf, REQ-uh2bzg
 
 **LLR-cve3d6**: `prove_device_absent(&Person, &DevicePublicKey)` returns a
 `PersonAbsenceProof` under `V1` whose device root is the Person's and whose
 absence proof is the device root tree's for that key; it fails with
-`DeviceStillHeld` when the Person holds the key. satisfies: REQ-5kvqcf
+`DeviceStillHeld` when the Person holds the key.
+satisfies: REQ-5kvqcf
 
 **LLR-z8h2w8**: `PersonAbsenceProof::verify(&PersonHash, &DevicePublicKey)`
 recomputes the Person hash from the proof's fields and device root under its
@@ -144,7 +143,8 @@ encoding version and fails with `PersonHashMismatch` when it differs from the
 given one, before any other check; it then verifies the absence proof against
 the device root under `PersonDeviceRootHasher` and fails with
 `DeviceRootMismatch` when it does not resolve to it and `DeviceStillHeld` when
-it shows the key held. satisfies: REQ-uh2bzg
+it shows the key held.
+satisfies: REQ-uh2bzg
 
 **LLR-3dvfjb**: every refusal named in this file is its own `IdentityError`
 variant (`DevicePositionTaken`, `DeviceStillHeld`, `PersonHashMismatch`,
@@ -155,10 +155,10 @@ enum variant or public field of this unit's own names the tree's
 functions. The `sparse-merkle-tree` unit's proof types, which this unit's
 proofs carry and its callers depend on directly, are shared by design
 (docs/adr/2026-10-23-one-sparse-merkle-tree.md). No input to these
-functions reaches a panic. satisfies: REQ-uh2bzg, REQ-4e23xr, REQ-bczz87
+functions reaches a panic.
+satisfies: REQ-uh2bzg, REQ-4e23xr, REQ-bczz87
 
-## Retired
+## NodeHash
 
 `NodeHash` is the `sparse-merkle-tree` unit's, and this
-unit re-exports it; LLR-z99qee, which defined this unit's own, is retired in
-its defining file.
+unit re-exports it; this unit defines no `NodeHash` of its own.

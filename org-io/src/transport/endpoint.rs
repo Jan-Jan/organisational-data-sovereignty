@@ -349,7 +349,7 @@ impl OrgEndpoint {
     }
 
     /// As [`recv_body`](Self::recv_body), and keep the stream's send half
-    /// for the verdict (LLR-unqfj5): dropping the reply unanswered writes
+    /// for the verdict (LLR-hhgdk7): dropping the reply unanswered writes
     /// nothing. The connection is bounded by [`CONNECTION_TIME_LIMIT`].
     /// Test builds only: the receive loop takes each connection with
     /// [`next_connection`](Self::next_connection) and reads it in a task of
@@ -385,13 +385,13 @@ impl PendingConnection {
     /// AUTHENTICATED remote device key, taken from the key the handshake
     /// authenticated and never from the body (LLR-v873fx), undecoded
     /// (org-node's `check_received` decodes it), and the reply its verdict
-    /// goes back through (LLR-unqfj5). At most `MAX_FRAME + 4` bytes are
+    /// goes back through (LLR-hhgdk7). At most `MAX_FRAME + 4` bytes are
     /// read from the stream, and a longer stream is a
     /// `TransportError::Stream` (LLR-k2y6nn); the four-byte prefix is
     /// discarded unchecked (LLR-2smrvx). Every connection whose handshake
     /// completes is taken, over a direct path or a relayed one, with no
     /// check of the remote key here: org-node's `check_received` judges the
-    /// sender (LLR-wvgec4).
+    /// sender (LLR-j467e9).
     pub async fn receive(self, limit: Duration) -> Result<(DevicePublicKey, Vec<u8>, InboundReply), TransportError> {
         tokio::time::timeout(limit, self.receive_unbounded()).await.map_err(|_| TransportError::TimedOut(limit))?
     }
@@ -410,7 +410,7 @@ impl PendingConnection {
 /// verdict and close; a sender that never closes is let go after it.
 const VERDICT_LINGER: Duration = Duration::from_secs(10);
 
-/// The send half of one inbound stream, kept for its verdict (LLR-unqfj5).
+/// The send half of one inbound stream, kept for its verdict (LLR-hhgdk7).
 pub struct InboundReply {
     connection: Connection,
     send: SendStream,

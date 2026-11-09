@@ -1,6 +1,7 @@
 # Membership change replication requirement
 
-Fills the hole PR-vf5hdm (`../problems/2026-09-17-review2-fixes.md`) names:
+Fills the hole a problem report found (`apply_delta` refused an honest change
+set that moved a handle between members):
 no requirement said that a change set the software produces is accepted by a
 receiver holding the record it was computed against. Decided 2026-10-03 in
 the `grill-requirements` interview recorded by

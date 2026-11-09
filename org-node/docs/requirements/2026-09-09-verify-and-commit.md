@@ -23,112 +23,24 @@ tests inside `org-node/src` by this change; the abnormal-input tests are new.
 
 ## Verifying a received Change set against the chain
 
-**REQ-wp2nyc**: The software shall reject a received Change set, leaving its
-record unchanged, when the Membership root recomputed by applying the Change
-set to its own record differs from the Membership root of the Organisation
-state it read from the chain. (implements: RC-6a2dke)
-satisfies: derived
-superseded-by: REQ-dwb9bq
-
-*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
-code that did what this item states, had no product caller and is deleted.
-REQ-dwb9bq states the behaviour now: a received Change set is no longer
-committed or rejected on receipt: it is kept, and verification adopts a
-provisional organisation only when the chain holds its Membership root and
-Organisation public key, else reports behind (REQ-dwb9bq). The text above is
-kept as it stood.
-
-**REQ-bvh8v6**: The software shall reject a received Change set, leaving its
-record unchanged, when the chain holds no Organisation state for the
-Organisation the Envelope names. (implements: RC-6a2dke)
-satisfies: derived
-superseded-by: LLR-rr558z
-
-*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
-code that did what this item states, had no product caller and is deleted.
-LLR-rr558z states the behaviour now: `verify` given no chain state refuses
-with `OrgNotOnChain` and changes nothing (LLR-rr558z, LLR-qvp7mq). The text
-above is kept as it stood.
-
 **REQ-gju89b**: The software shall reject an Envelope that names an
 Organisation other than the one it expected, before decoding the Change set
-the Envelope carries. (implements: RC-pm9kmx)
+the Envelope carries.
+implements: RC-pm9kmx
 satisfies: derived
-
-**REQ-ag6kqm**: The software shall decide whether to commit a received
-Envelope from the Organisation it names, its Sequence number, its Change set
-and the Organisation state on the chain alone, and shall check no signature
-and no Member's or device's key in doing so. (implements: RC-pm9kmx)
-satisfies: derived
-superseded-by: LLR-8528ud
-
-*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
-code that did what this item states, had no product caller and is deleted.
-LLR-8528ud states the behaviour now: which record is adopted is decided by the
-chain state and the held provisional organisations alone, never by the Device
-that delivered one (LLR-8528ud); the Envelope still carries no signature
-(LLR-pzde8b). A sender is now judged on receipt (LLR-283x6f). The text above
-is kept as it stood.
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-This item first required the Envelope's signature to verify under the
-Published signing key before decoding. The right to change an Organisation's
-data lies in its on-chain multisig proxy, and org-node has no concept of an
-administrator, so an Envelope carries no signature and the on-chain Membership
-root at a newer epoch is the sole authority. The item keeps its ID and states
-the rule that replaced it; retiring it is not expressible in the trace gate.
-
-**REQ-8gz8bu**: The software shall reject a received Change set, leaving its
-record unchanged, when the epoch of the Organisation state it verified against
-is not greater than the epoch of its last commit for that Organisation.
-(implements: RC-e5atck)
-satisfies: derived
-superseded-by: REQ-dwb9bq
-
-*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
-code that did what this item states, had no product caller and is deleted.
-REQ-dwb9bq states the behaviour now: a chain state at an epoch lower than the
-record's is reported inconsistent, an equal one in step or inconsistent, and
-only a greater one can adopt (REQ-dwb9bq); nothing is refused with
-`StaleEpoch`. The text above is kept as it stood.
-
-**REQ-nhe2zu**: The software shall, when an Envelope names the expected
-Organisation, carries a Sequence number greater than the highest committed,
-and carries a Change set whose recomputed Membership root equals the root of
-an Organisation state with an epoch greater than the last committed, commit
-the applied Change set as its record together with that epoch and that
-Sequence number as the new high-water mark.
-(implements: RC-6a2dke, RC-e5atck, RC-m4r75s)
-satisfies: derived
-superseded-by: REQ-dwb9bq
-
-*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-MR1-N1, owner ruling 2026-10-29).* `verify_envelope_against_chain`, the only
-code that did what this item states, had no product caller and is deleted.
-REQ-dwb9bq states the behaviour now: the commit rule is the adoption
-REQ-dwb9bq states: a provisional organisation kept from a received Change set
-becomes the record only when the chain holds its root and key at a greater
-epoch. The text above is kept as it stood.
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`):*
-the clause "carries a valid signature under the published signing key" is
-removed, with REQ-ag6kqm's amendment.
 
 ## Replay
 
 **REQ-6yu72z**: The software shall reject an Envelope whose Sequence number is
 not greater than the highest Sequence number it has committed for that
-Organisation, before decoding the Change set. (implements: RC-m4r75s)
+Organisation, before decoding the Change set.
+implements: RC-m4r75s
 satisfies: derived
 
 **REQ-mr5abb**: The software shall advance the Sequence-number high-water mark
 for an Organisation only when an Envelope has been committed, never on a
 rejection at any step, and never to a value lower than the mark it holds.
-(implements: RC-m4r75s)
+implements: RC-m4r75s
 satisfies: derived
 
 *Note 2026-10-30 (change `worktree-org-io-domain-api`, merge review MR1-N1,
@@ -143,38 +55,17 @@ reads "adopted". `SeqGuard::advance` is deleted with
 
 **REQ-9g6as6**: The software shall, for any sequence of bytes offered as an
 Envelope, either decode it and the Change set it carries or return a typed
-error, and shall not panic. (implements: RC-e2uvje)
+error, and shall not panic.
+implements: RC-e2uvje
 satisfies: derived
-
-**REQ-bcxz96**: The software shall, for any sequence of bytes offered as an
-Envelope to verification against a record and an Organisation state, either
-return a typed error or return a verified update, and shall not panic.
-(implements: RC-e2uvje)
-satisfies: derived
-superseded-by: REQ-rv4dwb
-
-*Superseded 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-round 2, MR2-N1).* The retirement below missed that the hazardous step, applying
-a received Change set to a record, did not go away with
-`verify_envelope_against_chain`: it moved to receipt, where `check_received`
-applies the Change set of Organisation information from a listed Device to
-the current record, and, in a store with no record, to the snapshot the body
-carries. REQ-rv4dwb states this item's bound over that path: any body, no
-panic, a typed error for a refusal and the store unchanged. The `retired:`
-line is replaced by `superseded-by:`; the text above is kept as it stood.
-
-*Retired 2026-10-30 (change `worktree-org-io-domain-api`, merge review MR1-N1,
-owner ruling 2026-10-29), replaced by the note above the same day.* No
-successor states it: no operation now verifies an Envelope against a record
-and a chain state.
 
 **REQ-eg5j8u**: The software shall reject with a typed error, before decoding
 any of its bytes, a wire frame whose body exceeds 1 MiB, on send and on
 receive alike, and shall deliver a frame within that bound unchanged.
-(implements: RC-gfn6kr)
+implements: RC-gfn6kr
 satisfies: derived
 
-*Amended 2026-10-08 (S4, task T2 of `docs/plans/2026-10-06-org-io-transport.md`), a clarification:* "wire frame" reads "Wire
+*Amended 2026-10-08 (S4, task T2), a clarification:* "wire frame" reads "Wire
 message body": org-node bounds the Wire message's encoding (`encode_message`,
 `decode_message`), with no length prefix. The bound on the stream a peer
 sends is org-io's (its stream requirement, in
@@ -182,109 +73,7 @@ sends is org-io's (its stream requirement, in
 
 ## Who the Wire message came from
 
-**REQ-xa6smf**: The software shall commit a first admission to an Organisation
-that verifies against the chain whichever Device key the connection
-authenticated, and shall require no Invite to have been imported for it.
-(implements: RC-b6mydy)
-satisfies: derived
-superseded-by: REQ-eqt23j
-
-**REQ-ztdza4**: The software shall commit an update to an Organisation it holds
-a record of only when the Device key the connection authenticated is listed
-in a member snapshot of its current committed record of that Organisation and
-the update verifies against the chain — a key listed there and absent from
-the record after the update included — and shall refuse an update delivered
-under any other Device key with a typed error naming the Organisation, before
-it reads the chain, leaving the store unchanged.
-(implements: RC-b6mydy, RC-u7kdam)
-satisfies: derived
-superseded-by: REQ-uk9rw7
-
-*Superseded 2026-10-08 (change worktree-org-io-create; owner's hybrid ruling
-on PR-zf924s: a change of meaning mints a new ID).* The 2026-10-07 amendment
-below reversed this item's meaning under the same ID. REQ-uk9rw7
-(`2026-10-08-sender-rule.md`) states the rule that holds
-now; the text above is kept as it stood when superseded. Its tests stay
-annotated with this ID, and the new test of REQ-uk9rw7 names both.
-
-*Note 2026-10-08 (review round 1 of change worktree-org-io-create,
-finding-13: dual-ID coverage).* Two older tests still name only this ID:
-`org-node/tests/admission_sender.rs`'s
-`update_from_the_admin_after_admission_is_committed` (:88) and
-`a_removal_relayed_by_the_member_it_removes_is_committed` (:1393). They are
-already green, and the robustness rule forbids re-annotating a green test
-with a new ID: a test gains a new ID only by being watched red against it.
-The dual-ID coverage of the supersession is therefore the new red-first test
-`receive_chain_reads.rs`'s
-`an_update_from_an_unlisted_device_is_refused_before_any_chain_state_is_asked_for`
-(:487), which names REQ-uk9rw7 and REQ-ztdza4 both.
-
-*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place: a
-clarification of who reads. "Before it reads the chain" reads "before it
-takes any chain state, so that none is read for it": org-node no longer
-reads the chain, and the order of the read is stated in org-io's
-architecture ledger (`org-io/docs/architecture/2026-10-08-org-io.md`).
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-REQ-xa6smf first required a first admission's sender to be the administrator's
-Device key named by an imported Invite; REQ-ztdza4 required an update's sender
-to be in the verified Membership record. The owner ruled that nothing about the
-sender is checked: authority is the chain's, Invites leave org-node for the
-app, and org-node has no administrator. A chain-valid update delivered by any
-peer is harmless because it matches the chain. Both items keep their IDs and
-state the rule that replaced them.
-
-*Amended 2026-10-07 (owner ruling R1 at the S3a close-out residual review,
-change `worktree-org-io-commit-workflow`; decision 16 of
-`docs/plans/2026-10-06-org-io-commit-workflow.md`).* REQ-ztdza4 said the
-software commits such an update "whichever Device key the connection
-authenticated, whether or not that key is in the Membership record before or
-after the update". The owner reversed that for an Organisation the node
-already holds: "Using iroh a connection can only be established via mutually
-known public keys, but I agree with only accepting updates and revocations
-from members. Furthermore, these are checked to be well formed before acting
-on them, which gives us another layer of protection." The sender must be
-listed in the receiver's current committed record (RC-u7kdam); a Member
-relaying its own removal is still listed there and is accepted. The
-revocation half is REQ-ea4qs5. REQ-xa6smf is **not** changed: by the owner's
-amendments of the same day a new joiner accepts the admitting update from any
-sender, "to avoid scenarios where something happens to the admin's device
-during this window", and verifies it against the chain; "The invite id plays
-no role in the update"; "the new joiner has no org information to disclose,
-and they verify the org information they receive on-chain so the risk here
-is only a new joiner being DoS'ed which is acceptable". Acknowledgements
-have their own sender rule: the sending Device must be the acknowledgement's
-named, removed Device (REQ-b462sh as amended 2026-10-07). Tests are
-rewritten by plan task T12a.
-
 ## Acting on one's own removal
-
-**REQ-uxv2x2**: The software shall, on committing a Membership record that no
-longer lists its own Device key, or on accepting a revocation of it
-(REQ-m2xh8q), delete in one sealed store image every piece of data it holds for that
-Organisation — its record, the Change set kept with it, the Organisation
-private key, the proxy account, every provisional update and every expected
-admission for it — and every Persona bound to that Organisation with its keys,
-leaving the data of every other Organisation and Persona unchanged.
-(implements: RC-wqgm2p, RC-44vvjp)
-satisfies: derived
-superseded-by: REQ-48zc3e
-
-*Superseded 2026-10-16 (owner ruling Q4', change
-`worktree-org-io-domain-api`):* the Device no longer deletes everything; it
-keeps, in the sealed store, the acknowledgements of its removal with their
-recipients' keys and addresses until each is accepted or 7 days pass
-(REQ-48zc3e and the items beside it in
-`org-node/docs/requirements/2026-10-14-batched-epoch.md`).
-
-*Amended 2026-10-06 (owner rulings 3 and 4 on the sweep of `fdf4e77`,
-`docs/plans/2026-10-06-org-io-roadmap.md`; change
-`worktree-org-io-commit-workflow`).* This said the software deletes its
-record and marks the Persona revoked. A Persona marked revoked kept its
-Device and Member secret keys, and with them the means to act as the revoked
-Device; "delete everything" deletes the Persona. The acknowledgement the
-Device signs before that is REQ-y99c9w. The absence-proof path is new with
-stage S3.
 
 ## The store at rest
 
@@ -292,15 +81,14 @@ stage S3.
 under a key derived from a passphrase, such that opening the store file with a
 different passphrase yields an error and not data, and no member seed, device
 seed or Organisation private key appears in the file in clear.
-(implements: RC-jjsz97)
+implements: RC-jjsz97
 satisfies: derived
 
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 The item named the Organisation secret, which that change removes in favour of
 the Organisation private key (REQ-szq3ud).
 
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* "write the Persona store only as
+*Amended 2026-10-08 (S4, task T3):* "write the Persona store only as
 ciphertext" becomes "give the Persona store out only as ciphertext": org-node
 seals each Persona's store under a key derived from that Persona's device
 secret and returns the sealed bytes for org-io to write (REQ-x3jrh8,
@@ -317,7 +105,7 @@ remain expectations, due 2026-12-05, and neither carries `(implements:)` in
 this change for the reason the risk file gives. And they do not state anything
 about the publish path — ordering the chain write and the local record, or
 delivery to the peer — because that path's behaviour is a defect under a
-problem report (PR-vt244s) and a requirement would be written against the fix,
+problem report (the resolved problem report on the publish path writing the chain before the record) and a requirement would be written against the fix,
 not the defect.
 
 And they do not cover every module of the unit. The hazard analysis was run
@@ -328,29 +116,28 @@ over the whole of `org-node/src` — `verify.rs`, `sequence.rs`, `envelope.rs`,
 nine controls that analysis chose call for, which is the verify-and-commit
 path, the frame bound, the sender cross-check, the self-delete and the store
 at rest. `ceremony.rs`, `keys.rs`, the blob encoding in `blobs.rs`,
-`chain_write/`, `chain_read.rs` — the module PR-hvg2dy is filed against —
+`chain_write/`, `chain_read.rs` — the module the resolved problem report on the chain reader's finality doc-comment is filed against —
 `preflight.rs`, the transport handshake and the two small modules `ids.rs`
 and `error.rs` have no requirement here; `chain.rs`'s `ChainReader` is
 exercised by the verify requirements as the seam the chain read arrives
 through, without a requirement of its own. Their requirements,
-and the low-level requirements of the whole unit, are tooth 4 of
-`docs/plans/2026-09-05-ratchet-gap-analysis.md`.
+and the low-level requirements of the whole unit, are tooth 4.
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* "The
+`worktree-person-shared-types`).* "The
 sender cross-check" in the list above is no longer a behaviour any requirement
-here states: REQ-xa6smf and REQ-ztdza4 are amended in place to say that
+here states: earlier forms of REQ-eqt23j and REQ-uk9rw7 are amended in place to say that
 nothing about the sender is checked.
 
 *Amended 2026-10-07 (owner ruling R1, change
 `worktree-org-io-commit-workflow`).* The membership cross-check is back for
-an Organisation the node holds: REQ-ztdza4 as amended that day. A first
-admission still checks nothing about the sender (REQ-xa6smf).
+an Organisation the node holds: an earlier form of REQ-uk9rw7 as amended that day. A first
+admission still checks nothing about the sender (an earlier form of REQ-eqt23j).
 
 *Amended 2026-10-08 (change `worktree-org-io-create`).* The membership
-cross-check is now stated by REQ-uk9rw7, which supersedes REQ-ztdza4 (owner's
-hybrid ruling on PR-zf924s). And by ruling B org-node reads no chain:
+cross-check is now stated by REQ-uk9rw7, which supersedes an earlier form of REQ-uk9rw7 (owner's
+hybrid ruling on the resolved problem report on amendment in place instead of supersession). And by ruling B org-node reads no chain:
 `chain_read.rs` is deleted, `chain.rs` holds `OrgState` and its parse edge
 but no `ChainReader`, and the verify requirements take the chain's state as
 a value that org-io read (org-io's ledgers, `org-io/docs/`). The module list

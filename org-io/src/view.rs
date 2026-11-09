@@ -187,7 +187,7 @@ pub enum DeletionFailure {
     /// `OrgIo::open` judged no deletion: the handle's clock read before the Unix epoch.
     ClockBeforeEpoch,
     /// A `removed-` file kept beside its Persona's live store file, with its keychain item
-    /// (PR-wch3zu).
+    /// (LLR-upqj5g).
     LeftoverKept,
 }
 

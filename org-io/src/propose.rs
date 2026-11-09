@@ -1,5 +1,5 @@
 //! The Admin's provisional changes (SDD-7mhqaz) and the proposed Organisation (SDD-4drrpr; both
-//! split from SDD-frsa73): recording an
+//! split from one item): recording an
 //! admission or a revocation, and having org-node calculate the provisional organisation from all
 //! of them; each writes the store org-node returns and touches no chain or transport. No
 //! operation discards (LLR-vvd8dn).

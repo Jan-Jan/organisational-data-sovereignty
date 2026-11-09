@@ -8,7 +8,7 @@ is in `app/docs/risk/README.md`; the harm pathway is
 `docs/adr/2026-09-01-safety-class-c.md`.
 
 Fourth and last of the per-unit registers begun on 2026-09-05
-(`docs/plans/2026-09-05-ratchet-gap-analysis.md`, tooth 3), after
+(tooth 3 of the guardrails gap analysis of 2026-09-05), after
 `org-members` (2026-09-02), `org-node` (2026-09-09) and `on-chain-client`
 (2026-09-10).
 
@@ -241,7 +241,7 @@ no `coverage_command`, and this change deliberately does not add one — that is
 tooth 5, and the owner's decision on 2026-09-14 was to keep one measurement
 basis for `org-node` and `app` rather than set a floor here in isolation.
 Under class C the absence is a gap against a mandatory requirement, and it
-remains recorded in `docs/plans/2026-09-05-ratchet-setup.md`. Nothing in this
+stays open until tooth 5 sets one coverage floor for both units. Nothing in this
 register should be read as resting on a coverage number, because there is none.
 
 **Decision coverage is unmeasured, here as in every unit.** Class C asks for
@@ -351,8 +351,8 @@ not have to infer which is which:
    `subscribeAll` before calling cleanup, so no teardown ever overlaps a
    pending registration. What actually implements the clause is a `torndown`
    flag inside `Membership.svelte` and `Revoke.svelte`, and no test renders a
-   component. The test is a valid reproduction of PR-u34uqm's
-   array-emptying defect and does not reach the clause its name claims.
+   component. The test is a valid reproduction of the array-emptying
+   listener leak RC-h7mnfj's restructuring fixed and does not reach the clause its name claims.
    Found by the independent review; another consequence of not-minted
    control 1.
 11. **That `verify_failure_carries_the_organisation_when_known` tests a
@@ -426,7 +426,8 @@ have ended and has not.
 **RC-8ygnjd**: Report the transport mode the running service was configured
 with in the connection status handed to the frontend, so that a decision
 depending on the transport mode can be made from the reported mode rather than
-guessed. mitigates: HAZ-n97v5g
+guessed.
+mitigates: HAZ-n97v5g
 
 *Checked 2026-10-14 (S4, task T15); text unchanged:* the running service's
 transport is org-io's since S4; the app hands it the mode it reports
@@ -434,11 +435,15 @@ transport is org-io's since S4; the app hands it the mode it reports
 
 **RC-jrkn7w**: Derive the revoke form's peer-address precondition from the
 reported transport mode, requiring an address only in Loopback, and validate
-the member identifier the operator does supply. mitigates: HAZ-n97v5g
+the member identifier the operator does supply.
+mitigates: HAZ-n97v5g
 
-Realised by REQ-645jq9 (the backend reports the mode), REQ-vgr7s2 (the
-precondition follows the mode), REQ-he8ejb (the identifier is checked),
-REQ-sjkp8z (the organisation identifier is checked at the backend boundary).
+Realised by REQ-645jq9 (the backend reports the mode), REQ-he8ejb (the
+identifier is checked), REQ-sjkp8z (the organisation identifier is checked at
+the backend boundary). The requirement that made the peer-address
+precondition follow the mode was retired on 2026-10-20: no peer address is
+taken anywhere in the app since addresses come with the Invite and the
+requests (owner answer A2, change `worktree-org-io-domain-api`).
 
 **Why two controls and not one.** The obvious fix — delete the check — is
 wrong, because the address genuinely *is* required in Loopback, where discovery
@@ -505,14 +510,17 @@ which a wrong membership would have been caught.
 
 **RC-6ajdv4**: Emit verification failures as a typed event carrying the
 organisation identifier wherever the failing update names one, rather than as
-an untyped message string. mitigates: HAZ-9fmhm4
+an untyped message string.
+mitigates: HAZ-9fmhm4
 
 **RC-h7mnfj**: Derive each verification log row's outcome from the event that
 produced it, render the failure outcome, and move the subscription lifecycle
-out of the component so that both can be tested. mitigates: HAZ-9fmhm4
+out of the component so that both can be tested.
+mitigates: HAZ-9fmhm4
 
 **RC-3rddh7**: Classify a receive-path failure by the error's type, and report
-a verification verdict only for an error that is one. mitigates: HAZ-9fmhm4
+a verification verdict only for an error that is one.
+mitigates: HAZ-9fmhm4
 
 RC-3rddh7 was **not** in the original analysis. It was added on 2026-09-14 after
 the independent review found that RC-6ajdv4 and RC-h7mnfj, as first implemented,
@@ -528,7 +536,8 @@ as not-verified), REQ-akt4p7 (the outcome comes from the event and nothing
 else), REQ-rq8g2v (the subscription helper unsubscribes what it subscribed).
 
 REQ-rq8g2v is in this control rather than in a control of its own because the
-restructuring the first three require is what exposed PR-u34uqm, and a
+restructuring the first three require is what exposed a listener leak (an
+`$effect` cleanup that ran before its subscriptions had registered), and a
 subscription helper that leaks listeners produces duplicate rows in the very
 table this hazard is about. A verification log that shows each result twice is
 a different way of being untrustworthy, and it would have been introduced by
@@ -629,10 +638,12 @@ genuinely known.
 
 **RC-2t9sgv**: Emit no membership event when the organisation record for that
 update cannot be read, and emit instead an event that identifies the
-organisation and states that its record was unreadable. mitigates: HAZ-5ha5vv
+organisation and states that its record was unreadable.
+mitigates: HAZ-5ha5vv
 
 **RC-9t3kpm**: Emit no epoch value on the self-delete path, where no epoch is
-known. mitigates: HAZ-5ha5vv
+known.
+mitigates: HAZ-5ha5vv
 
 Realised by REQ-2k7ys4, REQ-dp95pv and REQ-tw4cb5.
 
@@ -686,7 +697,8 @@ that verifies correctly.
 **RC-xt4qr3**: Refuse to start when no passphrase is configured, unless
 development defaults are explicitly enabled, and name in the refusal both the
 variable that would supply the value and the variable that would waive the
-requirement. mitigates: HAZ-8ghmhn
+requirement.
+mitigates: HAZ-8ghmhn
 
 Realised by REQ-7g3k9a and REQ-bmk2z2.
 
@@ -716,9 +728,8 @@ the original state, and nothing in this unit can prevent that. The refusal
 message naming the passphrase variable *first* is the mitigation for that, and
 it is why REQ-bmk2z2 exists as a requirement rather than as a nicety.
 
-*Amended 2026-10-14 (S4, task T17 of
-`docs/plans/2026-10-06-org-io-transport.md`; owner ruling of 2026-10-06,
-plan §13: passphrase sealing retired, the app stops asking for a
+*Amended 2026-10-14 (change `worktree-org-io-transport`, S4 task T17;
+owner ruling of 2026-10-06: passphrase sealing retired, the app stops asking for a
 passphrase, IDs kept).* The passphrase, and with it the published
 development constant, is gone: org-io seals each Persona's store under a
 key derived from that Persona's device secret, which only the OS keychain
@@ -804,7 +815,8 @@ mitigates: HAZ-ny7yvt
 
 **RC-a7fenm**: Report in the connection status only the endpoint and contract
 the running configuration was built from, and report both as absent when chain
-operations are not configured. mitigates: HAZ-ny7yvt
+operations are not configured.
+mitigates: HAZ-ny7yvt
 
 Realised by REQ-rxc8sp, REQ-e4ah9h and REQ-bvx4nh.
 
@@ -887,7 +899,8 @@ continuing to prevent a second loop from being spawned while one is running.
 mitigates: HAZ-cfp4jb
 
 **RC-8abufw**: Emit an event naming the reason the receiver loop stopped,
-before it exits. mitigates: HAZ-cfp4jb
+before it exits.
+mitigates: HAZ-cfp4jb
 
 Realised by REQ-3hfggn, REQ-6hgm8r and REQ-jfxah3.
 
@@ -1284,7 +1297,7 @@ noted.
 `satisfies: derived` that this file does not name. All twenty-two requirements
 written by this change are derived; each is assessed below.
 
-**Realising a control named above.** REQ-645jq9, REQ-vgr7s2, REQ-he8ejb,
+**Realising a control named above.** REQ-645jq9, REQ-he8ejb,
 REQ-sjkp8z (RC-8ygnjd, RC-jrkn7w, HAZ-n97v5g); REQ-affyf5, REQ-a83vqr,
 REQ-akt4p7, REQ-rq8g2v (RC-6ajdv4, RC-h7mnfj, HAZ-9fmhm4); REQ-2k7ys4,
 REQ-dp95pv, REQ-tw4cb5 (RC-2t9sgv, RC-9t3kpm, HAZ-5ha5vv); REQ-7g3k9a,
@@ -1294,10 +1307,10 @@ REQ-bmk2z2 (RC-xt4qr3, HAZ-8ghmhn); REQ-rxc8sp, REQ-e4ah9h, REQ-bvx4nh
 
 Each of these exists *because of* a hazard rather than alongside one, so the
 assessment is not "does it introduce a hazard" in the abstract — it is whether
-realising it introduces one, and §5 answers that for the five that do:
+realising it introduces one, and §5 answers that for the four that do:
 REQ-7g3k9a, REQ-rxc8sp (refusal as denial of the safety action); REQ-2k7ys4
-(suppression as silence); REQ-3hfggn (a release that could permit two loops);
-REQ-vgr7s2 (a relaxation that could weaken Loopback). The remaining fourteen
+(suppression as silence); REQ-3hfggn (a release that could permit two loops).
+The remaining fourteen
 introduce no new hazard: they add reported facts (REQ-645jq9, REQ-e4ah9h,
 REQ-bvx4nh), stop values being fabricated (REQ-dp95pv, REQ-tw4cb5), tighten
 input checks (REQ-he8ejb, REQ-sjkp8z), make an existing outcome visible
@@ -1305,7 +1318,7 @@ input checks (REQ-he8ejb, REQ-sjkp8z), make an existing outcome visible
 already held (REQ-6hgm8r), fix a leak (REQ-rq8g2v), or constrain a message's
 content (REQ-bmk2z2).
 
-assesses: REQ-7g3k9a, REQ-rxc8sp, REQ-2k7ys4, REQ-3hfggn, REQ-vgr7s2, REQ-645jq9, REQ-e4ah9h, REQ-bvx4nh, REQ-dp95pv, REQ-tw4cb5, REQ-he8ejb, REQ-sjkp8z, REQ-affyf5, REQ-a83vqr, REQ-akt4p7, REQ-jfxah3, REQ-6hgm8r, REQ-rq8g2v, REQ-bmk2z2
+assesses: REQ-7g3k9a, REQ-rxc8sp, REQ-2k7ys4, REQ-3hfggn, REQ-645jq9, REQ-e4ah9h, REQ-bvx4nh, REQ-dp95pv, REQ-tw4cb5, REQ-he8ejb, REQ-sjkp8z, REQ-affyf5, REQ-a83vqr, REQ-akt4p7, REQ-jfxah3, REQ-6hgm8r, REQ-rq8g2v, REQ-bmk2z2
 
 **REQ-kn5rtx and REQ-wu6z9p**, added after the independent review, are assessed
 here too. Both realise RC-3rddh7, and RC-3rddh7 exists *because* §5's fourth
@@ -1327,8 +1340,7 @@ explicitly. Master's `InvalidKey`, a receiver error, is removed too: the chain
 key it refused is now refused as `InvalidOrgPublicKey`, also a receiver error,
 so that case keeps its class (*added 2026-10-05 by review round 3,
 finding-16*). This change also added and then removed `UnknownSender`,
-`NoImportedInvite` and `InviteOrgKeyMismatch` before merge
-(docs/plans/2026-10-05-switch-trim.md); none is in the classification. Neither new variant concerns the transport endpoint, so neither
+`NoImportedInvite` and `InviteOrgKeyMismatch` before merge; none is in the classification. Neither new variant concerns the transport endpoint, so neither
 is terminal (REQ-jfxah3), and `a_refusal_this_change_added_does_not_stop_the_loop`
 pins that. A persistent invalid Organisation public key on chain is therefore
 reported as one receiver error per received message for that Organisation,

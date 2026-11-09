@@ -313,13 +313,13 @@ fn slot_device(seed: u8) -> org_members::types::DevicePublicKey {
     common::positioned_device_key(&format!("slot-{seed}"), seed)
 }
 
-// Master's LLR-k6dhz7 and LLR-t3p9zk tests, carried over to `person`'s types
-// on the person-shared-types branch. LLR-k6dhz7 is amended in place:
+// Master's LLR-k6dhz7 and `P2pDeviceSlots` tests, carried over to `person`'s
+// types on the person-shared-types branch. LLR-k6dhz7 is amended in place:
 // the constructors still accept exactly what decoding accepts, but decoding
 // now refuses small-order and non-canonical keys (LLR-z954wj, LLR-a645bx), so
-// "a weak key is accepted" became "a weak key is refused by both". LLR-t3p9zk
-// is superseded by LLR-st6j2r, which names `person::DeviceSlots` in place of
-// `P2pDeviceSlots`.
+// "a weak key is accepted" became "a weak key is refused by both". The
+// `P2pDeviceSlots` item is replaced by LLR-st6j2r, which names
+// `person::DeviceSlots` in place of `P2pDeviceSlots`.
 
 /// y = 2 as an ed25519 encoding (off the curve) and u = 2 as an X25519 one (on
 /// the twist, accepted).
@@ -391,7 +391,7 @@ fn key_parse_refuses_bytes_off_the_curve() {
     }
 }
 
-/// verifies: LLR-t3p9zk, LLR-st6j2r
+/// verifies: LLR-st6j2r
 #[test]
 fn device_slots_parse_holds_keys_sorted() {
     use org_members::types::{DevicePublicKey, DeviceSlots, MAX_DEVICES};
@@ -407,7 +407,7 @@ fn device_slots_parse_holds_keys_sorted() {
     assert_eq!(empty.device_count(), 0, "the empty list is the isolated state");
 }
 
-/// verifies: LLR-t3p9zk, LLR-st6j2r
+/// verifies: LLR-st6j2r
 #[test]
 fn device_slots_parse_refuses_too_many_and_repeated_keys() {
     use org_members::types::{DevicePublicKey, DeviceSlots, MAX_DEVICES};

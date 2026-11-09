@@ -28,7 +28,7 @@ the proof's encoded fields and device root under the stated encoding version
 equals the given one and the DevicePublicKey is absent under that device root;
 it shall reject every other proof with an error that says which of these
 failed.
-(implements: RC-ja7gx3)
+implements: RC-ja7gx3
 satisfies: derived
 exported: yes
 
@@ -47,13 +47,13 @@ probability 7/16.
 **REQ-9sh8qb**: The software shall report, for a set of DevicePublicKeys and a
 candidate DevicePublicKey, whether the candidate's position in that set's
 device root tree is taken by a key of the set, without changing the set.
-(implements: RC-5d9qxe)
+implements: RC-5d9qxe
 satisfies: derived
 exported: yes
 
 **REQ-4e23xr**: The software shall reject adding a DevicePublicKey whose
 position in the set's device root tree is taken by another key of the set, with an
 error distinct from a duplicate key and from a full set.
-(implements: RC-5d9qxe)
+implements: RC-5d9qxe
 satisfies: derived
 exported: yes

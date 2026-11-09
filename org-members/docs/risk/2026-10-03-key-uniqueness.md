@@ -69,10 +69,9 @@ both accepted by the owner:
   with zero DevicePublicKeys; with one or more, a group key distinct from
   every DevicePublicKey; a change whenever a DevicePublicKey is added, removed
   or replaced. They are recorded in `docs/adr/2026-10-04-group-key-rules.md`
-  on the unmerged branch `worktree-person-requirements`, the branch
-  `docs/plans/2026-10-04-person-shared-types.md` names for every earlier Person
-  decision, and are to be realised by the planned Member key rules change
-  (change 3 of `docs/plans/2026-10-04-person-sequencing.md` there). Until that
+  on the unmerged branch `worktree-person-requirements`, the branch that holds
+  every earlier Person decision, and are to be realised by the planned Member
+  key rules change there. Until that
   change merges, org-members enforces "distinct from every DevicePublicKey"
   only by the byte comparison above, within one encoding: it refuses a
   Member-as-a-group key whose bytes equal a held DevicePublicKey's, and does

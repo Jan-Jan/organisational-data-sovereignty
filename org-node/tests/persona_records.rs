@@ -5,7 +5,7 @@
 //! refused whole, naming the field (LLR-7yu2xy); the current record always
 //! carries its Organisation private key (LLR-78jfrd).
 //!
-//! A store is one Persona's view of one Organisation (LLR-d925uu), sealed
+//! A store is one Persona's view of one Organisation (LLR-f5wrjx), sealed
 //! under a key derived from its device secret and handed out as bytes; "a
 //! store file" below is those sealed bytes, opened with
 //! `PersonaStore::unseal`, and the wire form below is in that layout. The
@@ -287,7 +287,7 @@ fn wire_bob() -> WireMember {
 }
 
 /// A store in which every fallible field is valid and every key distinct,
-/// holding one value of every epoch-state kind (LLR-d925uu).
+/// holding one value of every epoch-state kind (LLR-f5wrjx).
 fn wire_store() -> WireStore {
     WireStore {
         persona: WirePersona {

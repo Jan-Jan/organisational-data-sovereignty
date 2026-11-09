@@ -1,10 +1,10 @@
 # Risk analysis — the signatory-set reads (on-chain-client)
 
 Run 2026-10-07 for change `worktree-org-io-create`, under IEC 62304 Class C
-and the acceptability matrix in this ledger's README. The change adds two
-derived reads
+and the acceptability matrix in this ledger's README. The change adds a
+derived read
 (`on-chain-client/docs/requirements/2026-10-08-signatory-reads.md`)
-that org-io's own-admin check consumes.
+that org-io's own-admin check consumed.
 
 ## Derived requirements assessment
 
@@ -16,12 +16,3 @@ that is not a 32-byte account is a typed error, reported as such, never read
 as "not mapped", so a malformed chain value cannot pass for an absent mapping.
 
 assesses: REQ-8p2veg
-
-**REQ-v8jczx** (an account's proxy delegates): no hazard impact in S2, for the
-same reason: the delegate list feeds a report, and the chain itself enforces
-who may dispatch through the proxy. A value that does not decode as the
-runtime's proxy definitions is a typed error, never read as "no delegates",
-and the decoder bounds its allocation by the input's length, so a hostile or
-corrupt value can neither panic the reader nor exhaust its memory.
-
-assesses: REQ-v8jczx

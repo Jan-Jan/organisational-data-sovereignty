@@ -6,9 +6,7 @@ control from
 and is worded from behaviour the crate has; the exceptions are REQ-9vwcwc and
 REQ-5upq6n, whose behaviour did not exist before this change — the emitting
 address was decoded and dropped, and nothing compared it — and which were
-written here as the fix for the problem report in
-`on-chain-client/docs/problems/2026-09-10-on-chain-client-problems.md`
-that records why. Every requirement is `satisfies: derived` — it exists because
+written here as the fix for that defect. Every requirement is `satisfies: derived` — it exists because
 of how this reader was built and what it was partitioned to do, not because a
 system-needs document asked for it — and each is assessed in that risk file.
 
@@ -21,14 +19,6 @@ Terms: *Organisation slot*, *Slot key*, *Emitting contract*, *Event signature*,
 Organisation state: the Organisation's X25519 key-agreement key, never a
 signing key (owner ruling, 2026-10-04). Both glossaries name the field by that
 term, and REQ-54txzh, in `2026-10-05-organisation-public-key.md`, uses it.
-
-History, kept as the record of REQ-2qa5r5, which REQ-54txzh supersedes: until
-2026-10-05 neither glossary defined *Organisation public key*, and both named
-the field the Organisation's *signing key* inside their definitions — the
-root's *Organisation state* and this unit's *Organisation slot*. REQ-2qa5r5
-uses *signing key* in that sense and no other. It had said "Organisation
-public key" until review round 2 (finding-13), which found that term defined
-nowhere at the time.
 
 *Finalised observation* was listed here until review round 3 (finding-1) and is used by no requirement below — the best/finalised
 distinction is stated by no requirement of this ledger, for the reason given
@@ -45,9 +35,10 @@ were relocated into `on-chain-client/tests` from `#[cfg(test)]` modules inside
 each kept its assertion and its independent recomputation on the way. The
 abnormal-input cases beside them are new.
 
-Two of the twenty-one carry no abnormal-input case, and the exemption is
+Two requirements carry no abnormal-input case, and the exemption is
 recorded here rather than left for a reader to notice as an omission, because
-class C asks for one or the other per requirement. **REQ-2qa5r5** constrains a
+class C asks for one or the other per requirement. **REQ-54txzh**
+(`2026-10-05-organisation-public-key.md`) constrains a
 declaration and not a behaviour: it has no runtime input domain at all, so there
 is no input to malform — a mutation of it is a mutation of the type, not of an
 argument, and that is how its evidence reds. **REQ-n6v896** is the inversion
@@ -58,31 +49,25 @@ Neither gap is closed by inventing a case, and both are argued at the
 corresponding entries of the risk file's derived-requirements assessment (review
 round 2, finding-5).
 
-*(Note 2026-10-05, review round 3, finding-13, change
-`worktree-person-shared-types`: REQ-2qa5r5 is superseded by REQ-54txzh
-(`2026-10-05-organisation-public-key.md`), which states the same widths and
-calls the thirty-two-byte key field the Organisation public key. What is
-said here of REQ-2qa5r5 holds for REQ-54txzh, which carries this exemption
-and this evidence; REQ-2qa5r5 is named as the record of the earlier text.)*
-
 ## Whose log it is
 
 **REQ-9vwcwc**: The software shall deliver a decoded `OrgRegistry` event to a
 subscriber only when the Emitting contract of the log it was decoded from is the
 contract the reader was constructed for, so that no other filter the
 subscription carries can admit a log from another contract.
-(implements: RC-5e3bdk)
+implements: RC-5e3bdk
 satisfies: derived
 
 **REQ-5upq6n**: The software's event decoder shall report, with every
 `OrgRegistry` event it decodes, the Emitting contract of the log that event was
-decoded from. (implements: RC-5e3bdk)
+decoded from.
+implements: RC-5e3bdk
 satisfies: derived
 
 **REQ-nygs7k**: The software shall, when a subscription names an Organisation
 admin to filter on, deliver a decoded `OrgRegistry` event to that subscriber
 only when the event's Organisation admin is the one named.
-(implements: RC-5e3bdk)
+implements: RC-5e3bdk
 satisfies: derived
 
 ## Which signatures are ours
@@ -92,44 +77,48 @@ signature exactly two values, each the `keccak256` of the canonical Solidity
 signature string of one of the two events the deployed contract declares —
 `GenesisInitialized(address,bytes32,bytes32)` and
 `RootUpdated(address,uint256,bytes32,bytes32,bytes32)` — and no other value.
-(implements: RC-675a3h)
+implements: RC-675a3h
 satisfies: derived
 
 ## The event decoder's shape checks
 
 **REQ-wnjz9j**: The software shall yield no event and no error for a log whose
 first topic matches no Event signature it knows, and for a log carrying no
-topics at all. (implements: RC-6gfh8d)
+topics at all.
+implements: RC-6gfh8d
 satisfies: derived
 
 **REQ-n6v896**: The software shall, for any structurally valid `OrgRegistry`
 event, decode that event's canonical encoding back to every field the event
 carried, the Emitting contract included, without loss, reordering or defaulting.
-(implements: RC-6gfh8d)
+implements: RC-6gfh8d
 satisfies: derived
 
 **REQ-88fp2h**: The software shall refuse, with a typed error naming both the
 expected and the actual value, a log whose topic count or whose data length
 does not exactly match the Event signature its first topic claims.
-(implements: RC-6gfh8d)
+implements: RC-6gfh8d
 satisfies: derived
 
 **REQ-twdu84**: The software shall refuse, with a typed error, a log whose
 indexed Organisation admin topic carries a non-zero byte at any of the twelve
 positions Solidity zero-pads, and shall accept the topic when all twelve are
-zero. (implements: RC-6gfh8d)
+zero.
+implements: RC-6gfh8d
 satisfies: derived
 
 ## Arbitrary bytes
 
 **REQ-axcxf7**: The software shall refuse, with a typed error, an event payload
 that carries bytes beyond the fields it declares and one that ends inside a
-field's own length prefix. (implements: RC-8w9wtp)
+field's own length prefix.
+implements: RC-8w9wtp
 satisfies: derived
 
 **REQ-sx5b6g**: The software shall, for any sequence of bytes offered to any of
 its decoders, either decode it or return a typed error, and shall not panic or
-abort. (implements: RC-8w9wtp)
+abort.
+implements: RC-8w9wtp
 satisfies: derived
 
 ## Which runtime the bytes came from
@@ -138,7 +127,7 @@ satisfies: derived
 decoder compiled for that exact version, and shall refuse a Runtime spec version
 for which no decoder is compiled in with a typed error naming the version it was
 asked about, rather than resolving to another decoder or to a default.
-(implements: RC-d7r82e)
+implements: RC-d7r82e
 satisfies: derived
 
 ## Deriving the Organisation's identifier
@@ -146,13 +135,15 @@ satisfies: derived
 **REQ-tkhe3u**: The software shall derive an Organisation admin from a 32-byte
 account identifier by returning that identifier's first twenty bytes when, and
 only when, all twelve of its marker positions hold pallet-revive's EVM-fallback
-marker byte. (implements: RC-mugta4)
+marker byte.
+implements: RC-mugta4
 satisfies: derived
 
 **REQ-rz7fja**: The software shall derive an Organisation admin from a 32-byte
 account identifier by hashing the whole identifier and taking the last twenty
 bytes of the hash whenever any one of its twelve marker positions does not hold
-the EVM-fallback marker byte. (implements: RC-mugta4)
+the EVM-fallback marker byte.
+implements: RC-mugta4
 satisfies: derived
 
 ## Deriving the Organisation slot
@@ -160,35 +151,30 @@ satisfies: derived
 **REQ-9m2rnd**: The software shall derive the Slot key of an Organisation slot
 as the hash of the Organisation admin, left-padded into the first of two
 32-byte words, concatenated with the map's declared slot index written
-big-endian into the second. (implements: RC-5ejucb)
+big-endian into the second.
+implements: RC-5ejucb
 satisfies: derived
 
 **REQ-xudf25**: The software shall derive the Slot key of the field at a given
 offset within an Organisation slot by adding that offset to the base Slot key as
 a 32-byte big-endian value, propagating carry through every byte it reaches.
-(implements: RC-5ejucb)
+implements: RC-5ejucb
 satisfies: derived
 
 ## The state decoder's bounds
 
-**REQ-2qa5r5**: The software shall represent each field of an Organisation state,
-and the Organisation admin whose Organisation slot holds it, as a public type
-whose width is the width the contract's ABI gives that field: thirty-two bytes
-for a Membership root, thirty-two for the Organisation's signing key, eight for
-an Epoch, and twenty for an Organisation admin. (implements: RC-sxjnx9)
-satisfies: derived
-superseded-by: REQ-54txzh
-
 **REQ-4astjb**: The software shall decode an Organisation state only from
 exactly the expected width of storage bytes, and shall refuse any other width —
 shorter or longer, including none at all — with a typed error naming both the
-expected and the actual length. (implements: RC-sxjnx9)
+expected and the actual length.
+implements: RC-sxjnx9
 satisfies: derived
 
 **REQ-9wwenn**: The software shall refuse, with a typed error, an Epoch whose
 on-chain value does not fit the range this reader represents, rather than
 truncating it to that range, and shall accept the largest value that does fit
-whole. (implements: RC-sxjnx9)
+whole.
+implements: RC-sxjnx9
 satisfies: derived
 
 ## Provisional and committed observations
@@ -197,12 +183,14 @@ satisfies: derived
 the hash and the number of the head that was discarded, when and only when it
 has already processed a head, the new best head's hash differs from that head's,
 and the new best head is either at or below that head's height or at the next
-height with a parent other than that head. (implements: RC-kemv75)
+height with a parent other than that head.
+implements: RC-kemv75
 satisfies: derived
 
 **REQ-gr2ver**: The software shall report nothing, and shall not advance the
 head it has processed, for a best-head notification whose hash equals that of
-the last head it processed. (implements: RC-kemv75)
+the last head it processed.
+implements: RC-kemv75
 satisfies: derived
 
 **REQ-5zux82**: The software shall read, in ascending order, every height from
@@ -211,7 +199,8 @@ and the new head's height alone when that height is at or below the last
 processed head's, or when it has processed no head at all — and shall report a
 Best-block observation for each `OrgRegistry` event it finds in that span that
 REQ-9vwcwc and REQ-nygs7k admit to the subscriber, those two being the specific
-rules this general one gives way to. (implements: RC-kemv75)
+rules this general one gives way to.
+implements: RC-kemv75
 satisfies: derived
 
 ## What these requirements do not say
@@ -341,8 +330,8 @@ loop and runtime-API call, the two subscription lanes' stream plumbing,
 `from_client`'s construction — has no requirement here, because the only tests
 that reach it are the five ungated targets that construct an
 `OrgRegistryClient`, none of which any gate runs. Stating what that code shall
-do, and the low-level requirements of the whole unit, is tooth 4 of
-`docs/plans/2026-09-05-ratchet-gap-analysis.md`.
+do, and the low-level requirements of the whole unit, was left to a later
+change (the unit's architecture ledger).
 
 **Corrected 2026-09-28 by the review sweep of the change
 `worktree-guardrails-on-chain-client-arch`.** Two paragraphs above said the

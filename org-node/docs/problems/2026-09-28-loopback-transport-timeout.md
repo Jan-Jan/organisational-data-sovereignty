@@ -14,76 +14,6 @@ documentation change would be worse than filing it.
 
 ## Seven loopback-transport tests time out at ten and thirty seconds
 
-**PR-d4nye8**: the three org-node test targets that exercise the iroh transport
-over `TransportMode::Loopback` — `admission_sender`, `service_stories` and
-`transport_handshake`, seven tests in all — now fail by timeout rather than
-passing, on a source tree byte-identical to the one that measured 51 passed and
-0 failed ten days earlier, so the unit's gate is red without any change to the
-unit.
-opened: 2026-09-28
-status: resolved
-resolution: `TransportMode::Loopback` named no bind address, so iroh bound its
-pre-configured wildcard sockets and the endpoint advertised the host's LAN
-address; every "loopback" exchange left the machine. Fixed by clearing iroh's
-default IP transports and binding `127.0.0.1:0` and `[::1]:0` explicitly in
-`org-node/src/transport/endpoint.rs`. Verified by
-`loopback_mode_binds_and_advertises_loopback_only` in
-`org-node/tests/transport_handshake.rs` (the binding-scope requirement; it and
-that test moved to org-io 2026-10-13, S4 task T10), which asserts the bound
-sockets and the advertised address set rather than a delivery timeout.
-
-Where: `org-node/tests/transport_handshake.rs:91` panics with
-`send timed out after 10 s: Elapsed(())`;
-`org-node/tests/admission_sender.rs:121` and
-`org-node/tests/service_stories.rs:124` panic with
-`B receive_and_verify timed out: Elapsed(())` after thirty seconds. The
-endpoints under test are built by `OrgEndpoint::bind`, which is
-`org-node/src/transport/endpoint.rs:44-46` —
-`bind_with_mode(device, TransportMode::Loopback)` — and that mode sets
-`RelayMode::Disabled` at `org-node/src/transport/endpoint.rs:62-68`, where the
-builder is `presets::Minimal` and `.bind()` is called with no address. The
-"binds on `127.0.0.1`" half of this sentence, as first written, cited those same
-lines; it is not in them. It is the documented behaviour of the mode, stated in
-the doc comment at `:50`. Corrected 2026-09-29 by review round 4; the argument
-is unaffected, because what matters here is that the relay is disabled.
-
-**Four of the six line numbers in the paragraph above no longer resolve; two
-still do.** The fix lengthened `endpoint.rs` and `transport_handshake.rs`, so
-the citations into those two moved: `transport_handshake.rs:91` is now `:94`,
-`endpoint.rs:44-46` is now `:53-55`, `endpoint.rs:62-68` is now `:100-111`, and
-the mode's doc comment at `:50` is now `:59`. The other two are **unmoved**,
-because this change touches neither file: `admission_sender.rs:121` and
-`service_stories.rs:124` are still the exact `expect("B receive_and_verify
-timed out")` sites the paragraph cites. *(Re-resolved 2026-10-04 by the org-node architecture change's review round
-7. `:100-111` was already stale at master, which had the arm at 112–113, and
-that change's inserted comment then moved it to **`endpoint.rs:134-140`**.
-`:53-55` still resolves, and the mode's doc comment is `:58-60`.)*
-
-The paragraph itself is kept as written, because it is the record of what was
-seen on the day; the present positions are given here so that following it does
-not land a reader in unrelated text.
-
-**This note was itself wrong twice, and that is the point of keeping it.** Its
-first version said "none of them resolves today", which condemned two good
-references and offered no replacement for them — review round 4. And its
-`endpoint.rs:62-68 → :93-104` figure was correct when round 2 wrote it and
-stale by the time it was committed, because a later commit in the same change
-added seven lines above that arm and nobody re-read the citations that had just
-been fixed. Round 4 measured the real offset. So this repository has now broken
-the rule this paragraph's closing sentence states — re-resolve citations after
-the *last* edit to the files they point into, not after the edit that prompted
-them — inside the very note that states it (`docs/verification/2026-09-30-…`,
-finding-43, is the earlier instance).
-
-Observable symptom: `cargo test -p org-node --features app,test-support …`
-reports **44 passed, 7 failed** where the unit's recorded baseline is **51
-passed, 0 failed**. The declared `verify_commands` line fails fast on the first
-failing target; the 44/7 figure comes from a `--no-fail-fast` diagnostic run.
-The seven are exactly the three targets above (3 + 3 + 1); everything that does
-not cross the loopback transport still passes — lib 23, `verify_against_chain`
-13, `store_at_rest` 4, `wire_frame_bound` 3, `transport_networked` 1 — 23 + 13 +
-4 + 3 + 1 = 44 — plus two bolero targets on budget.
-
 ## What has been established, and what has not
 
 Established:
@@ -98,8 +28,7 @@ Established:
   is touched, which the diffs named above show directly. A file count is
   deliberately not given here: it went stale twice while this report was open.
 - **It is not new code meeting old tests.** The same tree measured 51 passed, 0
-  failed on 2026-09-18 (`docs/verification/2026-09-18-worktree-guardrails-on-chain-client-finalize.md`),
-  on 2026-09-17 (`…-org-members-arch.md`) and on 2026-09-11
+  failed on 2026-09-18, on 2026-09-17 (`…-org-members-arch.md`) and on 2026-09-11
   (`…-on-chain-client-risk.md`). The repository's lockfiles are tracked and
   unchanged across that span.
 - **It is not the harness sandbox.** `transport_handshake` was re-run with the

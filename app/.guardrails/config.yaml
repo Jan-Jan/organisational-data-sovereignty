@@ -8,13 +8,13 @@
 #
 # This is a UNIT config (.guardrails/units.yaml at the repository root names
 # the units). Every doc_* value and every strict_paths/test_paths entry must
-# sit inside this unit's own directory, and doc_verification must NOT be set —
-# the verification record is repository-level (docs/verification).
+# sit inside this unit's own directory. The verification record is
+# repository-level: it is the change's signed squash commit message.
 #
 # Scripts run from the repository root, so paths and commands below are
 # repository-relative.
 guardrails_version: 0.5.1
-guardrails_commit: 2bc3cca04b75e1205d1c79a8e7b40c302036bf6f
+guardrails_commit: d6e285e71a55a2de7ef342801923ca8ed71f9c76
 
 # IEC 62304 software safety class. C: the app is the shipped product — the
 # surface through which an organisation admits, verifies and revokes members.
@@ -35,9 +35,10 @@ doc_problems: app/docs/problems
 
 # Both sides of the IPC boundary, widened 2026-09-14 with the unit's first
 # requirements. The SvelteKit frontend is in scope because six of this unit's
-# requirements are realised there — REQ-vgr7s2, REQ-he8ejb, REQ-a83vqr,
-# REQ-akt4p7, REQ-rq8g2v, REQ-wu6z9p — and FIVE of them are realised there and
-# NOWHERE else: all but REQ-vgr7s2, which also has a Rust half in ipc.rs.
+# requirements were realised there — the pasted-address requirement (retired
+# 2026-10-20), REQ-he8ejb, REQ-a83vqr, REQ-akt4p7, REQ-rq8g2v, REQ-wu6z9p — and
+# FIVE of them there and NOWHERE else: all but the pasted-address one, which
+# also had a Rust half in ipc.rs.
 #
 # Re-measured 2026-09-15 (it read "five ... three of them" until then, measured
 # on 2026-09-14 and overtaken twice). Two things moved it: REQ-wu6z9p was minted
@@ -103,7 +104,8 @@ test_paths:
 #   + receiver_events 32 + receiver_guard 6 + ipc 33 + csp_policy 24
 #   + state_assembly 3 = 135 tests; vitest 36.
 # 2026-10-06, T14 of docs/plans/2026-10-05-chain-authority.md: a ninth
-# target, submit_flow (5 tests, REQ-nfr3n2), and ipc 33 -> 21 (the twelve
+# target, submit_flow (5 tests, the submission requirement now split into
+# REQ-3pjmub, REQ-36gxmg, REQ-nactq6), and ipc 33 -> 21 (the twelve
 # tests of the invitation commands are deleted until T15 re-writes them):
 #   startup_policy 13 + connection_status 10 + org_id_parsing 14
 #   + receiver_events 32 + receiver_guard 6 + ipc 21 + csp_policy 24
@@ -115,7 +117,8 @@ test_paths:
 #   + receiver_events 32 + receiver_guard 6 + ipc 35 + csp_policy 24
 #   + state_assembly 3 + submit_flow 5 + invitation 12 = 154 tests; vitest 36.
 # 2026-10-06, R1c of the same plan (review round 1): invitation 12 -> 16
-# (LLR-rt8gdz's three, and LLR-gha5f6's send-failure clause), vitest 40 -> 43
+# (three for the item now LLR-kna4zj, and the send-failure clause of the item
+# now LLR-zkybw7), vitest 40 -> 43
 # (invite.personas):
 #   startup_policy 13 + connection_status 10 + org_id_parsing 14
 #   + receiver_events 32 + receiver_guard 6 + ipc 35 + csp_policy 24
@@ -128,7 +131,8 @@ test_paths:
 #   + state_assembly 3 + submit_flow 5 + invitation 17 = 159 tests; vitest 43.
 # 2026-10-08, T9 of docs/plans/2026-10-06-org-io-create.md (the app depends
 # on org-io alone): submit_flow 5 -> 2 — the five submission tests moved to
-# org-io's own submit_flow with the code (REQ-nfr3n2 is org-io's since then);
+# org-io's own submit_flow with the code (the submission requirement is
+# org-io's since then; now REQ-3pjmub, REQ-36gxmg, REQ-nactq6);
 # the two recipient tests (the one-send-per-command item's) stay. Measured at T9:
 #   startup_policy 13 + connection_status 10 + org_id_parsing 14
 #   + receiver_events 35 + receiver_guard 6 + ipc 33 + csp_policy 24
@@ -212,7 +216,8 @@ verify_commands:
 problem_age_days: 60
 # Raised from 10 to 15 on 2026-10-05 by owner ruling 2 of
 # docs/plans/2026-10-05-app-architecture.md: the architecture change books five
-# new reports (PR-8vh53d, PR-cu2h2g, PR-uxj7bg, PR-bu6mau, PR-7zz76t) on top of
+# new reports (PR-8vh53d, PR-cu2h2g, PR-uxj7bg, PR-bu6mau and one since
+# resolved) on top of
 # the five still open from 2026-09-14, 10 open in all. Each is deferred work,
 # not a ruling not to fix. The same limit org-node was given on the same date.
 problem_open_max: 15

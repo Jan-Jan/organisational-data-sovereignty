@@ -37,11 +37,10 @@ Device"; R7, a Device no held record lists may send an admission request, and
 the acknowledgement S3 allows a Device held as revoked, and nothing else —
 its organisation request is refused — and an admission request is accepted
 only by the Device that issued the Invite, the one Device the Invite names,
-which expects it because it holds the invite as outstanding. The S4 items superseded below: REQ-prjja8 (the Invite), REQ-ur7z4a
-and REQ-65xqp8 (inbound connections, Invite replies), REQ-fnsjb6 (the receive
-path), REQ-a2a6rm (the admission flow), REQ-tcutr6 (the Invite reply),
-REQ-6skn67 (the fan-out), and the expectations REQ-tzr3dk, REQ-jxyh9c and
-REQ-txkm94. The app supersedes its own warning before replying and its
+which expects it because it holds the invite as outstanding. The items
+below replace S4's requirements for the Invite, inbound connections and
+Invite replies, the receive path, the admission flow, the Invite reply, the
+fan-out, and S4's three expectations on org-node, which are deleted. The app supersedes its own warning before replying and its
 submission decision in its ledger.
 
 ## The Person
@@ -81,7 +80,6 @@ nothing in its store in doing so except the proxy address of a founding
 (REQ-qfnx94), and shall refuse, writing nothing, a provisional organisation
 whose provisional changes or current record have changed since it was
 proposed.
-supersedes: REQ-nfr3n2 REQ-a2a6rm
 satisfies: derived
 exported: yes
 
@@ -108,7 +106,6 @@ root, change nothing but what those rules discard or stamp, and report it
 inconsistent with the reason; and when the
 read fails or does not parse, change nothing and report it unverified with
 the reason.
-supersedes: REQ-nfr3n2 REQ-77rh5a REQ-a2a6rm
 satisfies: derived
 exported: yes
 
@@ -155,14 +152,13 @@ endpoint addresses org-node keeps for each Device's key, attempting
 each Device whatever happened to the others, report the outcome for each
 Device, change nothing in its store, and send the same again whenever the app
 asks again.
-(implements: RC-wbs9ch)
-supersedes: REQ-nfr3n2 REQ-6skn67 REQ-a2a6rm
+implements: RC-wbs9ch
 satisfies: derived
 exported: yes
 
 *Amended in place 2026-10-15 (unmerged draft; change
 `worktree-org-io-domain-api`):* now that S4 has merged, this item also
-supersedes S4's fan-out (REQ-6skn67) and its admission flow (REQ-a2a6rm);
+replaces S4's fan-out and its admission flow requirements;
 it carries the fan-out's control, so "attempting each Device whatever
 happened to the others" is added from it. The current epoch is the adopted
 one: an epoch becomes current only when verification adopts it.
@@ -190,7 +186,6 @@ write was based on; and deprecated, with the Organisation reported behind,
 when the chain's current epoch is at or past the epoch the write expected
 with a Membership root other than that provisional organisation's; until
 then it shall report the write's outcome as still unknown.
-supersedes: REQ-by9k5q
 satisfies: derived
 
 *Amended in place 2026-10-15 (unmerged draft; owner ruling R5, change
@@ -198,9 +193,8 @@ satisfies: derived
 report. A chain past the expected epoch with another root does not decide
 whether this write executed (it may have executed and been followed by
 another), so it is reported deprecated rather than not executed; this
-answers PR-9q5ems (`org-io/docs/problems/2026-10-15-review-round-2.md`),
-whose settle reported such a write as not executed from the local epoch
-alone. PR-k5tdxj's "after a restart the reconcile sends to no one" (its item
+answers the review round 2 problem whose settle reported such a write as
+not executed from the local epoch alone. PR-k5tdxj's "after a restart the reconcile sends to no one" (its item
 2) is answered by the app asking org-io to send an adopted epoch this node
 wrote at once (the app's ledger), since sending is now a separate step.
 
@@ -218,7 +212,8 @@ each Device the epoch concerns is behind at its next periodic verification
 and requests the Organisation (REQ-z73ctw), a revoked one being answered with
 its notice (REQ-wpq4fp); this is how PR-k5tdxj's item 2 is answered.
 
-*Amended in place 2026-10-24 (unmerged draft; owner decision on PR-8ghk9s):*
+*Amended in place 2026-10-24 (unmerged draft; owner decision on the
+founding's `create_proxy` timeout):*
 for a founding, the write whose outcome can be unknown is the founding at
 its stored proxy (REQ-qfnx94). Creating the proxy, before any proxy address
 is known, has no unknown outcome under this requirement: when it times out,
@@ -241,7 +236,6 @@ addresses the Invite gives for it, report the outcome (delivered, already receiv
 because the invite was already used by another Device, or not delivered with
 the reason), change nothing in its store, and send the same again whenever
 the app asks again.
-supersedes: REQ-tcutr6
 satisfies: derived
 
 *Amended in place 2026-10-16 (unmerged draft; owner answer A2 of
@@ -313,7 +307,6 @@ at its epoch or at a later one, and no chain write of it may still execute.
 It shall never discard a provisional organisation whose chain write may
 still execute, and shall offer the app no command that discards a
 provisional organisation or a provisional change.
-supersedes: REQ-dqbg9p
 satisfies: derived
 
 **REQ-kh2uth**: The software shall delete no data it holds, or has org-node
@@ -328,7 +321,6 @@ the verification of its removal (REQ-98a3ty); a
 failed or refused chain read, a chain state reported as behind or
 inconsistent, a write whose outcome is unknown, and a refused message shall
 delete nothing else.
-supersedes: REQ-cz753a
 satisfies: derived
 
 Discarding is automatic only (owner, 2026-10-14): the provisional changes an
@@ -464,9 +456,9 @@ satisfies: derived
 
 The name is a local display label (owner, 2026-10-15). Publishing it through
 dotNS, the Polkadot name service, pointing at the Organisation's on-chain
-account, is future scope. The Invite requirement S4 left (REQ-prjja8, whose
-note records the 2026-10-05 ruling that the name is "stored nowhere") is
-superseded by REQ-ek652a so that an Invite carries the stored name.
+account, is future scope. The Invite requirement S4 left (whose note recorded the 2026-10-05 ruling
+that the name is "stored nowhere") is replaced by REQ-ek652a so that an
+Invite carries the stored name.
 
 ## The Invite
 
@@ -476,7 +468,6 @@ holds, an Invite as a Blob carrying the Organisation name stored for it
 invitee's full name, the DevicePublicKey of the Device issuing it with the
 endpoint addresses that Device's endpoint holds in the current mode, and an invite identifier of 32 bytes drawn from its
 cryptographic random source, and shall keep that identifier as outstanding.
-supersedes: REQ-prjja8
 satisfies: derived
 exported: yes
 
@@ -503,8 +494,7 @@ write; and write on any inbound connection nothing but a single verdict —
 accepted, refused, already received, or refused because the invite was used
 by another Device — serving on it no Organisation information, record, key,
 address or other Organisation data.
-(implements: RC-6m89tr)
-supersedes: REQ-ur7z4a REQ-65xqp8
+implements: RC-6m89tr
 satisfies: derived
 
 Owner rulings 2026-10-15 (R6, change `worktree-org-io-domain-api`): an
@@ -517,7 +507,7 @@ path to a Device key (REQ-wpq4fp), never on the inbound connection. "Already
 received" and "refused because the invite was used by another Device" are
 the two verdicts of org-node's first-request rule, refining accepted and
 refused; they tell the sender only about its own request. Invite replies,
-which REQ-65xqp8 refused when not outstanding, are replaced by admission
+which S4 refused when not outstanding, are replaced by admission
 requests over iroh, checked by org-node against the outstanding pair.
 
 *Amended in place 2026-10-16 (unmerged draft; owner ruling Q3 of
@@ -532,7 +522,6 @@ org-node's one receive path, keep in the sealed store what org-node returns
 — a provisional organisation, a kept admission request, a kept revocation
 notice, a settled acknowledgement — report each to the app, and read no
 chain and adopt nothing on receipt.
-supersedes: REQ-fnsjb6
 satisfies: derived
 exported: yes
 
@@ -558,7 +547,6 @@ organisation, an admission request with its verdict, an organisation request
 with its answer, a settled acknowledgement or a refusal, covering an
 invitee's first admission and the node's own revocation, and returning the
 sealed store.
-supersedes: REQ-tzr3dk
 expects: org-node
 opened: 2026-10-15
 satisfies: derived
@@ -566,7 +554,6 @@ satisfies: derived
 **REQ-u894ty**: The software shall rely on org-node to return, for the
 adopted current epoch of an Organisation, on each request, every recipient
 Device and the encoded message for each, writing nothing.
-supersedes: REQ-jxyh9c
 expects: org-node
 opened: 2026-10-15
 satisfies: derived
@@ -579,7 +566,6 @@ settle outstanding invite identifiers, kept admission requests and expected
 admissions inside the store, and to keep and return the endpoint addresses
 accepted requests carried for each sending Device's key, returning the
 sealed store from each.
-supersedes: REQ-txkm94
 expects: org-node
 opened: 2026-10-15
 satisfies: derived

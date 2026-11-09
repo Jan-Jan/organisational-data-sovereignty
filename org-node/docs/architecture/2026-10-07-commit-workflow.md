@@ -1,19 +1,18 @@
 # Design — the commit workflow: revocation by proof, delete only when verified, acknowledgement, reconcile
 
 Software items and low-level requirements for change
-`worktree-org-io-commit-workflow` (stage S3 of
-`docs/plans/2026-10-06-org-io-roadmap.md`). They refine
+`worktree-org-io-commit-workflow` (stage S3). They refine
 `org-node/docs/requirements/2026-10-07-commit-workflow.md`
-(REQ-ps2gy2, REQ-qrtsc9, REQ-m2xh8q, REQ-em28bq, REQ-y99c9w, REQ-b462sh,
-REQ-tb4f8p) and the amendments of this change to REQ-uv3v5w, REQ-uxv2x2 and
-RC-wqgm2p, and they realise RC-r8bp43, RC-ub82my, RC-eydn8t and RC-44vvjp
+(REQ-ps2gy2, REQ-qrtsc9, REQ-m2xh8q, REQ-b462sh and earlier forms of REQ-y9p27b,
+REQ-h29c8e and REQ-dwb9bq) and the amendments of this change to earlier forms of
+REQ-x2dnee, REQ-48zc3e and RC-5jkcxz, and they realise RC-r8bp43, RC-ub82my,
+RC-eydn8t and an earlier form of RC-45k3zg
 (`org-node/docs/risk/2026-10-07-commit-workflow.md`).
-The org-io half of the workflow is proposed, unminted, in
-`docs/plans/2026-10-06-org-io-commit-workflow.md`.
+The org-io half of the workflow is org-io's, in its own ledgers.
 
 *Added 2026-10-07 (owner rulings at the S3a close-out residual review,
-decision 16 of the plan).* The sender rules: LLR-2r2fha (REQ-ztdza4 as
-amended), LLR-kzgjz8 (REQ-ea4qs5) and LLR-3aysup with LLR-5azhry as amended
+decision 16 of the plan).* The sender rules: two earlier forms of LLR-283x6f (one under an earlier form of
+REQ-uk9rw7 as amended, one under REQ-ea4qs5) and an earlier form of LLR-xudkh4 with LLR-5azhry as amended
 (REQ-b462sh as amended), realising RC-u7kdam and RC-eydn8t's sender clause;
 implemented by plan task T12a.
 
@@ -34,24 +33,24 @@ introduce, it names it as they define it.
   deletes the record and the provisional updates and marks the Personas
   Revoked; it is called by `commit_update`, `receive_and_verify` and
   `receive_and_self_delete_if_revoked`. `StoreData::forget_organisation`
-  (LLR-pba7yu) replaces it, and SDD-72ddm6's removal item (retired and
-  superseded in S4, task T9) names the call sites.
+  (an earlier form of LLR-2d5a7m) replaces it, and the removal item of an earlier form of
+  SDD-z4m57w (retired and superseded in S4, task T9) names the call sites.
 - `WireMessage::envelope()` returns the Envelope of either kind; with a
   revocation that holds no Envelope it gives way to `WireMessage::org_id()`
-  (LLR-js9dsu as amended).
+  (an earlier form of LLR-xr88a8 as amended).
 - `send_update(outgoing, recipient, peer_addr)` sends a Device the record
   does not list a `Revocation { envelope }`. Until S2 and S4 move the send
   into org-io, the transport is still org-node's, so `send_update` takes the
-  `CommitOutcome` and sends the matching notice (LLR-6ymd6d as amended).
+  `CommitOutcome` and sends the matching notice (an earlier form of LLR-degg8t as amended).
 - The receiver loop the app runs is `receive_and_self_delete_if_revoked`
   (`app/src-tauri/src/commands.rs`), so the revocation and acknowledgement
   must be decided on that path and on `receive_and_verify` until S4's one
-  receive path (LLR-pt32fx as amended).
+  receive path (an earlier form of LLR-jhy6t6 as amended).
 - `still_member` and the Persona match derive each Persona's
   DevicePublicKey from its stored device seed. Stage S4 stores the public key
   only; the items below speak of a Persona's DevicePublicKey and take any
   device seed they sign with from the caller, so they hold under either
-  layout (owner rulings recorded by S4, `docs/plans/2026-10-06-org-io-transport.md`
+  layout (owner rulings recorded by S4
   §13–§15 on branch `worktree-org-io-transport`).
 
 All items are class C, the unit's class. No dependency changes: the absence
@@ -64,7 +63,7 @@ acknowledgement's signature is the Device key's Ed25519, already in
 Owner ruling of 2026-10-06 on this draft: **one combined module**.
 
 1. **One new pure module, the rest under the items that own the code
-   (chosen by the owner).** `revocation.rs` (SDD-uck4tz) builds the notices a
+   (chosen by the owner).** `revocation.rs` (the item SDD-gatf4h and SDD-8zzmav later replaced) builds the notices a
    commit produces, decides a received one, and signs and checks the
    acknowledgements. The deletion, the kept Change set, the wire forms, the
    error variants and the reconcile go under the items that already own
@@ -75,7 +74,7 @@ Owner ruling of 2026-10-06 on this draft: **one combined module**.
    or a file. One item is added: the decomposition's nineteen becomes
    twenty. The receiver's acknowledgement check uses no chain state while
    the notice's acceptance must; that difference is stated per function
-   (LLR-5azhry, LLR-tx8ruv), not by an item boundary.
+   (LLR-5azhry and an earlier form of LLR-rhsfw9), not by an item boundary.
 2. **Everything as `OrgService` methods in `service.rs`.** Matches today's
    shape (`receive_and_self_delete_if_revoked` reads the chain itself), adds
    no item, but puts the new decisions behind the `ChainOps` trait and
@@ -89,33 +88,33 @@ Owner ruling of 2026-10-06 on this draft: **one combined module**.
 
 Placement:
 
-- SDD-uck4tz (new, `revocation.rs`): LLR-kr5t6f, LLR-r7zm39, LLR-tx8ruv,
-  LLR-r8qhky, LLR-uw7nmv, LLR-xgefn8, LLR-gbe9bt, LLR-hby4jr, LLR-5azhry;
+- the revocation item SDD-gatf4h and SDD-8zzmav later replaced (new, `revocation.rs`):
+  LLR-kr5t6f, LLR-r7zm39, LLR-5azhry and earlier forms of LLR-rhsfw9, LLR-5tvn7g,
+  LLR-f9mcsq, LLR-g2jeqd and LLR-bs6yxf;
 - SDD-kwncn7, which owns `transport/wire.rs`: LLR-dc45ur, LLR-378cj4;
-- SDD-af5vnt, which owns `store.rs`: LLR-pba7yu, LLR-d9778a;
-- SDD-swtd3w, which owns `error.rs`: LLR-n67aw8;
-- SDD-8cpyfa, which owns the commit path: LLR-gr8x3r, LLR-fm38ww,
-  LLR-a8z7r5;
-- SDD-72ddm6, which owns the node's own removal: its removal item (retired
-  and superseded by LLR-jd82t6 in S4, task T9, 2026-10-13).
+- SDD-af5vnt, which owns `store.rs`: earlier forms of LLR-2d5a7m and LLR-p8vpgz;
+- SDD-swtd3w, which owns `error.rs`: an earlier form of LLR-3sddey;
+- the item SDD-busuj3 and SDD-kegag2 replaced, which owned the commit path: earlier
+  forms of LLR-rr558z, LLR-34c5y3 and LLR-degg8t;
+- an earlier form of SDD-z4m57w, which owned the node's own removal: its removal item (retired
+  and superseded by an earlier form of LLR-9jn3z8 in S4, task T9, 2026-10-13).
 
 Each existing owning item's `traces:` line is amended in place in
 `2026-10-03-decomposition.md` with a dated note naming this change, and so
-are the low-level requirements this change falsifies: LLR-6p4pj2 and
-LLR-jwhzh3 (decomposition), LLR-mkj4bz, LLR-b27jr6 and LLR-eyc4ud
+are the low-level requirements this change falsifies: earlier forms of LLR-2d5a7m (decomposition) and of LLR-34c5y3, LLR-jhy6t6 and LLR-qqqg4b
 (`2026-10-06-chain-authority.md`).
 
 Amended in place on 2026-10-07, once the key-pair change had merged, in the
-files that define them: LLR-js9dsu (the `Revocation` variant holds a
+files that define them: an earlier form of LLR-xr88a8 (the `Revocation` variant holds a
 `RevocationNotice`, not an Envelope, and a third variant is added:
-LLR-dc45ur, LLR-378cj4), LLR-pt32fx (a revocation is no longer verified
-"as any update"; the receive paths hand it to `revocation::accept`,
-LLR-tx8ruv), LLR-38e2kn (the unheld refusal moves to LLR-r7zm39, on both
-receive paths), LLR-6ymd6d (`send_update` sends a Device the update removed
-its notice from `CommitOutcome.revocations`, LLR-a8z7r5, and nothing to a
+LLR-dc45ur, LLR-378cj4), of LLR-jhy6t6 (a revocation is no longer verified
+"as any update"; the receive paths hand it to `revocation::accept`, an
+earlier form of LLR-rhsfw9), of LLR-95av3e (the unheld refusal moves to LLR-r7zm39, on both
+receive paths), of LLR-degg8t (`send_update` sends a Device the update removed
+its notice from `CommitOutcome.revocations`, another earlier form of LLR-degg8t, and nothing to a
 Device neither record lists; org-io sends it once S4 moves the transport),
-LLR-j5vbqj (what `RevocationNotForThisDevice` now refuses) and LLR-4kh9w9
-(in `2026-10-07-org-key-pair.md`); LLR-8hdu9x and LLR-jsx922 (in
+of LLR-3sddey (what `RevocationNotForThisDevice` now refuses) and of LLR-34c5y3
+(in `2026-10-07-org-key-pair.md`); and earlier forms of LLR-degg8t and LLR-f9mcsq (in
 `2026-10-03-decomposition.md`).
 
 ## The shape of the change, for an implementer
@@ -138,7 +137,7 @@ LLR-j5vbqj (what `RevocationNotForThisDevice` now refuses) and LLR-4kh9w9
     WireMessage::org_id(&self) -> OrgId                         // replaces envelope()
     OrgRecord.kept_change_set: Option<Vec<u8>>                  // the Change set that produced it
     CommitOutcome.revocations: Vec<RevocationNotice>            // new field
-    CommitOutcome.acknowledgements: Vec<Acknowledgement>        // new field, empty unless the commit removed this node (LLR-b27jr6)
+    CommitOutcome.acknowledgements: Vec<Acknowledgement>        // new field, empty unless the commit removed this node (an earlier form of LLR-jhy6t6)
     send_update(outcome: &CommitOutcome, recipient, peer_addr)  // takes the outcome, was &OutgoingUpdate
     ReceiveOutcome.acknowledgements: Vec<Acknowledgement>       // new field, empty unless removed
     ReceiveOutcome.acknowledged: Option<VerifiedAcknowledgement> // new field, a received one
@@ -153,7 +152,7 @@ LLR-j5vbqj (what `RevocationNotForThisDevice` now refuses) and LLR-4kh9w9
                     DeviceSecretNotSupplied { org_id }, NoRevocationForRecipient { org_id } }
 
 `DeviceSeed` in `accept`, `sign_acknowledgements` and `reconcile` is the
-device seed moved in by the caller for that one call (REQ-y99c9w as amended):
+device seed moved in by the caller for that one call (an earlier form of REQ-h29c8e as amended):
 today `OrgService` takes it from the Persona it holds, and after stage S4 org-io
 moves it in from the OS keychain as S4's transient device-secret type, which
 replaces `DeviceSeed` in these signatures and zeroises it. No function here
@@ -162,40 +161,22 @@ clones a seed or stores one.
 *Amended 2026-10-07 (plan tasks T10b, T10c and T12).* `accept` and
 `reconcile` take a seed source, `impl FnOnce() -> Vec<DeviceSeed>`, not the
 seeds: `accept` calls it only once the notice is accepted, just before
-signing, so a refused notice never reads the seeds (LLR-r8qhky); `reconcile`,
+signing, so a refused notice never reads the seeds (an earlier form of LLR-5tvn7g); `reconcile`,
 and `commit_update` through the one commit step, call it only on the path
 where the committed record removes this node, so a commit that keeps the
-node listed never obtains a seed (LLR-gr8x3r, LLR-fm38ww).
+node listed never obtains a seed (earlier forms of LLR-rr558z and LLR-34c5y3).
 `sign_acknowledgements` and the removal step take the seeds themselves.
 `CommitOutcome` also gains `acknowledgements`: the acknowledgements
 `commit_update` or `reconcile` signed when the commit removed this node
-(LLR-b27jr6), empty otherwise; this list had omitted it.
+(an earlier form of LLR-jhy6t6), empty otherwise; this list had omitted it.
 
 "The store" below is the `StoreData` value. A function returns its successor
 by value or returns none; S2's values-out `OrgService` seals a successor into
 the store bytes org-io writes, and returns no store bytes with a refusal.
 
-## SDD-uck4tz — The revocation a revoked Device receives, the decision it acts on, and its acknowledgement
+## The revocation a revoked Device receives, the decision it acts on, and its acknowledgement
 
 `org-node/src/revocation.rs`.
-
-**SDD-uck4tz**: the revocation notice — building one for each Device a
-commit removes, from the committed record, holding only that Device's
-identity and an absence proof; and deciding a received notice against an
-Organisation state the caller supplies, refusing it with a typed error or
-accepting it into the acknowledgements and the store without that
-Organisation; and the acknowledgement a revoked Device signs before it
-deletes, with the check every other node runs on one it receives, under a
-signing domain of its own and using no chain state. Pure functions over
-values: no chain read, no transport, no file.
-traces: REQ-ps2gy2, REQ-qrtsc9, REQ-m2xh8q, REQ-em28bq, REQ-y99c9w, REQ-uxv2x2, REQ-b462sh
-superseded-by: SDD-73emgx
-
-*Superseded 2026-10-20 (change `worktree-org-io-domain-api`, owner ruling
-Q4' of 2026-10-16):* an accepted notice no longer leaves a store without the
-Organisation and acknowledgements held by no one; the acknowledgements are
-kept in the removed store (REQ-48zc3e). SDD-73emgx restates the module's
-responsibility.
 
 **LLR-kr5t6f**: `revocation::notices_for(previous: &OrgRecord, committed:
 &OrgRecord, committed_trie: &Trie) -> Result<Vec<RevocationNotice>,
@@ -211,9 +192,9 @@ returns an empty list when no Device was removed, and refuses with
 no notice.
 satisfies: REQ-ps2gy2
 
-*Amended 2026-10-13 (S4, task T5 of `docs/plans/2026-10-06-org-io-transport.md`):*
+*Amended 2026-10-13 (S4, task T5):*
 unchanged; its caller is now the commit step's body builder, which encodes
-each notice as a revocation body (LLR-gdfqn9, LLR-a8z7r5).
+each notice as a revocation body (earlier forms of LLR-degg8t).
 
 **LLR-r7zm39**: `revocation::check_notice(store: &StoreData, notice:
 &RevocationNotice) -> Result<&PersonaRecord, OrgNodeError>` takes no
@@ -226,157 +207,18 @@ that does not decode never reaches it: the wire decode refuses it first
 (LLR-dc45ur, `MalformedMessage`).
 satisfies: REQ-qrtsc9
 
-*Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
+*Amended 2026-10-13 (S4, task T4).*
 Called from `check_received` (through `revocation::notice_store`, which
 picks the store whose Persona the notice is for and raises the unheld
 refusal) and again from `commit_checked` through `revocation::accept`. The
 rule is unchanged.
 
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* a store holds one Persona:
+*Amended 2026-10-08 (S4, task T3):* a store holds one Persona:
 `check_notice` returns the store's Persona when it is the one the notice names
 and refuses otherwise; the service finds the store a notice is for among its
 stores.
 
-**LLR-tx8ruv**: `revocation::accept(store: &StoreData, notice:
-&RevocationNotice, chain: Option<OrgState>, device_seeds: impl FnOnce() ->
-Vec<DeviceSeed>) -> Result<Accepted, OrgNodeError>` (the seed source called
-only after every refusal check below has passed, just before signing,
-LLR-r8qhky; a refused notice never calls it) runs `check_notice` first and
-returns its refusal unchanged;
-then refuses with `OrgNotOnChain` when `chain` is `None`; with
-`StaleChainState { org_id, chain_epoch, record_epoch }` when
-`chain.epoch` is lower than the record's epoch; and with
-`RevocationProofRefused { org_id, cause }`, `cause` the org-members error,
-when `notice.proof.verify(&chain.root_hash, &notice.member_id,
-&notice.device)` (the hasher the node's tries use) refuses — root mismatch,
-or the Device still held. A `chain.epoch` equal to the record's is accepted
-(RC-ub82my: at its own epoch a listed Device has no valid proof).
-satisfies: REQ-m2xh8q
-superseded-by: LLR-rhsfw9
-
-*Superseded 2026-10-22 (change `worktree-org-io-domain-api`, plan detail
-pass, dispatcher decision):* `accept` now only decides, with no seed source,
-and returns `()`; `verify` signs (LLR-jhy6t6, LLR-5tvn7g). Every refusal
-above, `ChainStateConflict` included, is kept in the same order (LLR-
-rhsfw9).
-
-*Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
-Called from `commit_checked`, with the state org-io read for the checked
-notice and org-io's `device_secrets` closure; acceptance is reported as
-`ReceiveKind::Revoked`. The rule is unchanged.
-
-*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, review
-round 2 finding-1; owner ruling R3, false deletion extremely unlikely).*
-Between `StaleChainState` and the proof check, `accept` now also refuses
-with `ChainStateConflict { org_id }` when `chain.epoch` equals the record's
-epoch and `chain.root_hash` is not the record's `root_hash` — the refusal
-`reconcile` gives the same state (LLR-gr8x3r). Such a state proves the
-chain disagrees with the record; before, `accept` checked the proof against
-its root and could delete on it. The seed source is not called and nothing
-is forgotten. With this check an equal epoch passes only with the record's
-own root, under which the record still lists the Device, so the proof is
-then refused: a notice is acted on only against a chain state of a later
-epoch. The sentence above saying an equal epoch "is accepted" means it
-passes the `StaleChainState` check only.
-
-**LLR-r8qhky**: when every check of `accept` passes, it first signs, through
-`revocation::sign_acknowledgements(store, org_id, &chain, device_seeds())`
-(LLR-hby4jr), one acknowledgement for each Persona bound to that
-Organisation, returning that function's refusal unchanged, and then builds
-the successor `forget_organisation(store, org_id)` (LLR-pba7yu); it returns
-both as `Accepted { store, acknowledgements }`. The successor holds no
-acknowledgement and no key of a Persona bound to that Organisation, and no
-device seed passed in outlives the call.
-satisfies: REQ-y99c9w, REQ-uxv2x2
-superseded-by: LLR-5tvn7g
-
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* the secret source takes the
-Device keys it is asked for (LLR-uw7nmv), and `Accepted.store` is
-`forget_organisation`'s `Option<StoreData>`: `None`, since the notice is for
-the store's one Persona.
-
-**LLR-uw7nmv**: on any refusal, `accept` returns the error alone: no
-successor and no acknowledgement is produced, and the `StoreData` passed in
-is borrowed immutably and so unchanged.
-satisfies: REQ-m2xh8q, REQ-em28bq
-superseded-by: LLR-f9mcsq
-
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* the secret source is
-`device_secrets: impl FnOnce(&[DevicePublicKey]) -> Vec<DeviceSecret>`,
-called, with the Device keys of the store's bound Persona, only on the path
-that signs; a refusal returns the error alone and calls it never. org-io's
-source reads the keychain (task T8).
-
-**LLR-xgefn8**: every public function of `revocation.rs` and of
-`reconcile` (LLR-gr8x3r) takes the store as
-`&StoreData` and any chain state as an `OrgState` or `Option<OrgState>`
-argument, returns a successor `StoreData` by value or none, is not `async`,
-is generic over no IO trait, and calls no `ChainOps`, `ChainReader`,
-transport, endpoint or file-system function; the `absences` test reads these
-files' source for those names. This LLR also constrains SDD-8cpyfa's
-reconcile.
-satisfies: REQ-qrtsc9, REQ-m2xh8q, REQ-em28bq, REQ-b462sh, REQ-tb4f8p
-superseded-by: LLR-g2jeqd
-
 ### The acknowledgement, in the same module
-
-**LLR-gbe9bt**: the bytes an `Acknowledgement` signs are `ACK_DOMAIN`
-(`b"ods/org-node/revocation-acknowledgement/v1"`) followed by the postcard
-encoding of the tuple `(org_id, member_id, device, epoch, root)`;
-`Acknowledgement::signed_bytes(&self) -> Vec<u8>` returns them, and
-`signature` is the 64-byte Ed25519 signature over them. No other message
-org-node signs or verifies begins with `ACK_DOMAIN`.
-satisfies: REQ-y99c9w, REQ-b462sh
-superseded-by: LLR-bs6yxf
-
-**LLR-hby4jr**: `revocation::sign_acknowledgements(store: &StoreData, org_id: OrgId,
-verified: &OrgState, device_seeds: Vec<DeviceSeed>) ->
-Result<Vec<Acknowledgement>, OrgNodeError>` returns, in store order, one
-acknowledgement for each Persona whose `org_id` is `Some(org_id)` — every
-such Persona's `member_id` is set, because each path that binds a Persona
-sets it with the `org_id`: `commit_genesis` to the MemberId of the genesis
-leaf listing the Persona's DevicePublicKey, and a first admission on
-`receive_and_verify` to the admitted leaf's — naming `org_id`, that
-`member_id`, that Persona's
-DevicePublicKey, `verified.epoch` and `verified.root_hash`, signed with the
-signing key pair of the seed in `device_seeds` whose public key is that
-Persona's DevicePublicKey; Ed25519 signing is deterministic, so it draws no
-randomness. When such a Persona has no matching seed in `device_seeds` it
-refuses with `DeviceSecretNotSupplied { org_id }` and returns no
-acknowledgement. It reads no seed from the store. `device_seeds` is taken by
-value and dropped when the function returns, on success and on refusal; no
-seed is cloned, returned or kept, and a seed matching no such Persona is
-unused. The returned values hold no secret key and no other Organisation
-data.
-satisfies: REQ-y99c9w
-superseded-by: LLR-5tvn7g
-
-*Revised 2026-10-07 (owner rulings recorded by stage S4: the device seed
-lives only in the OS keychain and org-node receives it transiently for
-signing).* This signed with each Persona's stored `device_seed`.
-
-*Amended 2026-10-07 (PR-eqs4fs; change `worktree-org-io-commit-workflow`,
-task s3t12b).* This said one
-acknowledgement for each bound Persona "whose `member_id` is set", narrower
-than REQ-y99c9w's "each Persona bound to that Organisation": the founding
-Persona was bound by `commit_genesis` with no `member_id`, so a founder
-removed from its Organisation signed no acknowledgement. `commit_genesis` now
-sets it, and no bound Persona is without one. No fallback derives a MemberId
-for a stored founder without one: stores written before S3 do not load (owner
-ruling of 2026-10-07, plan decision 12), so no store this code reads was
-written by the defective binding outside this unmerged change.
-
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* the seed source is a
-`DeviceSecret` source: `sign_acknowledgements(store, org_id, verified,
-device_secrets: Vec<DeviceSecret>)` signs with the secret whose `device_key()`
-is the Persona's, built into a signing key pair inside the crate. A store
-holds one Persona, so at most one acknowledgement. The secrets are moved in
-and dropped, zeroised, on return. REQ-y99c9w's deferral of the transient type
-to S4 is met.
 
 **LLR-5azhry**: `revocation::check_acknowledgement(store: &StoreData, ack:
 Acknowledgement) -> Result<VerifiedAcknowledgement, OrgNodeError>` takes no
@@ -395,7 +237,7 @@ acknowledgement does not decode; were they decoded, the refusal would be
 `AcknowledgementSignatureInvalid { org_id }`.
 satisfies: REQ-b462sh
 
-*Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
+*Amended 2026-10-13 (S4, task T4).*
 Called from `check_received` with the sender org-io passed in. The rule is
 unchanged.
 
@@ -427,7 +269,7 @@ satisfies: REQ-ps2gy2, REQ-qrtsc9
 *Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place: a
 rename. `receive_one` reads `receive_message`, now public, body unchanged.
 
-*Amended 2026-10-08 (S4, task T2 of `docs/plans/2026-10-06-org-io-transport.md`):*
+*Amended 2026-10-08 (S4, task T2):*
 code path only. The decoder is `decode_message` (`org-node/src/wire.rs`),
 whose refusal is `OrgNodeError::MalformedMessage`, and the bound is
 `MAX_MESSAGE` (1 MiB); `receive_message` still reports a body that does not
@@ -442,160 +284,21 @@ over. An acknowledgement is received on the same receive path as every
 other Wire message (one receive path, owner ruling of 2026-10-06).
 satisfies: REQ-b462sh
 
-*Amended 2026-10-08 (S4, task T2 of `docs/plans/2026-10-06-org-io-transport.md`):*
+*Amended 2026-10-08 (S4, task T2):*
 code path only. The decoder is `decode_message` (`org-node/src/wire.rs`),
 whose refusal is `OrgNodeError::MalformedMessage`. The rule is unchanged.
 
 ## SDD-af5vnt — The encrypted persona store (additions)
 
-**LLR-pba7yu**: `StoreData::forget_organisation(&self, org_id: OrgId) ->
-StoreData` returns a copy with, removed: the `OrgRecord` of `org_id` (and so
-its kept Change set, Organisation private key and proxy account); every
-provisional update whose `org_id` is `Some(org_id)`; every expected
-admission for `org_id`; every Persona whose `org_id` is `Some(org_id)`, with
-every key the store holds for it (today its member and device seeds; after
-stage S4, its member seed and Device public key); and every genesis
-provisional update built by one of those Personas. It adds nothing in their place: no tombstone, no
-"was a member" marker, no copy of an acknowledgement, and no other value
-that names `org_id` (owner ruling of 2026-10-06 on retention). Every other
-record, Persona, provisional update and expected admission is in the copy
-unchanged and in its original order.
-satisfies: REQ-uxv2x2, REQ-em28bq
-superseded-by: LLR-2d5a7m
-
-*Note 2026-10-07.* It replaces the private `OrgService::forget_organisation`
-of the merged key-pair change, which marked the Personas Revoked. Under S4's
-one sealed store per Persona (owner ruling of 2026-10-06, S4 plan §15 point
-1), the copy for that Persona's store holds no Persona at all; deleting the
-store file and the Persona's keychain item is then org-io's IO (the plan's
-proposed 7), not this function's. It holds under either layout.
-
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* `forget_organisation(&self,
-org_id) -> Option<StoreData>`: a store holds one Persona, so when that Persona
-is bound to `org_id` nothing of the store is left and the result is `None`,
-which the service applies by removing the store and returning
-`StoreChange::Forgotten { device_key }`; otherwise the copy without `org_id`'s
-record, provisional updates and expectations.
-
-*Amended 2026-10-13 (S4, task T6 of docs/plans/2026-10-06-org-io-transport.md):*
-the copy also drops every outstanding Invite pair whose Organisation is
-`org_id` (`StoreData.outstanding_invites`, LLR-nr8df3); the others stay in
-their order. Test: `invitation.rs`'s
-`forgetting_an_organisation_drops_its_outstanding_invites`. (S3a's scan
-`only_forget_organisation_removes_records_and_personas` watches the record
-and Persona collections only, so `settle`'s removal of a pair is outside it.)
-
-**LLR-d9778a**: `OrgRecord` (and `RawOrgRecord`) gains `kept_change_set:
-Option<Vec<u8>>`, encoded in the store with the rest of the record: `None`
-on a record `commit_genesis` creates, and on every other commit — a first
-admission included — exactly the Change set bytes of the Envelope that commit
-verified, replacing any earlier one. It is never larger than `MAX_FRAME`,
-because it is the Change set of a received frame or of a provisional update
-bounded by `MAX_PROVISIONAL_BYTES`; it is sent to nobody in this change.
-satisfies: REQ-uv3v5w
-superseded-by: LLR-p8vpgz
-
-*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, review
-finding-1 of round 1).* This said `None` also "on a record … a first
-admission creates", and the code kept none there. REQ-uv3v5w exempts only a
-record created by genesis: a first admission is a received update whose
-Change set produced the joiner's record, and LLR-mkj4bz already set it for
-every commit through `receive_and_verify`. The first-admission record now
-keeps the admitting Envelope's Change set; no reader of `kept_change_set`
-depends on `None` there. REQ-uv3v5w's text is unchanged.
-
 ## SDD-swtd3w — The rejection vocabulary (additions)
 
-**LLR-n67aw8**: `OrgNodeError` gains ten variants, each distinct from
-every other variant and each with a `Display` naming the Organisation:
-`DeviceSecretNotSupplied { org_id }` (a Persona bound to the Organisation
-whose device seed the caller did not give, LLR-hby4jr);
-`NoRevocationForRecipient { org_id }` (`send_update` to a Device the record
-does not list and the outcome holds no notice for, LLR-6ymd6d as amended);
-`OrgNotHeld { org_id }` (a reconcile for an Organisation with no record);
-`StaleChainState { org_id, chain_epoch: Epoch, record_epoch: Epoch }`,
-whose `Display` also names both epochs (a state older than the record);
-`ChainStateConflict { org_id }` (the record's epoch with a different
-root); `RevocationProofRefused { org_id, cause: OrgMembersError }`, whose
-`Display` also names the cause; `AcknowledgementNotHeld { org_id }`;
-`AcknowledgementFromFuture { org_id }`; `AcknowledgementForListedDevice {
-org_id }`; and `AcknowledgementSignatureInvalid { org_id }`.
-satisfies: REQ-m2xh8q, REQ-b462sh, REQ-tb4f8p, REQ-y99c9w, REQ-3dsweu
-superseded-by: LLR-3sddey
-
-*Revised 2026-10-07 (re-survey after the key-pair change merged).* This
-listed eight; `DeviceSecretNotSupplied` follows from the transient device
-seed and `NoRevocationForRecipient` from `send_update` taking the outcome.
-
-*Note 2026-10-07 (owner rulings at the S3a close-out residual review; plan
-task T12a).* Two more variants, each distinct and with a `Display` naming the
-Organisation, are added by T12a and specified by the items that raise them:
-`SenderNotListed { org_id }` (an update for a held Organisation or a
-revocation from a Device the record does not list, LLR-2r2fha, LLR-kzgjz8)
-and `AcknowledgementNotFromItsDevice { org_id }` (an acknowledgement
-delivered by a Device other than the one it names, LLR-5azhry as amended,
-LLR-3aysup). This item's list of ten is unchanged.
-
-*Amended 2026-10-13 (S4, task T5 of `docs/plans/2026-10-06-org-io-transport.md`):*
-`NoRevocationForRecipient` goes with `send_update`: the commit builds every
-recipient's body (LLR-gdfqn9), so no caller-named recipient is left to
-refuse. The list is the other nine.
-
-## SDD-8cpyfa — The commit path (additions)
-
-**LLR-gr8x3r**: `reconcile(store: &StoreData, org_id: OrgId, chain:
-OrgState, device_seeds: impl FnOnce() -> Vec<DeviceSeed>) -> Result<Reconciled, OrgNodeError>`
-(the seed source called only by a commit that removes this node, LLR-fm38ww) refuses with `OrgNotHeld {
-org_id }` when the store holds no record of `org_id`, and otherwise decides
-from the record and `chain` alone: `chain.epoch` lower than the record's →
-`StaleChainState`; equal epoch and equal Membership root → `InStep`; equal
-epoch and a different root → `ChainStateConflict`; greater epoch and a
-stored provisional update for `org_id` whose `resulting_root` and
-`org_pub_key` equal `chain.root_hash` and `chain.org_pub_key` → the commit
-of LLR-fm38ww; greater epoch and no such update → `Behind { chain_epoch }`.
-`InStep`, `Behind` and every refusal carry no successor store.
-satisfies: REQ-tb4f8p
-superseded-by: LLR-rr558z
-
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* the seed source is
-`device_secrets: impl FnOnce(&[DevicePublicKey]) -> Vec<DeviceSecret>`
-(LLR-uw7nmv), and `Reconciled::Removed`'s store is `forget_organisation`'s
-`Option<StoreData>` (LLR-pba7yu). The service's `reconcile` returns, beside
-the outcome, the `StoreChange` of a commit or a removal (`Sealed`, or
-`Forgotten` for a removal) and none otherwise.
-
-**LLR-fm38ww**: the commit `reconcile` makes runs the commit step
-`commit_update` runs against the same state (LLR-cmdrp9, LLR-6s785x: the
-Envelope built from the selected update, the chain-free checks, the epoch
-rule, verification against `chain`), and returns `Committed { store,
-outcome }`, or, when the committed record lists no DevicePublicKey of a
-Persona bound to that Organisation, `Removed { store, acknowledgements }`
-built as LLR-r8qhky builds `Accepted`, with `chain` as the verified state.
-A refusal of that step is returned as the error, with no successor.
-satisfies: REQ-tb4f8p, REQ-uxv2x2
-superseded-by: LLR-34c5y3
-
-**LLR-a8z7r5**: `CommitOutcome` gains `revocations: Vec<RevocationNotice>`,
-which `commit_update` and `reconcile` fill with `notices_for(previous record,
-committed record, committed trie)` (LLR-kr5t6f), so the notices org-io sends
-are those of exactly the committed update; a received update's commit
-produces none, since only the node that built an update fans it out.
-satisfies: REQ-ps2gy2
-superseded-by: LLR-degg8t
-
-*Amended 2026-10-13 (S4, task T5 of `docs/plans/2026-10-06-org-io-transport.md`):*
-the notices become bodies and the `revocations` field goes. `commit_update`
-and `reconcile` encode each notice of exactly the committed update as a
-`WireMessage::Revocation` body for its Device and return it in
-`CommitOutcome.outgoing`, after the Organisation-information bodies
-(LLR-gdfqn9); a commit that removes this node returns no bodies.
+## The commit path (additions)
 
 ### Who sent the message (owner rulings of 2026-10-07; plan task T12a)
 
 The receive paths `receive_and_verify` and
-`receive_and_self_delete_if_revoked` (SDD-8cpyfa, SDD-72ddm6) keep the
+`receive_and_self_delete_if_revoked` (owned by the items SDD-busuj3, SDD-kegag2 and SDD-z4m57w
+replaced) keep the
 DevicePublicKey `OrgEndpoint::recv_one` returns: the private `receive_one`
 returns `(DevicePublicKey, WireMessage)` instead of discarding it. Until S4
 moves receiving into org-io, org-node takes the sender from its own
@@ -607,84 +310,9 @@ returns it with the message, and the chain-free phase (`prepare_receive`,
 `prepare_self_delete`) takes both as arguments. In S2 org-io passes what
 `receive_message` returned; S4 changes only who supplies it.
 
-**LLR-2r2fha**: on an `OrgInformation` message whose Envelope names an
-Organisation the store holds a record of, `receive_and_verify` and
-`receive_and_self_delete_if_revoked` refuse with `SenderNotListed { org_id }`
-when the sender `receive_one` returned is in no member snapshot's
-`device_keys` of that record. The check comes after the held-record lookup
-(an unheld Organisation is refused as before: a first admission on
-`receive_and_verify`, `OrgNotOnChain` on the self-delete path, by an item
-retired with that path in S4)
-and before `check_chain_free`, the chain read and any decode of the Change
-set or snapshot; the refusal writes nothing, saves nothing and leaves every
-expectation in place. A first admission (no record held) is not subject to
-it: it is accepted from any sender and verified against the chain
-(REQ-xa6smf; owner amendment of 2026-10-07). A sender listed in the record
-and absent from the verified update's record (a Member relaying its own
-removal) passes.
-satisfies: REQ-uk9rw7
-superseded-by: LLR-283x6f
+## The node's own removal (addition)
 
-*Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
-The sender now arrives as `check_received`'s `sender` argument, from org-io,
-which passes the Device the transport authenticated with the body; the check
-runs there, before the snapshot or Change set is decoded and before any
-chain state is asked for, on the one receive path. The rule is unchanged.
-
-*Re-parented 2026-10-08 (change worktree-org-io-create, owner's hybrid
-ruling on PR-zf924s).* This said `satisfies: REQ-ztdza4`. REQ-uk9rw7
-supersedes REQ-ztdza4 and states the same rule; this item is unchanged.
-
-*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
-where the check runs, the rule unchanged. "The sender `receive_one`
-returned" reads "the sender passed to `prepare_receive` /
-`prepare_self_delete`"; "before `check_chain_free`, the chain read and any
-decode" reads "in the chain-free phase, before `check_chain_free` and any
-decode, so the phase returns no pending value and no state is asked for".
-
-**LLR-kzgjz8**: on a `Revocation(notice)`, both receive paths, after
-`revocation::check_notice` passes (LLR-r7zm39) and before the chain read and
-`revocation::accept`, refuse with `SenderNotListed { org_id }` when the
-sender `receive_one` returned is in no member snapshot's `device_keys` of the
-record of `notice.org_id`; the refusal reads no chain, never calls the seed
-source, writes nothing and saves nothing.
-satisfies: REQ-ea4qs5
-superseded-by: LLR-283x6f
-
-*Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
-The sender now arrives as `check_received`'s `sender` argument, from org-io;
-the check runs there, after `check_notice` and before any chain state is
-asked for, on the one receive path. The rule is unchanged.
-
-*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
-"the sender `receive_one` returned" reads "the sender passed to
-`prepare_receive` / `prepare_self_delete`"; "before the chain read and
-`revocation::accept`" reads "in the chain-free phase, so the phase returns
-no pending value and no state is asked for"; `revocation::accept` runs in
-the apply phase.
-
-**LLR-3aysup**: on an `Acknowledgement(ack)`, both receive paths call
-`revocation::check_acknowledgement(store, sender, ack)` (LLR-5azhry as
-amended) with the sender `receive_one` returned, and with no other Device key;
-neither path applies LLR-2r2fha's or LLR-kzgjz8's check to an
-acknowledgement, whose sender is by design a Device the record no longer
-lists. No chain read, no write.
-satisfies: REQ-b462sh
-superseded-by: LLR-5wg8cu
-
-*Amended 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
-The sender now arrives as `check_received`'s `sender` argument, from org-io;
-the acknowledgement is decided there (`Checked::Acknowledged`), on the one
-receive path. The rule is unchanged.
-
-*Amended 2026-10-08 (ruling B, change worktree-org-io-create).* In place:
-the check is made in the chain-free phase (`prepare_receive`,
-`prepare_self_delete`) with the sender passed to it, which returns the
-outcome itself (`Prepared::Done`), so no state is asked for.
-
-## SDD-72ddm6 — The node's own removal (addition)
-
-*Retired 2026-10-13 (S4, task T9 of docs/plans/2026-10-06-org-io-transport.md;
+*Retired 2026-10-13 (S4, task T9;
 owner ruling of that day, option A).* The item that stood here said where
 `StoreData::forget_organisation` is called (`revocation::accept` and the
 commit paths' one removal step) and that no other function in org-node
@@ -692,7 +320,7 @@ removes an `OrgRecord` or a Persona's record. A 2026-10-07 revision named
 the one removal step, and a 2026-10-08 amendment (S4, task T3) named
 `OrgService::adopt` as the one place a store is removed. It is superseded
 by a new item in `org-node/docs/architecture/2026-10-07-sans-io.md`
-(SDD-72ddm6, S4 supersession). That item keeps this content and adds
+(an earlier form of SDD-z4m57w, S4 supersession). That item keeps this content and adds
 `OrgService::drop_store`, which org-io uses after a local IO failure, as a
 second exempt place. Per the owner's retirement ruling of 2026-10-13, the
 retired ID is listed only in the S4 verification record.

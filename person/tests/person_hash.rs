@@ -101,8 +101,9 @@ fn the_v1_hash_is_blake3_keyed_by_the_v1_domain_key() {
     );
 }
 
-/// Pinned values: see "Golden values" in
-/// docs/plans/2026-10-24-sparse-merkle-tree.md (T7). V1 is defined over the
+/// Pinned values: the record of the V1 hash, which the structural tests
+/// recompute from `blake3::keyed_hash` alone; never re-pinned to make a red
+/// test pass. V1 is defined over the
 /// root of the depth-4 device root tree (LLR-qwp8d7); a change here is a change of the V1
 /// encoding, which needs a new version (REQ-wg7z4s).
 /// verifies: LLR-4ebtn4, LLR-qwp8d7

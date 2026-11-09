@@ -1,13 +1,13 @@
 #![cfg(all(feature = "app", feature = "test-support"))]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! No secret reaches debug output (REQ-y7tsft, PR-hqwpg9): a Persona record,
+//! No secret reaches debug output (REQ-y7tsft): a Persona record,
 //! an Organisation record, the store plaintext and a Wire message holding a
 //! member seed, a device seed or an Organisation private key, and a signing key
 //! pair, render none of its bytes in any form (LLR-bwb9pu), and the store encryption key renders as
 //! its redaction marker (LLR-scgk5j).
 //!
 //! The store holds one current record and the epoch state beside it
-//! (LLR-d925uu); the "many records" case holds the second Organisation
+//! (LLR-f5wrjx); the "many records" case holds the second Organisation
 //! private key in a provisional organisation.
 
 mod support;
@@ -44,7 +44,7 @@ fn sentinel_down(start: u8) -> [u8; 32] {
 }
 
 /// An Active Persona of the member seed `member`. The record holds the
-/// Device public key of `device`, never the device seed (LLR-bvt5up).
+/// Device public key of `device`, never the device seed (LLR-ay8nvu).
 fn persona(member: [u8; 32], device: [u8; 32]) -> PersonaRecord {
     PersonaRecord::from(PersonaRecordParts {
         status: PersonaStatus::Active,

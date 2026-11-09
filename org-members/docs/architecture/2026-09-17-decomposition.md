@@ -24,8 +24,8 @@ per-change file.
 immutable identifier, the handle, the member-as-a-group key, the device key
 set and the personal fields — together with the validation and
 normalisation every construction path applies, including the path from
-deserialised bytes. traces: REQ-crjxk8, REQ-h5ret5, REQ-m8aexh, REQ-xdx2c2,
-REQ-shk82j, REQ-t46uad
+deserialised bytes.
+traces: REQ-crjxk8, REQ-h5ret5, REQ-m8aexh, REQ-xdx2c2, REQ-shk82j, REQ-t46uad
 
 **LLR-xzqs9r**: `Handle::parse` (and `TryFrom<&str>`/`TryFrom<String>`,
 which delegate to it) is the only constructor of a `Handle`; it stores the NFC
@@ -43,22 +43,12 @@ added to the rejection list with REQ-h5ret5's owner-ruled amendment.)
 its UTS#39 skeleton, so that two handles rendering alike share a skeleton.
 satisfies: REQ-m8aexh
 
-**LLR-pys2ek**: a member holds at most `MAX_DEVICES` device keys, and
-`MAX_DEVICES` is 4 because the device sub-trie is a fixed depth-2 binary tree
-of four slots. satisfies: REQ-xdx2c2
-superseded-by: LLR-utk6uy
-
-(Amended 2026-10-04, corrected 2026-10-05 in review round 3: realised
-through `person`'s `DeviceSlots` and `MAX_DEVICES`, which org-members
-re-exports, under person's exported REQ-4szc22. The bound is still 4 and the
-sub-trie still four slots, now in `person/src/slots.rs` and
-`person/src/device_trie.rs`.)
-
 **LLR-w5nkbu**: `Name::parse` and `Surname::parse` (and their `TryFrom`
 impls) are the only constructors of a `Name` and a `Surname`; each stores the
 NFC form, bounded at 128 bytes after normalisation, and a field exceeding its
 bound is rejected as `FieldTooLong { field, max }` naming which field and which
-limit. satisfies: derived
+limit.
+satisfies: derived
 
 (Amended 2026-10-04, corrected 2026-10-05 in review round 3: realised
 through `person`'s `Name` and `Surname`, which org-members re-exports, under
@@ -68,15 +58,18 @@ same name and fields.)
 
 **LLR-paxj7b**: `MemberLeaf::new` rejects a member constructed with no device
 key, so that the zero-device state is reachable only through the isolation
-operation. satisfies: derived
+operation.
+satisfies: derived
 
 **LLR-4czn8t**: the `Debug` rendering of a member record redacts the handle,
 the name and the surname, and the `Debug` rendering of a `Handle`, `Name` or
-`Surname` on its own redacts its value. satisfies: derived
+`Surname` on its own redacts its value.
+satisfies: derived
 
 **LLR-xyv6p9**: deserialising a device key set accepts only a strictly
 increasing, duplicate-free list within `MAX_DEVICES`, and accepts the empty
-list. satisfies: REQ-shk82j, REQ-xdx2c2
+list.
+satisfies: REQ-shk82j, REQ-xdx2c2
 
 (Amended 2026-10-05: realised through `person`'s `DeviceSlots` `Deserialize`,
 which org-members re-exports, under person's exported REQ-tq4ms4. A refusal
@@ -89,14 +82,6 @@ slots exceed MAX_DEVICES"; each element decodes through
 surname through `Handle::parse`, `Name::parse` and `Surname::parse`, so a
 value the software would refuse cannot enter through the wire form.
 satisfies: REQ-shk82j
-
-LLR-pys2ek is owed. `org-members/docs/requirements/2026-08-31-org-membership.md`
-says so in as many words under REQ-xdx2c2: the bound "belongs in a low-level
-requirement under the software item that owns the sub-trie, which does not exist
-yet", and until it is written the number 4 "lives only in places no gate reads".
-This is the LLR that closes that note. REQ-xdx2c2's own text and note are not
-edited — this project records corrections by date rather than by rewrite; the
-discharge is recorded in this change's risk draft instead.
 
 Two items here are carried on one side only, and stay that way. Recorded
 2026-09-17, after the verification gate found eighteen of the thirty-five items
@@ -140,62 +125,13 @@ calls `person::compute_device_root`. The item is now `hasher.rs` and its use of
 **SDD-d6x85b**: the hash interface that provides the Membership record's
 eight separated hash domains, four member, four device, per LLR-4rdqyn (the
 device root those device domains build is `person`'s,
-`person/docs/architecture/2026-10-24-device-root-tree.md`). traces: REQ-xdx2c2
+`person/docs/architecture/2026-10-24-device-root-tree.md`).
+traces: REQ-xdx2c2
 
 (Amended 2026-10-24, `worktree-generic-smt`: the statement, heading and file
 above were restated on 2026-10-28, guideline review round 5, to the item's one
 current responsibility; the device sub-trie it once also held is `person`'s
 device root tree.)
-
-**LLR-72p8bz**: the hash interface provides four separated domains — member
-leaf, member node, device leaf, device node — such that the same input hashed
-in two domains yields two different values. satisfies: derived
-superseded-by: LLR-4rdqyn
-
-(Amended 2026-10-04, corrected 2026-10-05 in review round 3: the four
-domains are still `Blake3Hasher`'s, in `org-members/src/hasher.rs`. The two
-member domains are org-members' own, through `TrieHasher`; the two device
-domains are the implementation of `person`'s `DeviceTrieHasher`, which
-`TrieHasher` extends, keyed as before, so every hash is unchanged. `person`'s
-exported REQ-aj6x3n states the device-root half of the separation, a
-different device root under a different domain.)
-
-**LLR-kdhd2v**: the device sub-trie is a fixed depth-2 binary tree of four
-slots whose unoccupied slots hash a device empty sentinel, and device keys are
-held sorted so that construction order does not change the record's hash.
-satisfies: REQ-xdx2c2
-superseded-by: LLR-uudst2
-
-(Amended 2026-10-04, corrected 2026-10-05 in review round 3: realised
-through `person`'s `compute_device_root` and `DeviceSlots`, under person's
-exported REQ-mu3qgz (the device root) and REQ-4szc22 (keys held sorted). The
-sentinel is org-members' own, `Blake3Hasher::DEVICE_EMPTY_SENTINEL`, unchanged,
-so every hash is unchanged; LLR-jfj6pc requires it to encode no
-DevicePublicKey.)
-
-Both items here are carried on one side only, and stay that way (2026-09-17).
-
-For LLR-72p8bz the carrier is itself the adversarial case.
-`hasher_domains_are_separated` hashes the same thirty-two bytes in all four
-domains and asserts that all six pairs differ; feeding identical input across
-domains is precisely the attack domain separation defeats. A hash over `&[u8]`
-has no invalid input — every byte string is in the domain — so there is no
-further abnormal input to supply.
-
-For LLR-kdhd2v the out-of-range case never reaches the item. A fifth device is
-refused by `P2pDeviceSlots` (*`person::DeviceSlots` since 2026-10-05, in
-`parse` and in its `Deserialize`; review round 3 finding-16*), in `new()` and in the `Deserialize` impl, before
-`compute_device_root` is ever called, so the abnormal-input evidence for the
-four-slot shape sits under LLR-pys2ek and LLR-xyv6p9 where those refusals and
-their mutations already live. The degenerate case — a record with zero or only
-some slots filled — is *executed* by several tests
-(`device_slot_order_does_not_change_the_root` fills two of the four, the
-isolation tests fill none) and asserted by none that a mutation of
-`device_trie.rs` could discriminate: each of them compares two roots, and a
-change to the sentinel or to the tree's shape moves both sides of that
-comparison together. Annotating one would buy a name and no evidence. (Amended
-2026-10-05: the file is now `person/src/device_trie.rs`; see the note under
-the item's heading.)
 
 ## SDD-d9svdj — Member leaf on the sparse Merkle tree
 
@@ -203,25 +139,20 @@ the item's heading.)
 
 **SDD-d9svdj**: the Membership record's leaf on the `sparse-merkle-tree`
 unit's tree at depth 256 — a member record, held with its device root, that
-the tree places by its MemberId. traces: REQ-d3prca, REQ-avmu3j, REQ-crjxk8
-
-(Amended 2026-10-06 by `worktree-org-members-absence-proofs`: the store also
-returns a MemberId's path siblings and the node its path ends in, LLR-utp6x4,
-for the absence proof SDD-57vaj4, which is the only code that interprets the
-leaf it ends in. LLR-7jkcba makes `MemberId::bit` and `DefaultHashes::at_level`
-return an error rather than panic, resolving PR-jq43gx. Both are in this
-change's `absence-proofs` architecture file.)
+the tree places by its MemberId.
+traces: REQ-d3prca, REQ-avmu3j, REQ-crjxk8
 
 (Amended 2026-10-24, `worktree-generic-smt`: the store is now the
 `sparse-merkle-tree` unit's tree at depth 256 over `MemberLeaf`, whose
 identity is the MemberId; this item is that use — the member leaf, its
-position and its hashing — and its LLRs other than LLR-utp6x4 and LLR-7jkcba,
-retired, are realised through it. `2026-10-24-on-sparse-merkle-tree.md`. The
+position and its hashing — and its LLRs are realised through it
+(`2026-10-24-on-sparse-merkle-tree.md`). The
 statement, heading and file above were restated to match on 2026-10-27,
 guideline review round 1.)
 
 **LLR-zbe553**: a member is addressed by the 256 bits of its identifier, index
-0 being the most significant bit of the first byte. satisfies: derived
+0 being the most significant bit of the first byte.
+satisfies: derived
 
 **LLR-wm5hpc**: the hash of an empty subtree at each of the 257 levels is
 computed once per hasher, so that an absent member contributes its level's
@@ -257,14 +188,17 @@ paragraph instead of assuming the row was forgotten.
 
 **LLR-n7nya3**: each node's hash is a write-once cell; `recalculate()` fills
 every unset cell bottom-up, and the root value is refused with
-`HashesNotCalculated` until it has. satisfies: REQ-avmu3j
+`HashesNotCalculated` until it has.
+satisfies: REQ-avmu3j
 
 **LLR-4n8zqx**: the root of a trie is determined by its member set alone, not
-by the order the members were inserted in. satisfies: derived
+by the order the members were inserted in.
+satisfies: derived
 
 **LLR-8jttpb**: the diff walk descends the left subtree before the right, so
 removed identifiers and upserted records are produced in strictly increasing
-identifier order. satisfies: derived
+identifier order.
+satisfies: derived
 
 LLR-8jttpb is the load-bearing one. It is the reason the canonical form in
 SDD-55b2zj holds *by construction* for every delta this crate produces, rather
@@ -287,22 +221,11 @@ from the crate root, its parameter is a `u16`, and nothing rejects 256..=65535 �
 index panics (`types.rs`). An external caller *can* supply one. The
 abnormal-input waiver for LLR-zbe553 therefore does not stand on unreachability.
 
-What is actually the case: the panic is real and reachable through the public
-API, it is filed as **PR-jq43gx** (opened 2026-09-17, open) in
-`../problems/2026-09-17-review-fixes.md` (written under its draft name
-until `finalize-docs.sh` dated it; the reference was corrected 2026-09-17), and
-the open question inside it is whether `bit()` is a "membership operation" in
-REQ-ds8ryr's sense at all — an addressing primitive that adds nothing and
-rejects nothing, or public input the requirement's "for any input" governs. The
-owner's decision on 2026-09-17 was that the code is not touched here: fixing it
-is a behaviour or surface change owed its own red-first change, the same
-disposition PR-zz4exm carried (it was resolved by such a change on 2026-10-03).
-
-So no abnormal-input test is added for LLR-zbe553 in this change — but the
-reason is now *the deferral recorded in PR-jq43gx*, not a claim that the input
-cannot arrive, and a test written later will be the one that discharges the
-problem report rather than one that merely asserts a panic against LLR-h9gs32's
-posture.
+What is actually the case: the panic was real and reachable through the public
+API. It was filed as a problem report and fixed on 2026-10-06; since
+2026-10-24 the position bits are the `sparse-merkle-tree` unit's, which bounds
+them, and this unit keeps no bit accessor of its own
+(`2026-10-24-on-sparse-merkle-tree.md`).
 
 For LLR-wm5hpc the defaults take no input at all: the 257 empty-subtree hashes
 are derived from the hasher when the trie is constructed. The item's only input
@@ -330,9 +253,8 @@ would be one the mutation protocol could never discharge.
 
 **SDD-k5wa4n**: the organisation trie and its eight membership operations,
 together with the handle and skeleton indexes that make uniqueness and
-confusability decidable without walking the store. traces: REQ-crjxk8,
-REQ-kmvc96, REQ-m8aexh, REQ-xdx2c2, REQ-ewdg2q, REQ-r784fu, REQ-avmu3j,
-REQ-d3prca, REQ-h5ret5, REQ-ds8ryr, REQ-t46uad
+confusability decidable without walking the store.
+traces: REQ-crjxk8, REQ-kmvc96, REQ-m8aexh, REQ-xdx2c2, REQ-ewdg2q, REQ-r784fu, REQ-avmu3j, REQ-d3prca, REQ-h5ret5, REQ-ds8ryr, REQ-t46uad
 
 **LLR-ub6dw9**: the trie carries a handle-to-identifier index keyed by
 `Handle` and a skeleton-to-handle index keyed by `HandleSkeleton`, and every
@@ -344,8 +266,8 @@ already held, and a handle whose skeleton matches one already held.
 satisfies: REQ-crjxk8, REQ-kmvc96, REQ-m8aexh
 
 **LLR-ch2pkw**: `genesis` applies the same identifier, handle and skeleton
-checks as `add_member` to its initial member set. satisfies: REQ-crjxk8,
-REQ-kmvc96, REQ-m8aexh
+checks as `add_member` to its initial member set.
+satisfies: REQ-crjxk8, REQ-kmvc96, REQ-m8aexh
 
 **LLR-j4d38d**: `delete_member` removes the member's handle and skeleton from
 the indexes, so the handle becomes available to another member.
@@ -360,7 +282,8 @@ member-as-a-group key in one operation, and isolates the member when the device
 removed was the last; a replacement key equal to the member's current key is
 refused with `P2pKeyNotReplaced`, checked after the member and device lookups,
 and the refusal changes nothing — the device stays enrolled and the key stays
-as it was. satisfies: REQ-ewdg2q
+as it was.
+satisfies: REQ-ewdg2q
 
 **LLR-w92psx**: `emergency_isolate_member` removes every device key and
 replaces the member-as-a-group key in one step, retains the member in the
@@ -373,28 +296,31 @@ satisfies: REQ-r784fu, REQ-ewdg2q
 **LLR-k89ahd**: `rotate_p2p_key` replaces the member-as-a-group key and changes
 no other field, the device set included; a replacement key equal to the
 member's current key is refused with `P2pKeyNotReplaced`, checked after the
-member lookup, and the refusal changes nothing. satisfies: derived
+member lookup, and the refusal changes nothing.
+satisfies: derived
 
 **LLR-mmst86**: `update_handle` takes the new handle as a `Handle` (valid by
 construction, LLR-xzqs9r) and re-checks it for uniqueness and confusability
-against every other member. satisfies: REQ-h5ret5, REQ-kmvc96, REQ-m8aexh
+against every other member.
+satisfies: REQ-h5ret5, REQ-kmvc96, REQ-m8aexh
 
 **LLR-g6arcs**: `update_name_surname` takes a `Name` and a `Surname`, so both
 fields carry the NFC form and the bounds of LLR-w5nkbu by construction.
 satisfies: derived
 
 **LLR-v3jqau**: every operation naming a member that is not in the organisation
-is refused with `IdNotFound`. satisfies: REQ-ds8ryr
+is refused with `IdNotFound`.
+satisfies: REQ-ds8ryr
 
 ### Amendments to LLR-s97ywt, LLR-w92psx and LLR-k89ahd
 
 LLR-s97ywt as first written (2026-09-17) stated what the software did, which
 was less than REQ-ewdg2q requires: the requirement's second clause — reject a
 replacement key equal to the key being replaced — was not implemented, recorded
-as PR-zz4exm, open since 2026-08-31. The LLR was deliberately worded to the
+as a problem report opened 2026-08-31. The LLR was deliberately worded to the
 implemented behaviour, because an LLR restating the requirement would have been
 satisfied by a test that could not exist. Amended 2026-10-03, together with
-LLR-w92psx, in the change that fixes PR-zz4exm: the owner decided that an
+LLR-w92psx, in the change that fixes that problem report: the owner decided that an
 unchanged replacement key is an error and the operation is atomic — refused
 whole, never performed by halves. `emergency_isolate_member` removes device
 keys too, so REQ-ewdg2q's second clause governs it as well, and LLR-w92psx now
@@ -409,7 +335,8 @@ It stays derived — no requirement asks for it — and is assessed in
 `../risk/2026-09-17-design-derived.md` under LLR-k89ahd. The same ruling settled
 that a key no longer held — a member key used earlier, the key of a device
 removed earlier — and a non-canonical encoding of a held key are not checked,
-by any of the three operations; see PR-z463w5. A second owner decision the same
+by any of the three operations, which resolved the problem report that raised
+them. A second owner decision the same
 day, in the same change, refuses with `DuplicateKey` every replacement key still
 held anywhere in the organisation, the key of the device being removed included:
 LLR-fym7dy in `2026-10-03-key-uniqueness.md`.)
@@ -422,23 +349,27 @@ the canonical-form check in `org-members/src/trie.rs`
 **SDD-55b2zj**: the change set that crosses a process boundary — anchored
 to the record it was computed against, canonical in its encoding, and
 usable only after its result is verified against a root supplied
-independently of it. traces: REQ-4umsuz, REQ-shk82j, REQ-d3prca, REQ-wx3wpv
+independently of it.
+traces: REQ-4umsuz, REQ-shk82j, REQ-d3prca, REQ-wx3wpv
 
 (Amended 2026-10-03: REQ-wx3wpv added to the trace, refined by LLR-n5t6bn in
 `docs/architecture/2026-10-03-lawful-change-replicates.md`. The
-item's purpose is a change set that crosses a process boundary; PR-vf5hdm
-showed a class of lawful transition it could not carry.)
+item's purpose is a change set that crosses a process boundary; a problem
+report showed a class of lawful transition it could not carry.)
 
 **LLR-au8het**: a change set names the record root it was computed against, and
 applying it to a record with a different root is refused with
-`DeltaBaseMismatch`. satisfies: REQ-4umsuz
+`DeltaBaseMismatch`.
+satisfies: REQ-4umsuz
 
 **LLR-y38jfk**: applying a change set yields a candidate record that exposes no
 member query, and only verification against an expected root turns it into a
-usable record. satisfies: REQ-4umsuz
+usable record.
+satisfies: REQ-4umsuz
 
 **LLR-7tdqv9**: verification refuses a candidate whose root differs from the
-expected root, and the candidate is consumed either way. satisfies: REQ-4umsuz
+expected root, and the candidate is consumed either way.
+satisfies: REQ-4umsuz
 
 **LLR-xmpqn2**: a change set is accepted only in canonical form: removals
 strictly increasing and all present in the record, upserts strictly increasing
@@ -451,7 +382,8 @@ satisfies: REQ-shk82j
 
 **LLR-h7stq2**: `calculate_delta(old)` produces the change set transforming
 `old` into the receiver, and is refused when either record has uncomputed
-hashes. satisfies: derived
+hashes.
+satisfies: derived
 
 What LLR-xmpqn2 buys, and what it does not. Together with LLR-8jttpb it fixes
 the *structure* of an accepted change set: removals and upserts each strictly
@@ -479,10 +411,9 @@ walks the upserts in one ascending pass and so still sees the outgoing handle in
 the index when it checks the member acquiring it. So the sentence is defensible
 on the narrow reading — the canonical-form check itself does pass — and false on
 the reading it invites. It is now written to the narrow claim only. The defect
-is **PR-vf5hdm** (opened 2026-09-17, open) in
-`../problems/2026-09-17-review2-fixes.md`, which
-has the mechanism, the two failing shapes, and the reason no hazard in the
-register covers it.
+was filed as a problem report on 2026-09-17 and fixed on 2026-10-03 (REQ-wx3wpv,
+LLR-n5t6bn): `apply_delta` now releases every outgoing handle from both indexes
+before it checks any incoming one.
 
 **What it does NOT buy is a unique byte string, and until 2026-09-17 this
 paragraph said it did.** The independent review at merge found the claim false
@@ -558,10 +489,12 @@ traces: REQ-ds8ryr
 
 **LLR-h9gs32**: every rejected operation returns an `OrgMembersError` variant,
 and the crate denies `unwrap`, `expect` and `panic` at the lint level so that
-no input reaches a panicking path. satisfies: REQ-ds8ryr
+no input reaches a panicking path.
+satisfies: REQ-ds8ryr
 
 **LLR-sa3ugj**: `MalformedDelta` renders the rule that was broken, and
-`FieldTooLong` renders the field and the limit. satisfies: REQ-ds8ryr
+`FieldTooLong` renders the field and the limit.
+satisfies: REQ-ds8ryr
 
 LLR-sa3ugj's two carriers are both already its normal case (2026-09-17). The
 item is about how two error variants render.
@@ -650,8 +583,9 @@ A **second** independent review, on 2026-09-17, added Obligation G below and
 closed its own finding-7 in place — see the note after Obligation G. Its other
 outputs were fixes rather than obligations: the trace corrections above, the
 byte-uniqueness corrections in `org-members/README.md` and
-`org-members/src/trie.rs`, the widening of PR-jq43gx to `DefaultHashes::at_level`,
-the fourth site added to Obligation A in the risk file, and **PR-vf5hdm**.
+`org-members/src/trie.rs`, the widening of the out-of-range index problem
+report to `DefaultHashes::at_level`, the fourth site added to Obligation A in
+the risk file, and the problem report on a refused handle handover.
 
 **No SDD, LLR, HAZ or RC is minted for any of these.** Where an item looks
 wanted, that is said and left to the owner.

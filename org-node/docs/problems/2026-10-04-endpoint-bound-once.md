@@ -1,9 +1,8 @@
 # Problem reports — org-node, one endpoint per service
 
-Opened by the architecture tooth
-(`docs/plans/2026-10-03-org-node-architecture.md`) from review round 5.
+Opened by the architecture tooth from review round 5.
 
-*Moved 2026-10-13 (S4, task T10 of `docs/plans/2026-10-06-org-io-transport.md`,
+*Moved 2026-10-13 (S4, task T10,
 ruling A):* the report this file held — the transport endpoint bound once per
 service, from whichever Persona first needed it, so a device administering two
 Organisations through two Personas sent the second Organisation's admissions

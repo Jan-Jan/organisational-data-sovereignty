@@ -65,50 +65,6 @@ DevicePublicKey the record lists or holds as revoked, each entry at most
 sixteen addresses of 256 bytes (LLR-h4gwns). The store of a Persona removed
 from its Organisation is SDD-z4m57w's.
 
-**LLR-d925uu**: `StoreData` holds, in this encoding order: `persona:
-PersonaRecord`; `record: Option<OrgRecord>` (the current record, at most one,
-in place of `orgs: Vec<OrgRecord>`); `org_name: String` (the Organisation
-name, free text); `provisional_changes: Vec<ProvisionalChange>` in the order
-recorded; `provisional_organisations: Vec<ProvisionalOrganisation>`;
-`founding: Option<ProvisionalFounding>`; `member: Option<ProvisionalMember>`;
-`kept_admission_requests: Vec<KeptAdmissionRequest>`;
-`kept_revocation_notices: Vec<RevocationNotice>`; `expected_admissions:
-Vec<ExpectedAdmission>`; `outstanding_invites: Vec<OutstandingInvite>`,
-each `OutstandingInvite { org_id: OrgId, invite_id: InviteId, invitee_name:
-String }` in that order, `invitee_name` the name the inviter typed for that
-Invite (LLR-h9f5c9);
-`revoked_devices: Vec<RevokedDevice>` (LLR-bgj2ff); `address_book:
-Vec<(DevicePublicKey, EndpointAddresses)>` (LLR-h9d65p). It
-holds no `provisional_updates` field and no `ProvisionalUpdate` type exists.
-Every field reaches the sealed store and is read back unchanged by
-`PersonaStore::unseal`, except the behind marker (LLR-zk7fx2). A
-`StoreData` is sealed as the `Active` form of the store plaintext
-(LLR-6zaeb6).
-satisfies: REQ-dhr58q, REQ-3pj7rd, REQ-9ktgwx, REQ-hx4r8y, REQ-6qxesy, REQ-ky5tyd
-supersedes: LLR-95753m
-superseded-by: LLR-f5wrjx
-
-*Superseded 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; owner
-rulings R2 and 5 as cut down by the plan's §0) by LLR-f5wrjx
-(`2026-11-02-publish-2.md`):* each kept revocation notice is kept with the
-Device it came from, and the store gains the acknowledged record, last. The
-store encoding changes, so the successor has its own ID; every other field is
-as stated here.
-
-*Noted 2026-11-09 (change `worktree-org-io-publish-2`, merge review round 1,
-MR1-N4):* LLR-f5wrjx also drops this item's clause "no `ProvisionalUpdate`
-type exists". Its field list is exhaustive and still holds no
-`provisional_updates` field, so the store keeps no provisional update.
-
-*Amended in place 2026-10-20 (unmerged draft; owner answer A2 and owner
-rulings Q3 and Q4' of 2026-10-16):* adds the last two fields, and the
-`Active` form.
-
-*Amended in place 2026-10-20 (unmerged draft; consistency pass, REQ-ky5tyd
-as amended that day):* an outstanding invite keeps the invitee name the
-inviter typed, beside its `(OrgId, InviteId)` pair, so that each kept
-admission request can be returned with it (LLR-8ru6mv).
-
 **LLR-b2hgd4**: `ProvisionalChange` is `Admit { invite_id: InviteId, handle:
 Handle }` (naming the kept admission request it admits and the Handle chosen
 for it, LLR-bwtx3h) or `Revoke { member_id: MemberId }`; it holds no
@@ -160,10 +116,9 @@ pair is drawn only by `propose_founding` (LLR-9qavm7) and
 `propose_updated_organisation` (LLR-qghs95), and a received provisional
 organisation holds the key its message carried.
 satisfies: REQ-3pj7rd, REQ-ech45n
-supersedes: LLR-qjz3q4 LLR-3fwykc
 
 *Amended in place 2026-10-21 (unmerged draft; design gap G2 of the plan):*
-supersedes LLR-3fwykc (the Organisation private key held only in the
+supersedes an earlier item (the Organisation private key held only in the
 record and, until `commit_genesis`, in the genesis provisional update; both
 on disk only in the encrypted store; the record's key replaced by each
 commit; a fresh one drawn only when a provisional update is built), whose
@@ -181,7 +136,6 @@ returning no `StoreChange` and leaving `StoreData` exactly as it was. The
 operations are `record_admission`, `record_revocation`,
 `propose_updated_organisation` and `check_received`.
 satisfies: REQ-g2537c
-supersedes: LLR-jq7qh7
 
 **LLR-p8vpgz**: `OrgRecord` keeps `kept_change_set: Option<Vec<u8>>` and
 gains `kept_base_snapshot: Option<Vec<u8>>` (the postcard `Vec<MemberSnapshot>`
@@ -192,7 +146,6 @@ or adopted from an organisation answer (LLR-kd7u2r), keeps `None` for both.
 Each is bounded by `MAX_MESSAGE`, being part of a body that was built or
 received within it.
 satisfies: REQ-x2dnee, REQ-ttv8k7
-supersedes: LLR-d9778a
 
 **LLR-78jfrd**: `OrgRecord` (and its decode mirror `RawOrgRecord`) has no
 `org_secret` field, and its `org_private_key` is an `OrgPrivateKey`, not an
@@ -206,9 +159,8 @@ with the match's (LLR-34c5y3); the record holds only the adopted epoch's key
 and keeps no earlier one. Stores written before this change are not
 supported: nothing reads or migrates their layout.
 satisfies: REQ-ju6vn2, REQ-ech45n
-supersedes: LLR-byjvd9
 
-*Added 2026-10-21 (unmerged draft; design gap G2 of the plan):* LLR-byjvd9
+*Added 2026-10-21 (unmerged draft; design gap G2 of the plan):* an earlier form of this item
 named `commit_genesis`, `commit_update` and the committed
 Organisation-information message as the record's creators and replacers,
 which this change removes; its rule — a record always holds the
@@ -283,7 +235,7 @@ the current record's epoch and whose `applied` equals the store's
 `OrgPrivateKey` nor changes the store. `OrgService::admission_requests(device_key)`
 returns the kept admission requests (LLR-v3av9t) in the same way, in kept
 order, each paired with the `invitee_name` of the outstanding invite whose
-invite id it carries (LLR-d925uu). `OrgService::persona_view(device_key) ->
+invite id it carries (LLR-f5wrjx). `OrgService::persona_view(device_key) ->
 Result<PersonaView, OrgNodeError>` returns, by value, a copy of the store's
 public values: `PersonaView { device_key, org_id, org_name, record:
 Option<RecordView { org_id, root_hash, org_pub_key, epoch, members }>,
@@ -307,7 +259,6 @@ per-store operation does (LLR-f9x3vf). These views, not the
 `PersonStore::data`, whose values hold a key field, are how a caller
 outside org-node reads a store.
 satisfies: REQ-3pj7rd, REQ-dhr58q, REQ-6qxesy, REQ-ky5tyd
-supersedes: LLR-nvn3wk LLR-gwk4nk
 
 *Amended in place 2026-10-28 (unmerged draft; review round 1 A1):*
 `persona_records` and `PersonStore::view` are added. org-io's listings of
@@ -351,7 +302,6 @@ DevicePublicKey as `DevicePublicKey`, Organisation public key as
 `OrgPublicKey`). Decoding a record snapshot (`first_admission_base`) refuses
 in the same way with `member.*`.
 satisfies: REQ-kd34f5
-supersedes: LLR-8bum44
 
 **LLR-mkvx2k**: the postcard encoding of a fixed Persona store plaintext (one
 Persona; one current record with its Organisation private key, chain account,
@@ -364,18 +314,17 @@ its invitee name; one revoked Device; one address-book entry), in its
 removed store (an Organisation identifier, a verification time and two kept
 acknowledgements, each with its recipient's key and addresses), in its
 `Removed` form (LLR-6zaeb6), each equal the bytes pinned in
-`org-node/tests/encoding_golden.rs`, field order as LLR-d925uu and
+`org-node/tests/encoding_golden.rs`, field order as LLR-f5wrjx and
 LLR-6zaeb6 state; the pinned Organisation-information and revocation Wire
-messages of LLR-ayrdr8 are unchanged.
+messages of this item's earlier form are unchanged.
 satisfies: derived
-supersedes: LLR-ayrdr8
 
 *Amended in place 2026-10-20 (unmerged draft; owner answer A2 and owner
 rulings Q3 and Q4' of 2026-10-16):* the pinned plaintext gains the new
 fields, and a removed store is pinned beside it.
 
 *Amended in place 2026-10-20 (unmerged draft; consistency pass):* the pinned
-outstanding invite carries its invitee name (LLR-d925uu), and the pinned
+outstanding invite carries its invitee name (an earlier form of LLR-f5wrjx), and the pinned
 provisional organisations their applied changes (LLR-s3vq6d).
 
 *Amended in place 2026-10-30 (change `worktree-org-io-domain-api`, merge
@@ -393,7 +342,6 @@ Option<MemberId>` and `status`; every value is constructed only from parsed
 types, and `MemberSnapshot` and `ProvisionalMember` hold the handle, name and
 surname typed. No `Joiner` type remains.
 satisfies: REQ-kd34f5
-supersedes: LLR-g76zqd
 
 **LLR-qqqg4b**: a Persona's Organisation is fixed for the life of its store:
 `propose_member` sets `persona.org_id` to the Invite's Organisation
@@ -402,7 +350,6 @@ to the identifier it is given, and no other operation writes `org_id`.
 `record_founding_proxy` refuses with `FoundingProxyAlreadyRecorded` a store
 whose `org_id` is already set to another identifier (LLR-nx87k5).
 satisfies: REQ-yp75u9
-supersedes: LLR-6z5xya LLR-eyc4ud
 
 **LLR-ay8nvu**: every `OrgService` operation that changes a store
 (`propose_founding`, `record_founding_proxy`, `propose_member`,
@@ -421,7 +368,6 @@ it was before the call. Only `propose_founding`, `propose_member` and
 `device_secrets` closure, called only when it signs acknowledgements
 (LLR-5tvn7g).
 satisfies: REQ-x3jrh8, REQ-qthum6
-supersedes: LLR-bvt5up
 
 *Amended in place 2026-10-20 (unmerged draft; owner ruling Q4' of
 2026-10-16):* `Forgotten` is removed. On its own removal a Persona's store
@@ -435,10 +381,9 @@ refuses an unknown one (`PersonaNotHeld`), reading and changing that store
 alone; `propose_founding` and `propose_member` add one new store and change
 no other.
 satisfies: REQ-x3jrh8
-supersedes: LLR-rdda86 LLR-vdyu65 LLR-y2v8v2
 
 *Amended in place 2026-10-22 (unmerged draft; dispatcher decision O4, plan
-assembly):* supersedes LLR-y2v8v2 (every record the receive path reads or
+assembly):* supersedes an earlier item (every record the receive path reads or
 writes is the one the received change's Organisation identifier names, so a
 node holding more than one Organisation leaves every other Organisation's
 record, Organisation private key, expectation and provisional updates
@@ -449,7 +394,7 @@ today's operations: no other store's record, Organisation private key,
 expected admission or provisional changes is read or changed.
 
 *Amended in place 2026-10-21 (unmerged draft; design gap G2 of the plan):*
-supersedes LLR-vdyu65 (`admit_member` builds on the record its `org_id`
+supersedes another earlier item (`admit_member` builds on the record its `org_id`
 names and leaves every other Organisation's record and provisional updates
 where they were), whose operation is removed: a store now holds one
 Organisation, and an admission is recorded in the store its Device key
@@ -488,10 +433,9 @@ current record and calls no chain operation. The secret is returned by value
 for org-io's keychain; org-node keeps no copy, and the Persona records the
 Device public key and the member seed, never the Device seed.
 satisfies: REQ-4qh2h8, REQ-kd34f5, REQ-ky5tyd
-supersedes: LLR-e5kqhg LLR-s6qnht LLR-68yd3j LLR-tev8h8
 
 *Amended in place 2026-10-21 (unmerged draft; design gap G2 of the plan):*
-supersedes LLR-tev8h8 (`create_persona` draws an independent member keypair
+supersedes the item it and LLR-6acxu9 replaced (`create_persona` draws an independent member keypair
 and Device seed, keeps the member seed and, since S4, the Device public key
 and no Device seed, and returns the Device secret by value), whose operation
 is removed; with LLR-6acxu9 this item states the same draws for
@@ -504,7 +448,6 @@ founding root is calculated and refuses with
 Member-as-a-group key or DevicePublicKey, adding no store and returning no
 secret.
 satisfies: REQ-4qh2h8, REQ-ech45n
-supersedes: LLR-sj7cd5
 
 *Amended in place 2026-10-28 (unmerged draft; round 2 review, AR2-8):* a
 drawn Organisation public key equal to a key already held is org-node's own
@@ -543,12 +486,11 @@ for `propose_founding` (LLR-d4gpxm), the secret is returned by value for
 org-io's keychain, org-node keeps no copy, and the Persona records the
 Device public key and the member seed, never the Device seed.
 satisfies: REQ-hx4r8y, REQ-kd34f5, REQ-ky5tyd
-supersedes: LLR-7q9g9z LLR-9zfnmb LLR-tev8h8
 
 *Amended in place 2026-10-21 (unmerged draft; design gap G2 of the plan):*
-supersedes LLR-tev8h8 together with LLR-d4gpxm: a provisional Member's
+supersedes, together with LLR-d4gpxm, the item they both replaced: a provisional Member's
 Persona is the other Persona `create_persona` made, and the last sentence
-states for it what LLR-tev8h8 stated of the keys.
+states for it what that item stated of the keys.
 
 **LLR-rjphn4**: `propose_founding` and `propose_member` parse the name, the
 surname and each Handle with `Name::parse`, `Surname::parse` and
@@ -559,7 +501,6 @@ first failure is refused with `InvalidField` whose `field` is
 `member.preferred_handles[i]` / `member.preferred_handles` (count or
 repeat), before any draw from `rng`, adding no store.
 satisfies: REQ-kd34f5
-supersedes: LLR-q6n25z
 
 **LLR-w2uyyh**: `propose_member` refuses with
 `OrganisationHeldByAnotherPersona { org_id }`, before any draw and adding no
@@ -567,7 +508,6 @@ store, an Invite whose Organisation a held store is already bound to
 (`persona.org_id`) or expects admission to; the variant's `Display` names
 the Organisation and no Persona.
 satisfies: REQ-uy7kfq
-supersedes: LLR-yexf5m
 
 **LLR-bwtx3h**: `OrgService::record_admission(rng, device_key, invite_id,
 chosen: Option<&str>) -> Result<StoreChange, OrgNodeError>` takes the kept
@@ -577,7 +517,6 @@ record nor by the `handle` of another `Admit` change in
 `provisional_changes`; when none is free it parses `chosen` and gives that,
 refused as LLR-mq7n6u states; it then appends `Admit { invite_id, handle }`.
 satisfies: REQ-2nnsmv, REQ-dhr58q
-supersedes: LLR-rb8r65 LLR-kkj64b
 
 **LLR-mq7n6u**: `record_admission` refuses, recording nothing: an
 `invite_id` with no kept admission request (`NoAdmissionRequestKept`); an
@@ -596,7 +535,6 @@ refuses, recording nothing, a MemberId the current record does not hold
 (`RevocationAlreadyRecorded`), a store with no current record (`OrgNotHeld`),
 the behind marker set and the bound; it builds no trie and draws nothing.
 satisfies: REQ-dhr58q, REQ-akfwf3
-supersedes: LLR-6dc598
 
 *Amended in place 2026-10-30 (change `worktree-org-io-domain-api`, the
 plan's open low, confirmed by merge review MR1):* "draws nothing" reads
@@ -617,7 +555,6 @@ encodes the Change set from the current record to the result, and keeps an
 key pair of LLR-qghs95. The provisional changes stay held; the current
 record is unchanged.
 satisfies: REQ-3pj7rd
-supersedes: LLR-ghja3x LLR-tax3pm
 
 *Amended in place 2026-10-20 (unmerged draft; consistency pass):* keeps the
 applied changes with the provisional organisation (LLR-s3vq6d).
@@ -628,7 +565,6 @@ pair from `rng` after the resulting root is calculated and refuses with
 the record's current Organisation public key or to any Member-as-a-group key
 or DevicePublicKey of the resulting record (`OrgPublicKey::ensure_distinct_from`).
 satisfies: REQ-3pj7rd
-supersedes: LLR-e2b7gv
 
 *Amended in place 2026-10-28 (unmerged draft; round 2 review, AR2-8):* a
 drawn Organisation public key equal to a key already held is org-node's own
@@ -646,9 +582,8 @@ Member-as-a-group key and DevicePublicKey admitted twice, in two proposals,
 get two different identifiers, and a deleted identifier is never issued
 again.
 satisfies: REQ-d9g6nt
-supersedes: LLR-ag9mgm
 
-*Added 2026-10-21 (unmerged draft; design gap G2 of the plan):* LLR-ag9mgm
+*Added 2026-10-21 (unmerged draft; design gap G2 of the plan):* an earlier form of this item
 stated this of `admit_member`, which this change removes; a Member is now
 given its identifier when the provisional organisation that admits it is
 calculated, and the founder when the founding is proposed, and the rule is
@@ -662,9 +597,8 @@ satisfies: REQ-3pj7rd, REQ-akfwf3, REQ-g2537c
 
 ## Verification
 
-**SDD-kegag2**: verification of one Organisation against the chain. Code: `org-node/src/verify_org.rs` (`judge`, `adopt`) and `OrgService::verify` in `org-node/src/service.rs`. Given the Organisation state org-io read at a finalised block, it decides exactly one outcome, carried out on the store: on adoption the current record is replaced; on the Persona's own removal the store goes to SDD-z4m57w's removal. It takes over the commit responsibility SDD-8cpyfa describes for `commit_update`, `commit_genesis`, `commit_checked`, `reconcile`, all removed.
+**SDD-kegag2**: verification of one Organisation against the chain. Code: `org-node/src/verify_org.rs` (`judge`, `adopt`) and `OrgService::verify` in `org-node/src/service.rs`. Given the Organisation state org-io read at a finalised block, it decides exactly one outcome, carried out on the store: on adoption the current record is replaced; on the Persona's own removal the store goes to SDD-z4m57w's removal. It takes over the commit responsibility for `commit_update`, `commit_genesis`, `commit_checked` and `reconcile`, all removed.
 traces: REQ-dwb9bq, REQ-x2dnee, REQ-eqt23j, REQ-nbx4nn, REQ-2yduet, REQ-akfwf3, REQ-9ktgwx, REQ-tqap3r, REQ-jy6ybw, REQ-ju6vn2, REQ-kt877x, REQ-m2xh8q, REQ-4qh2h8, REQ-48zc3e, REQ-y9p27b
-supersedes: SDD-8cpyfa
 
 *Amended in place 2026-10-30 (change `worktree-org-io-domain-api`, merge
 review MR3-N1):* the code also holds `verify_org::discard_unadoptable` and
@@ -676,10 +610,9 @@ verification leaves; no edge is added.
 for ARCHITECTURE Boundaries 3):* reworded so deciding the outcome and carrying it out read as the one responsibility they are, a verification's outcome (adoption is the outcome carried out, not a second job); its code and LLRs are unchanged.
 
 *Amended in place 2026-10-20 (unmerged draft; owner ruling Q4' and
-dispatcher's resolution C6 of 2026-10-16):* REQ-uxv2x2, REQ-y99c9w and
-REQ-em28bq are superseded; the item traces their successors REQ-48zc3e and
-REQ-y9p27b, and supersedes SDD-8cpyfa together with SDD-busuj3, whose
-chain-free checks that item also held.
+dispatcher's resolution C6 of 2026-10-16):* the item traces REQ-48zc3e and
+REQ-y9p27b; with SDD-busuj3, which holds the chain-free checks, it carries
+the receive-and-commit responsibility.
 
 **LLR-rr558z**: `OrgService::verify(rng, device_key, chain: Option<OrgState>,
 verified_at: VerificationTime, device_secrets: impl FnOnce(&[DevicePublicKey])
@@ -701,7 +634,6 @@ possible. `VerificationTime(u64)` is the caller's time of the verification
 in seconds since the Unix epoch; `verify` reads no clock and keeps it only
 on a removal (LLR-2d5a7m).
 satisfies: REQ-dwb9bq, REQ-48zc3e
-supersedes: LLR-gr8x3r LLR-3wb7th REQ-bvh8v6 LLR-8m99q2 LLR-vf5mjx
 
 *Amended in place 2026-10-30 (change `worktree-org-io-domain-api`, merge
 review MR3-N1, owner decision on rule 4 of 2026-10-30):* `verify` also takes
@@ -719,12 +651,11 @@ reported `Inconsistent`, and LLR-4tsgfh's discard does not run on it:
 nothing is discarded or stamped.
 
 *Amended in place 2026-10-30 (change `worktree-org-io-domain-api`, merge
-review MR1-N1, owner ruling 2026-10-29):* supersedes REQ-bvh8v6, LLR-8m99q2,
-LLR-vf5mjx, which `verify_envelope_against_chain` alone did; it is deleted,
+review MR1-N1, owner ruling 2026-10-29):* supersedes earlier items, which `verify_envelope_against_chain` alone did; it is deleted,
 and this item states what each became (see each one's note).
 
 *Amended in place 2026-10-22 (unmerged draft; dispatcher decision O4, plan
-assembly):* supersedes LLR-3wb7th (an Organisation the chain holds no state
+assembly):* supersedes an earlier item (an Organisation the chain holds no state
 for is refused with `OrgNotOnChain`, record unchanged — for a held
 Organisation only after the chain-free checks, for a first admission only
 after the expectation check, the snapshot decode and the chain-free
@@ -754,7 +685,6 @@ record refuses never deletes anything.
 was and call `device_secrets` never; only the behind marker of LLR-zk7fx2
 changes.
 satisfies: REQ-dwb9bq, REQ-tqap3r, REQ-y9p27b
-supersedes: LLR-ewkg85 LLR-6qjmhf LLR-8hwqru
 
 *Amended in place 2026-10-30 (change `worktree-org-io-domain-api`, merge
 review MR3-N1, owner ruling 2026-10-30):* the one exception to this item is
@@ -766,7 +696,7 @@ every other field are as they were, and `device_secrets` is still never
 called. Every refusal (no chain state among them) still changes nothing.
 
 *Amended in place 2026-10-30 (change `worktree-org-io-domain-api`, merge
-review MR1-N1, owner ruling 2026-10-29):* supersedes LLR-8hwqru, which
+review MR1-N1, owner ruling 2026-10-29):* supersedes an earlier item, which
 `verify_envelope_against_chain` alone did; it is deleted, and this item states
 what each became (see each one's note).
 
@@ -791,11 +721,9 @@ message carried but the Change set, record snapshot and Organisation
 private key it was kept from, and never the Device that delivered it
 (origin plays no part in the match).
 satisfies: REQ-dwb9bq, REQ-9ktgwx, REQ-2yduet
-supersedes: LLR-ba2ejp LLR-37cj3n REQ-ag6kqm LLR-na7p4w LLR-8n95rf
 
 *Amended in place 2026-10-30 (change `worktree-org-io-domain-api`, merge
-review MR1-N1, owner ruling 2026-10-29):* supersedes REQ-ag6kqm, LLR-na7p4w,
-LLR-8n95rf, which `verify_envelope_against_chain` alone did; it is deleted,
+review MR1-N1, owner ruling 2026-10-29):* supersedes earlier items, which `verify_envelope_against_chain` alone did; it is deleted,
 and this item states what each became (see each one's note).
 
 *Amended in place 2026-10-22 (unmerged draft; plan detail pass —
@@ -805,11 +733,11 @@ founding whose members do not give its root is no match and adopts
 nothing. It was silent.
 
 *Amended in place 2026-10-20 (unmerged draft; dispatcher's resolution C6 of
-2026-10-16):* supersedes LLR-ba2ejp, whose functions are removed: the key
+2026-10-16):* supersedes an earlier item, whose functions are removed: the key
 check it made on receipt is this match, at verification.
 
 *Amended in place 2026-10-21 (unmerged draft; design gap G2 of the plan):*
-supersedes LLR-37cj3n (which Change set `receive_and_verify` commits is
+supersedes another earlier item (which Change set `receive_and_verify` commits is
 decided by the chain state and the node's own record, never by a carried
 value but the Envelope, the key and a first admission's snapshot, and never
 by the delivering Device), whose operation is removed: the added sentence
@@ -828,20 +756,19 @@ revocation only through such an adoption: `record_admission`,
 (LLR-b2hgd4, LLR-va2yqz), and `messages_for_current_epoch` changes nothing
 (LLR-degg8t).
 satisfies: REQ-x2dnee, REQ-tqap3r, REQ-jy6ybw, REQ-ju6vn2
-supersedes: LLR-mkj4bz LLR-cmdrp9 LLR-6s785x LLR-fm38ww LLR-4kh9w9 LLR-ckk5nz LLR-sxd3tg LLR-qg9utu LLR-d6kvbx LLR-uc7cej
 
 *Amended in place 2026-10-30 (change `worktree-org-io-domain-api`, merge
-review MR1-N1, owner ruling 2026-10-29):* supersedes LLR-d6kvbx, LLR-uc7cej,
+review MR1-N1, owner ruling 2026-10-29):* supersedes earlier items,
 which `verify_envelope_against_chain` alone did; it is deleted, and this item
 states what each became (see each one's note).
 
 *Amended in place 2026-10-20 (unmerged draft; dispatcher's resolution C6 and
-owner ruling Q3 of 2026-10-16):* supersedes LLR-sxd3tg (the update branch's
+owner ruling Q3 of 2026-10-16):* supersedes an earlier item (the update branch's
 record fields, saved before the outcome), which this item states over
 `verify`; the sealed image also holds the revoked Devices the adoption adds.
 
 *Amended in place 2026-10-21 (unmerged draft; design gap G2 of the plan):*
-supersedes LLR-qg9utu (the revoking node's record takes the removal only
+supersedes another earlier item (the revoking node's record takes the removal only
 through `commit_update`, once it verified against the chain, and never
 through `revoke_member` or `send_update`), whose operations are removed: the
 added sentence states the same over adoption.
@@ -855,7 +782,6 @@ with the kept request's Member-as-a-group key and DevicePublicKey, and a
 included changes are removed and not reported. No command discards a change
 on request.
 satisfies: REQ-x2dnee
-supersedes: LLR-7cmp38
 
 **LLR-x8drb8**: on adoption at epoch `e`, every provisional organisation
 whose `epoch` is at most `e` is removed with its Organisation private key, the
@@ -963,7 +889,6 @@ outstanding (LLR-6gkxpg), and the endpoint addresses the request kept are
 moved into the address book under its DevicePublicKey (LLR-h9d65p),
 replacing any entry for that key.
 satisfies: REQ-nbx4nn, REQ-ky5tyd
-supersedes: LLR-d55brn
 
 *Amended in place 2026-10-20 (unmerged draft; owner answer A2 of
 2026-10-16):* the admitted Device's addresses outlive its settled request, so
@@ -983,13 +908,12 @@ The created record's Organisation public key is the chain's `org_pub_key`
 (equal to the match's, LLR-8528ud), never a value a message carried, and
 `OrgRecord` holds no administrator key.
 satisfies: REQ-eqt23j, REQ-kt877x
-supersedes: LLR-3f5h7b LLR-j83kc8 LLR-mbjfq8 LLR-xq9nrq
 
 *Amended in place 2026-10-20 (unmerged draft; dispatcher's resolution C6 of
-2026-10-16):* states LLR-xq9nrq's rule over the first adoption and
-supersedes it.
+2026-10-16):* states the rule of the item it replaced over the first adoption,
+and supersedes that item.
 
-*Amended in place 2026-10-25 (unmerged draft; PR-8sgsb5):* the first
+*Amended in place 2026-10-25 (unmerged draft; the resolved problem report on the issuer's addresses lost on first adoption):* the first
 adoption moves the Invite issuer's addresses into the address book. Without
 it `addresses_for` (LLR-pgy2rb) lost the issuer once the provisional Member
 was removed, and an admitted Member could not reach the Admin to request the
@@ -1003,10 +927,9 @@ pair, `kept_change_set` and `kept_base_snapshot` `None`, sets
 `persona.member_id` to the founder's MemberId, removes the founding, and
 reports `Adopted { epoch: 1, discarded: [], own: true }`.
 satisfies: REQ-4qh2h8, REQ-tqap3r, REQ-x2dnee
-supersedes: LLR-wzqqg9 LLR-pk6mhv LLR-q3aj8z
 
 *Amended in place 2026-10-21 (unmerged draft; design gap G2 of the plan):*
-supersedes LLR-q3aj8z, which said `commit_genesis` leaves the founding
+supersedes an earlier item, which said `commit_genesis` leaves the founding
 Persona's member id `None`, the founder's MemberId held only in the record's
 snapshots. That operation is removed, and this item states what the
 founding's adoption now does with the Persona's member id: it sets it to the
@@ -1023,10 +946,9 @@ store holding one Persona (LLR-f9x3vf), no other Persona is changed. The
 Organisation the Persona is bound to is fixed as LLR-qqqg4b states and is
 never rebound.
 satisfies: derived
-supersedes: LLR-w3fhhg LLR-e5c9ud
 
 *Amended in place 2026-10-22 (unmerged draft; plan detail pass —
-dispatcher decision):* supersedes LLR-e5c9ud (the Persona marked Active is
+dispatcher decision):* supersedes an earlier item (the Persona marked Active is
 the first in the store whose DevicePublicKey is in the verified trie, among
 those the commit may bind, and is given the member id of the member holding
 that key and the change's Organisation), whose commit is removed. A store
@@ -1039,7 +961,7 @@ same pass (dispatcher's design call): the plan builds the first adoptions
 order.
 
 *Added 2026-10-21 (unmerged draft; design gap G2 of the plan):*
-LLR-w3fhhg stated this of `commit_genesis` (the named Persona marked Active
+Another earlier item stated this of `commit_genesis` (the named Persona marked Active
 and bound, every other Persona as it was, a bound Persona never rebound),
 which this change removes; the rule holds over the two first adoptions.
 
@@ -1050,10 +972,9 @@ with `org_id` `Some(invite.org_id)` and no member id. A Persona's member id
 is set only by the first adoption in its store (LLR-exaa9u), and by no
 other operation.
 satisfies: derived
-supersedes: LLR-v82xds
 
 *Added 2026-10-22 (unmerged draft; plan detail pass — dispatcher
-decision):* LLR-v82xds said a newly created Persona is recorded Proposed
+decision):* an earlier form of this item said a newly created Persona is recorded Proposed
 with no Organisation and no member identifier. That holds of a founding's
 Persona, but a provisional Member's Persona is created bound to its
 Invite's Organisation (LLR-6acxu9, LLR-qqqg4b), which contradicts it; this
@@ -1070,12 +991,11 @@ other operation — `record_admission`, `record_revocation`,
 `propose_updated_organisation`, an adoption that replaces the record
 (LLR-34c5y3) — reads or changes it.
 satisfies: derived
-supersedes: LLR-dzte8x LLR-3v5nu9 LLR-drgdy8
 
-*Added 2026-10-21 (unmerged draft; design gap G2 of the plan):* LLR-dzte8x
-(stored opaquely by `commit_genesis`), LLR-3v5nu9 (handed back by
-`proxy_account`) and LLR-drgdy8 (neither read nor changed by
-`revoke_member`) state one rule over removed operations; it holds over the
+*Added 2026-10-21 (unmerged draft; design gap G2 of the plan):* three earlier
+items (the proxy account stored opaquely by `commit_genesis`, handed back by
+`proxy_account`, and neither read nor changed by `revoke_member`) stated one
+rule over removed operations; it holds over the
 founding's proxy recorded before its write, which org-io reads back to
 write each later epoch.
 
@@ -1090,12 +1010,11 @@ returning `Removed { org_id, acknowledgements_kept }` with that one
 `StoreChange::Sealed`. A notice `accept` refuses stays kept and the
 judgement continues as LLR-rr558z states (LLR-f9mcsq).
 satisfies: REQ-48zc3e, REQ-2yduet, REQ-m2xh8q
-supersedes: LLR-b27jr6 LLR-pt32fx
 
 *Amended in place 2026-10-20 (unmerged draft; owner rulings Q3 and Q4' of
 2026-10-16):* the removal no longer forgets the store
 (`StoreChange::Forgotten`); it seals one that keeps the acknowledgements.
-REQ-uxv2x2 and REQ-y99c9w are superseded by REQ-48zc3e and REQ-h29c8e. A
+Earlier forms of REQ-48zc3e and REQ-h29c8e are superseded by those two. A
 refused notice is no longer dropped, so `Behind` and `InStep` still change no
 sealed byte (LLR-qvp7mq); kept notices go on adoption (LLR-x8drb8).
 
@@ -1110,7 +1029,6 @@ returned with no send made or awaited, and whether its epoch's messages
 (LLR-degg8t, built afterwards from the adopted record) are ever sent changes
 neither the outcome nor the store.
 satisfies: REQ-dwb9bq, REQ-m2xh8q, REQ-y9p27b, REQ-b462sh, REQ-qrtsc9, REQ-tqap3r
-supersedes: LLR-xgefn8 LLR-4tcxsu LLR-t4znbk
 
 *Amended in place 2026-10-30 (change `worktree-org-io-domain-api`, merge
 review MR1, finding-6):* `verify_org::accepted_notice` is now `pub(crate)`
@@ -1119,7 +1037,7 @@ that file the rule holds of every `pub(crate)` function, the ones `verify`
 calls, and the `absences` test reads those.
 
 *Amended in place 2026-10-22 (unmerged draft; plan detail pass —
-dispatcher decision):* supersedes LLR-t4znbk (`send_update` writes nothing
+dispatcher decision):* supersedes an earlier item (`send_update` writes nothing
 to the store and changes no record, the record already updated by the
 commit the send came from, and a failed send leaves that record in place),
 whose operation is removed: org-node sends nothing now, and the last
@@ -1128,15 +1046,15 @@ adoption's alone, sealed before any send, and no send or its failure
 changes it. The typed error of a failed send is org-io's.
 
 *Amended in place 2026-10-20 (unmerged draft; owner ruling Q4' of
-2026-10-16):* REQ-em28bq is superseded by REQ-y9p27b, which this item
+2026-10-16):* an earlier form of REQ-y9p27b is superseded by REQ-y9p27b, which this item
 satisfies in its place; `removal.rs` is added, with the clock names.
 
 *Amended in place 2026-10-21 (unmerged draft; design gap G2 of the plan):*
-supersedes LLR-4tcxsu (`commit_update` and `commit_genesis` bind no
+supersedes another earlier item (`commit_update` and `commit_genesis` bind no
 endpoint and send nothing, so a commit never waits on a send and its
 outcome does not depend on one), whose operations are removed: the added
 sentence states the same of `verify`'s adoption, and the item now also
-satisfies REQ-tqap3r, the requirement LLR-4tcxsu served.
+satisfies REQ-tqap3r, the requirement that item served.
 
 **LLR-7en38k**: org-node's source names no `on_chain_client::` or
 `subxt::` path, and no `ChainOps`, `ChainReader`, `read_state`,
@@ -1148,18 +1066,17 @@ the one operation that judges against the chain, `verify`
 takes the Organisation's state as an `Option<OrgState>` or `OrgState` value
 and is synchronous (LLR-g2jeqd).
 satisfies: REQ-dwb9bq
-supersedes: LLR-mn5c2q
 
 *Re-pointed 2026-10-30 (change `worktree-org-io-domain-api`, merge review
-round 2, finding-4).* This item satisfied REQ-bvh8v6 alone, superseded by
+round 2, finding-4).* This item satisfied only an earlier form of LLR-rr558z, superseded by
 LLR-rr558z. It now satisfies REQ-dwb9bq, which takes the Organisation state
 the caller read as given and, as amended that day, refuses with none.
 
-*Added 2026-10-21 (unmerged draft; design gap G2 of the plan):* LLR-mn5c2q
+*Added 2026-10-21 (unmerged draft; design gap G2 of the plan):* an earlier form of this item
 listed `commit_genesis`, `commit_update`, `reconcile` and `commit_checked`
 as the operations that judge against the chain, all removed by this change;
 its absences hold unchanged, and the list is now `verify` alone. The
-no-chain-write clause is the one LLR-65py3d also stated, which LLR-mn5c2q's
+no-chain-write clause is the one another earlier form also stated, which that form's
 note of 2026-10-08 kept in force through its test.
 
 **LLR-9jn3z8**: `StoreData::into_removed` (LLR-2d5a7m) is called from exactly
@@ -1170,12 +1087,11 @@ function removes a current record other than by replacing it with an adopted
 one (LLR-34c5y3), or a Persona's keys or store. A source scan in the `absences` test lists the
 callers of each.
 satisfies: REQ-y9p27b
-supersedes: LLR-jd82t6 LLR-vw2jn6
 
 *Amended in place 2026-10-20 (unmerged draft; owner ruling Q4' of
 2026-10-16):* `forget_organisation` becomes `into_removed`, which keeps the
 acknowledgements; the acknowledgement deletion is the one other deleting
-path REQ-y9p27b allows. Supersedes LLR-vw2jn6 (verification before anything
+path REQ-y9p27b allows. Supersedes an earlier item (verification before anything
 is decided about the node's own membership), which this states over
 `verify`.
 
@@ -1191,7 +1107,6 @@ org-io deletes them once none is left, and at the latest after 7 days.
 
 **SDD-z4m57w**: the removed store, from the node's own removal until its last acknowledgement is accepted. Code: `org-node/src/removal.rs` (new: `StoreContent`, `RemovedStore`, `KeptAcknowledgement`, `StoreData::into_removed`, the recipient choice) and `OrgService::acknowledgement_accepted` and `OrgService::kept_acknowledgements` in `org-node/src/service.rs`. When verification finds the Persona removed, the store is replaced, in one sealed image, by a removed store holding only the signed acknowledgements, each with its recipient's DevicePublicKey and addresses, with the verification time; afterwards an acknowledgement its recipient accepted is deleted, what is still kept is listed. It reads no clock; it removes no file or keychain item, which are org-io's.
 traces: REQ-48zc3e, REQ-y9p27b, REQ-h29c8e, REQ-6tepxq, REQ-ayyt5f, REQ-35s4eb, REQ-m2xh8q, REQ-2yduet, REQ-32cp7f
-supersedes: SDD-72ddm6
 
 *Traces amended 2026-11-03 (change `worktree-org-io-publish-2`, task T13b):*
 REQ-32cp7f joins the line: the recipient choice (LLR-6fsnma) puts the
@@ -1210,13 +1125,12 @@ organisation and the provisional founding, the provisional Member, every
 expected admission, outstanding invite, kept admission request and kept
 revocation notice, the revoked Devices, every address-book entry (those of
 the chosen recipients copied into their acknowledgements first,
-LLR-vq5d5n), and the Persona record with its member seed and keys are
+LLR-6fsnma), and the Persona record with its member seed and keys are
 dropped with it. `verify`
 replaces the held store's content with the `Removed` form (LLR-6zaeb6) and
 returns it as its one `StoreChange::Sealed`; no other store the service
 holds is read or changed (LLR-f9x3vf).
 satisfies: REQ-48zc3e
-supersedes: LLR-pba7yu LLR-6p4pj2 LLR-jwhzh3
 
 *Clarified 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; a
 clarification, the ID is kept):* "holding nothing else" also drops the
@@ -1289,10 +1203,9 @@ kept admission request and revocation notice, an outstanding invite, an
 address-book entry and a revoked Device, and finds every other field
 unchanged.
 satisfies: REQ-y9p27b, REQ-m2xh8q
-supersedes: LLR-jsx922 LLR-6qmq2g LLR-uw7nmv
 
 **LLR-5tvn7g**: before `into_removed`, `verify` signs the acknowledgement:
-when the count of LLR-vq5d5n is not zero it calls `device_secrets` once with
+when the count of LLR-6fsnma is not zero it calls `device_secrets` once with
 `[persona.device_key]`, takes the returned secret whose `device_key()` is
 the Persona's, and signs one `Acknowledgement { org_id, member_id, device,
 epoch: chain.epoch, root: chain.root_hash }` naming the Persona's MemberId
@@ -1304,26 +1217,6 @@ calls `device_secrets` never and signs nothing. Every secret is moved in and
 dropped, zeroised, before `verify` returns, on success and on refusal; none
 is cloned, put in the store or returned.
 satisfies: REQ-h29c8e
-supersedes: LLR-hby4jr LLR-r8qhky
-
-**LLR-vq5d5n**: the candidates for a removal are the distinct
-DevicePublicKeys the member snapshots of the current record held before the
-removal list, other than the Persona's own; with `n` of them, `k` is 3 when
-`n` is five or more, 2 when three or four, 1 when one or two, and 0 when
-none. The recipients are the first `k` candidates in this order: on a
-removal by an adopted match, first the candidates the matched record still
-lists, then the others; on a removal by a notice, all of them; each group in
-ascending order of the key's 32 bytes. Each recipient is distinct, and its
-`recipient_addresses` are its address-book entry (LLR-h9d65p), or `None`
-when the store keeps none for it.
-satisfies: REQ-6tepxq
-superseded-by: LLR-6fsnma
-
-*Superseded 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; owner
-ruling R2 of 2026-11-02) by LLR-6fsnma (`2026-11-02-publish-2.md`):* the
-Device the removal was received from is the first recipient; the order
-below it, and the count, are as stated here. A change of the recipient
-order, so a new ID.
 
 **LLR-85kves**: `OrgService::acknowledgement_accepted(rng, device_key,
 recipient: DevicePublicKey) -> Result<(usize, StoreChange), OrgNodeError>`,
@@ -1347,24 +1240,7 @@ acknowledgement's recipient and its `body` the encoded
 (`PersonaNotHeld`), changes nothing, and equal stores give equal results.
 satisfies: REQ-35s4eb
 
-**SDD-73emgx**: revocation notices and acknowledgements. Code: `org-node/src/revocation.rs`. It builds a revocation notice — for each Device an adopted epoch removed, for the send step, and for a Device held as revoked that asks for the Organisation, each proving the Device's absence from the current record's trie; checks a received notice with no chain state and decides a kept one against the chain state the caller read; signs this Device's acknowledgement of its own removal under a domain of its own; and checks a received acknowledgement with no chain state. Pure functions over values: no chain read, no transport, no file, no clock.
-traces: REQ-ps2gy2, REQ-qrtsc9, REQ-m2xh8q, REQ-b462sh, REQ-h29c8e, REQ-p4hwuv, REQ-ea4qs5
-supersedes: SDD-uck4tz
-superseded-by: SDD-gatf4h, SDD-8zzmav
-
-*Superseded 2026-10-28 (unmerged draft; round 2 review AR2-11,
-ARCHITECTURE Boundaries 3):* the item stated two responsibilities, the
-revocation notice and the removal acknowledgement's signature, each with its
-own reason to change (what a notice proves and when it is acted on; what an
-acknowledgement signs). It is split into SDD-gatf4h (the notices) and
-SDD-8zzmav (the acknowledgement's signature), both still in
-`org-node/src/revocation.rs`, each owning the functions and types named in
-its Code line. Its LLRs are re-pointed: LLR-rhsfw9 (below), LLR-kr5t6f and
-LLR-r7zm39 (2026-10-07-commit-workflow.md) are SDD-gatf4h's; LLR-bs6yxf
-(below) and LLR-5azhry (2026-10-07-commit-workflow.md) are SDD-8zzmav's. No
-behaviour changes.
-
-### The removal acknowledgement's signature (successor of SDD-73emgx)
+### The removal acknowledgement's signature
 
 **SDD-8zzmav**: the removal acknowledgement's signature: a removed Device's
 signed statement of its own removal, signed on this Device under a domain of
@@ -1374,10 +1250,9 @@ its own or checked on receipt with no chain state. Code:
 `check_acknowledgement`, `VerifiedAcknowledgement`). Pure functions over
 values: no chain read, no transport, no file, no clock.
 traces: REQ-h29c8e, REQ-b462sh
-supersedes: SDD-73emgx
 
-*Added 2026-10-28 (unmerged draft; round 2 review AR2-11):* SDD-73emgx's
-acknowledgement half. LLR-bs6yxf and LLR-5azhry are its LLRs; the signing
+*Added 2026-10-28 (unmerged draft; round 2 review AR2-11):* the acknowledgement half of
+the revocation item this and SDD-gatf4h replaced. LLR-bs6yxf and LLR-5azhry are its LLRs; the signing
 `verify` does on a removal is LLR-5tvn7g's (SDD-z4m57w), through
 `sign_acknowledgement`.
 
@@ -1388,9 +1263,8 @@ encoding of the tuple `(org_id, member_id, device, epoch, root)`;
 `signature` is the 64-byte Ed25519 signature over them. No other message
 org-node signs or verifies begins with `ACK_DOMAIN`.
 satisfies: REQ-h29c8e, REQ-b462sh
-supersedes: LLR-gbe9bt
 
-### Revocation notices (successor of SDD-73emgx)
+### Revocation notices
 
 **SDD-gatf4h**: revocation notices: proving to a Device an adopted epoch
 removed that it is absent from the current record, from building its notice
@@ -1401,10 +1275,9 @@ epoch removed, for the send step, and for a Device held as revoked that asks
 for the Organisation; a received one is checked with no chain state. Pure
 functions over values: no chain read, no transport, no file, no clock.
 traces: REQ-ps2gy2, REQ-qrtsc9, REQ-m2xh8q, REQ-p4hwuv, REQ-ea4qs5
-supersedes: SDD-73emgx
 
-*Added 2026-10-28 (unmerged draft; round 2 review AR2-11):* SDD-73emgx's
-notice half. LLR-rhsfw9, LLR-kr5t6f and LLR-r7zm39 are its LLRs.
+*Added 2026-10-28 (unmerged draft; round 2 review AR2-11):* the notice half of the
+revocation item this and SDD-8zzmav replaced. LLR-rhsfw9, LLR-kr5t6f and LLR-r7zm39 are its LLRs.
 
 **LLR-rhsfw9**: `revocation::accept(store: &StoreData, notice:
 &RevocationNotice, chain: Option<OrgState>) -> Result<(), OrgNodeError>`
@@ -1423,20 +1296,18 @@ nothing; the signing that follows an accepted notice is `verify`'s
 state of a later epoch than the record's, under whose root the Device is
 absent.
 satisfies: REQ-m2xh8q
-supersedes: LLR-tx8ruv
 
 *Added 2026-10-22 (unmerged draft; plan detail pass — dispatcher
-decision):* LLR-tx8ruv stated `accept` with a `device_seeds` source called
+decision):* an earlier form of this item stated `accept` with a `device_seeds` source called
 just before signing and returning `Accepted`; under this change `accept`
 only decides and `verify` signs (LLR-jhy6t6, LLR-5tvn7g), so the signature
-loses the seed source and returns `()`. Every refusal of LLR-tx8ruv, as
+loses the seed source and returns `()`. Every refusal of that earlier form, as
 amended on 2026-10-07 (`ChainStateConflict`), is kept, in the same order.
 
 ## The receive path
 
 **SDD-busuj3**: one chain-free receive path. Code: `OrgService::check_received` and `Checked` in `org-node/src/service.rs`. It decides from a received body, the receiving Persona's store and the DevicePublicKey the transport authenticated what is kept, answered, settled or refused; it never adopts and takes no chain state.
 traces: REQ-ncv4sc, REQ-9ktgwx, REQ-6qxesy, REQ-p4hwuv, REQ-eqt23j, REQ-8amu2a, REQ-uk9rw7, REQ-ea4qs5, REQ-zxgd46, REQ-b462sh, REQ-g2537c, REQ-2yduet, REQ-f2k4tr, REQ-ky5tyd, REQ-y9p27b, REQ-rv4dwb, REQ-h7y5ur, REQ-32cp7f
-supersedes: SDD-esg2kc SDD-8cpyfa
 
 *Traces amended 2026-11-03 (change `worktree-org-io-publish-2`, task T13b):*
 REQ-h7y5ur and REQ-32cp7f join the line: the acknowledgement arm keeps an
@@ -1450,17 +1321,17 @@ appends to. The note above read "LLR-xudkh4, under SDD-acnpu4".
 
 *Amended in place 2026-10-30 (change `worktree-org-io-domain-api`, merge
 review round 2, MR2-N1):* traces REQ-rv4dwb, the bound on receipt of any
-body (LLR-7u3dg7), which supersedes REQ-bcxz96.
+body (LLR-7u3dg7), which supersedes an earlier form of REQ-rv4dwb.
 
 *Amended in place 2026-10-20 (unmerged draft; owner rulings Q3 and A2,
 dispatcher's resolution C6 of 2026-10-16):* it also answers an organisation
 request from a Device held as revoked with its notice, keeps the senders'
-addresses, and holds the chain-free checks of SDD-8cpyfa, which it
+addresses, and holds the chain-free checks of the receive-and-commit item it
 supersedes with SDD-kegag2; it deletes nothing (REQ-y9p27b).
 
 *Amended in place 2026-10-21 (unmerged draft; owner decision of
-2026-10-20):* traces REQ-zxgd46, which supersedes REQ-c29s93 (RC-5gbgwb's
-receipt half), in its place.
+2026-10-20):* traces REQ-zxgd46 in place of the earlier form it supersedes
+(RC-5gbgwb's receipt half).
 
 **LLR-94rzrk**: `OrgService::check_received(rng, device_key, sender:
 DevicePublicKey, body: &[u8]) -> Result<(Checked, Option<StoreChange>),
@@ -1470,29 +1341,28 @@ the sender rule (LLR-283x6f, LLR-w7b9kd) and returns one of `Checked::
 ProvisionalOrganisationKept { epoch } | AlreadyHeld | RevocationNoticeKept |
 AdmissionRequest { outcome } | OrganisationRequest { answer:
 OutgoingMessage } | OrganisationAnswerKept { epoch } | Acknowledged(..)`; an
-acknowledgement is decided as LLR-5wg8cu states. Every refusal returns no
+acknowledgement is decided as LLR-xudkh4 states. Every refusal returns no
 `StoreChange`; an `OrganisationRequest` returns one only when it changed the
 sender's address-book entry (LLR-h9d65p).
 satisfies: REQ-ncv4sc, REQ-zxgd46
-supersedes: LLR-zetn7a LLR-xn5pwc
 
 *Amended in place 2026-10-20 (unmerged draft; owner answer A2 and
 dispatcher's resolution C6 of 2026-10-16):* the acknowledgement arm is
-LLR-5wg8cu, which supersedes LLR-3aysup; an organisation request may now
+an earlier form of LLR-xudkh4, which supersedes an older one; an organisation request may now
 change the store, by its sender's addresses.
 
 *Amended in place 2026-10-21 (unmerged draft; owner decision of
-2026-10-20):* satisfies REQ-zxgd46, which supersedes REQ-c29s93, in its
-place: the decode refusal (`MalformedMessage`) of a message with no key or a
+2026-10-20):* satisfies REQ-zxgd46 in place of the earlier form that REQ-zxgd46
+replaced: the decode refusal (`MalformedMessage`) of a message with no key or a
 key that is not 32 bytes is made here, before anything is kept.
 
 *Amended in place 2026-10-21 (unmerged draft; design gap G2 of the plan):*
-supersedes LLR-xn5pwc (an Organisation-information message with no
+supersedes an earlier item (an Organisation-information message with no
 Organisation private key, or a key shorter than 32 bytes, refused as
 `MalformedMessage` before any record or expectation is consulted and with no
 chain read), whose `receive_one`, `receive_and_verify` and
 `receive_and_self_delete_if_revoked` are removed and whose requirement,
-REQ-c29s93, is superseded by REQ-zxgd46, which this item satisfies; the
+an earlier form of REQ-zxgd46, is superseded by REQ-zxgd46, which this item satisfies; the
 refusal is this item's decode step, which consults no record and takes no
 chain state.
 
@@ -1514,15 +1384,14 @@ or answer would lead to is consulted about it, whether or not that record
 lists the sender, and verification, which adopts, never consults the Device
 that delivered what it adopts (LLR-8528ud).
 satisfies: REQ-ncv4sc, REQ-uk9rw7, REQ-ea4qs5, REQ-9ktgwx, REQ-p4hwuv
-supersedes: LLR-2r2fha LLR-kzgjz8 LLR-3q63zv LLR-u6rq4s LLR-9fvb3y LLR-mcdh85
 
 *Amended in place 2026-10-30 (change `worktree-org-io-domain-api`, merge
-review MR1-N1, owner ruling 2026-10-29):* supersedes LLR-mcdh85, which
+review MR1-N1, owner ruling 2026-10-29):* supersedes an earlier item, which
 `verify_envelope_against_chain` alone did; it is deleted, and this item states
 what each became (see each one's note).
 
 *Amended in place 2026-10-22 (unmerged draft; dispatcher decision O4, plan
-assembly):* supersedes LLR-9fvb3y (a genuine Envelope relayed by a device
+assembly):* supersedes an earlier item (a genuine Envelope relayed by a device
 other than the one that built it is committed on both Receive operations
 when it verifies against the chain; the delivering device is not an input
 to verification), whose Receive operations are removed. Its relay rule is
@@ -1533,7 +1402,7 @@ this item's last sentence: verification, which adopts, never consults the
 Device that delivered what it adopts.
 
 *Amended in place 2026-10-22 (unmerged draft; plan detail pass —
-dispatcher decision):* supersedes LLR-u6rq4s (the authenticated Device key
+dispatcher decision):* supersedes another earlier item (the authenticated Device key
 of a message about a held Organisation is compared only with the current
 committed record, before the update is verified; the record after the
 update is never consulted about the sender), whose commit path is removed.
@@ -1546,7 +1415,7 @@ LLR-rhsfw9's and LLR-jhy6t6's.
 answered with its notice; a Device no record has listed is still refused.
 
 *Amended in place 2026-10-21 (unmerged draft; design gap G2 of the plan):*
-supersedes LLR-3q63zv (the sender's authenticated Device key is checked
+supersedes a third earlier item (the sender's authenticated Device key is checked
 against the current record, and only it, on the deleting and the updating
 branch alike, a message from any other Device refused as `SenderNotListed`),
 whose `receive_and_self_delete_if_revoked`, `commit_checked` and
@@ -1557,7 +1426,7 @@ nothing kept.
 
 **LLR-w7b9kd**: from a Device the current record does not list,
 `check_received` acts on three kinds alone: an acknowledgement (S3's
-revoked-Device path, LLR-5wg8cu), an admission request (LLR-6gkxpg), and an
+revoked-Device path, LLR-xudkh4), an admission request (LLR-6gkxpg), and an
 organisation request from a Device held as revoked (LLR-j338wq); every
 other kind, and an organisation request from any other Device, is refused
 with `SenderNotListed { org_id }` as LLR-283x6f states, or, in a store with
@@ -1566,21 +1435,6 @@ satisfies: REQ-ncv4sc, REQ-6qxesy, REQ-b462sh, REQ-p4hwuv
 
 *Amended in place 2026-10-20 (unmerged draft; owner ruling Q3 of
 2026-10-16):* adds the third kind.
-
-**LLR-5wg8cu**: on an `Acknowledgement(ack)`, `check_received` calls
-`revocation::check_acknowledgement(store, sender, ack)` (LLR-5azhry as
-amended) with its `sender` argument and no other Device key, applies none of
-LLR-283x6f's sender check to it (its sender is by design a Device the record
-no longer lists), takes no chain state, and returns `Checked::Acknowledged`
-with no `StoreChange`, or that function's refusal unchanged with none.
-satisfies: REQ-b462sh, REQ-ncv4sc
-supersedes: LLR-3aysup
-superseded-by: LLR-xudkh4
-
-*Superseded 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; plan
-§0, T16g) by LLR-xudkh4 (`2026-11-02-publish-2.md`):* an accepted
-acknowledgement from a Device held as revoked is now kept, with a store
-change; "with no `StoreChange`" no longer holds for it.
 
 **LLR-76bhw9**: Organisation information from a listed Device is checked
 against the current record with `check_chain_free` (`OrgIdMismatch`,
@@ -1593,21 +1447,19 @@ organisation with `org_pub_key` derived from the carried private key and
 `AlreadyHeld`, no change. Every one of these refusals is made with no chain
 state, which `check_received` never takes.
 satisfies: REQ-9ktgwx, REQ-ncv4sc, REQ-zxgd46, REQ-f2k4tr
-supersedes: LLR-9ew26y LLR-cs4mpb LLR-9sknpa LLR-992mbf LLR-9f5hmr
 
 *Amended in place 2026-10-30 (change `worktree-org-io-domain-api`, merge
-review MR1-N1, owner ruling 2026-10-29):* supersedes LLR-cs4mpb, LLR-9sknpa,
-LLR-992mbf, LLR-9f5hmr, which `verify_envelope_against_chain` alone did; it is
+review MR1-N1, owner ruling 2026-10-29):* supersedes earlier items, which `verify_envelope_against_chain` alone did; it is
 deleted, and this item states what each became (see each one's note).
 
 *Amended in place 2026-10-20 (unmerged draft; dispatcher's resolution C6 of
-2026-10-16):* supersedes LLR-9ew26y, whose functions are removed; its rule —
+2026-10-16):* supersedes an earlier item, whose functions are removed; its rule —
 the chain-free checks refuse before any chain state is used — is this
 item's, over `check_received`.
 
 *Amended in place 2026-10-21 (unmerged draft; owner decision of
-2026-10-20):* satisfies REQ-zxgd46, which supersedes REQ-c29s93, in its
-place. REQ-zxgd46 (narrowed 2026-10-21, owner decision) refuses a missing
+2026-10-20):* satisfies REQ-zxgd46 in place of the earlier form it
+supersedes. REQ-zxgd46 (narrowed 2026-10-21, owner decision) refuses a missing
 or non-32-byte key and keeps the public key derived from the carried key
 (LLR-s3vq6d); the message carries no public key (LLR-xr88a8), so there is
 no comparison to make at receipt.
@@ -1631,7 +1483,6 @@ a store with no record cannot judge; expectations untouched. Either is
 adopted only by verification (LLR-8528ud), and in this store only when its
 members list the provisional Member (LLR-q4puca).
 satisfies: REQ-eqt23j, REQ-8amu2a, REQ-ncv4sc, REQ-2yduet
-supersedes: LLR-s8xp7m
 
 *Amended in place 2026-10-30 (change `worktree-org-io-domain-api`, merge
 review MR3-N1, owner ruling 2026-10-30):* what this item keeps from
@@ -1662,33 +1513,13 @@ information whose Change set decodes and names the base root is applied
 (`verify_against`) without a panic, whatever Change set and record snapshot
 bytes it carries. A refusal leaves the store's encoded bytes as they were.
 satisfies: REQ-rv4dwb
-supersedes: LLR-hs7g6j
 
 *Added 2026-10-30 (change `worktree-org-io-domain-api`, merge review round
-2, MR2-N1).* LLR-hs7g6j bounded `verify_envelope_against_chain`, which is
+2, MR2-N1).* An earlier form of this item bounded `verify_envelope_against_chain`, which is
 deleted; the apply its fuzz target reached now runs here (LLR-76bhw9,
 LLR-e6w3nr). Verified by the bolero target `fuzz_check_received`, which
 drives arbitrary bodies, arbitrary Change sets in an honest body, and honest
 Change sets and bodies with one byte perturbed, through both stores.
-
-**LLR-r4qtqe**: a revocation notice from a listed Device that
-`revocation::check_notice` passes (LLR-r7zm39) is appended to
-`kept_revocation_notices` (the bound applies) and returned as
-`RevocationNoticeKept`; nothing is deleted and no secret is asked for on
-receipt. A notice that comes in answer to this Device's organisation request
-is a `Revocation` body like any other and is kept the same way; only
-`verify` acts on it (LLR-jhy6t6).
-satisfies: REQ-ncv4sc, REQ-ea4qs5, REQ-2yduet, REQ-y9p27b
-superseded-by: LLR-gb7p7c
-
-*Superseded 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; owner
-ruling R2 of 2026-11-02) by LLR-gb7p7c (`2026-11-02-publish-2.md`):* the
-notice is kept with its sender, which the removal names as its delivering
-Device.
-
-*Amended in place 2026-10-20 (unmerged draft; owner rulings Q3 and Q4' of
-2026-10-16):* checked against the new rulings — unchanged in rule; states
-the answer case and satisfies REQ-2yduet and REQ-y9p27b.
 
 **LLR-95av3e**: a `Revocation` body about an Organisation the receiving
 store holds no record of is refused by `check_received` with a typed error,
@@ -1700,9 +1531,8 @@ before any field past its kind and Organisation identifier is decoded
 (LLR-e6w3nr). Either way no record is created, an expected admission stays
 in place, and no chain state is taken.
 satisfies: REQ-vxqc5g
-supersedes: LLR-38e2kn
 
-*Added 2026-10-21 (unmerged draft; design gap G2 of the plan):* LLR-38e2kn
+*Added 2026-10-21 (unmerged draft; design gap G2 of the plan):* an earlier form of this item
 stated this of `receive_and_verify` and `receive_and_self_delete_if_revoked`
 (S4's note: of `check_received`, the store chosen by
 `revocation::notice_store`), with `RevocationNotHeld` in every case. With
@@ -1760,7 +1590,6 @@ lookup by Device key stays `PersonaNotHeld` (LLR-f9x3vf).
 
 **SDD-qzv5mn**: the messages of the adopted current epoch. Code: `OrgService::messages_for_current_epoch` and `OutgoingMessage` in `org-node/src/service.rs`. Who receives what for the epoch a store holds as current; it neither writes nor sends.
 traces: REQ-ttv8k7, REQ-3dsweu, REQ-szq3ud, REQ-ps2gy2, REQ-y7tsft
-supersedes: SDD-bm27xt
 
 *Amended in place 2026-10-28 (unmerged draft; round 3 review AR3-5, sweep
 for ARCHITECTURE Boundaries 3):* "it writes nothing and sends nothing" is reworded "it neither writes nor sends"; nothing else changes.
@@ -1780,10 +1609,9 @@ such a notice only when its absence proof verifies against the chain's
 root (LLR-rhsfw9), which a Device the chain's record still lists has none
 for.
 satisfies: REQ-ttv8k7, REQ-3dsweu, REQ-szq3ud, REQ-ps2gy2
-supersedes: LLR-gdfqn9 LLR-bg3vsw LLR-6ymd6d LLR-a8z7r5 LLR-2xzys9 LLR-48jakr LLR-8hdu9x
 
 *Amended in place 2026-10-22 (unmerged draft; plan detail pass —
-dispatcher decision):* supersedes LLR-8hdu9x (what `send_update` sends: a
+dispatcher decision):* supersedes an earlier item (what `send_update` sends: a
 removed Device a `Revocation` holding its notice and nothing else, every
 listed Device `OrgInformation` with the Envelope, the snapshots before the
 update and the epoch's Organisation private key; a receiver accepts a
@@ -1798,25 +1626,7 @@ satisfies: REQ-ttv8k7, REQ-y7tsft
 
 ## The Invite and the admission request
 
-**SDD-xexu3k**: the Invite and the admission request. Code: `org-node/src/invitation.rs` (`InviteId`, `Invite`, the Blob armour), `StoreData.outstanding_invites` and `kept_admission_requests`, and the service operations `build_invite`, `build_admission_request`, `cancel_invite`. The Invite names the one issuing Device and its addresses; the admission request carries the Invite's identifiers first and the sending Device's own addresses last; the endpoint addresses one Device keeps for another (`EndpointAddresses`, the address book, `addresses_for`) are this item's too.
-traces: REQ-ky5tyd, REQ-9xf99q, REQ-6qxesy, REQ-f8p36u, REQ-nbx4nn
-supersedes: SDD-xshv5b
-superseded-by: SDD-n2x3gb, SDD-42cjqk
-
-*Amended in place 2026-10-20 (unmerged draft; owner answer A2 of
-2026-10-16):* requests carry the sender's addresses, and the receiver keeps
-them per Device key for org-io's send path.
-
-*Superseded 2026-10-28 (unmerged draft; round 2 review AR2-10,
-ARCHITECTURE Boundaries 3):* the item stated two responsibilities, the
-invitation of a joining Device and the endpoint addresses one Device keeps
-for another, each with its own reason to change. It is split into
-SDD-n2x3gb (the invitation) and SDD-42cjqk (the address book). Its LLRs are
-re-pointed: LLR-h4gwns, LLR-h9d65p, LLR-pgy2rb and LLR-ds228z are
-SDD-42cjqk's; LLR-h9f5c9, LLR-9jxwq4, LLR-g32hjn, LLR-v3av9t, LLR-96z2k5
-and LLR-ag8hjd are SDD-n2x3gb's. No behaviour changes.
-
-### The address book (successor of SDD-xexu3k)
+### The address book
 
 **SDD-42cjqk**: the address book: the endpoint addresses one Device keeps
 for another, held as opaque text it parses but never dials. Code:
@@ -1825,10 +1635,9 @@ for another, held as opaque text it parses but never dials. Code:
 the receive path (SDD-busuj3) and verification (SDD-kegag2) write the book,
 as LLR-h9d65p states.
 traces: REQ-ky5tyd, REQ-6qxesy
-supersedes: SDD-xexu3k
 
-*Added 2026-10-28 (unmerged draft; round 2 review AR2-10):* SDD-xexu3k's
-address half. LLR-h4gwns, LLR-h9d65p, LLR-pgy2rb and LLR-ds228z are its
+*Added 2026-10-28 (unmerged draft; round 2 review AR2-10):* the address half of the
+invitation item this and SDD-n2x3gb replaced. LLR-h4gwns, LLR-h9d65p, LLR-pgy2rb and LLR-ds228z are its
 LLRs.
 
 **LLR-h4gwns**: `EndpointAddresses::parse(Vec<String>)` accepts zero to
@@ -1862,7 +1671,7 @@ dropped whole only by `into_removed` (LLR-2d5a7m). It is not measured by
 the bound of LLR-m76r4k.
 satisfies: REQ-ky5tyd
 
-*Amended in place 2026-10-25 (unmerged draft; PR-8sgsb5):* the first
+*Amended in place 2026-10-25 (unmerged draft; the resolved problem report on the issuer's addresses lost on first adoption):* the first
 adoption is a third writer of the address book (LLR-q4puca): it keeps the
 Invite issuer's addresses, which a provisional Member held outside the book.
 
@@ -1887,10 +1696,9 @@ organisation requests it builds carry only the addresses their caller gave
 (LLR-h9f5c9, LLR-g32hjn, LLR-vyank2). No other value it returns carries an
 endpoint address.
 satisfies: derived
-supersedes: LLR-qezw3n
 
 *Added 2026-10-22 (unmerged draft; plan detail pass — dispatcher
-decision):* LLR-qezw3n said no value org-node returns carries a dialling
+decision):* an earlier form of this item said no value org-node returns carries a dialling
 address for another Device to reach it by. Under owner answer A2 of
 2026-10-16 the Invite and both requests carry the sender's addresses and
 the receiver keeps them per Device key, so that rule no longer holds; this
@@ -1900,7 +1708,7 @@ operations of this design that return them: the dispatcher's decision named
 `addresses_for` and the kept admission requests, and `kept_acknowledgements`
 (LLR-75sn9g) returns its recipients' addresses by design too.
 
-### Inviting a Device (successor of SDD-xexu3k)
+### Inviting a Device
 
 **SDD-n2x3gb**: the invitation of a joining Device, from the Invite this
 Device issues to the admission request kept for it until the invite is
@@ -1911,10 +1719,9 @@ settled or cancelled. Code: `org-node/src/invitation.rs` (`InviteId`,
 Device and its addresses; the admission request carries the Invite's
 identifiers first and the sending Device's own addresses last.
 traces: REQ-ky5tyd, REQ-9xf99q, REQ-6qxesy, REQ-f8p36u, REQ-nbx4nn
-supersedes: SDD-xexu3k
 
-*Added 2026-10-28 (unmerged draft; round 2 review AR2-10):* SDD-xexu3k's
-invitation half. LLR-h9f5c9, LLR-9jxwq4, LLR-g32hjn, LLR-v3av9t, LLR-96z2k5
+*Added 2026-10-28 (unmerged draft; round 2 review AR2-10):* the invitation half of the
+invitation item this and SDD-42cjqk replaced. LLR-h9f5c9, LLR-9jxwq4, LLR-g32hjn, LLR-v3av9t, LLR-96z2k5
 and LLR-ag8hjd are its LLRs.
 
 **LLR-h9f5c9**: `OrgService::build_invite(rng, device_key, invitee_name:
@@ -1928,7 +1735,6 @@ carrying the stored Organisation name and the store's Persona's
 DevicePublicKey; the invitee name kept and the one the Invite carries are
 the one it was given.
 satisfies: REQ-ky5tyd
-supersedes: LLR-nr8df3
 
 *Amended in place 2026-10-20 (unmerged draft; consistency pass, REQ-ky5tyd
 as amended that day):* the outstanding invite keeps the invitee name the
@@ -1944,7 +1750,6 @@ bytes), and text that is not a Blob with `field` `invite`; the parse is pure,
 so a refused Invite acts on nothing. A Blob `Invite::encode` wrote parses
 back to an equal Invite.
 satisfies: REQ-9xf99q, REQ-ky5tyd
-supersedes: LLR-b7wgpf
 
 *Amended in place 2026-10-20 (unmerged draft; consistency pass):* "one to
 sixteen" becomes "zero to sixteen", as LLR-h4gwns: a Networked endpoint may
@@ -1984,9 +1789,8 @@ alone (LLR-va2yqz). org-node has no `import_join_request`, no Join-request
 or Invite-reply type and no other operation that takes bytes a joining
 Device composed.
 satisfies: derived
-supersedes: LLR-836z24
 
-*Added 2026-10-21 (unmerged draft; design gap G2 of the plan):* LLR-836z24
+*Added 2026-10-21 (unmerged draft; design gap G2 of the plan):* an earlier form of this item
 said what a joiner composes reaches the inviter's store only through
 `admit_member`'s parsed `Joiner`; both are removed. The admission request,
 kept parsed, takes the `Joiner`'s place, and the absence of a Join-request
@@ -2117,22 +1921,20 @@ field is optional; `org_id()` returns any kind's Organisation;
 `decode_message` refuses with `MalformedMessage`, without panicking, an
 unknown index, a body that ends early and any bytes left over.
 satisfies: REQ-ncv4sc, REQ-zxgd46, REQ-6qxesy, REQ-p4hwuv, REQ-ky5tyd
-supersedes: LLR-tajh9d
 
 *Amended in place 2026-10-20 (unmerged draft; owner answer A2 of
 2026-10-16):* both requests carry the sending Device's addresses as their
 last field, so `peek_admission_request` (LLR-g9n9w9) is unchanged.
 
 *Amended in place 2026-10-21 (unmerged draft; owner decision of
-2026-10-20):* satisfies REQ-zxgd46, which supersedes REQ-c29s93, in its
-place (a key field that is not 32 bytes does not decode).
+2026-10-20):* satisfies REQ-zxgd46 in place of the earlier form it
+supersedes (a key field that is not 32 bytes does not decode).
 
 **LLR-g3wmen**: `AdmissionRequest` is the only kind that carries an invite
 identifier; no Organisation-information, revocation, acknowledgement,
 organisation-request or organisation body, and no expected admission, holds
 one.
 satisfies: REQ-6qxesy, REQ-8amu2a
-supersedes: LLR-ms8njy
 
 **LLR-g9n9w9**: `peek_admission_request(body: &[u8]) -> Option<(OrgId,
 InviteId)>` decodes only the variant index and, for index 3, the next twenty
@@ -2162,32 +1964,31 @@ exceed {limit} bytes". `NoProvisionalUpdate`, `ReplyForAnotherOrganisation`,
 `PersonaAlreadyBound` and `RecordMovedSinceCheck` are removed with the
 operations that raised them. It also gains `AdmissionKeyNotSender { org_id
 }`, `OrganisationRemoved { org_id }` and `AcknowledgementNotKept { recipient
-}`, and keeps the nine variants of LLR-n67aw8 unchanged —
+}`, and keeps the nine variants of an earlier form of LLR-3sddey unchanged —
 `DeviceSecretNotSupplied { org_id }` (now raised by LLR-5tvn7g), `OrgNotHeld
 { org_id }`, `StaleChainState { org_id, chain_epoch, record_epoch }`,
 `ChainStateConflict { org_id }`, `RevocationProofRefused { org_id, cause }`,
 `AcknowledgementNotHeld`, `AcknowledgementFromFuture`,
 `AcknowledgementForListedDevice` and `AcknowledgementSignatureInvalid`, each
-`{ org_id }`. It keeps three of LLR-j5vbqj's four variants unchanged —
+`{ org_id }`. It keeps three of the four variants of another earlier form of LLR-3sddey unchanged —
 `MalformedMessage` ("received wire message is malformed", LLR-94rzrk,
-LLR-xr88a8), `RevocationNotHeld { org_id }` (LLR-38e2kn) and
+LLR-xr88a8), `RevocationNotHeld { org_id }` (an earlier form of LLR-95av3e) and
 `RevocationNotForThisDevice { org_id }` (LLR-r7zm39) — and removes the
 fourth, `OrgKeyMismatch`, which no operation raises any more.
 satisfies: REQ-g2537c, REQ-2nnsmv, REQ-dhr58q, REQ-6qxesy, REQ-f8p36u, REQ-akfwf3, REQ-kt877x, REQ-8amu2a, REQ-yp75u9, REQ-m2xh8q, REQ-b462sh, REQ-h29c8e, REQ-ayyt5f, REQ-48zc3e, REQ-zxgd46, REQ-vxqc5g, REQ-3dsweu, REQ-qrtsc9
-supersedes: LLR-mxskg9 LLR-n67aw8 LLR-j5vbqj
 
 *Amended in place 2026-10-20 (unmerged draft; dispatcher's resolution C4,
-owner ruling Q4' of 2026-10-16):* the three new variants, and LLR-n67aw8's
-list, whose `DeviceSecretNotSupplied` traced the superseded REQ-y99c9w, is
+owner ruling Q4' of 2026-10-16):* the three new variants, and the list of an earlier form of this item,
+whose `DeviceSecretNotSupplied` traced a superseded earlier form of REQ-h29c8e, are
 restated here.
 
 *Amended in place 2026-10-20 (unmerged draft; consistency pass):* also
-supersedes LLR-j5vbqj, whose `OrgKeyMismatch` served the superseded
-REQ-bwx7eg; its other three variants, and their requirements (REQ-c29s93,
+supersedes another earlier item, whose `OrgKeyMismatch` served a superseded
+earlier form of REQ-dwb9bq; its other three variants, and their requirements (an earlier form of REQ-zxgd46,
 REQ-vxqc5g, REQ-3dsweu, REQ-qrtsc9), are carried here.
 
 *Amended in place 2026-10-21 (unmerged draft; owner decision of
-2026-10-20):* REQ-c29s93 is superseded by REQ-zxgd46, which this item
+2026-10-20):* an earlier form of REQ-zxgd46 is superseded by REQ-zxgd46, which this item
 satisfies in its place (`MalformedMessage` unchanged).
 
 *Amended in place 2026-10-22 (unmerged draft; plan detail pass —

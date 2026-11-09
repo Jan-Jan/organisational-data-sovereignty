@@ -47,7 +47,7 @@ command is the only way the frontend can cause anything to happen.
 *Amended 2026-10-28 (change `worktree-org-io-domain-api`, ARCHITECTURE review round 3, AR3-7):* "Twelve" became seventeen with
 the domain surface.
 *Amended 2026-11-09 (change `worktree-org-io-publish-2`, merge review round 1, MR1-A2):* "Seventeen" became eighteen
-with `list_removed_devices`, and the list's item is LLR-ce4hxz, which supersedes LLR-kk8gc7.
+with `list_removed_devices`, and the list's item is now LLR-ce4hxz.
 _Avoid_: handler, endpoint, IPC call, action
 
 **Event**:
@@ -89,7 +89,7 @@ keeps each for that Device's DevicePublicKey and dials only those.
 *Amended 2026-10-28 (change `worktree-org-io-domain-api`, ARCHITECTURE review round 3, AR3-7):* it was "required in Loopback,
 absent by design in Networked, and optional in every request that takes
 one"; no command takes one since the change retired the pasted address
-(REQ-vgr7s2 retired 2026-10-20).
+(2026-10-20): addresses now come with the Invite and the requests.
 _Avoid_: node addr, endpoint addr, peer blob
 
 **Blob**:

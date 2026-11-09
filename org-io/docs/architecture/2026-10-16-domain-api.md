@@ -27,7 +27,7 @@ relies on two more it exports: deleting an accepted acknowledgement
 (REQ-ayyt5f) and listing the kept acknowledgements (REQ-35s4eb); and on
 on-chain-client's two exported genesis steps (REQ-v86pyy) and their resume
 from chain reads (REQ-6vh3ht). The new section "Acting on this node's
-removal" (SDD-83un8g, split on 2026-10-28 into SDD-3my66m and SDD-wyn7b6) holds the acknowledgement delivery and the
+removal" (SDD-3my66m and SDD-wyn7b6, split from one item on 2026-10-28) holds the acknowledgement delivery and the
 deletions that follow it.
 The decisions are the two decision records of 2026-10-15 in `docs/adr/`,
 named by description because the repository's ADRs sit outside this unit's
@@ -169,7 +169,7 @@ surname org-node refuses is returned as `CreateError::Node` with no item
 and no file written; a keychain refusal is `CreateError::Keychain`, with no
 file written and the Person dropped; a failed file write is
 `CreateError::Store`, the Person dropped and its item left in place, as for
-a Persona (LLR-n9dnm4's note).
+a Persona (LLR-kna4zj).
 satisfies: REQ-ggjuu6, REQ-rz93uz
 
 *Amended in place 2026-10-22 (unmerged draft; plan detail pass — owner
@@ -240,7 +240,6 @@ new store is dropped, no file is written and the refusal is
 `CreateError::Keychain`; when the file write fails the Persona is dropped,
 its item stays, and the refusal is `CreateError::Store`.
 satisfies: REQ-rz93uz, REQ-g9cu2c
-supersedes: LLR-n9dnm4, LLR-rt8gdz
 
 **LLR-6sfub6**: `keychain::write_device_secret(device_key, secret:
 &DeviceSecret)` hands the Device seed's bytes to the keychain only inside
@@ -252,8 +251,8 @@ keychain item and nowhere else (REQ-rz93uz, RC-jgyd6m).
 satisfies: REQ-rz93uz
 
 *Added 2026-10-28 (unmerged draft; review round 1 T-O7):* the rule was
-stated only in LLR-n9dnm4, which LLR-kna4zj superseded without carrying it
-over (LLR-kna4zj states the keychain-before-file order of the proposals, not
+stated only in S4's keychain-write item, which LLR-kna4zj replaced without
+carrying it over (LLR-kna4zj states the keychain-before-file order of the proposals, not
 how the bytes reach the keychain). This item restates it unchanged.
 
 *Note 2026-10-28 (robustness, N/A):* a source scan of `keychain.rs`, which
@@ -322,32 +321,7 @@ surrounding spaces around text past ASCII, are each reported unchanged.
 
 ## The invitation operations
 
-**SDD-6gb59p**: the invitation operations: issuing an Invite from the
-Organisation's Persona with that Device's endpoint addresses, reading an
-imported Invite, and cancelling an outstanding invite, each through
-org-node's Invite operations (REQ-ky5tyd) and each writing the store
-org-node returns before it reports; and listing the admission requests the
-held Organisations keep, which writes nothing. Code: `org-io/src/exchange.rs`.
-traces: REQ-ek652a, REQ-pnr6kh, REQ-2xgsbn, REQ-4bvmwc, REQ-wb93ch
-supersedes: SDD-rr7dtw
-superseded-by: SDD-zqv3v6, SDD-9rbm8t, SDD-cxh9d8
-
-*Amended in place 2026-10-20 (unmerged draft; owner answer A3 of
-2026-10-16):* the item also lists the kept admission requests (REQ-wb93ch,
-LLR-dm2h8u), so that the app can show them at start.
-
-*Superseded 2026-10-28 (unmerged draft; round 2 review AR2-6, ARCHITECTURE
-Boundaries 3):* the item stated four operations of three responsibilities —
-the Organisation's outstanding invites (issue, cancel), an imported
-Invite's reading, and the listing of the kept admission requests — so a
-change to any one edited it. It is split, as SDD-83un8g was, into
-SDD-zqv3v6 (the outstanding invites: LLR-95e3jx, LLR-v9dkrv, LLR-8ze6cc),
-SDD-9rbm8t (an imported Invite read: LLR-npw5zg) and SDD-cxh9d8 (the kept
-admission requests listed: LLR-dm2h8u), whose code stays in
-`org-io/src/exchange.rs`. Its LLRs are re-homed below under those items. No
-behaviour changes.
-
-### The outstanding invites (successor of SDD-6gb59p)
+### The outstanding invites
 
 **SDD-zqv3v6**: the Organisation's outstanding invites as org-node keeps
 them: each issued from the Persona that holds the Organisation, or cancelled
@@ -357,12 +331,11 @@ issued Invite carries that Device's endpoint addresses and the stored
 Organisation name. Code:
 `org-io/src/exchange.rs` (`issue_invite`, `cancel_invite`).
 traces: REQ-ek652a, REQ-pnr6kh, REQ-2xgsbn, REQ-4bvmwc
-supersedes: SDD-6gb59p
 
 *Amended in place 2026-10-28 (unmerged draft; round 3 review, AR3-4 sweep, ARCHITECTURE Boundaries 3):* the responsibility is restated in one sentence without "and", the detail it listed moved to the sentences after it. No behaviour change.
 
-*Added 2026-10-28 (unmerged draft; round 2 review AR2-6):* SDD-6gb59p's
-outstanding-invite half. LLR-95e3jx, LLR-v9dkrv and LLR-8ze6cc are its
+*Added 2026-10-28 (unmerged draft; round 2 review AR2-6):* the invitation
+operations' outstanding-invite part, split from one item. LLR-95e3jx, LLR-v9dkrv and LLR-8ze6cc are its
 LLRs.
 
 **LLR-95e3jx**: `OrgIo::issue_invite(org_id, invitee_name: &str) ->
@@ -378,7 +351,6 @@ Organisation no Persona here holds is org-io's own refusal,
 pairs survive a reopen of the data directory and leave the store only by
 org-node's settle on adoption or by `cancel_invite`.
 satisfies: REQ-ek652a, REQ-pnr6kh, REQ-2xgsbn
-supersedes: LLR-h9qf3s, LLR-9sraks, LLR-f35pda
 
 *Amended in place 2026-10-28 (unmerged draft; round 2 review, AR2-5):* an Organisation no
 Persona here holds is found by org-io's own lookup of the Persona holding
@@ -425,16 +397,15 @@ admission request and its invite and refuses an invite id with no kept
 request (`NoAdmissionRequestKept`), as its requirement on removing a kept
 request states; this item now says the same.
 
-### An imported Invite read (successor of SDD-6gb59p)
+### An imported Invite read
 
 **SDD-9rbm8t**: reading an imported Invite: its public fields, parsed
 through org-node's Invite parse (REQ-ky5tyd), with nothing written or
 created. Code: `org-io/src/exchange.rs` (`read_invite`).
 traces: REQ-2xgsbn
-supersedes: SDD-6gb59p
 
-*Added 2026-10-28 (unmerged draft; round 2 review AR2-6):* SDD-6gb59p's
-reading of an imported Invite. LLR-npw5zg is its LLR.
+*Added 2026-10-28 (unmerged draft; round 2 review AR2-6):* the invitation
+operations' reading of an imported Invite, split from one item. LLR-npw5zg is its LLR.
 
 **LLR-npw5zg**: `OrgIo::read_invite(invite_blob: &str) ->
 Result<InviteSummary, ExchangeError>` parses the Invite through org-node
@@ -444,16 +415,15 @@ writes nothing and creates nothing; a Blob that does not parse is
 `ExchangeError::Node` naming the field that failed.
 satisfies: REQ-2xgsbn
 
-### The kept admission requests listed (successor of SDD-6gb59p)
+### The kept admission requests listed
 
 **SDD-cxh9d8**: the listing of the admission requests the held
 Organisations keep, for the app to show at start, read from org-node with
 nothing changed. Code: `org-io/src/exchange.rs` (`admission_requests`).
 traces: REQ-wb93ch
-supersedes: SDD-6gb59p
 
-*Added 2026-10-28 (unmerged draft; round 2 review AR2-6):* SDD-6gb59p's
-listing of the kept admission requests. LLR-dm2h8u is its LLR.
+*Added 2026-10-28 (unmerged draft; round 2 review AR2-6):* the invitation
+operations' listing of the kept admission requests, split from one item. LLR-dm2h8u is its LLR.
 
 **LLR-dm2h8u**: `OrgIo::admission_requests() -> Vec<KeptAdmissionRequestSummary>`
 takes, under the node's lock, from every Persona store holding a current
@@ -477,30 +447,7 @@ holds equal to the Device the transport authenticated.
 
 ## Provisional changes and the proposed Organisation
 
-**SDD-frsa73**: the Admin's provisional changes and the proposal of the
-updated Organisation: recording an admission or a revocation, and having
-org-node calculate the provisional organisation from all of them, each
-writing the store org-node returns and touching no chain or transport; and
-no command that discards. Code: `org-io/src/propose.rs`.
-traces: REQ-g9cu2c, REQ-3pjmub, REQ-7jh4rh, REQ-kh2uth
-superseded-by: SDD-7mhqaz, SDD-4drrpr
-
-*Amended in place 2026-10-20 (unmerged draft; owner ruling Q4' of
-2026-10-16):* its responsibility is unchanged; LLR-vvd8dn, the unit-wide
-absence of deletions it carries, now exempts the deletions that follow this
-node's removal (REQ-kh2uth as amended), which SDD-83un8g makes.
-
-*Superseded 2026-10-28 (unmerged draft; round 3 review AR3-4, ARCHITECTURE
-Boundaries 3):* the item stated two responsibilities, recording the Admin's
-provisional changes and having org-node calculate the updated Organisation
-from them, which change for different reasons. It is split, as SDD-83un8g
-and SDD-6gb59p were, into SDD-7mhqaz (the provisional changes recorded:
-LLR-un47j8, LLR-6kb33y, LLR-vvd8dn) and SDD-4drrpr (the updated
-Organisation proposed: LLR-5fchwt), whose code stays in
-`org-io/src/propose.rs`. Its LLRs are re-homed below under those items. No
-behaviour changes.
-
-### The provisional changes recorded (successor of SDD-frsa73)
+### The provisional changes recorded
 
 **SDD-7mhqaz**: the Admin's provisional changes: each admission or
 revocation the Admin records, kept by org-node in the Organisation's store,
@@ -508,10 +455,9 @@ which org-io writes before it reports, touching no chain or transport, with
 no command that discards one. Code: `org-io/src/propose.rs`
 (`propose_admission`, `propose_revocation`).
 traces: REQ-g9cu2c, REQ-7jh4rh, REQ-kh2uth
-supersedes: SDD-frsa73
 
-*Added 2026-10-28 (unmerged draft; round 3 review AR3-4):* SDD-frsa73's
-recording half. LLR-un47j8, LLR-6kb33y and LLR-vvd8dn are its LLRs.
+*Added 2026-10-28 (unmerged draft; round 3 review AR3-4):* the proposals'
+recording half, split from one item. LLR-un47j8, LLR-6kb33y and LLR-vvd8dn are its LLRs.
 
 **LLR-un47j8**: `OrgIo::propose_admission(org_id, invite_id,
 chosen_handle: Option<&str>) -> Result<ProvisionalChangeSummary,
@@ -526,7 +472,6 @@ own variants: an Organisation no Persona here holds is
 written admission that org-node's provisional changes then list no Handle
 for is `OperationError::AdmissionNotListed { invite_id }`.
 satisfies: REQ-g9cu2c
-supersedes: LLR-y4dg74
 
 *Amended in place 2026-10-28 (unmerged draft; round 5 TEST review, Notes):*
 untested clause: `OperationError::AdmissionNotListed`. org-node's
@@ -552,7 +497,6 @@ nothing, writes nothing to the chain and sends nothing; an Organisation no
 Persona here holds is org-io's own refusal, `OperationError::NotHeld {
 org_id }`, with the same nothing.
 satisfies: REQ-g9cu2c
-supersedes: LLR-nqdr97
 
 *Amended in place 2026-10-28 (unmerged draft; round 2 review, AR2-5):* the Organisation
 no Persona here holds is org-io's own `OperationError::NotHeld`, not an
@@ -571,7 +515,6 @@ change org-node returns from verification (LLR-pbng7d), from its deletion of
 an accepted acknowledgement (LLR-6ux6yw) or from `cancel_invite`, which
 org-io writes unread.
 satisfies: REQ-7jh4rh, REQ-kh2uth
-supersedes: LLR-cc59ys
 
 *Amended in place 2026-10-28 (unmerged draft; review round 1 C-O12):*
 `store_file::remove_store` is renamed `remove_removed_file`, for what it
@@ -598,7 +541,7 @@ the scanned names (`write_store`'s own rename of its temporary file is
 inside `write_store`); "org-node's forget operation" leaves the list, since
 org-node has none (its removal is a sealed store, LLR-zcw3xv).
 
-### The updated Organisation proposed (successor of SDD-frsa73)
+### The updated Organisation proposed
 
 **SDD-4drrpr**: the proposal of the updated Organisation: org-node's
 calculation of one provisional organisation from every provisional change
@@ -606,10 +549,9 @@ held, with an Organisation key pair drawn from the handle's random source,
 written to the store before it is reported, with no chain read or write.
 Code: `org-io/src/propose.rs` (`propose_updated_organisation`).
 traces: REQ-g9cu2c, REQ-3pjmub
-supersedes: SDD-frsa73
 
-*Added 2026-10-28 (unmerged draft; round 3 review AR3-4):* SDD-frsa73's
-proposal half. LLR-5fchwt is its LLR.
+*Added 2026-10-28 (unmerged draft; round 3 review AR3-4):* the proposals'
+proposal half, split from one item. LLR-5fchwt is its LLR.
 
 **LLR-5fchwt**: `OrgIo::propose_updated_organisation(org_id) ->
 Result<ProposedOrganisation, OperationError>` has org-node apply every held
@@ -652,7 +594,6 @@ the sequence of the former submit module, removed by T28; `ChainWriter`,
 `WRITE_TIMEOUT` and `bounded` stay, in `write.rs`).
 The production writer is the chain connection item's (SDD-z85ux9).
 traces: REQ-3pjmub, REQ-qfnx94, REQ-bm4ppg, REQ-3pxa8f, REQ-tg9zrn, REQ-wd683g
-supersedes: SDD-erzj3m
 
 *Amended in place 2026-10-28 (unmerged draft; round 3 review, AR3-4 sweep, ARCHITECTURE Boundaries 3):* the responsibility is restated in one sentence without "and", the detail it listed moved to the sentences after it. No behaviour change.
 
@@ -670,7 +611,6 @@ failure }` or `Unknown`; it calls no `StateReader` method and no org-node
 operation that adopts, commits or discards, and writes no store change but
 LLR-5tpdxw's. On `Refused` the provisional organisation stays held.
 satisfies: REQ-3pjmub
-supersedes: LLR-qhjp6g, LLR-9r2bxd
 
 *Amended in place 2026-10-28 (unmerged draft; round 3 review, AR3-2,
 ARCHITECTURE Boundaries 2):* `Refused { reason: String }` is `Refused {
@@ -715,7 +655,6 @@ with `WriteRefused::OutcomeUnknown`, writing nothing, until verification
 settles it (LLR-zey4mg); an unknown outcome for one target never refuses a
 write for another.
 satisfies: REQ-bm4ppg
-supersedes: LLR-nqvbb6
 
 **LLR-5tpdxw**: for a founding the write runs in two `ChainWriter` steps,
 `create_proxy()` and `found_at(proxy, root, key)`; as soon as
@@ -792,7 +731,8 @@ timed-out write: the variant is `WriteFailure::CreateProxyUnanswered`
 went unanswered for 90 s; nothing stored, and the next write creates the
 proxy again". Behaviour is unchanged.
 
-*Amended in place 2026-10-24 (unmerged draft; owner decision on PR-8ghk9s):*
+*Amended in place 2026-10-24 (unmerged draft; owner decision on the
+founding's `create_proxy` timeout):*
 a `create_proxy` that does not return within `WRITE_TIMEOUT` is reported as
 its failure is: `WriteReport::Refused { reason }` naming the proxy creation
 and the 90 s bound, no proxy stored and no unknown write recorded, so the
@@ -809,9 +749,9 @@ treated as an unknown outcome: org-io records the unknown write
 and returns `WriteReport::Unknown` saying the write timed out after 90 s and
 may yet execute on chain.
 satisfies: REQ-bm4ppg
-supersedes: LLR-be3zv9
 
-*Amended in place 2026-10-24 (unmerged draft; owner decision on PR-8ghk9s):*
+*Amended in place 2026-10-24 (unmerged draft; owner decision on the
+founding's `create_proxy` timeout):*
 every call stays bounded, but a founding's `create_proxy` past the bound is
 not treated as an unknown outcome: it is refused and records nothing
 (LLR-sq5pbq). The unknown outcome is recorded for an update's write and for
@@ -822,7 +762,6 @@ refusals and before the write, calls `ChainWriter::write_window()` once and
 passes that window to `ChainWriter::update`; when `write_window` fails it
 writes nothing and returns `WriteReport::Refused` saying no write was made.
 satisfies: REQ-bm4ppg
-supersedes: LLR-2yjuaj
 
 *Amended in place 2026-10-28 (unmerged draft; round 3 review, AR3-2,
 ARCHITECTURE Boundaries 2):* `ChainWriter`'s calls return `ChainWriteError`
@@ -854,15 +793,15 @@ satisfies: REQ-3pjmub
 *Added 2026-10-28 (unmerged draft; round 4 TEST review, finding-1):* see
 LLR-js7wgk's note.
 
-## The chain read (successor of SDD-6qz9ms)
+## The chain read
 
 **SDD-4bbt47**: the read of an Organisation's state from the chain at a
 finalised block, handed to org-node as a value, made only by
 verification: no receive, send or write path reads the chain. Code:
 `org-io/src/chain_read.rs` (the `StateReader` seam and the parse,
-unchanged). LLR-rm9x4z, defined under SDD-6qz9ms, stays in force beside it.
+unchanged). LLR-rm9x4z, defined in `2026-10-08-org-io.md` under "The chain read", stays
+in force beside it.
 traces: REQ-tg9zrn, REQ-36gxmg, REQ-cj9u3y
-supersedes: SDD-6qz9ms
 
 *Amended in place 2026-10-28 (unmerged draft; round 3 review, AR3-4 sweep, ARCHITECTURE Boundaries 3):* the responsibility is restated in one sentence without "and", the detail it listed moved to the sentences after it. No behaviour change.
 
@@ -897,7 +836,8 @@ contract tests of the chain seams (`tests/common/chain_contract.rs`, run over
 `FakeChain` in `tests/chain_write.rs` and over the production halves in
 `tests/chain_writer_contract.rs`) cited LLRs of `verify_organisation`,
 `write_organisation_to_chain` and `is_own_admin`, which they do not call.
-This item, LLR-j4nkx5 and LLR-bwerd2 state the seams' own contract, which
+This item and LLR-j4nkx5 state the seams' own contract (a third, for the
+own-admin check's seam, went with that check), which
 those tests verify. No behaviour changes.
 
 ## Verification
@@ -912,7 +852,6 @@ an unknown chain write. Code:
 `org-io/src/verify.rs` (replacing the settle and reconcile of the former
 publish module, removed by T28).
 traces: REQ-36gxmg, REQ-bm4ppg, REQ-7jh4rh, REQ-kh2uth, REQ-tg9zrn
-supersedes: SDD-6mpmsw
 
 *Amended in place 2026-10-28 (unmerged draft; round 3 review, AR3-4 sweep, ARCHITECTURE Boundaries 3):* the responsibility is restated in one sentence without "and", the detail it listed moved to the sentences after it. No behaviour change.
 
@@ -922,7 +861,7 @@ verification gives org-node the time read from the handle's clock and,
 through a closure, the Persona's Device secret key for the signing; it
 writes the sealed store org-node returns, which keeps only the
 acknowledgements, and keeps the Persona's store file; and it then hands the
-Persona to the acknowledgement delivery (SDD-83un8g), with no app
+Persona to the acknowledgement delivery (SDD-3my66m), with no app
 confirmation. On `Behind` nothing is written: the behind marker is not
 persisted and is derived again by each verification.
 
@@ -933,7 +872,6 @@ absence) to org-node's verification, and maps its outcome to `Verified::InStep
 { epoch }`, `Adopted { epoch, discarded, own }`, `Removed`, `Behind {
 chain_epoch }` or `Inconsistent { reason }`; it sends nothing.
 satisfies: REQ-36gxmg
-supersedes: LLR-k5pzsz
 
 *Amended in place 2026-10-28 (unmerged draft; round 3 review, AR3-2,
 ARCHITECTURE Boundaries 2):* `Verified::Refused { reason }`, org-node's
@@ -1028,8 +966,8 @@ owner ruling Q4' of 2026-10-16):* on `Behind` nothing is written — the
 behind marker is not persisted (org-node keeps it out of the sealed store)
 and the app's periodic verification derives it again each interval; on
 `Removed` org-node's sealed change is written and the file kept, replacing
-the removal of the file through `StoreChange::Forgotten` (LLR-amv4mb,
-superseded by LLR-vj2nkb, which deletes the file and the keychain item when
+the removal of the file through `StoreChange::Forgotten` (S4's removal
+item, replaced by LLR-vj2nkb, which deletes the file and the keychain item when
 REQ-98a3ty says).
 
 *Amended in place 2026-10-28 (unmerged draft; review round 1 C-O12):*
@@ -1043,7 +981,6 @@ reason }`, calls no org-node operation and writes nothing;
 `Unverified` until a later verification reads a state. A handle with the
 chain not configured returns `Unverified` for every target.
 satisfies: REQ-36gxmg, REQ-kh2uth
-supersedes: LLR-kp95ty
 
 *Amended in place 2026-10-28 (unmerged draft; round 3 review, AR3-2,
 ARCHITECTURE Boundaries 2):* the reason of a failed read or refused parse,
@@ -1111,7 +1048,7 @@ until this item; the stand-in is removed. The limit is a field of
 `ChainSettings`, not a parameter of `verify_organisation` or `verify_all`,
 so that every verification path (at mount, on the button, after a write,
 on receipt, periodically) gives the one value the handle was connected
-with, and the domain surface of LLR-4usfu2 is unchanged. It is a
+with, and the domain surface of LLR-zhdc9f is unchanged. It is a
 `Duration`, not org-node's `AheadLimit`, which `org_io::node` does not
 re-export (LLR-3zdw8v).
 
@@ -1191,7 +1128,6 @@ Box<Verified>, write: WriteOutcome }`, `outcome` the verification's own
 outcome as above and `write` this settlement; with none recorded it returns
 the outcome alone, never `Settled`.
 satisfies: REQ-bm4ppg
-supersedes: LLR-t98pk9
 
 *Amended in place 2026-10-22 (unmerged draft; plan detail pass —
 dispatcher decision):* the report of the settlement is named: the
@@ -1214,7 +1150,6 @@ which no chain write can still execute), and org-io writes that change
 unread; nothing is discarded on `Behind`, `Inconsistent`, `Unverified`, a
 refused or unknown write, or a refused message.
 satisfies: REQ-7jh4rh, REQ-kh2uth
-supersedes: LLR-fptp57, LLR-36zp69
 
 *Amended in place 2026-10-20 (unmerged draft; owner ruling Q4' of
 2026-10-16):* the same holds for what this node's removal deletes: the
@@ -1257,13 +1192,12 @@ new connection to a Device key, one recipient after another, each Device's
 outcome reported from the one verdict byte it writes back, with no store
 written or chain read. Code: `org-io/src/send.rs`.
 traces: REQ-nactq6, REQ-8trkps, REQ-sjqxg2, REQ-z73ctw, REQ-wpq4fp, REQ-u894ty
-supersedes: SDD-v2bq89 SDD-wr8m5n
 
 *Amended in place 2026-10-28 (unmerged draft; round 3 review, AR3-4 sweep, ARCHITECTURE Boundaries 3):* the responsibility is restated in one sentence without "and", the detail it listed moved to the sentences after it. No behaviour change.
 
 *Amended in place 2026-10-20 (unmerged draft; consistency pass):* also
-supersedes SDD-wr8m5n, the peer-address parse, whose requirement (REQ-n82q47)
-and low-level requirement (LLR-2b2ghe) are retired (owner answer A2): no
+replaces S4's peer-address parse item, whose requirement and low-level
+requirement are retired (owner answer A2): no
 address reaches org-io as text, and where each send's addresses come from is
 this item's.
 
@@ -1275,7 +1209,7 @@ or organisation request carried, or, for a provisional Member's requests, at
 the Invite's addresses for its issuer; no address is taken from an inbound
 connection's source. The app asks for each adopted epoch's send once and
 org-io offers no retry trigger of its own; a repeated call is still
-harmless. The removed node's acknowledgements are sent by SDD-83un8g, over
+harmless. The removed node's acknowledgements are sent by SDD-3my66m, over
 this item's verdict read but from a direct-only endpoint.
 
 **LLR-pxqdy4**: `OrgIo::send_organisation(org_id) -> Result<SendReport,
@@ -1289,7 +1223,6 @@ attempting every recipient whatever happened to the others;
 store, starts no later send of its own, and repeated calls send the same
 messages.
 satisfies: REQ-nactq6, REQ-u894ty
-supersedes: LLR-znhmh2
 
 *Amended in place 2026-10-20 (unmerged draft; owner ruling Q1 and answer A2
 of 2026-10-16, dispatcher's resolution C8):* the `peer_addr` parameter is
@@ -1310,7 +1243,6 @@ attempted. A kept address is read in the text form of LLR-v9dkrv, its
 endpoint identity the 64 hex characters before `@` and its socket the rest;
 an entry of any other form names no identity and is not dialled.
 satisfies: REQ-8trkps
-supersedes: LLR-r9sh6k, LLR-jn5jeh, LLR-pw369n
 
 *Amended in place 2026-10-22 (unmerged draft; plan detail pass —
 dispatcher decision):* the identity a kept address names is read from its
@@ -1321,9 +1253,9 @@ text form, `<64 lower-case hex endpoint id>@<socket>`.
 addressed recipient, with every other recipient reported
 `NotAttemptedInLoopback`; each recipient has the addresses kept for its key,
 and the identity check applies to each. The variant `NotAttemptedInLoopback`
-is removed. This item now also supersedes S4's Loopback dial at the
-caller's full address (LLR-jn5jeh) and its refusal when the caller passes
-none (LLR-pw369n), whose `send_committed` and caller-passed address are
+is removed. This item now also replaces S4's Loopback dial at the
+caller's full address and its refusal when the caller passes
+none, whose `send_committed` and caller-passed address are
 gone.
 
 **LLR-hx5c2y**: every send is made from the endpoint of the Persona whose
@@ -1388,7 +1320,6 @@ the same body on every call. No provisional Member for `org_id` is
 `RequestError::NoProvisionalMember`, and a bind that fails is
 `RequestError::Bind`, each sending nothing.
 satisfies: REQ-sjqxg2, REQ-2xgsbn
-supersedes: LLR-9cb443, LLR-w4mhd4
 
 *Amended in place 2026-10-20 (unmerged draft; owner answer A2 of
 2026-10-16):* the request carries the sender's own endpoint addresses, so
@@ -1443,7 +1374,7 @@ its Invite's issuer, which answers once its current record lists the
 requester. The app calls this with no user step when a verification reports
 the Organisation behind (the app's ledger, owner ruling Q2).
 
-## The receive step (successor of SDD-aw3nka)
+## The receive step
 
 **SDD-2fc2cq**: the receive step: org-node's one receive path
 (REQ-ncv4sc) applied to each body of every inbound connection whose
@@ -1453,10 +1384,9 @@ org-node returns, writes one verdict byte back, sends an answer to an
 organisation request through the send path, and reports the result to the
 app. Code: `org-io/src/receiver.rs`,
 `org-io/src/transport/` (the verdict and the framing, unchanged).
-LLR-szhe7j and the framing items, defined under SDD-aw3nka, stay in force
-beside it.
+LLR-szhe7j and the framing items, defined in `2026-10-07-transport.md`,
+stay in force beside it.
 traces: REQ-xd5a2d, REQ-cj9u3y, REQ-wpq4fp, REQ-2yw5y3, REQ-qkrj55, REQ-8e57wm, REQ-szt6ea
-supersedes: SDD-aw3nka
 
 *Amended in place 2026-10-28 (unmerged draft; round 3 review, AR3-4 sweep, ARCHITECTURE Boundaries 3):* the responsibility is restated in one sentence without "and", the detail it listed moved to the sentences after it. No behaviour change.
 
@@ -1480,7 +1410,6 @@ before its proxy) is org-io's own refusal,
 `ReceiveError::NoOrganisation { receiver }`, with `0x01` written: there is
 no Organisation to report it under.
 satisfies: REQ-cj9u3y, REQ-2yw5y3, REQ-tg9zrn
-supersedes: LLR-cvyyr8, LLR-7pj5af
 
 *Amended in place 2026-10-28 (unmerged draft; round 2 review, AR2-5):* that case was
 returned as an `OrgNodeError::PersonaNotHeld` org-io built itself, which
@@ -1536,7 +1465,6 @@ as revoked and an admission request for an invite this store holds as
 outstanding can be acted on; every other message from it is refused by that
 check before any store write, and no chain is read on this path at all.
 satisfies: REQ-xd5a2d
-supersedes: LLR-wvgec4
 
 *Amended in place 2026-10-20 (unmerged draft; owner ruling Q3 of
 2026-10-16):* an organisation request from a Device held as revoked joins
@@ -1553,7 +1481,6 @@ org-node's admission-request rule, and `Verdict::Refused` (`0x01`) for every
 other refusal or failure; a dropped responder writes nothing, and no other
 byte is written on an inbound connection by any code in `org-io/src`.
 satisfies: REQ-xd5a2d
-supersedes: LLR-unqfj5
 
 **LLR-zkybw7**: for an admission request org-node's check returns its
 outcome (`AdmissionRequestOutcome`) and, for the first request kept, the
@@ -1561,7 +1488,6 @@ store change; org-io writes that change before it writes `0x00` and reports `Adm
 `AlreadyReceived` and `InviteUsedByAnotherDevice` it writes nothing,
 reports nothing to the app, and writes `0x02` or `0x03`.
 satisfies: REQ-xd5a2d, REQ-2yw5y3
-supersedes: LLR-gha5f6
 
 *Amended in place 2026-10-20 (unmerged draft; consistency pass):* org-node's
 check returns `AdmissionRequest { outcome }` and nothing else, so the
@@ -1620,7 +1546,6 @@ only around org-node's check and the store write that follows, and holds
 none while it sends an answer; every other `OrgIo` method that takes the
 lock completes while `next_received` waits.
 satisfies: REQ-qkrj55
-supersedes: LLR-9arvqj
 
 ## Acting on this node's removal
 
@@ -1629,50 +1554,7 @@ rulings of 2026-10-20).* S3b-io part 2's acknowledgement delivery, which
 no item in force stated, is stated here for the store org-node now keeps on
 this node's removal.
 
-**SDD-83un8g**: the removal acknowledgements: after verification reports
-this node removed from an Organisation, sending each acknowledgement
-org-node keeps for it directly to its recipient from the removed Persona's
-own endpoint identity, on a backoff schedule measured by a clock org-io
-reads, having org-node delete each one its recipient accepts, and deleting
-the Persona's store file and keychain item as soon as none is left, or 7
-days after the kept verification time, or at start when either already
-holds; with no command and no app confirmation. Code:
-`org-io/src/acknowledge.rs` (the delivery task, the schedule, the deletion),
-`org-io/src/clock.rs` (`Clock`, `SystemClock`), `store_file::mark_removed`
-and `store_file::remove_store`, `keychain::delete_device_secret`, and the
-direct-only bind in
-`endpoints.rs`. It reaches org-node only through its exported listing
-(REQ-35s4eb) and deletion (REQ-ayyt5f) of kept acknowledgements. SOUP:
-`tokio` (`time`, `spawn`), `keyring` (`delete_credential`).
-traces: REQ-k6kcgd, REQ-sd7ayv, REQ-98a3ty, REQ-jqmpz5, REQ-bg5whd, REQ-kh2uth, REQ-36gxmg
-superseded-by: SDD-3my66m, SDD-wyn7b6
-
-*Superseded 2026-10-28 (unmerged draft; review round 1 A8, ARCHITECTURE
-Boundaries 3):* the item stated two responsibilities, the acknowledgements'
-delivery and the removed data's retention and deletion, so a change to the
-delivery's schedule and one to the retention deadline both edited it and
-its one module. It is split into SDD-3my66m (the delivery,
-`acknowledge.rs`) and SDD-wyn7b6 (the retention and deletion, the new
-`retention.rs`), which share the handle's delivery-task registry; the
-deletion rule is one pure function (`retention::deletion_due`) used by open,
-resume and the delivery task. Its LLRs are re-pointed below: LLR-zzsqj4,
-LLR-sn5ded, LLR-cqr26z, LLR-3w22wc, LLR-rav7dr, LLR-6ux6yw, LLR-xwz3nu,
-LLR-bv6wkz and LLR-5rxqr8 are SDD-3my66m's; LLR-vj2nkb, LLR-n649th,
-LLR-upqj5g and LLR-3fxxpp are SDD-wyn7b6's. No behaviour changes.
-
-*Amended in place 2026-10-20 (unmerged draft; consistency pass, dispatcher's
-decision on the deletion order):* the code gains `store_file::mark_removed`;
-the Persona's keychain item is deleted before its store file (LLR-vj2nkb).
-
-*Amended in place 2026-10-22 (unmerged draft; plan detail pass —
-dispatcher decision):* the handle's `OrgService` is held as
-`Arc<tokio::sync::Mutex<OrgService>>`, so that each delivery task, which
-outlives the call that started it, shares the one service with the handle
-and reaches org-node's listing and deletion of kept acknowledgements under
-the same lock as every other operation; the handle's operations are
-otherwise unchanged.
-
-### The acknowledgements' delivery (successor of SDD-83un8g)
+### The acknowledgements' delivery
 
 **SDD-3my66m**: the removal acknowledgements' delivery: after verification
 reports this node removed from an Organisation, sending each acknowledgement
@@ -1690,7 +1572,6 @@ directory), `org-io/src/clock.rs` (`Clock`,
 org-node only through its exported listing (REQ-35s4eb) and deletion
 (REQ-ayyt5f) of kept acknowledgements. SOUP: `tokio` (`time`, `spawn`).
 traces: REQ-k6kcgd, REQ-sd7ayv, REQ-jqmpz5, REQ-bg5whd, REQ-kh2uth, REQ-36gxmg, REQ-kn8zg6
-supersedes: SDD-83un8g
 
 *Traces amended 2026-11-03 (change `worktree-org-io-publish-2`, task T13b;
 owner ruling Q1 (c) of 2026-11-03, as recommended):* REQ-kn8zg6 joins the line, the dial by key of
@@ -1700,8 +1581,7 @@ LLR-u2j6u8.
 ruling Q1' of 2026-11-04):* "directly" and "the direct-only bind" hold for
 every dial that has an address; the one dial by key alone in Networked mode
 goes from an endpoint of the Persona's identity bound for it with iroh's
-relay server and address lookup, closed after the dial (LLR-spckm6, which
-supersedes LLR-cqr26z). No other Device forwards it (ruling D7). The code is
+relay server and address lookup, closed after the dial (LLR-spckm6). No other Device forwards it (ruling D7). The code is
 `acknowledge.rs`'s `dial_by_key`, binding the handle's bind plan (`Endpoints::bind_plan`).
 
 *Amended in place 2026-11-09 (change `worktree-org-io-publish-2`, merge
@@ -1712,8 +1592,9 @@ review round 1, MR1-O4; a wording change, the ID is kept):* the note of
 
 *Amended in place 2026-10-28 (unmerged draft; round 3 review, AR3-4 sweep, ARCHITECTURE Boundaries 3):* the responsibility is restated in one sentence without "and", the detail it listed moved to the sentences after it. No behaviour change.
 
-*Added 2026-10-28 (unmerged draft; review round 1 A8):* SDD-83un8g's
-delivery half. LLR-zzsqj4, LLR-sn5ded, LLR-cqr26z, LLR-3w22wc, LLR-rav7dr,
+*Added 2026-10-28 (unmerged draft; review round 1 A8):* the removal
+acknowledgements' delivery half, split from one item. LLR-zzsqj4, LLR-sn5ded,
+LLR-spckm6, LLR-u2j6u8, LLR-rav7dr,
 LLR-6ux6yw, LLR-xwz3nu, LLR-bv6wkz and LLR-5rxqr8 are its LLRs. With owner
 ruling C-O6 of 2026-10-27, the handle remembers the removed stores' keys:
 the resume at start and the report used to list the data directory again,
@@ -1773,50 +1654,8 @@ one delivery showing org-node's bytes unchanged at the recipient (whose
 answer is already a refusal). The inputs a delivery can meet — a refused
 or other verdict, no answer, a failed write of the acceptance, a list that
 holds none — are the inputs of the items it constrains and are tested
-there, abnormal cases included: LLR-xwz3nu, LLR-6ux6yw, LLR-3w22wc and
+there, abnormal cases included: LLR-xwz3nu, LLR-6ux6yw, LLR-u2j6u8 and
 LLR-n649th.
-
-**LLR-cqr26z**: every acknowledgement is sent from the endpoint whose
-identity is the removed Persona's own Device key, bound from that Persona's
-keychain item (LLR-cns6q6), never from a fresh identity; before its first
-round the delivery closes that Persona's endpoint if it is bound with a
-relay and binds it again with the relay disabled and no address lookup
-(`BindPlan::Direct`: Loopback mode's loopback sockets, or Networked mode's
-direct sockets), and each dial is to an address holding the recipient's
-Device key and only one of its kept direct addresses, with no relay URL. A
-bind that fails is the round's outcome for every recipient
-(`NotDelivered { reason: SenderEndpoint }`), and the next round binds
-again.
-satisfies: REQ-k6kcgd
-superseded-by: LLR-spckm6
-
-*Superseded 2026-11-04 (change `worktree-org-io-publish-2`, task q1r;
-owner ruling Q1' of 2026-11-04) by LLR-spckm6 (`2026-11-02-publish-2.md`):*
-every clause stands; in Networked mode the one dial by a recipient's key
-alone (REQ-kn8zg6, LLR-u2j6u8) goes from an endpoint of the same identity
-bound with iroh's relay server and address lookup, since the direct-only
-endpoint can never find a key; every dial that has an address keeps the
-direct-only bind.
-
-**LLR-3w22wc**: in a round, the delivery takes the kept acknowledgements in
-org-node's order and, for each recipient, dials its kept addresses one at a
-time in the order kept — in Loopback mode only those whose endpoint
-identity is the recipient's key (LLR-34tfm8) — writing the acknowledgement
-and reading the verdict (LLR-fwz3tb); it stops at the first `Accepted`, and
-moves to the next address on `Refused`, on any other verdict byte and on
-`NotDelivered` (a failed dial, a failed stream, no byte within 10 s); the
-recipient's outcome for the round is `Accepted` or the last address's
-result, `NotDelivered { reason: NoAddress }` when no address may be dialled;
-one recipient's outcome never stops the others. The node's lock is not held
-while a dial or a verdict read is in progress.
-satisfies: REQ-k6kcgd
-superseded-by: LLR-u2j6u8
-
-*Superseded 2026-11-03 (change `worktree-org-io-publish-2`, task T13b;
-owner ruling Q1 (c) of 2026-11-03, as recommended) by LLR-u2j6u8 (`2026-11-02-publish-2.md`):* in
-Networked mode a recipient with no kept address that may be dialled is
-dialled once by its key alone instead of reported `NoAddress`
-(REQ-kn8zg6); Loopback mode is unchanged.
 
 **LLR-rav7dr**: `OrgIo::acknowledgement_report(org_id) ->
 Option<AcknowledgementReport>` returns, for the removed Persona bound to
@@ -2017,7 +1856,7 @@ C-O6 of 2026-10-27):* `start_receiving` listed the data directory again
 and resumed none when that listing failed; it now reads the removed stores'
 keys the handle remembers.
 
-### The removed data's retention and deletion (successor of SDD-83un8g)
+### The removed data's retention and deletion
 
 **SDD-wyn7b6**: the removed Persona's data lifetime: the store file of a
 Persona this node was removed with, with its keychain item, kept while its
@@ -2031,12 +1870,11 @@ listing of kept acknowledgements (REQ-35s4eb), read for the verification
 time and the count, and `drop_store`. SOUP: `tokio` (`spawn`), `keyring`
 (`delete_credential`).
 traces: REQ-98a3ty, REQ-kh2uth
-supersedes: SDD-83un8g
 
 *Amended in place 2026-10-28 (unmerged draft; round 3 review, AR3-4 sweep, ARCHITECTURE Boundaries 3):* the responsibility is restated in one sentence without "and", the detail it listed moved to the sentences after it. No behaviour change.
 
-*Added 2026-10-28 (unmerged draft; review round 1 A7, A8):* SDD-83un8g's
-deletion half. The rule, written inline three times there, is one pure
+*Added 2026-10-28 (unmerged draft; review round 1 A7, A8):* the removal
+acknowledgements' deletion half, split from one item. The rule, written inline three times there, is one pure
 function, `deletion_due(left, verified_at, now)`: `Expired` once `now`
 reaches `verified_at` + 604 800 s, else `NoneKept` when `left` is 0, else
 none. Open deletes on either; the delivery task deletes on either; the
@@ -2060,7 +1898,6 @@ cannot be opened, and its name records whose it was; the next listing holds
 no Persona file for that key, and no other Persona's file or item is
 touched.
 satisfies: REQ-98a3ty, REQ-kh2uth
-supersedes: LLR-amv4mb
 
 *Amended in place 2026-10-28 (unmerged draft; review round 1 C-O12):* the
 renamed file's removal is `store_file::remove_removed_file` (was
@@ -2121,7 +1958,7 @@ dispatcher's ruling of 2026-10-28):* a reading before the epoch was taken
 as time 0 at open, so nothing was found due and nothing was reported; open
 now judges no deletion on it and reports it.
 
-*Amended in place 2026-10-25 (unmerged draft; PR-wch3zu, plan task T60):* a
+*Amended in place 2026-10-25 (unmerged draft, plan task T60):* a
 `removed-` leftover whose key still has a live `persona-` store file — which
 no real rename leaves, but a restored backup or copy can — is skipped, so the
 live Persona never loses its keychain item (RC-hd5des's rule); it stays,
@@ -2206,22 +2043,22 @@ transport through org-io's and org-node's own types: it dials a recipient by
 its `DevicePublicKey` with the endpoint addresses org-node keeps for that
 key, or the Invite's (org-node's `EndpointAddresses`; LLR-34tfm8,
 LLR-qa4nrt), binds an endpoint by org-io's own bind plan (relayed, or direct
-only, LLR-cqr26z), and asks an endpoint for the addresses it holds in the
+only, LLR-spckm6), and asks an endpoint for the addresses it holds in the
 current mode as strings (LLR-v9dkrv) and whether it has a relay home, not
 for its iroh address; no transport function takes an address parsed from
 text a user gave.
 satisfies: REQ-xuzw32
-supersedes: LLR-3vb4k9
 
 *Note 2026-11-04 (change `worktree-org-io-publish-2`, task q1r):* the
-bind plan's rule is now LLR-spckm6's (successor of LLR-cqr26z): direct only,
+bind plan's rule is now LLR-spckm6's: direct only,
 or relayed for a dial by key alone in Networked mode. No change to this
 item's rule.
 
-*Added 2026-10-21 (unmerged draft; design gap G2 of the plan):* LLR-3vb4k9
-named the dial at a transport-owned `PeerAddr` (`OrgEndpoint::send_body_at`,
-SDD-wr8m5n's parse), which this change removes with the peer-address parse
-(SDD-2bzgtp supersedes SDD-wr8m5n; LLR-2b2ghe retired). Its rule — iroh one
+*Added 2026-10-21 (unmerged draft; design gap G2 of the plan):* S4's iroh
+confinement item named the dial at a transport-owned `PeerAddr`
+(`OrgEndpoint::send_body_at`, the peer-address parse's), which this change
+removes with the peer-address parse (SDD-2bzgtp replaces its item; its
+low-level requirement is retired). Its rule — iroh one
 adapter's dependency, confined to the transport module — holds unchanged
 over the addresses kept per Device key.
 
@@ -2292,32 +2129,6 @@ recipient accepted), reachable in the public report as
 LLR-rav7dr as amended 2026-10-30). Its sibling `AcceptanceFailure::Store`
 holds org-io's own store-write error and is outside it.
 
-**LLR-4usfu2**: `OrgIo`'s production public methods for the domain are
-exactly `propose_person`, `person`, `propose_founding_organisation`,
-`issue_invite`, `read_invite`, `propose_member`, `request_admission`,
-`propose_admission`, `propose_revocation`, `cancel_invite`,
-`propose_updated_organisation`, `write_organisation_to_chain`,
-`verify_organisation`, `verify_all`, `verification`, `send_organisation`,
-`request_organisation`, `start_receiving` and `next_received`, beside the
-queries (`personas`, `organisations`, `organisation`,
-`admission_requests`, `acknowledgement_report`) and `open`,
-`connect`, `not_configured`, `is_own_admin`; none of `create_persona`,
-`found_organisation`, `admit_member`, `revoke_member`, `expect_admission`,
-`produce_reply`, `import_reply`, `admit_reply`, `submit_commit_send`,
-`settle_unknown`, `reconcile` or `reconcile_held` exists, and no public
-method takes a `PeerAddr` or sends, deletes or resends an acknowledgement.
-satisfies: REQ-6fk4qj
-
-*Amended in place 2026-10-20 (unmerged draft; owner answers A2, A3 and
-ruling Q4' of 2026-10-16):* the queries gain `admission_requests`
-(LLR-dm2h8u) and `acknowledgement_report` (LLR-rav7dr); no method takes a
-peer address; the acknowledgement delivery is org-io's own, with no command.
-superseded-by: LLR-zhdc9f
-
-*Superseded 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; owner
-ruling 6 and plan §0's T16g) by LLR-zhdc9f (`2026-11-02-publish-2.md`):*
-`is_own_admin` leaves the list and `removed_devices` joins the queries.
-
 **LLR-n2srhc**: no public field of a type `org-io/src` defines is declared
 with the type `OrgService`, and no public function of `org-io/src` outside
 test-only (`test-support`) code returns an `OrgService` by value: the app
@@ -2328,68 +2139,13 @@ sources.
 satisfies: REQ-6fk4qj
 
 *Added 2026-10-28 (unmerged draft; round 5 TEST review, low 11):* the scan
-`org_io_hands_out_no_bare_service` cited LLR-4usfu2, which states the exact
-method list, not this rule; since LLR-7pj5af and LLR-9r2bxd were superseded
-no in-force item stated it. *Note 2026-10-28 (robustness, N/A):* a scan of
+`org_io_hands_out_no_bare_service` cited LLR-zhdc9f, which states the exact
+method list, not this rule; since S2's receive and write-then-read sequence
+items were replaced no item stated it. *Note 2026-10-28 (robustness, N/A):* a scan of
 org-io's sources, which takes no input, so it has no abnormal-input case; it
 was watched red against a planted public `OrgService` field.
 
-**LLR-7qdjqn**: `OrgIo::is_own_admin(org_id)` returns
-`Err(OwnAdminError::NotConfigured)` when org-io holds no signatory key;
-otherwise it makes one signatory-set read,
-`SignatorySetReader::signatory_set(org_id)` (on-chain-client's pinned
-read, which reads the mapped account and, only for a mapped H160, its proxy
-definitions at one finalised block), returns `Err(OwnAdminError::Read(_))`
-when that read fails at either value, never `Ok(NotAdmin)` for a failed
-read, and otherwise returns `Ok(admin_status(controller_of(own,
-co_signers), &set))` — `Admin`, `DelegateCannotDispatch` or `NotAdmin` by
-LLR-2hkqv2's rule.
-satisfies: REQ-ntkjk6
-supersedes: LLR-c9fyun
-retired: 2026-11-03 — owner ruling 6 of 2026-10-16: OrgIo::is_own_admin is removed in plan task T16h of change worktree-org-io-publish-2 (REQ-ntkjk6 retired the same day)
-
-*Deleted 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; owner
-ruling 6; plan task T16h, which also drops `is_own_admin` from
-`org-io/tests/absences.rs`'s allowlist):* the method, its error type and
-its reader go; the absence is pinned by `absences.rs`
-`the_handle_offers_none_of_the_removed_methods` and
-`the_handles_production_methods_are_exactly_the_domain_surface`.
-
-*Amended in place 2026-11-09 (change `worktree-org-io-publish-2`, merge
-review round 1, MR1-O5; a wording change):* the deletion note above named
-`org_io_offers_no_own_admin_check`, which task o2 replaced; it now names
-the two `absences.rs` tests that pin the absence.
-
-*Added 2026-10-21 (owner decision of 2026-10-20; consistency pass).*
-LLR-c9fyun (`2026-10-08-org-io.md`) still read "either signatory-set read"
-and `admin_status(…, original_account, delegates)`, which disagree with
-LLR-2hkqv2 (`2026-10-13-publish.md`): `admin_status` takes the signatory
-set from one pinned read. LLR-2hkqv2 is right — it is the in-force rule
-the owner ruled (D4, D5 of 2026-10-13), the one read is on-chain-client's
-pinned read the code makes, and LLR-c9fyun's own 2026-10-13 notes already
-restated it so. This item states LLR-c9fyun's claims over that one read,
-with the result set LLR-2hkqv2's rule gives, and supersedes it; no
-behaviour changes.
-
-**LLR-bwerd2**: the `SignatorySetReader` seam (SDD-f4khqn) answers as the
-chain does: `signatory_set(org_id)` returns no mapped account and no
-definition for an Organisation the chain holds no state for, and, once the
-Organisation's account is mapped to its proxy and its proxy definitions are
-the controller's founding one, the proxy as the mapped account and that one
-definition, `(controller, Any, 0)`, with the runtime's `Any` index. Every
-reader org-io holds, the production `OnChainSignatorySetReader` and the
-test-support fake, meets it.
-satisfies: REQ-ntkjk6
-retired: 2026-11-03 — owner ruling 6 of 2026-10-16: the SignatorySetReader seam exists only for the own-admin check, removed in plan task T16h of change worktree-org-io-publish-2
-
-*Deleted 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; owner
-ruling 6; plan task T16h):* the seam, the production reader and the
-test-support fake's signatory slots go; their tests go with them.
-
-*Added 2026-10-28 (unmerged draft; round 4 TEST review, finding-1):* see
-LLR-js7wgk's note.
-
-**LLR-gh4rw3**: every type the methods of LLR-4usfu2 return
+**LLR-gh4rw3**: every type the methods of LLR-zhdc9f return
 (`PersonSummary`, `ProposedFounding`, `ProposedMember`, `InviteSummary`,
 `ProvisionalChangeSummary`, `ProposedOrganisation`, `WriteReport`,
 `WriteRefused`, `Verified`, `WriteOutcome`, `SendReport`, `SendRefused`,
@@ -2464,8 +2220,8 @@ satisfies: REQ-6fk4qj
 
 *Added 2026-10-28 (unmerged draft; round 3 review, T3-O6):* the scan cited
 LLR-kz9hj4, which states `next_received`'s behaviour, not the app's code;
-no item stated the scan's rule since LLR-kz9hj4 superseded LLR-7pj5af,
-whose test it was.
+no item stated the scan's rule since LLR-kz9hj4 replaced S2's receive
+sequence item, whose test it was.
 
 *Note 2026-10-28 (robustness, N/A):* a scan of the app's sources, which
 takes no input, so it has no abnormal-input case; it was watched red

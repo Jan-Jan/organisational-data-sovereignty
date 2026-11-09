@@ -18,13 +18,15 @@ a device key with the same bytes are the same key.
 exactly one place — no two members hold the same member key, no device key is
 enrolled under two members, and no member key equals an enrolled device key —
 and `genesis`, `add_member` and `add_p2p_device` refuse an input that would
-break this with `DuplicateKey`, after their existing checks. satisfies: derived
+break this with `DuplicateKey`, after their existing checks.
+satisfies: derived
 
 **LLR-fym7dy**: `rotate_p2p_key`, `delete_p2p_device` and
 `emergency_isolate_member` refuse a replacement member key that is held anywhere
 in the organisation before the operation — another member's key or any enrolled
 device key, the key of a device being removed included — with `DuplicateKey`,
-after `P2pKeyNotReplaced`, and the refusal changes nothing. satisfies: derived
+after `P2pKeyNotReplaced`, and the refusal changes nothing.
+satisfies: derived
 
 **LLR-gjj6bx**: `apply_delta` refuses, with `DuplicateKey` and after its existing
 checks, a change set whose resulting record breaks LLR-v6gfc7's invariant.

@@ -27,7 +27,7 @@ the type-safety change.
 open. A Member's key pair is an `X25519Keypair` and a device's a
 `SigningKeypair`, two types, so a Member key pair can no longer be passed
 where a device key pair is meant, and `SigningKeypair` has no `member_seed()`.
-LLR-56hc77 is amended in place to say so (docs/plans/2026-10-05-switch-trim.md). The same shape remains one level down:
+LLR-56hc77 is amended in place to say so. The same shape remains one level down:
 `X25519Keypair` holds either a member seed or the Organisation private key,
 and both `member_seed()` and `org_private_key()` are public on it, so the
 Organisation key pair can hand its secret back as a `MemberSeed`, and the

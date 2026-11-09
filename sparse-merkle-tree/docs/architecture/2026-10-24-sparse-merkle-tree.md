@@ -24,19 +24,22 @@ and `From<[u8; 32]>` construct it, `as_bytes` returns the bytes unchanged, its
 `Debug` form is `NodeHash(` and the first four bytes in lowercase hex and
 `..)`, and with the `serde` feature it serialises as the 32 bytes. It is the
 one `NodeHash` of the workspace; `person` and `org-members` re-export it
-(`docs/adr/2026-10-04-parse-at-the-system-edge.md`). satisfies: derived
+(`docs/adr/2026-10-04-parse-at-the-system-edge.md`).
+satisfies: derived
 
 **LLR-znpbf5**: `TreeHasher` provides `leaf(&NodeHash, &NodeHash) -> NodeHash`
 (an identity hash and a content hash), `node(&NodeHash, &NodeHash) ->
 NodeHash` (a left and a right child) and `empty_leaf() -> NodeHash`, each a
 pure function the consumer implements under its own domains; the crate
-provides no implementation. satisfies: REQ-vg9wq4, REQ-ymgg6b
+provides no implementation.
+satisfies: REQ-vg9wq4, REQ-ymgg6b
 
 **LLR-t3e8pp**: `Leaf<H: TreeHasher>` has an associated `Identity` type and
 provides `identity(&self) -> &Self::Identity`, `position_bytes(&Self::Identity)
 -> [u8; 32]` (the leaf's position bytes), `identity_hash(&Self::Identity) -> NodeHash` and
 `content_hash(&self) -> NodeHash`. Two leaves are the same leaf for the tree
-when their identities are equal. satisfies: REQ-ymgg6b, REQ-s3unp5
+when their identities are equal.
+satisfies: REQ-ymgg6b, REQ-s3unp5
 
 **LLR-9z6dc9**: a leaf's hash is `H::leaf(identity_hash(identity),
 content_hash(leaf))`, and nothing else of a leaf enters the tree.
@@ -57,7 +60,8 @@ traces: REQ-vg9wq4, REQ-6cej5z, REQ-uy4euz, REQ-3szczq, REQ-dyjq33
 
 **LLR-ggu9bh**: the tree is `SparseMerkleTree<L, H, const DEPTH: usize>`, and a
 `DEPTH` of 0 or above 256 fails to compile (a constant assertion evaluated
-when the type is used). satisfies: REQ-vg9wq4
+when the type is used).
+satisfies: REQ-vg9wq4
 
 **LLR-mm45ry**: a leaf's position is the first `DEPTH` bits of its position
 bytes `L::position_bytes(identity)`, bit 0 being the most significant bit of the first
@@ -83,13 +87,15 @@ satisfies: derived
 
 **LLR-8uem8c**: `insert` and `remove` take `&self` and return a new tree,
 sharing every unchanged node with the receiver, which is observably
-unchanged. satisfies: REQ-6cej5z
+unchanged.
+satisfies: REQ-6cej5z
 
 **LLR-ycf27m**: `insert(leaf)` places the leaf at its position; when that
 position holds a leaf of a different identity it returns
 `TreeError::Collision` and no tree, and when it holds a leaf of the same
 identity it replaces it. `remove(identity)` returns `TreeError::LeafNotHeld`
-when no leaf of that identity is held. satisfies: REQ-6cej5z
+when no leaf of that identity is held.
+satisfies: REQ-6cej5z
 
 **LLR-3y5pq6**: each node's hash is a write-once cell. `calculate()` fills
 every unset cell bottom-up and returns the calculated tree, or
@@ -98,7 +104,8 @@ every unset cell bottom-up and returns the calculated tree, or
 satisfies: REQ-uy4euz, REQ-3szczq
 
 **LLR-3zffc2**: the root of a tree is determined by its set of leaves alone,
-not by the order they were inserted or removed in. satisfies: derived
+not by the order they were inserted or removed in.
+satisfies: derived
 
 **LLR-9qncuc**: `from_leaves(leaves)` inserts the leaves, in the order
 given, into an empty tree and returns that tree calculated, or the first
@@ -109,7 +116,8 @@ satisfies: REQ-vg9wq4, REQ-6cej5z
 **LLR-639mz9**: `get(identity)` returns the held leaf of that identity, or
 none; `contains(identity)` whether one is held; `leaves()` every held leaf
 in strictly increasing position order; `is_calculated()` whether no node
-hash is unset. None of them changes the tree. satisfies: REQ-vg9wq4
+hash is unset. None of them changes the tree.
+satisfies: REQ-vg9wq4
 
 **LLR-u2r4vj**: `changes_between(before, after)` walks both trees,
 calculated or not, descending left before right, skipping every pair of
@@ -121,18 +129,20 @@ satisfies: derived
 
 **LLR-byz55h**: the crate is `#![no_std]` with `alloc`, performs no I/O, and
 builds under the workspace lints that deny `unwrap`, `expect` and `panic`
-together with `clippy::indexing_slicing` crate-wide. satisfies: REQ-dyjq33
+together with `clippy::indexing_slicing` crate-wide.
+satisfies: REQ-dyjq33
 
 **LLR-c4eunm**: the crate's normal dependencies are `spin`, for the
 write-once cell, and, under its `serde` feature, `serde`; it depends on no
-hash function and on no other unit of the workspace. satisfies: derived
+hash function and on no other unit of the workspace.
+satisfies: derived
 
 ## Proofs
 
 **SDD-ur6uvu**: Proofs — the fixed-depth proof of a leaf's absence or
 inclusion, from its production on a calculated tree to its check against a
-root. traces: REQ-uy4euz, REQ-ymgg6b, REQ-s3unp5, REQ-3szczq,
-REQ-fmx9e7, REQ-dyjq33
+root.
+traces: REQ-uy4euz, REQ-ymgg6b, REQ-s3unp5, REQ-3szczq, REQ-fmx9e7, REQ-dyjq33
 
 **LLR-m5c3vw**: an `AbsenceProof<DEPTH>` holds exactly three things: a map of
 `DEPTH` bits marking which siblings are not their level's empty-subtree hash,
@@ -142,7 +152,8 @@ satisfies: REQ-s3unp5
 
 **LLR-tz3nfz**: an `InclusionProof<DEPTH>` holds exactly the map and the
 sibling hashes, in the same form as an absence proof; the leaf it is for is
-given to the verifier, not carried. satisfies: REQ-3szczq, REQ-fmx9e7
+given to the verifier, not carried.
+satisfies: REQ-3szczq, REQ-fmx9e7
 
 **LLR-5tww69**: `prove_absent(identity)` on a tree returns an
 `AbsenceProof<DEPTH>` whose ending is `Empty` when the identity's position is
@@ -155,7 +166,8 @@ satisfies: REQ-uy4euz, REQ-s3unp5
 **LLR-88rm99**: `prove_included(identity)` returns the held leaf and an
 `InclusionProof<DEPTH>`, or `TreeError::HashesNotCalculated` when the tree is
 not calculated and `TreeError::LeafNotHeld` when no leaf of that identity is
-held. satisfies: REQ-3szczq
+held.
+satisfies: REQ-3szczq
 
 **LLR-77zy97**: a proof's fields are private, and the only ways to obtain one
 are its `prove_` function and parsing. `from_parts` returns
@@ -185,7 +197,8 @@ satisfies: REQ-fmx9e7
 **LLR-smf4zq**: every refusal named in this file is its own `TreeError`
 variant, so the error says which check failed; through a serde format the
 variant arrives as that format's custom error. No input to any function of
-the crate reaches a panic. satisfies: REQ-dyjq33
+the crate reaches a panic.
+satisfies: REQ-dyjq33
 
 ## Segregation
 

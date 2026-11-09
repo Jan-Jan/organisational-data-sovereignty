@@ -60,7 +60,8 @@ walks, resolved 2026-10-06.
 
 **RC-gy5f5r**: every rejection by the tree is a typed error and no input
 causes a panic; a proof's size is bounded by the verifier's depth before any
-of it is used. mitigates: HAZ-7qhav6
+of it is used.
+mitigates: HAZ-7qhav6
 
 Residual risk: with RC-gy5f5r, no input reaches a panic or an unbounded
 allocation, as the no-panic property tests and the crate's own rule against
@@ -111,8 +112,7 @@ hazard: the first removes a parallel type, the second keeps the SOUP surface
 to the two rows of this unit's inventory.
 assesses: LLR-kep2ju, LLR-yuyn8f, LLR-3zffc2, LLR-u2r4vj, LLR-jd4phg, LLR-c4eunm
 
-**Amended 2026-10-24 (plan `docs/plans/2026-10-24-sparse-merkle-tree.md`,
-T1).** LLR-yuyn8f now computes the empty-subtree hashes once per empty tree
+**Amended 2026-10-24.** LLR-yuyn8f now computes the empty-subtree hashes once per empty tree
 and once per verification rather than once per type, and LLR-u2r4vj walks
 uncalculated trees too, skipping a pair only when it is one node or both
 hashes are set and equal. No hazard impact: neither changes a value the tree

@@ -587,7 +587,7 @@ fn delete_p2p_device_nonexistent_member_fails() {
 
 /// verifies: REQ-ewdg2q, LLR-s97ywt
 ///
-/// PR-zz4exm's reproducing test. Passing the member's current key back as
+/// Regression test: passing the member's current key back as
 /// the replacement must be refused whole (owner decision 2026-10-03). The
 /// evidence is the `Err(P2pKeyNotReplaced)` itself: the operation takes
 /// `&self` and returns `Result<Self, _>`, so an `Err` carries no trie and
@@ -2602,9 +2602,9 @@ fn a_member_is_addressed_by_its_id_bits_most_significant_first() {
     }
 }
 
-/// verifies: PR-jq43gx, LLR-zbe553
+/// verifies: LLR-zbe553
 ///
-/// PR-jq43gx's subject, the ends of the MemberId range: the all-0 and all-1
+/// The ends of the MemberId range, where an out-of-range index once panicked: the all-0 and all-1
 /// MemberIds are held, looked up and proved absent without a panic or an
 /// error.
 #[test]

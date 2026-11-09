@@ -23,10 +23,8 @@ guidance.
   signer) is roadmap stage S8.
 - **Status (2026-10-08):** S2 built the crate: the chain read and write, key
   custody, the own-admin check (removed 2026-11-03, owner ruling 6; plan
-  task T16h of `../docs/plans/2026-10-16-org-io-publish-2.md`), the handle
-  the app uses. Plan:
-  `../docs/plans/2026-10-06-org-io-create.md`; roadmap:
-  `../docs/plans/2026-10-06-org-io-roadmap.md`.
+  task T16h of change `worktree-org-io-publish-2`), the handle the app uses
+  (change `worktree-org-io-create`, stage S2 of the org-io roadmap).
 - Type safety is the project's hard rule: parse at the system's edge
   (`../docs/adr/2026-10-04-parse-at-the-system-edge.md`). org-io's edges are
   the environment, the chain and, from S4, the network and the disk.

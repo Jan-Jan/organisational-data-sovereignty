@@ -185,7 +185,7 @@
 	$effect(() => {
 		loadOrgs();
 
-		// REQ-rq8g2v / PR-u34uqm: the cleanup cancels exactly the listeners that
+		// REQ-rq8g2v: the cleanup cancels exactly the listeners that
 		// were registered, including any whose `listen` call resolved after
 		// teardown began. The previous shape pushed into an array the synchronous
 		// cleanup had already emptied, leaving live listeners bound to a destroyed

@@ -17,7 +17,7 @@ constructors, `OrgMembersError::InvalidDeviceKey` through `From`; serde's
 custom error, "invalid device public key", on decode). Before the switch a
 device key was an ed25519 `VerifyingKey` decoded through
 `VerifyingKey::from_bytes`, which refused bytes off the curve and accepted the
-other three (`org-members/tests/device_key_decoding.rs`, PR-b7khyw).
+other three (`org-members/tests/device_key_decoding.rs`, the small-order key problem report).
 No hazard impact, and the change reduces exposure on two existing hazards:
 
 - HAZ-bmv7cy, a serialised record introducing a member the software would have
@@ -84,7 +84,7 @@ Accepted, with no control: there are no adopters with stored records, and a
 record from before the switch is not expected to reach a node after it. A
 format version in the leaf would close it, and belongs to the change that
 next changes the record format (the Member key rules change,
-`docs/plans/2026-10-04-person-sequencing.md` on `worktree-person-requirements`).
+planned on `worktree-person-requirements`).
 
 **LLR-k6dhz7, derived, amended in place (2026-10-05).** The 32-byte
 constructors of a DevicePublicKey and a PersonPublicKey accept exactly what

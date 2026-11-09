@@ -1,7 +1,7 @@
 #![cfg(feature = "app")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Pins the bytes org-node stores and sends, so a change of a type cannot
-//! silently change them (LLR-ayrdr8, LLR-mkvx2k): the postcard plaintext of a
+//! silently change them (LLR-mkvx2k): the postcard plaintext of a
 //! Persona store in its two forms, and the postcard bodies of the two kinds of
 //! Wire message and the record snapshot inside the first. The EVM calldata of
 //! the chain writes is pinned by on-chain-client's `write_pure`.
@@ -21,7 +21,7 @@ use org_node::store::MemberSnapshot;
 use org_node::wire::{decode_message, encode_message, WireMessage};
 use serde_json::{json, Value};
 
-// GOLDEN_WIRE is Organisation information (LLR-js9dsu): `00`, the variant
+// GOLDEN_WIRE is Organisation information (LLR-xr88a8): `00`, the variant
 // index ‖ the Envelope (`org_id` aa×20, parent sequence 2, its Change set
 // bytes; no signature, LLR-e7s4ye) ‖ the record snapshot (one Member, "admin"
 // "Test" "User", member key d04a…8737, Device ca93…be7c) ‖ the Organisation
@@ -40,7 +40,7 @@ const GOLDEN_WIRE: &str = "00aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa029101b642e
 // Empty).
 const GOLDEN_REVOCATION: &str = "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0202020202020202020202020202020202020202020202020202020202020202ca93ac1705187071d67b83c7ff0efe8108e8ec4530575d7726879333dbdabe7c0080022000000000000000000000000000000000000000000000000000000000000000000000";
 
-// The store plaintext is a `StoreContent` (LLR-mkvx2k, LLR-d925uu, LLR-6zaeb6): its variant index, then
+// The store plaintext is a `StoreContent` (LLR-mkvx2k, LLR-f5wrjx, LLR-6zaeb6): its variant index, then
 // its fields. No migration (LLR-78jfrd: a store of an earlier layout is not read). Both values are derived by the format rule from the
 // fields below, never captured from the code: varint lengths, counts, epochs and variant indices; `00`/`01`
 // option tags; strings as length ‖ UTF-8; keys, identifiers and roots as their raw bytes; a Signature64 as

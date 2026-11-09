@@ -1,7 +1,7 @@
 # Problems — a committed update reaches one Device
 
-*Moved 2026-10-13 (S4, task T12 of `docs/plans/2026-10-06-org-io-transport.md`,
-ruling A):* the report this file held — the app sent each committed update to
+*Moved 2026-10-13 (change `worktree-org-io-transport`, S4 task T12;
+ruling A: an item moves with the code that realises it, keeping its ID):* the report this file held — the app sent each committed update to
 one Device only (an admission to the joiner's Device, a revocation to the
 revoked Member's first Device), so no other Member's Device received the
 update or its new Organisation private key, and a revoked Member's other

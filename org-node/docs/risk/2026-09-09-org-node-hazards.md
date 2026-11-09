@@ -2,9 +2,7 @@
 
 org-node's first hazard enumeration, run under IEC 62304 **Class C**
 (`docs/adr/2026-09-05-units-and-per-unit-classes.md`) and evaluated against
-the acceptability matrix in this ledger's README. It is tooth 3 of
-`docs/plans/2026-09-05-ratchet-gap-analysis.md`; the plan for the change is
-`docs/plans/2026-09-09-org-node-risk-analysis.md`.
+the acceptability matrix in this ledger's README. It is tooth 3.
 
 ## Scope
 
@@ -49,11 +47,10 @@ requirements in
 `org-node/docs/requirements/2026-09-09-verify-and-commit.md`
 realise only the nine controls this analysis chose, so `ceremony.rs`,
 `keys.rs`, the blob encoding in `blobs.rs`, `chain_write/`, `chain_read.rs`
-(the module PR-hvg2dy is filed against), `preflight.rs`, `ids.rs`, `error.rs`
+(the module the resolved problem report on the chain reader's finality doc-comment is filed against), `preflight.rs`, `ids.rs`, `error.rs`
 and the transport handshake are analysed here without acquiring a requirement
 of their own. Stating what those modules shall do, and the unit's low-level
-requirements throughout, is tooth 4 of
-`docs/plans/2026-09-05-ratchet-gap-analysis.md`.
+requirements throughout, is tooth 4.
 
 Deliberately **outside** this analysis, and not to be read as assessed:
 
@@ -117,7 +114,7 @@ Member-as-a-group key). Each is named below, and the two stand in different
 relations to the controls. The finalised-block expectation's subject *is* the decisive input to
 RC-6a2dke: the chain read that control compares against, so the control is
 only as good as the expectation. REQ-q92yac's subject is not a half of any
-control here — RC-wqgm2p is fully implemented and tested in this unit — but
+control here — the self-delete control, now RC-5jkcxz, is fully implemented and tested in this unit — but
 one of the uncontrolled residual counts of HAZ-vxabf9: a Change set that
 removes a Device key and leaves the Member-as-a-group key it held would be
 applied, and only org-members can refuse it. Neither carries
@@ -129,12 +126,12 @@ owner took that decision on 2026-09-08.
 
 Three hazards are the shape of a **defect** rather than a missing control:
 behaviour the code has that is wrong on an ordinary failure — the publish path
-writing the chain before the local record (**PR-vt244s**), loopback admission
+writing the chain before the local record (**the resolved problem report on the publish path writing the chain before the record**), loopback admission
 delivering the organisation secret to an address unbound to the joiner's
 Device key (**the unchecked-Loopback-address report**; *moved to org-io with
 the send and resolved there, 2026-10-13, S4 task T12, where it is named by
 its ID; this register names it in prose since*), and the revocation receive path committing a
-record from a sender it never checked (**PR-u4c2vp**). All three are filed as
+record from a sender it never checked (**the resolved problem report on the revocation receive path's unchecked sender**). All three are filed as
 problem reports in this unit's ledger
 (`org-node/docs/problems/2026-09-09-org-node-problems.md`)
 and recorded below in prose, with their fixes under "Controls identified but
@@ -173,14 +170,16 @@ recomputed by applying it to the node's own record equals the Membership root
 of the Organisation state the node itself read from the chain in the same
 receive operation; the root it compares against is never taken from the
 message, its sender, or a value the sender can influence, and a Change set for
-an Organisation the chain does not know is rejected. mitigates: HAZ-tawvm2
+an Organisation the chain does not know is rejected.
+mitigates: HAZ-tawvm2
 
 **RC-pm9kmx**: before a received Change set is decoded, the node requires the
 Envelope to name the Organisation the node expected, and rejects one that
 does not with a typed error and without decoding the Change set; it checks
 no signature and no key of the sender or of any Member or device, and
 leaves authority over the Change set to the Membership root and epoch it
-reads from the chain (RC-6a2dke, RC-e5atck). mitigates: HAZ-tawvm2
+reads from the chain (RC-6a2dke, RC-e5atck).
+mitigates: HAZ-tawvm2
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`;
 text written by change `worktree-person-shared-types`, which merges first).*
@@ -201,10 +200,11 @@ assessment is in
 **RC-e5atck**: the node commits a Change set only when the epoch of the
 Organisation state it verified against is strictly greater than the epoch of
 its last commit for that Organisation, so that a chain state older than one
-already acted on is never the basis of a commit. mitigates: HAZ-tawvm2
+already acted on is never the basis of a commit.
+mitigates: HAZ-tawvm2
 
 How the three sit in the code. `verify_envelope_against_chain`
-(`org-node/src/verify.rs:45-88`, *re-resolved 2026-10-05 after the trim (docs/plans/2026-10-05-switch-trim.md), review round 3 finding-16; it read `:53-100` after the merge of master `1feb608`, `:52-99` on this
+(`org-node/src/verify.rs:45-88`, *re-resolved 2026-10-05 after the trim, review round 3 finding-16; it read `:53-100` after the merge of master `1feb608`, `:52-99` on this
 branch before it and `:47-88` on master*) checks Organisation binding, then the
 signature, then the sequence number, then decodes the Change set, then
 requires its declared base to be the local root, applies it, reads the
@@ -296,7 +296,7 @@ admin-authority hazard in prose below.
 `worktree-person-shared-types`: this paragraph no longer holds. `org_pub_key`
 is the Organisation public key, the X25519 public half of a secret drawn for
 the Organisation alone and distinct from every genesis key (REQ-ech45n), and
-no Envelope is signed (REQ-ag6kqm, RC-pm9kmx amended in place). Who may move
+no Envelope is signed (an earlier form of LLR-8528ud, RC-pm9kmx amended in place). Who may move
 the membership root is decided on-chain by the Organisation's multisig proxy;
 the paragraph is kept as the assessment made of the signing design.)*
 
@@ -319,7 +319,8 @@ moved past its parent, and this is exactly the case where it has moved back.
 strictly greater than the highest sequence number it has committed for that
 Organisation, checks this before the Change set is decoded, and advances that
 high-water mark only after the envelope has fully verified — never on a
-rejection, and never backwards. mitigates: HAZ-p4gfv9
+rejection, and never backwards.
+mitigates: HAZ-p4gfv9
 
 `SeqGuard::check` is step 3 of the verify order and does not mutate;
 `SeqGuard::advance` is called only after the root match and ignores a value
@@ -354,7 +355,7 @@ Severity is the worst credible harm of the unavailability pathway, as argued
 in "Method". P2: the input is attacker-chosen and the surface is a decoder
 reachable by anything that can open a QUIC connection to the node.
 
-*Amended 2026-10-08 (S4, task T2 of `docs/plans/2026-10-06-org-io-transport.md`):* the decoder (`decode_message`, out of
+*Amended 2026-10-08 (S4, task T2):* the decoder (`decode_message`, out of
 `transport/`) is reached through org-io's bounded stream read first, once
 the transport moves to org-io; until then through org-node's transport. The
 surface is the same decoder, reachable by the same peers, so the
@@ -362,13 +363,14 @@ probability argument is unchanged.
 
 **RC-e2uvje**: every rejected envelope and Change set yields a typed error,
 and no sequence of envelope bytes, however malformed, causes a panic in
-decoding or in verification against the chain. mitigates: HAZ-5f9jcm
+decoding or in verification against the chain.
+mitigates: HAZ-5f9jcm
 
 **RC-gfn6kr**: a wire frame whose body exceeds 1 MiB is rejected with a typed
-error before any of its bytes are decoded, on send as on receive. mitigates:
-HAZ-5f9jcm
+error before any of its bytes are decoded, on send as on receive.
+mitigates: HAZ-5f9jcm
 
-*Amended 2026-10-08 (S4, task T2 of `docs/plans/2026-10-06-org-io-transport.md`), a clarification:* "wire frame" reads "Wire
+*Amended 2026-10-08 (S4, task T2), a clarification:* "wire frame" reads "Wire
 message body" (`OrgNodeError::MessageTooLarge` from `encode_message` and
 `decode_message`); the bound on the stream a peer sends is org-io's
 (its stream requirement, in `org-io/docs/requirements/`).
@@ -421,7 +423,7 @@ decoding them from fuzz bytes; a `panic!()` on the accept path and a check 8
 weakened to compare against the candidate's own root both redden it. The
 target is therefore evidence of the root-match assertion as well as of
 panic-freedom. The two deterministic tests named above remain the primary
-evidence. Detail in `docs/verification/2026-10-03-worktree-guardrails-org-node-arch.md`.*
+evidence.*
 
 Residual risk: reduced, **not acceptable**. The fuzz targets run under
 bolero's generative engine for one second each at the merge gate, which finds
@@ -477,7 +479,7 @@ acceptable** until the key-pair change checks a received key against the
 chain (owner-accepted window, 2026-10-05).
 
 *Amended 2026-10-06 (change `worktree-org-node-org-key-pair`):* the
-Organisation secret is replaced by the Organisation private key, and RC-9cefcn
+Organisation secret is replaced by the Organisation private key, and an earlier form of RC-5gbgwb
 refuses any received key whose public half is not the chain's `org_pub_key`.
 A substituted key is refused; the 2026-10-05 window closes. Residual S3, P1,
 acceptable (`org-node/docs/risk/2026-10-07-org-key-pair.md`).
@@ -499,8 +501,7 @@ chain has published, whichever listed Device delivers it.
 mitigates: HAZ-ep6uzs, HAZ-vxabf9
 
 *Amended 2026-10-07 (owner ruling R1 at the S3a close-out residual review,
-change `worktree-org-io-commit-workflow`; decision 16 of
-`docs/plans/2026-10-06-org-io-commit-workflow.md`).* This said the node
+change `worktree-org-io-commit-workflow`; decision 16).* This said the node
 "checks nothing about the Device key the connection authenticated: not on a
 first admission, with or without an imported Invite, and not on a later
 update, whether or not that key is in the Membership record before or after
@@ -526,15 +527,14 @@ sender is checked: authority is the chain's, and a chain-valid update
 delivered by any peer matches the chain.
 
 **Residual risk: not acceptable.** What the connection delivers beside the
-Change set is not covered: the Organisation secret (PR-ve9zw8) can now be
+Change set is not covered: the Organisation secret (the resolved problem report on the unauthenticated Organisation secret) can now be
 substituted by any peer that relays a genuine admission or update, not only by
 a device in the record. Chain-authority's change 2 replaces the secret with the
 Organisation private key, checked on receipt against the chain's
 `org_pub_key`, and that is the control this hazard waits for. The owner's
 earlier ruling that the secret is replaced by CGKA keys a member verifies
 against the Organisation public key is recorded beside it, unranked: whether
-change 2's receipt check supersedes it was not ruled (Q2 of
-docs/plans/2026-10-05-switch-trim.md).
+change 2's receipt check supersedes it was not ruled (Q2).
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
 This control first required a first admission's sender to be the
@@ -579,7 +579,7 @@ revocation is the intended outcome and for the `UpdatedNotRevoked` branch of
 the same function is a message from an unchecked sender committing a record.
 That second outcome is the reason RC-b6mydy's second clause is scoped to the
 Receive operation that admits or updates rather than to every Wire message,
-and it is now filed as **PR-u4c2vp**.
+and it is now filed as **the resolved problem report on the revocation receive path's unchecked sender**.
 
 Third — and this is the defect filed as the unchecked-Loopback-address report — in loopback transport
 mode `admit_member` sends the envelope and the organisation secret to the
@@ -613,9 +613,8 @@ used after its removal (residual P1, acceptable)
 (`org-node/docs/risk/2026-10-07-org-key-pair.md`).
 
 *Restated 2026-10-07 (change `worktree-org-io-commit-workflow`, at its merge
-of master `1f52c36`; owner ruling D of 2026-10-06 in
-`docs/plans/2026-10-06-org-io-roadmap.md`, section "Owner's rulings on the
-S2–S4 design drafts").* "Residual P1, acceptable" above follows the reading
+of master `1f52c36`; owner ruling D of 2026-10-06 on the
+S2–S4 design drafts).* "Residual P1, acceptable" above follows the reading
 of the matrix that ruling D rejects: this hazard is S3, and S3 is
 unacceptable at every probability. The residual of the key a removed Device
 keeps — the Organisation private keys of the epochs up to its removal — is
@@ -634,76 +633,6 @@ and post-compromise secrecy across rotations) is recorded as ODS Phase 3's
 to address, not this stage's. The "owner ruling pending" above is settled by
 this ruling.
 
-**RC-wqgm2p**: on committing a Membership record that no longer lists its own
-Device key, or on accepting an absence proof of its removal checked against
-the current on-chain root, the node deletes every piece of data it holds for
-that Organisation and every Persona bound to it, so that a cooperating device
-stops acting on the Organisation from the moment it learns of its removal.
-mitigates: HAZ-vxabf9
-superseded-by: RC-5jkcxz
-
-*Superseded 2026-10-20 (owner ruling Q4' of 2026-10-16, change
-`worktree-org-io-domain-api`):* the node still deletes at once on a verified
-removal, now also with no user step, but keeps the signed acknowledgements of
-that removal with their recipients' keys and addresses until each is
-accepted or 7 days pass (RC-5jkcxz and RC-45k3zg, with HAZ-vxabf9's residual
-re-estimated, in
-`org-node/docs/risk/2026-10-15-domain-api.md`).
-
-*Amended 2026-10-06 (owner rulings 3 and 4 on the sweep of `fdf4e77`,
-`docs/plans/2026-10-06-org-io-roadmap.md`; change
-`worktree-org-io-commit-workflow`).* This said the node deletes its record
-and marks the persona revoked, on a committed Change set only. The absence
-proof is the second verified path (stage S3), and the Persona, with its
-Device and Member secret keys, is now deleted rather than marked. The control
-is still cooperative; what S3 adds around it is assessed in
-`org-node/docs/risk/2026-10-07-commit-workflow.md`.
-
-RC-wqgm2p is minted with its weakness stated in its own text: it is a
-cooperative control, and a control that depends on the party being excluded
-is the weakest kind. It is here because it is real, tested end to end (story
-5 of `org-node/tests/service_stories.rs`), and because its absence would be
-worse — a device that learns of its own removal and carries on. The
-non-cooperative half is RC-b6mydy's second clause on every other device: once
-their records no longer list the removed Device key, its messages are refused.
-*(Amended 2026-10-05: RC-b6mydy no longer has that clause. Nothing about the
-sender is checked, so a removed device's messages are refused only when they
-do not match the chain, as anyone's are.)*
-
-Residual risk: **not acceptable**, on three counts, two of them outside this
-unit.
-
-The other devices' records are updated only when a Change set reaches them,
-and the node pushes a Change set to the affected device alone — the admitted
-member on admission, the revoked member on revocation
-(the transport send in `admit_member` and in `revoke_member`,
-`org-node/src/service.rs`). There is no fan-out and no
-periodic re-read of the chain, so every other member's record stays at the
-epoch it last received until something happens to it. That is the stale-view
-hazard in prose below.
-
-The organisation secret is never rotated. The revocation message carries
-`org_secret: None` (`revoke_member` in `org-node/src/service.rs`), and the secret handed to
-the member at admission stays valid for everyone who has it. Rotating it, and
-distributing the new Member-as-a-group keys the rotation implies, is the CGKA
-layer (Phase 3) — the same boundary org-members' register draws for its
-missed-rotation hazard.
-
-And the Change set that performs a removal is validated by org-members, on the
-wire path, with nothing relating a leaf's device set to its Member-as-a-group
-key. That is what REQ-q92yac asks of org-members and is due 2026-12-05; until
-then a Change set that removes a Device key and leaves the key it held would
-be applied here.
-
-*Amended 2026-10-05 (review round 2, finding-12).* HAZ-vxabf9 has a further
-control, RC-95dgg8 (`org-node/docs/risk/2026-10-05-envelope-authenticity.md`):
-the node commits an Envelope only when its Sequence number is the epoch of
-the Organisation state it read from the chain itself. It closes one route to
-this hazard that the unsigned Envelope opened: any peer setting the Sequence
-number to `u64::MAX`, after which the receiver refused
-every later Envelope, its own removal included. The hazard is not re-scored:
-the three counts above are unchanged.
-
 ### Keys and record read from the device's storage
 
 **HAZ-45ucqx**: the persona store holds every secret the node has — each
@@ -716,8 +645,7 @@ Organisation's secret. Severity: S3. Probability: P2.
 P2: loss or theft of a laptop is an ordinary event, and the file sits in the
 application's data directory with default permissions.
 
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* the store no longer holds every
+*Amended 2026-10-08 (S4, task T3):* the store no longer holds every
 secret in one file: one sealed store per Persona, holding its Member seed, its
 Organisation's record and private key, and no device seed, which the OS
 keychain holds (tasks T8–T9). A reader of one store file without that
@@ -727,7 +655,8 @@ pathways are gone (RC-jjsz97's note).
 **RC-jjsz97**: the persona store is written only as ciphertext under a key
 derived from a passphrase, so that the file opened without the passphrase
 yields an error and not data, and no member seed, device seed or
-organisation secret appears in the file in clear. mitigates: HAZ-45ucqx
+organisation secret appears in the file in clear.
+mitigates: HAZ-45ucqx
 
 The store is XChaCha20-Poly1305 over the postcard-encoded data, under an
 Argon2-derived key, with a fresh random nonce per save
@@ -752,14 +681,14 @@ cloned (LLR-98ufry). Everything else stands: the decrypted store data, among
 it every persisted seed and `OrgRecord.org_private_key`, the Organisation
 private key, is not zeroised, and nor is the derived key. The residual verdict
 does not change. *(Amended at the merge of master `1feb608`: this said those
-were "plain `[u8; 32]` … (PR-hqwpg9)". Master resolved PR-hqwpg9; they are now
+were "plain `[u8; 32]` … (the resolved problem report on secret key material in debug output)". Master resolved the resolved problem report on secret key material in debug output; they are now
 held in redacted secret types (`MemberSeed`, `DeviceSeed`, `OrgPrivateKey`),
 which are `Clone` and not wiped on drop.)*
 
 *Interim limitation, stated 2026-10-07 (change
 `worktree-org-io-commit-workflow`, review round 1 finding-8).* Stage S3a
 gives the removal paths a Device secret key for one signing operation
-(REQ-y99c9w: keep no Device secret key it was given "in the store or anywhere
+(an earlier form of REQ-h29c8e: keep no Device secret key it was given "in the store or anywhere
 else once the operation returns"), but until stage S4 that key is still a
 `DeviceSeed` read from the store, and copies of it outlive the operation in
 freed memory: `DeviceSeed` is not wiped on drop
@@ -773,19 +702,18 @@ store, seeds included. Only the ed25519 `SigningKey` derived from the seed is
 wiped on drop (ed25519-dalek's `zeroize` feature, `org-node/Cargo.toml`). So
 copies of Device secret keys may remain in freed process memory, where a
 crash dump, a swapped page or another process reading this one's memory can
-find them — this hazard's in-memory route, and REQ-y99c9w's "anywhere else"
-is not met in that sense until then. REQ-y99c9w's amendment of 2026-10-07
+find them — this hazard's in-memory route, and an earlier form of REQ-h29c8e's "anywhere else"
+is not met in that sense until then. An earlier form of REQ-h29c8e's amendment of 2026-10-07
 defers the transient value's own type, move-only and zeroised, to S4, which
 takes the seed from the OS keychain rather than the store; **S4 is the stage
 that closes this limitation**. Until it merges, the residual above stands
 widened by these copies. This interim exposure has not been put to the
 owner and is not owner-accepted.
 
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* re-assessed with HAZ-45ucqx. The
+*Amended 2026-10-08 (S4, task T3):* re-assessed with HAZ-45ucqx. The
 store is one sealed store per Persona, XChaCha20-Poly1305 under a key derived
 by HKDF-SHA-256 from that Persona's device secret (LLR-2qqqx6), with a fresh
-nonce per seal; no device seed is in it (LLR-bvt5up). The passphrase and the
+nonce per seal; no device seed is in it (an earlier form of LLR-ay8nvu). The passphrase and the
 fixed-salt residuals are gone: there is no passphrase, and the key differs per
 Persona and installation. No file-permission control replaces them (owner
 ruling 2026-10-07): the file's confidentiality rests on the keychain-held
@@ -853,7 +781,7 @@ review round 5; it read `:258`*, the check at
   revocation path alike — with the peer told nothing and the administrator's
   record an epoch behind the chain, which is to say every later publish
   refused. That is the publish-before-persist hazard in prose below, which this
-  register assesses **S3 / P2** and files as **PR-vt244s**. By the counting
+  register assesses **S3 / P2** and files as **the resolved problem report on the publish path writing the chain before the record**. By the counting
   test above this entry is a new trigger for that hazard rather than a hazard
   of its own: the hazardous situation and the harm are the ones assessed there.
   Assessed **S3 / P2**, **not acceptable**. The severity is that hazard's. The
@@ -885,7 +813,7 @@ review round 5; it read `:258`*, the check at
   guess — below the bound the trigger is inert, above it certain — and the
   verdict does not turn on the number in any case: S3 is unacceptable at every
   probability. Two controls, neither minted: the ordering fix
-  PR-vt244s already specifies (not-minted control 1), which makes a failed send
+  the resolved problem report on the publish path writing the chain before the record already specifies (not-minted control 1), which makes a failed send
   recoverable rather than leaving the Organisation wedged; and bounding or
   omitting the membership snapshot on the send path (not-minted control 15),
   which removes the failure mode rather than making it survivable — and which
@@ -926,11 +854,11 @@ review round 5; it read `:258`*, the check at
   check is reconsidered when there is more than one author.
   *(Amended 2026-10-05, owner ruling of that day, change
   `worktree-org-node-chain-authority`; written by change
-  `worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md: the
+  `worktree-person-shared-types`: the
   invite cross-check is gone, RC-b6mydy being amended in place to check
   nothing about the sender, so no such admission is rejected and this
   hazard no longer arises.)*
-- **RC-wqgm2p (delete the record on one's own removal).** The presence test
+- **An earlier form of RC-5jkcxz (delete the record on one's own removal).** The presence test
   that decides whether the node is still a member filters the store's personas
   by their recorded Organisation (the `my_still_present` test in
   `receive_and_self_delete_if_revoked`, `org-node/src/service.rs`), so a persona
@@ -1024,7 +952,7 @@ revocation, the chain records a removal that no device is ever told about,
 while every member's record still lists the removed device. Hazardous
 situation: a revocation of a stolen device is attempted while that device is
 offline. Assessed **S3 / P2** — a send failure is an ordinary event. Filed as
-**PR-vt244s**. The control — persist the local record as soon as the chain
+**the resolved problem report on the publish path writing the chain before the record**. The control — persist the local record as soon as the chain
 confirms, and make delivery a separate, retryable step — is not minted.
 
 **A stale view of the membership.** A member's record is updated only when a
@@ -1195,7 +1123,7 @@ unsigned Envelope opened; its three counts stand. HAZ-45ucqx's "no zeroise"
 now excepts `X25519Keypair` in memory (LLR-98ufry); the persisted seeds and
 the Organisation private key in `OrgRecord` are still not zeroised. Neither
 verdict changes. *(Amended at the merge of master `1feb608`: this ended
-"(PR-hqwpg9)". Master resolved PR-hqwpg9, which is about `Debug` output, not
+"(the resolved problem report on secret key material in debug output)". Master resolved the resolved problem report on secret key material in debug output, which is about `Debug` output, not
 zeroising; the persisted seeds and the Organisation private key are now held in
 redacted secret types (`MemberSeed`, `OrgPrivateKey`), which are not wiped on
 drop either — RC-jjsz97's residual.)*
@@ -1204,12 +1132,12 @@ drop either — RC-jjsz97's residual.)*
 HAZ-tawvm2, "one author key" is gone: there is no author key, and nothing
 about the sender is checked; the decisive read is unchanged. For HAZ-ep6uzs,
 the sender checks are gone (RC-b6mydy amended in place); its residual is
-recorded there. PR-u4c2vp is resolved by the owner's ruling. The
+recorded there. The resolved problem report on the revocation receive path's unchecked sender is resolved by the owner's ruling. The
 unchecked-Loopback-address report is still open. *(It moved to org-io and was
 resolved there on 2026-10-13, S4 task T12.)* A re-scoring is the next risk analysis's job.
 
 And the seven prose hazards: publish before persist **not acceptable**
-(S3/P2, PR-vt244s); stale view **not acceptable** (S3/P2); secret retained
+(S3/P2, the resolved problem report on the publish path writing the chain before the record); stale view **not acceptable** (S3/P2); secret retained
 after revocation **not acceptable** (S3/P2, Phase 3); administrator authority
 **not acceptable** (S3/P1, control outside software); admission address
 **not acceptable** (S3/P1, the unchecked-Loopback-address report); discarded root **not acceptable**
@@ -1275,7 +1203,7 @@ item on the checklist.
 Each would reduce a residual risk above. None has a requirement, and none is
 given an RC identifier until it does.
 
-1. **Persist before push** (publish-before-persist hazard, PR-vt244s). Update
+1. **Persist before push** (publish-before-persist hazard, the resolved problem report on the publish path writing the chain before the record). Update
    the local record when the chain confirms the update and make delivery to
    the peer a separate, retryable step, so a failed send leaves the
    administrator able to act and the revocation deliverable. The reproducing
@@ -1289,15 +1217,15 @@ given an RC identifier until it does.
    fall-through in `receive_and_verify`'s invite cross-check into a
    rejection.
 4. **Cross-check the sender on the revocation receive path** (HAZ-ep6uzs,
-   PR-u4c2vp). The `UpdatedNotRevoked` branch commits a record from a sender
+   the resolved problem report on the revocation receive path's unchecked sender). The `UpdatedNotRevoked` branch commits a record from a sender
    it did not check.
 
    *(Amended 2026-10-05, owner ruling of that day, change
    `worktree-org-node-chain-authority`; written by change
-   `worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md:
+   `worktree-person-shared-types`:
    controls 3 and 4 are withdrawn by that ruling. No Invite is required for a
    first admission, and nothing about the sender is checked on either Receive
-   operation; PR-u4c2vp is resolved as not a defect.)*
+   operation; the resolved problem report on the revocation receive path's unchecked sender is resolved as not a defect.)*
 5. **Fan out every Change set to every current device, or read the chain on a
    schedule** (stale-view hazard, HAZ-vxabf9). Either closes the window in
    which the remaining members still list a removed device; a stated maximum
@@ -1334,7 +1262,7 @@ given an RC identifier until it does.
     either.
 15. **Bound or omit the membership snapshot on the send path** (the frame
     bound's introduced trigger for the publish-before-persist hazard, and
-    PR-vt244s with it). Both Wire messages carry
+    the resolved problem report on the publish path writing the chain before the record with it). Both Wire messages carry
     the whole pre-change record (`admit_member` and `revoke_member`, where
     each builds the record snapshot, `org-node/src/service.rs`), which makes
     the 1 MiB frame a bound on the Organisation, and the bound bites after the
@@ -1354,7 +1282,7 @@ given an RC identifier until it does.
     Related to control 10 (atomic write), and worth doing with it: both are the
     store surviving an event the user did not choose.
 17. **Make the presence test independent of a Persona's recorded Organisation**
-    (the spurious self-delete RC-wqgm2p introduces). The test that decides
+    (the spurious self-delete an earlier form of RC-5jkcxz introduced). The test that decides
     whether this node is still a member filters the store's personas by their
     recorded Organisation first (the `my_still_present` test in
     `receive_and_self_delete_if_revoked`, `org-node/src/service.rs`), so a
@@ -1380,7 +1308,7 @@ given an RC identifier until it does.
 
 ## Derived requirements assessment
 
-assesses: REQ-wp2nyc, REQ-bvh8v6, REQ-gju89b, REQ-ag6kqm, REQ-8gz8bu, REQ-nhe2zu, REQ-6yu72z, REQ-mr5abb, REQ-9g6as6, REQ-bcxz96, REQ-eg5j8u, REQ-xa6smf, REQ-ztdza4, REQ-uxv2x2, REQ-hzm4kt
+assesses: REQ-gju89b, REQ-6yu72z, REQ-mr5abb, REQ-9g6as6, REQ-eg5j8u, REQ-hzm4kt
 
 Every requirement minted by this change is `satisfies: derived`: each exists
 because of how the node was built — a signed envelope, a sequence number, a
@@ -1388,26 +1316,26 @@ passphrase-protected store — and not because a system-needs document asked
 for it. Finding the hazard a rule addresses gives it a justification, not a
 parent. Each is assessed here, and each has a hazard to point at.
 
-- **REQ-wp2nyc** (reject a Change set whose recomputed root differs from the
+- **An earlier form of REQ-dwb9bq** (reject a Change set whose recomputed root differs from the
   chain's): realises RC-6a2dke against HAZ-tawvm2. Introduces no hazard: a
   rejection leaves the record unchanged.
-- **REQ-bvh8v6** (reject a Change set for an Organisation the chain does not
+- **An earlier form of LLR-rr558z** (reject a Change set for an Organisation the chain does not
   know): realises RC-6a2dke against HAZ-tawvm2. Introduces one situation worth
   naming: a node whose chain read fails or whose reader has not been refreshed
   sees "absent" and refuses — fail-closed, which is the intended direction,
   and an unavailability that resolves on the next read.
 - **REQ-gju89b** (reject an envelope for another Organisation before decoding
   its Change set): realises RC-pm9kmx against HAZ-tawvm2. No hazard impact.
-- **REQ-ag6kqm** (reject an envelope whose signature does not verify under
+- **An earlier form of LLR-8528ud** (reject an envelope whose signature does not verify under
   the published signing key, before decoding): realises RC-pm9kmx against
   HAZ-tawvm2. Its dependence on a single published key is the
   administrator-authority hazard, recorded in prose.
-- **REQ-8gz8bu** (reject a commit against an Organisation state whose epoch
+- **An earlier form of REQ-dwb9bq** (reject a commit against an Organisation state whose epoch
   is not newer than the last committed): realises RC-e5atck against
   HAZ-tawvm2. Refuses a genuinely current envelope when the node's own epoch
   is somehow ahead of the chain's — which cannot arise without the chain
   moving backwards, and if it did, refusing is right.
-- **REQ-nhe2zu** (commit the applied Change set with the chain's epoch and
+- **An earlier form of REQ-dwb9bq** (commit the applied Change set with the chain's epoch and
   the envelope's sequence number when every check passes): realises
   RC-6a2dke, RC-e5atck and RC-m4r75s together; it is the normal case of
   HAZ-tawvm2's and HAZ-p4gfv9's controls. Its hazard impact is the stale-view
@@ -1422,24 +1350,24 @@ parent. Each is assessed here, and each has a hazard to point at.
   what keeps REQ-6yu72z from being a replay bypass.
 - **REQ-9g6as6** (never panic decoding arbitrary bytes as an envelope and a
   Change set): realises RC-e2uvje against HAZ-5f9jcm. No hazard impact.
-- **REQ-bcxz96** (never panic verifying arbitrary envelope bytes): realises
+- **An earlier form of REQ-rv4dwb** (never panic verifying arbitrary envelope bytes): realises
   RC-e2uvje against HAZ-5f9jcm. It does not carry RC-6a2dke: its fuzz target
   cannot reach the accept branch in practice, so it is evidence of
   panic-freedom over the verification path and not of the root match, which
-  RC-6a2dke gets from REQ-wp2nyc and REQ-bvh8v6. No hazard impact.
+  RC-6a2dke gets from earlier forms of REQ-dwb9bq and LLR-rr558z. No hazard impact.
 - **REQ-eg5j8u** (reject a frame over 1 MiB before decoding it): realises
   RC-gfn6kr against HAZ-5f9jcm. Introduces the size bound assessed above
   (S3/P2, not acceptable: the refusal lands after the chain write, inside the
   publish-before-persist window).
-- **REQ-xa6smf** (on first admission with an imported invite, reject a Wire
+- **An earlier form of REQ-eqt23j** (on first admission with an imported invite, reject a Wire
   message from a device other than the invite's administrator): realises
   RC-b6mydy against HAZ-ep6uzs. Its scoping to "with an imported invite" is
   the fall-through recorded under that hazard.
-- **REQ-ztdza4** (after admission, reject a Wire message from a device not in
+- **An earlier form of REQ-uk9rw7** (after admission, reject a Wire message from a device not in
   the record it was verified into): realises RC-b6mydy against HAZ-ep6uzs and
   HAZ-vxabf9. No hazard impact.
-- **REQ-uxv2x2** (delete the record and mark the persona revoked on a Change
-  set that removes the node's own Device key): realises RC-wqgm2p against
+- **An earlier form of REQ-48zc3e** (delete the record and mark the persona revoked on a Change
+  set that removes the node's own Device key): realises an earlier form of RC-5jkcxz against
   HAZ-vxabf9. Introduces the spurious self-delete on an inconsistent store
   assessed under "Hazards introduced by these controls" (S3/P1, not
   acceptable: deleting this node's record of the Organisation is the
@@ -1462,7 +1390,7 @@ HAZ-vxabf9 respectively — and the dates they fall due.
 
 ## Added 2026-10-03 — the binding scope of the transport, assessed
 
-*Moved 2026-10-13 (S4, task T10 of `docs/plans/2026-10-06-org-io-transport.md`,
+*Moved 2026-10-13 (S4, task T10,
 ruling A):* the two requirements this section and the next assess moved to
 org-io with the transport, and their assessments with them, re-read against
 org-io's hazards, to `org-io/docs/risk/2026-10-06-transport.md`
@@ -1471,7 +1399,7 @@ register's history, the requirements named in prose: **the binding-scope
 requirement** and **the sockets requirement**.
 
 **The binding-scope requirement** (in Loopback mode, bind only loopback addresses and offer a
-peer only loopback addresses) was minted while resolving PR-d4nye8, and is
+peer only loopback addresses) was minted while resolving the resolved problem report on the loopback transport timeout, and is
 assessed here because it is `satisfies: derived` and realises no control in
 this register. It is recorded as an assessment rather than as a new hazard,
 and the reasoning is given in full so that disagreeing with it is cheap.
@@ -1525,19 +1453,19 @@ was imported, falling through to signature and chain proof alone otherwise
 (the invite cross-check in `receive_and_verify`, `org-node/src/service.rs`),
 and the revocation receive path performs neither clause, its
 `UpdatedNotRevoked` branch committing a record from an unchecked sender
-(`receive_and_self_delete_if_revoked`, filed as PR-u4c2vp). **On exactly those paths,
+(`receive_and_self_delete_if_revoked`, filed as the resolved problem report on the revocation receive path's unchecked sender). **On exactly those paths,
 distance was the only thing standing between the node and an arbitrary peer**,
 and the wildcard bind removed it. That does not change what is minted, and it
 does sharpen what the fix is worth.
 
 *Amended 2026-10-05 (owner ruling of that day, change
 `worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).*
+`worktree-person-shared-types`).*
 RC-b6mydy no longer rejects a Wire message from a Device key the record does
 not list: it is amended in place to check nothing about the sender, on every
 path. Distance now stands between the node and an arbitrary peer on every
 receive path, and what an arbitrary peer can deliver is what the chain
-already published, apart from the Organisation secret (PR-ve9zw8).
+already published, apart from the Organisation secret (the resolved problem report on the unauthenticated Organisation secret).
 
 **Probability: three P2 figures rest on a premise this defect falsified, and
 all three are owed a re-derivation.** An earlier draft of this paragraph
@@ -1560,8 +1488,7 @@ false. **That is a reason to re-derive them, not a reason to assert they are
 unchanged**, and retrofitting a Networked-only scope onto a sentence that never
 had one was the weakest step in this assessment. The figures are left at P2
 here because moving a rated number is not a side effect a defect fix may have;
-they are owed a pass of their own, booked as an owner item in
-`docs/plans/2026-09-05-ratchet-setup.md`.
+they are owed a pass of their own, an open owner item.
 
 **The organisation secret: inbound unchanged, outbound materially narrowed.**
 An earlier draft said flatly that the secret "is not newly exposed", reasoning
@@ -1647,7 +1574,7 @@ loopback the node gets no endpoint at all and its membership function is down,
 which is the harm pathway HAZ-5f9jcm's severity is drawn from ("a member cannot
 receive a membership change or act on the record at the moment a decision needs
 it", S3). That is accepted rather than overlooked. The alternative is an
-endpoint that came up on something other than loopback, which is PR-d4nye8
+endpoint that came up on something other than loopback, which is the resolved problem report on the loopback transport timeout
 again and silently, where this failure is loud and at startup. A class C node
 that cannot bind the socket its mode requires should refuse to run.
 

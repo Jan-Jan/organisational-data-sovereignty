@@ -9,7 +9,7 @@
 //! a key derived from its Persona's device secret (LLR-2qqqx6) and handed out
 //! as a `StoreWrite`, whose bytes org-io writes; "the file" below is those
 //! bytes, and "the wrong passphrase" is another Device's secret. The store
-//! holds one Organisation (LLR-d925uu), and the write the tests read is
+//! holds one Organisation (LLR-f5wrjx), and the write the tests read is
 //! `build_invite`'s.
 
 mod support;

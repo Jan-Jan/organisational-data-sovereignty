@@ -1,7 +1,7 @@
 # Recalculating a calculated trie is refused
 
 Low-level requirement added 2026-10-03 by owner ruling, in the change that
-resolves PR-zqvs7t. "Trie" here is the `OrgTrie` that holds a Membership
+resolves the recalculate problem report. "Trie" here is the `OrgTrie` that holds a Membership
 record; this item is about its API, so it uses the implementation term. A
 node's hash is a write-once cell (LLR-n7nya3), so a request to fill the cells
 of a trie whose cells are already filled is a caller error, and the owner ruled
@@ -18,7 +18,8 @@ since. Mutating it, even back to the same members, makes it pending again.
 **LLR-j35sxz**: `recalculate()` on a calculated trie is refused with
 `HashesAlreadyCalculated`, a variant distinct from `HashesNotCalculated` and
 `InvariantViolated`. A trie mutated since it was calculated recalculates, even
-when its change set is empty. satisfies: derived
+when its change set is empty.
+satisfies: derived
 
 The test is whether the trie was mutated, not whether its change set is empty.
 A trie whose members were added and then removed again has an empty change

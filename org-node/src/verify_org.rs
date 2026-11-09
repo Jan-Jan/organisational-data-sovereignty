@@ -242,7 +242,7 @@ pub(crate) fn adopt(store: &StoreData, previous: &OrgRecord, index: usize) -> (S
 /// record is created with the chain's Organisation public key and the
 /// match's private key, members, root and kept values; the Persona takes
 /// that member's MemberId and Handle; the Invite issuer's addresses
-/// become its address-book entry (LLR-h9d65p, PR-8sgsb5); the provisional
+/// become its address-book entry (LLR-h9d65p); the provisional
 /// Member and the expectation go; earlier provisional organisations and kept notices
 /// go as on every adoption (LLR-x8drb8).
 pub(crate) fn adopt_first(store: &StoreData, index: usize, chain: &OrgState) -> Result<(StoreData, Verified), OrgNodeError> {

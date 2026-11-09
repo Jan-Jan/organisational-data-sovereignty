@@ -3,7 +3,9 @@
  *
  * REQ-rq8g2v — unsubscribe exactly the listeners registered, including those
  *              whose registration completed after teardown began.
- * PR-u34uqm  — the defect that clause was written for.
+ *              The clause was written for a listener leak: a cleanup returned
+ *              before its `listen` calls resolved emptied an array they then
+ *              refilled.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -28,7 +30,7 @@ describe('subscribeAll', () => {
 		expect(registered.sort()).toEqual(['a', 'b', 'c']);
 	});
 
-	// verifies: LLR-z4ky6f, PR-u34uqm
+	// verifies: LLR-z4ky6f
 	it('unsubscribes exactly the listeners it registered, including those whose listen call resolved late', async () => {
 		const cancelled: string[] = [];
 		const fast: Subscribe = async () => () => cancelled.push('fast');

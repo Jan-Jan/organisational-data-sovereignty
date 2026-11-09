@@ -1,7 +1,7 @@
 # Derived requirements assessment — dependency expectations
 
 First file in org-node's risk ledger. It is **not** org-node's hazard
-analysis; that is tooth 3 of `docs/plans/2026-09-05-ratchet-gap-analysis.md`
+analysis; that is tooth 3
 and is written with `analyze-risks`. This file does the one thing
 `check-trace.sh` requires of a derived requirement before it may exist:
 assesses it in the risk management file (UNANALYZED-DERIVED). Read each entry
@@ -44,8 +44,8 @@ evaluates the residual risk of that hazard as unacceptable on two counts, the
 second being exactly this wire-path bypass. Failure behaviour if the
 expectation is violated: a Change set authored elsewhere removes a device and
 keeps the key, org-node applies it because every check it performs passes,
-and the removed device continues to decrypt — the same S3 pathway as the open
-problem report in `org-members/docs/problems/2026-08-31-device-removal-key-check.md`,
+and the removed device continues to decrypt — the same S3 pathway as a resolved
+org-members problem report (device removal keeping the key),
 reached without calling either operation that report names. (Corrected
 2026-10-03: that report is resolved on the direct API; this wire-path pathway
 is unchanged by it.) Hazard introduced

@@ -18,7 +18,7 @@ the Member on the transport, sign as the administrator if the persona is the
 administrator's, and hold the Organisation secret. Severity: S3. Probability: P1.
 
 P1, agreed with the owner (2026-10-04): no code path formats a record, the
-store or a wire message today (PR-hqwpg9 records the latent leak); the
+store or a wire message today (the resolved problem report on secret key material in debug output records the latent leak); the
 hazardous situation needs a later edit — a debug log added during an incident,
 a failing `assert_eq!` on a wire message, an error that embeds a record.
 
@@ -26,7 +26,8 @@ a failing `assert_eq!` on a wire message, an error that embeds a record.
 prints a fixed redaction marker and never the bytes, which has no display
 formatting, and which gives its bytes up only through one explicitly named
 accessor, so that every record, store and wire message holding a secret
-redacts it in debug output by construction. mitigates: HAZ-uy8sxm
+redacts it in debug output by construction.
+mitigates: HAZ-uy8sxm
 
 This is inherent safety by design, ISO 14971's first priority: the formatting
 route is closed for every value that holds a secret, including values added
@@ -84,7 +85,8 @@ every key is parsed where it enters the software (Join request and Invite
 import, the chain read, a record snapshot), so a store written by this
 software holds only values that load, and a store, Join request, Invite or
 record snapshot that is refused is refused as a whole, reporting which field
-failed (an Invite, that it failed to decode). mitigates: HAZ-vfjy32
+failed (an Invite, that it failed to decode).
+mitigates: HAZ-vfjy32
 
 (Amended 2026-10-05 after independent review round 3: by owner ruling the
 hazardous situation and the control include keys. Before this change a pending
@@ -92,7 +94,7 @@ Invite's keys and an Organisation record's keys were stored as unchecked bytes,
 so a development store can hold an off-curve key there — for instance from an
 imported Invite — and such a store now fails to open as a whole.)
 
-Implemented by REQ-qn2erx. Migration or quarantine of an invalid Persona was
+Implemented by an earlier form of REQ-kd34f5. Migration or quarantine of an invalid Persona was
 considered and ruled out by the owner (2026-10-04): it would be machinery for
 data that does not exist.
 
@@ -123,16 +125,16 @@ REQ-y7tsft is the requirement for RC-8a4xjb, assessed above under
 HAZ-uy8sxm. It adds no hazard: it removes an output and changes no serialised
 byte.
 
-assesses: REQ-qn2erx
 
-REQ-qn2erx is the requirement for RC-zutc67, and it introduces HAZ-vfjy32,
+
+An earlier form of REQ-kd34f5 is the requirement for RC-zutc67, and it introduces HAZ-vfjy32,
 assessed above. It changes when an invalid handle, name or surname is refused
 (at Persona creation, store open and Join-request import, before any
 admission), not which values are refused: the rules are org-members' member
 record rules, unchanged.
 
 (Amended 2026-10-05 after independent review round 3: the owner widened
-REQ-qn2erx to keys, so this assessment now covers key refusals.) A member, device or Organisation public key
+an earlier form of REQ-kd34f5 to keys, so this assessment now covers key refusals.) A member, device or Organisation public key
 that is not a curve point is now refused when a store is opened, a Join
 request or Invite is imported, or a record snapshot is decoded, where before
 it was refused only when used (`Chain("bad member key: …")` and the like) or,
@@ -151,7 +153,7 @@ change — for instance one holding a crafted Invite — can hold one. (Amended
 acceptable"; what holds is that the key refusals leave HAZ-vfjy32's residual
 unchanged.)
 
-(Amended 2026-10-05 after independent review round 4: REQ-qn2erx was narrowed
+(Amended 2026-10-05 after independent review round 4: an earlier form of REQ-kd34f5 was narrowed
 to each key's curve-point parse.) A member snapshot whose device key set breaks
 org-members' rules (a repeated key, more than four) still opens, and is refused
 when the members are rebuilt for an admission, a revocation or a Receive, as
@@ -160,7 +162,7 @@ set is built or applied, and its effect is the unavailability HAZ-vfjy32
 already covers, at a later step.
 
 Parsing at creation also canonicalises a non-NFC handle, name or surname to
-NFC there (LLR-q6n25z), so the Persona as stored, listed and exported in its
+NFC there (an earlier form of LLR-rjphn4), so the Persona as stored, listed and exported in its
 Join request holds the NFC form, and a non-NFC Persona in a development store
 is rewritten in NFC on its next save (design ledger, "Observable changes").
 This adds no hazard (assessed 2026-10-04 after independent review round 2):
@@ -232,7 +234,7 @@ assesses: LLR-mmdu38
 LLR-mmdu38 (the Organisation public key parsed as a curve point) adds no
 hazard; the earlier refusal it causes at the chain read is assessed under "The
 refactor itself" above. Naming the type for the key's intended role does not
-change which key Envelopes verify under; that conflation is PR-szkat6.
+change which key Envelopes verify under; that conflation is the resolved problem report on the Organisation key held only by its founder.
 Its `Debug` clause (the type name and the first four bytes in hex) adds no
 hazard either: the Organisation public key is not secret, and truncation only
 shortens diagnostics; the full key stays available through `as_bytes`.
@@ -268,9 +270,9 @@ and each renders in full, as the plain value did before, wrapped in its type
 name. (Amended 2026-10-05 by the org-node type-safety change, review round 8:
 the `Debug` clause was added to LLR-s7whrn and is assessed here.)
 
-assesses: LLR-ayrdr8
 
-LLR-ayrdr8 (pinned bytes) is the verification obligation named under "The
+
+An earlier form of LLR-mkvx2k (pinned bytes) is the verification obligation named under "The
 refactor itself": it is what shows that the store, the Wire message, the blobs
 and the calldata are unchanged. It adds no hazard. Its limit: it pins fixed
 values, so it shows that each type serialises as before for those values, not

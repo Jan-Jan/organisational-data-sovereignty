@@ -12,35 +12,10 @@ HAZ-ep6uzs and HAZ-vxabf9 are amended in place with dated notes in
 
 ## The receipt check
 
-**RC-9cefcn**: the node stores a received Organisation private key only if
-the Wire message carries one, it decodes as 32 bytes, and its X25519 public
-half equals the `org_pub_key` the chain holds for that Organisation;
-otherwise it refuses the whole message, leaving the store unchanged.
-mitigates: HAZ-ep6uzs
-superseded-by: RC-5gbgwb
-
-*Superseded 2026-10-21 (owner decision of 2026-10-20, change
-`worktree-org-io-domain-api`):* receipt reads no chain (owner ruling R2 of
-2026-10-15). On receipt the key must decode as 32 bytes and its public half
-must equal the Organisation public key the received provisional organisation
-itself states, else the whole message is refused; at verification that
-provisional organisation is adopted only when that key is the chain's
-(RC-5gbgwb, with HAZ-ep6uzs's residual unchanged, in
-`org-node/docs/risk/2026-10-15-domain-api.md`).
-
-What it breaks: a genuine update relayed by a peer that strips or alters the
-key is refused instead of committed. A relay can drop any message, so the
-refusal gives an attacker nothing it lacked; the update arrives again from the
-next correct sender. A key from an earlier epoch is refused: the
-key pair changes with every update, and each receiver checks the key it is
-sent against the `org_pub_key` the chain holds at the epoch it verifies, which
-is the update's own (REQ-txvtm9). A receiver that missed updates receives the
-current key with the next Organisation information. No new hazard.
-
 ## What the change does to the existing hazards
 
 **HAZ-ep6uzs** (a relay substitutes the secret on an admission). With
-RC-9cefcn a substituted key is refused: only the holder of the genuine private
+an earlier form of RC-5gbgwb a substituted key is refused: only the holder of the genuine private
 key can produce one whose public half is the chain's key, and a relay that
 holds the genuine key gains nothing by sending it. The owner-accepted window
 recorded on 2026-10-05 closes. The hazard's second half, a non-member's
@@ -48,9 +23,8 @@ message shaping a member's record, stays controlled by the root match
 (RC-6a2dke, RC-b6mydy). Residual: S3, P1, acceptable under the matrix.
 
 *Restated 2026-10-07 (change `worktree-org-io-commit-workflow`, at its merge
-of master `1f52c36`; owner ruling D of 2026-10-06,
-`docs/plans/2026-10-06-org-io-roadmap.md`, section "Owner's rulings on the
-S2–S4 design drafts").* Ruling D: the README's matrix wins, and S3 is
+of master `1f52c36`; owner ruling D of 2026-10-06 on the
+S2–S4 design drafts).* Ruling D: the README's matrix wins, and S3 is
 unacceptable at every probability. This residual is S3/P1 — unacceptable
 under the matrix (ruling D); owner ruling pending (flagged 2026-10-07). The
 owner reviews it individually (ruling of 2026-10-07), and has not accepted
@@ -67,7 +41,7 @@ owner accepted on 2026-10-07, on the benefit-risk case given there. The
 "owner ruling pending" of the note above is settled by this ruling.
 
 *Restated 2026-10-07 after owner ruling R1 (S3a close-out residual review,
-decision 16 of `docs/plans/2026-10-06-org-io-commit-workflow.md`; review
+decision 16; review
 round 1 finding-4 of change `worktree-org-io-commit-workflow`).* The two
 notes above say the hazard's second half — a non-member's message shaping a
 member's record — "stays controlled by the root match (RC-6a2dke,
@@ -92,7 +66,7 @@ What remains of the residual is first admission only. A new joiner holds no
 record to check a sender against, and accepts the admitting update from any
 sender; it commits only what the chain carries (the root match, RC-6a2dke)
 and stores the carried key only if its public half is the chain's
-`org_pub_key` (RC-9cefcn), so a stranger can deliver the genuine admission or
+`org_pub_key` (an earlier form of RC-5gbgwb), so a stranger can deliver the genuine admission or
 be refused. The owner ruled on that remainder at R1 (decision 16): a new
 joiner accepts the admitting update from any sender "to avoid scenarios
 where something happens to the admin's device during this window"; "The
@@ -111,13 +85,13 @@ date).
 **HAZ-vxabf9** (a revoked Device keeps what it held). Before this change it
 kept the opaque Organisation secret, which nobody checked. Now it keeps the
 Organisation private keys of the epochs up to its removal. The update that
-removes it draws a fresh key pair (REQ-stx9v3), and that key and every later
+removes it draws a fresh key pair (an earlier form of REQ-3pj7rd), and that key and every later
 one go only to the Devices of the new record (REQ-3dsweu), so the removed
 Device holds no key the Organisation uses after its removal. Severity
 unchanged (S3); probability of exposure of post-removal material P1; residual
 acceptable. A Device that is removed while offline still holds what it held,
 as before. (Owner ruling 2026-10-06: rotation is part of calculating a new
-root; the earlier acceptance of a never-rotated key is withdrawn and PR-g9u3xq
+root; the earlier acceptance of a never-rotated key is withdrawn and the resolved problem report on no key rotation on removal
 is resolved in this change.)
 
 *Restated 2026-10-07 (change `worktree-org-io-commit-workflow`, at its merge
@@ -130,13 +104,13 @@ reviews it individually (ruling of 2026-10-07), and has not accepted it. The
 benefit-risk case put to the owner: every
 Member's Device must hold the current private key for the key pair to serve
 at all, and a key already delivered cannot be taken back; rotation on every
-update (REQ-stx9v3) is the strongest control available at this layer, and it
+update (an earlier form of REQ-3pj7rd) is the strongest control available at this layer, and it
 bounds the exposure to material from before the removal. Refusing the
 function would mean no Organisation key pair, which leaves the
 unchecked-secret exposure this change removed. Stage S3 narrows the residual
 further: the removed Device receives only an absence proof, not the Change
 set (RC-r8bp43), and a cooperating Device deletes the keys it holds
-(RC-wqgm2p as amended).
+(an earlier form of RC-5jkcxz as amended).
 
 *Owner ruling of 2026-10-07:* residual accepted for the key itself. The
 residual stated in the note above — a removed Device keeps the Organisation
@@ -158,19 +132,19 @@ exposure of a removed Device is HAZ-vxabf9, assessed above. Taking no key from
 the caller removes a path by which software above org-node could send a wrong
 or foreign key. No new hazard.
 
-**REQ-stx9v3, REQ-jy6ybw** (a fresh key pair with every provisional update's
+**REQ-jy6ybw and an earlier form of REQ-3pj7rd** (a fresh key pair with every provisional update's
 root; the sender's record takes it on commit): realise rotation, which narrows
 HAZ-vxabf9 as assessed above. What it breaks: a provisional update that is
 discarded or never verifies leaves its private key unused, and it is dropped
-with the update (REQ-hhva9d, REQ-uv3v5w). A key that was published on the
+with the update (earlier forms of REQ-x2dnee). A key that was published on the
 chain but whose update the sender never commits (crash after the chain write)
 is still in the provisional update in the encrypted store, and the commit
 retried later uses it (REQ-tqap3r). The record keeps only the current key;
 nothing encrypts under the key pair yet, so no earlier key is needed. No new
 hazard.
 
-**REQ-c29s93, REQ-bwx7eg** realise RC-9cefcn; assessed above. The parse check
-(REQ-c29s93) runs before the chain read, so a stranger's malformed message
+**Earlier forms of REQ-zxgd46 and REQ-dwb9bq** realise an earlier form of RC-5gbgwb; assessed above. The parse check
+(an earlier form of REQ-zxgd46) runs before the chain read, so a stranger's malformed message
 costs no chain read (RC-mj6gjq unchanged).
 
 **REQ-ju6vn2** (the received key is stored on commit): the key reaches the
@@ -184,7 +158,7 @@ by a Device the verified record still lists): narrows where the key goes, from
 never leaves for a Device the chain-valid record does not list (a wrong peer
 address in Loopback mode, the unchecked-Loopback-address report, still
 reaches whoever holds that address; *that report moved to org-io with the
-send and is resolved there, 2026-10-13, S4 task T12*). Resolves PR-xwek5e, where a revocation cleared a remaining Member's
+send and is resolved there, 2026-10-13, S4 task T12*). Resolves the resolved problem report on an update clearing the Organisation secret, where a revocation cleared a remaining Member's
 secret: a remaining Member never commits a revocation now. A relay that
 relabels Organisation information as a revocation, to hold a listed Device on
 the previous epoch's key, is refused by that Device, which takes the update
@@ -208,4 +182,4 @@ is refused): narrows what can create a record. No new hazard.
 "Organisation private key"): a rename of the secret they protect; their
 controls are unchanged.
 
-assesses: REQ-8amu2a, REQ-stx9v3, REQ-jy6ybw, REQ-szq3ud, REQ-c29s93, REQ-bwx7eg, REQ-ju6vn2, REQ-3dsweu, REQ-vxqc5g, REQ-hzm4kt, REQ-y7tsft
+assesses: REQ-8amu2a, REQ-jy6ybw, REQ-szq3ud, REQ-ju6vn2, REQ-3dsweu, REQ-vxqc5g, REQ-hzm4kt, REQ-y7tsft

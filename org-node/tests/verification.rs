@@ -917,7 +917,7 @@ fn the_first_records_key_is_the_chains() {
     assert_eq!(record.org_private_key_for_test().x25519_keypair().org_public_key().unwrap(), state.org_pub_key);
 }
 
-// Reproduces PR-8sgsb5: a provisional Member's first adoption moves the
+// Regression: a provisional Member's first adoption moves the
 // Invite issuer's DevicePublicKey and addresses into the address book in
 // the adoption's own sealed change, so `addresses_for(issuer)` still
 // answers once the provisional Member is gone.

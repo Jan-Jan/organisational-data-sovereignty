@@ -10,8 +10,7 @@ second, parallel copy and `person` must not depend on org-members (owner,
 2026-10-04). Until that change merges, org-members keeps its originals, and its
 code and requirements are untouched here; this change adds only a problem
 report in org-members' ledger. The Person definition built on these types is a later change
-again (branch `worktree-person-requirements`,
-`docs/plans/2026-10-04-person-sequencing.md` there).
+again (branch `worktree-person-requirements`).
 
 These items state what `person` guarantees to any unit that uses the types.
 org-members' own requirements (the device bound, re-validation of records from

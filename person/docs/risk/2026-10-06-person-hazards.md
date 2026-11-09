@@ -15,8 +15,8 @@ definition against its predecessor.
 Deliberately **outside** this analysis, and not to be read as assessed:
 
 - **Everything on-chain** — publishing the hash, reading it back, the entry's
-  owning account and epoch. Deferred to a future `on-chain-person` unit
-  (`docs/plans/2026-10-04-person-sequencing.md`); hazards that unit must close
+  owning account and epoch. Deferred to a future `on-chain-person` unit (owner
+  decision, 2026-10-04); hazards that unit must close
   are named below where they arise.
 - **Key agreement** — computing the PersonPublicKey (TreeKEM/BeeKEM). This
   unit checks the key's relationship to the DevicePublicKeys, not how it was made.
@@ -79,7 +79,8 @@ them stolen — material delegated to the Person stays readable through a key a
 revoked device could use, disclosing it. Severity: S3. Probability: P2.
 
 **RC-ee994g**: a definition holding no DevicePublicKey is refused unless it also
-holds no PersonPublicKey. mitigates: HAZ-zdwra7
+holds no PersonPublicKey.
+mitigates: HAZ-zdwra7
 
 Residual risk for HAZ-zdwra7: within this unit the situation is eliminated —
 no definition it accepts can reach it. The matrix scores S3 not acceptable at
@@ -96,7 +97,8 @@ through a state no honest software produces. Severity: S3. Probability: P2.
 
 **RC-bnm8qs**: every Person definition read from outside the process is
 re-validated against every rule a definition must satisfy, and rejected,
-before its hash is computed or checked. mitigates: HAZ-h3swmw
+before its hash is computed or checked.
+mitigates: HAZ-h3swmw
 
 **HAZ-y6ft54**: malformed, hostile or oversized input to any Person operation
 can crash the process or exhaust its memory, so that the person cannot reach

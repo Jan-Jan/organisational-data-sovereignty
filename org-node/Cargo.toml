@@ -39,7 +39,7 @@ chacha20poly1305 = { version = "0.10", optional = true }
 # Same 0.12.4 and 0.10.9 the lockfile already resolves through other crates.
 hkdf = { version = "0.12", optional = true }
 sha2 = { version = "0.10", optional = true }
-# The armour of the Invite and Invite-reply Blobs (LLR-b7wgpf), back in
+# The armour of the Invite and Invite-reply Blobs (LLR-9jxwq4), back in
 # org-node with the invitation (S4 task T6); the app's 0.22.
 base64 = { version = "0.22", optional = true }
 
@@ -81,7 +81,7 @@ harness = false
 required-features = ["app"]
 
 # `decode_message` on arbitrary bytes and on bytes after an Organisation-information
-# prefix (LLR-js9dsu), change worktree-org-node-org-key-pair. No feature since
+# prefix (LLR-xr88a8), change worktree-org-node-org-key-pair. No feature since
 # S4 task T2: the codec left `transport/`.
 [[test]]
 name = "fuzz_wire_decode"
@@ -119,7 +119,7 @@ name = "admission_sender"
 path = "tests/admission_sender.rs"
 required-features = ["app", "test-support"]
 
-# Golden bytes pinned before the org-node type-safety refactor (LLR-ayrdr8).
+# Golden bytes pinned before the org-node type-safety refactor (LLR-mkvx2k).
 # The store is `app`; the Wire message needs no feature since S4 task T2.
 [[test]]
 name = "encoding_golden"
@@ -182,7 +182,7 @@ path = "tests/organisation_key.rs"
 required-features = ["app", "test-support"]
 
 # The receive paths read the chain only after the chain-free checks
-# (LLR-9ew26y), change worktree-org-node-chain-authority.
+# (LLR-76bhw9), change worktree-org-node-chain-authority.
 [[test]]
 name = "receive_chain_reads"
 path = "tests/receive_chain_reads.rs"
@@ -235,25 +235,25 @@ harness = false
 required-features = ["app", "test-support"]
 
 # The one receive path by values, `check_received` then `commit_checked`
-# (SDD-esg2kc), S4 task T4.
+# (SDD-busuj3), S4 task T4.
 [[test]]
 name = "receive_path"
 path = "tests/receive_path.rs"
 required-features = ["app", "test-support"]
 
-# The commit returns every recipient's body (SDD-bm27xt), S4 task T5.
+# The commit returns every recipient's body (SDD-qzv5mn), S4 task T5.
 [[test]]
 name = "outgoing_bodies"
 path = "tests/outgoing_bodies.rs"
 required-features = ["app", "test-support"]
 
-# The Invite, the reply and their bookkeeping (SDD-xshv5b), S4 task T6.
+# The Invite, the reply and their bookkeeping (SDD-n2x3gb, SDD-42cjqk), S4 task T6.
 [[test]]
 name = "invitation"
 path = "tests/invitation.rs"
 required-features = ["app", "test-support"]
 
-# `Invite::parse` and `InviteReply::parse` on arbitrary text (LLR-b7wgpf),
+# `Invite::parse` and `InviteReply::parse` on arbitrary text (LLR-9jxwq4),
 # S4 task T6.
 [[test]]
 name = "fuzz_invitation_parse"

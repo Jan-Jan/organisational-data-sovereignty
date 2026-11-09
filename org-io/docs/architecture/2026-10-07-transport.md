@@ -1,12 +1,11 @@
 # Design — org-io takes the transport, the store files, the keychain and the invitation exchange (stage S4)
 
 Software items and low-level requirements for change
-`worktree-org-io-transport`, stage S4 of
-`docs/plans/2026-10-06-org-io-roadmap.md`. They refine org-io's S4
+`worktree-org-io-transport`, stage S4 of the org-io roadmap. They refine
+org-io's S4
 requirements (`org-io/docs/requirements/2026-10-06-transport.md`)
 and realise its S4 controls
-(`org-io/docs/risk/2026-10-06-transport.md`). Plan:
-`docs/plans/2026-10-06-org-io-transport.md` ("## Tasks"). Drafted 2026-10-07,
+(`org-io/docs/risk/2026-10-06-transport.md`). Drafted 2026-10-07,
 before any code, on top of S2's crate (`OrgIo`, the chain read as values, the
 submit path), which merges first. Every item is class C, the unit's class.
 
@@ -39,7 +38,7 @@ org-io/src/
 
 *Amended 2026-10-15 (S4, ARCHITECTURE conformance review finding-1):*
 `peer_addr.rs` moved from `org-io/src/` into `transport/`, so iroh is named
-in the transport module alone (LLR-3vb4k9); `lib.rs` re-exports it as
+in the transport module alone (LLR-4k43dm); `lib.rs` re-exports it as
 `org_io::peer_addr`, so its public path is unchanged.
 
 S2's `OrgIo` holds `service: OrgService` directly and its methods take
@@ -86,10 +85,9 @@ it: the authenticated endpoint and the endpoint lifecycle (org-node's
 decomposition), with their low-level items.
 traces: REQ-bupq5y, REQ-xuzw32, REQ-hw82ue, REQ-mnd9rj
 
-*Amended 2026-10-15 before first merge (S4 review round 2, finding 1;
-PR-d2p5y2):* traces REQ-mnd9rj, the per-connection time limit (LLR-8uf9a5).
+*Amended 2026-10-15 before first merge (S4 review round 2, finding 1):* traces REQ-mnd9rj, the per-connection time limit (LLR-8uf9a5).
 
-*Note 2026-10-14 (S4, task T20; PR-tcd2ta):* an endpoint is kept only while
+*Note 2026-10-14 (S4, task T20):* an endpoint is kept only while
 it is open. One that has closed is bound again on its Persona's next send or
 `start_receiving` (LLR-d2pzzk and LLR-z35vbh as amended that day).
 
@@ -140,8 +138,7 @@ accept task to every endpoint whose task has ended. Once it has been called,
 every endpoint bound later, by a send included, gets its accept task too.
 satisfies: REQ-bupq5y
 
-*Amended 2026-10-14 before first merge (S4 review round 1, finding 2;
-resolves PR-y6t5kt), LLR-z35vbh:* a Persona created while the node receives
+*Amended 2026-10-14 before first merge (S4 review round 1, finding 2), LLR-z35vbh:* a Persona created while the node receives
 had no endpoint and no accept task: `create_persona` bound nothing, the app's
 `start_receiver` returns early while its loop runs, and T21's flag reached
 only an endpoint a send binds. Once `start_receiving` has been called,
@@ -155,7 +152,7 @@ whose endpoint cannot be bound hands out no reply: the refusal is
 `no_reply_is_produced_while_receiving_for_a_persona_whose_endpoint_cannot_be_bound`
 (`org-io/tests/endpoints.rs`).
 
-*Amended 2026-10-14 before first merge (S4, task T21; resolves PR-47aycj),
+*Amended 2026-10-14 before first merge (S4, task T21),
 LLR-z35vbh:* only `start_receiving` started accept tasks, so an endpoint a
 send bound again while another Persona's endpoint kept the receive loop
 running had none, and its Persona received nothing until the next
@@ -172,7 +169,7 @@ concurrent `start_receiving` could before. Tests:
 and `a_refused_rebind_while_the_receiver_runs_binds_and_accepts_on_the_next_send`
 (`org-io/tests/endpoints.rs`).
 
-*Amended 2026-10-14 before first merge (S4, task T20; resolves PR-tcd2ta),
+*Amended 2026-10-14 before first merge (S4, task T20),
 LLR-d2pzzk and LLR-z35vbh:* both items said the endpoint, once bound, is the
 same one for the life of the handle, with one accept task, once. A closed
 endpoint was therefore kept: every later send from its Persona failed with
@@ -191,7 +188,7 @@ closure it forwards is skipped by the receive step as before. Tests:
 *Amended 2026-10-07 before first merge (reconciled with S3a, `60c7d58`):*
 each accept task forwards the body together with the DevicePublicKey the
 handshake authenticated for its connection (S3a's member-sender rule needs
-it, REQ-fnsjb6 as amended).
+it; now REQ-xd5a2d).
 
 *Amended 2026-10-15 before first merge (S4 review round 2, A6),
 LLR-z35vbh:* `start_receiving` marks the node receiving
@@ -220,11 +217,10 @@ it accepts no further connection, so the bodies in flight stay bounded
 (RC-5wz559's per-stream bound times sixteen). When the endpoint closes, its
 accept task waits for its connections' tasks before it counts itself out
 of the running tasks and forwards the closure, so the count stays exact
-(LLR-szhe7j); the verdict path is unchanged (LLR-unqfj5).
+(LLR-szhe7j); the verdict path is unchanged (LLR-hhgdk7).
 satisfies: REQ-mnd9rj
 
-*Added 2026-10-15 before first merge (S4 review round 2, finding 1;
-resolves PR-d2p5y2):* each endpoint had one accept task reading one
+*Added 2026-10-15 before first merge (S4 review round 2, finding 1):* each endpoint had one accept task reading one
 connection at a time with no limit, so a peer that completed the handshake
 and then opened no stream stopped the endpoint receiving (HAZ-4hj5m9,
 RC-96w7nf). Tests (`org-io/tests/endpoints.rs`):
@@ -296,15 +292,14 @@ endpoint is accepting; `start_receiving` called again accepts on the
 endpoints of Personas created since.
 
 *Clarified 2026-10-13 (S4, task T12):* the send left `Endpoints` for
-`send::send_committed` (SDD-v2bq89), and with it
+`send::send_committed` (then the fan-out item), and with it
 `TransportError::NoLoopbackAddress`: a Loopback send without an address is
 refused per recipient as `SendError::NoLoopbackAddress`, still before any
-endpoint is bound (LLR-r9sh6k).
+endpoint is bound (the Loopback address check, now LLR-34tfm8).
 
 *Note 2026-10-13 (S4, task T11):* `next_received` (`org-io/src/receiver.rs`)
 replaces `receive_and_verify`. The channel carries `Inbound { sender, body
-}` (task T11a added the verdict responder, `verdict`; see LLR-unqfj5's
-note) or a connection's failure; the
+}` (task T11a added the verdict responder, `verdict`; see LLR-hhgdk7) or a connection's failure; the
 running accept tasks are counted, and when none is left and the channel is
 drained `next_inbound` returns `TransportError::EndpointClosed`, which the
 receive step reports as `TerminalCause::EndpointClosed` (LLR-szhe7j).
@@ -370,13 +365,10 @@ message body**, so the sender identity a caller cross-checks cannot be chosen
 by the sender.
 satisfies: REQ-bupq5y, REQ-cj9u3y
 
-*Traces amended 2026-10-20 (change worktree-org-io-domain-api): REQ-fnsjb6 →
-REQ-cj9u3y.*
-
 *Moved 2026-10-13 (S4, task T10):* satisfied org-node's custody and sender
 requirements. Since S3a's member-sender rule the key is compared with the
 record again, in org-node's `check_received`; org-io hands it over with the
-body (REQ-fnsjb6, LLR-z35vbh). The notes of 2026-10-05 that said no caller
+body (REQ-xd5a2d, LLR-z35vbh). The notes of 2026-10-05 that said no caller
 compares the key are history.
 
 **LLR-wwunf4**: in Loopback mode the endpoint binds only loopback addresses and
@@ -393,31 +385,7 @@ with its currently bound sockets, rather than with addresses from asynchronous
 discovery that may not have run.
 satisfies: REQ-db6s7q
 
-**LLR-3vb4k9**: iroh is named only in `org-io/src/transport/` (and, under
-`test-support`, in `org-io/src/test_support.rs`): no other file of
-`org-io/src` names `iroh::` in code, and no function outside the transport
-module returns or takes an iroh type. The rest of org-io reaches the
-transport through org-io's and org-node's own types: it dials a recipient by
-its `DevicePublicKey` (`OrgEndpoint::send_body_to_device`) or at a
-transport-owned `PeerAddr` (`OrgEndpoint::send_body_at`; the parse is
-SDD-wr8m5n's), and asks an endpoint whether it has a relay home
-(`OrgEndpoint::has_relay_home`), not for its iroh address.
-satisfies: REQ-xuzw32
-superseded-by: LLR-4k43dm
-
-*Superseded 2026-10-21 (change `worktree-org-io-domain-api`, design gap G2
-of its plan):* `PeerAddr`, its parse and the dial at it are removed; every
-send dials a Device key at the addresses org-node keeps for it, and iroh
-stays confined to the transport module (LLR-4k43dm).
-
-*Added 2026-10-15 (S4, ARCHITECTURE conformance review finding-1; owner
-ruling of that day):* iroh is one adapter's dependency, so its failure modes
-and upgrades are handled in one module. It satisfies REQ-xuzw32 because the
-endpoint that holds the Device seed is iroh's, and confining iroh to this
-module keeps that endpoint, and every type that reaches it, out of the rest
-of org-io and the app.
-
-### The framing and the stream read cap (beside SDD-aw3nka)
+### The framing and the stream read cap (beside SDD-2fc2cq)
 
 `org-io/src/transport/frame.rs`
 
@@ -477,12 +445,13 @@ satisfies: REQ-bupq5y
 *Amended 2026-10-13 (S4, task T10; plan §3.1, "rewritten to one per
 Persona"):* the item stated org-node's `ensure_endpoint` binding at most one
 endpoint **per service**, which on a node holding more than one Persona was
-the defect PR-8qsnhx books, stated and not endorsed. It now states the rule
+the defect of the endpoint bound once per service (a resolved problem
+report), stated and not endorsed. It now states the rule
 of LLR-d2pzzk, which it sits beside; its test
 (`the_endpoint_is_bound_once_and_the_same_one_is_returned_after`, moved to
 `org-io/tests/endpoints.rs`) observes the same endpoint by its sockets.
 
-*Clarified 2026-10-14 (S4, task T20; PR-tcd2ta):* "that same endpoint on
+*Clarified 2026-10-14 (S4, task T20):* "that same endpoint on
 every later call" holds while the endpoint is open; a closed one is bound
 again, as LLR-d2pzzk states since that day.
 
@@ -494,7 +463,7 @@ satisfies: REQ-xuzw32, REQ-bupq5y
 *Amended 2026-10-13 (S4, task T10; plan §3.1, "rewritten: from the keychain
 item"):* the item stated that the endpoint is bound from the device seed of
 the Persona named by the first call, true of that Persona only (narrowed
-2026-10-04 to PR-8qsnhx; on 2026-10-08 bound from a `DeviceSecret` the caller
+2026-10-04 to that defect; on 2026-10-08 bound from a `DeviceSecret` the caller
 passed). It now states LLR-d5y7ks's keychain bind per Persona; its test
 (`the_endpoint_binds_the_named_personas_device_not_the_first_personas`,
 moved) binds the second Persona's endpoint and sees its key.
@@ -515,178 +484,6 @@ Networked-style bind against an in-process relay.
 
 ## The receive step
 
-**SDD-aw3nka**: the receive step. Code: `org-io/src/receiver.rs`, `org-io/src/transport/frame.rs`. Moved beside it:
-the framing and the stream read cap (org-node's decomposition), whose
-`satisfies:` lines are re-parented to REQ-szt6ea when they move.
-traces: REQ-qkrj55, REQ-fnsjb6, REQ-8e57wm, REQ-szt6ea, REQ-ur7z4a
-superseded-by: SDD-2fc2cq
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; owner rulings
-R2, R6, R7):* the receive step no longer reads the chain or commits on
-receipt, and two of its traced requirements are superseded (REQ-fnsjb6 by
-REQ-cj9u3y, REQ-ur7z4a by REQ-xd5a2d). SDD-2fc2cq
-(`2026-10-16-domain-api.md`) is the receive step now;
-LLR-szhe7j and the framing items below stay in force beside it.
-
-**LLR-9arvqj**: `OrgIo::next_received(&self) -> Result<ReceiveOutcome,
-ReceiveError>` waits for the next body on the accept channel and reads no
-stream while holding the `OrgService` lock or any store file; it takes the
-lock only around `check_received`, releases it for the chain read, and takes
-it again only around `commit_checked` and the store write that follows; every
-other `OrgIo` method that takes the lock completes while `next_received` is
-waiting.
-satisfies: REQ-qkrj55
-superseded-by: LLR-eeh4pq
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`):* there is no
-chain read or `commit_checked` on receipt any more (REQ-cj9u3y); LLR-eeh4pq
-states the lock rule for the check, the store write and the answer's send.
-
-*Note 2026-10-13 (S4, task T11):* as landed, `OrgIo { node:
-tokio::sync::Mutex<OrgService>, .. }`, and every method takes `&self`;
-`next_received<R: RngCore + CryptoRng + Send>(&self, rng: &mut R) ->
-Result<Received, ReceiveError>` (the rng is `commit_checked`'s; `Received`
-is `Committed(ReceiveOutcome)` or `Acknowledged(VerifiedAcknowledgement)`).
-It waits on the receive channel's own lock (`Endpoints::next_inbound`),
-never the node's. The submission (`found_organisation`,
-`submit_commit_send`) holds the node's lock for its whole sequence, chain
-write included: the item covers the receive step only. Test:
-`a_command_completes_while_the_receiver_waits`
-(`org-io/tests/receive_step.rs`), mutation-checked with the lock taken
-before the wait.
-
-**LLR-cvyyr8**: for each body `next_received` calls `check_received` first;
-only when it accepts does it read the chain once, for
-`CheckedMessage::org_id()`, through S2's chain read, then calls
-`commit_checked` with that state and writes the returned `StoreWrite`
-(LLR-b9bm36) before returning the outcome; a refusal at any step returns that
-step's typed error and reads no chain after a refusal of `check_received`.
-The connection's authenticated key is not passed to org-node.
-satisfies: REQ-fnsjb6
-superseded-by: LLR-kz9hj4
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; owner rulings
-R2, R3):* the receive step reads no chain and commits nothing; LLR-kz9hj4
-hands each body to org-node's check alone and writes what it returns.
-
-*Amended 2026-10-07 before first merge (reconciled with S3a, `60c7d58`):*
-the last sentence is reversed. `next_received` calls
-`check_received(sender, body)` with the DevicePublicKey the connection
-authenticated (S3a's member-sender rule); a `Checked::Acknowledged` result
-reads no chain and writes nothing; for a `ReadChain` result it reads the
-chain once and calls `commit_checked` with that state and a
-`device_secrets` closure that reads each named Device key's keychain item
-(LLR-677fqq), then applies the returned `StoreChange` (`write_store`, or
-`remove_store` for `Forgotten`, LLR-amv4mb) before returning the outcome.
-
-*Noted 2026-10-08 (reconciled with S2, `e41cb09`):* S2's merged LLR-7pj5af
-(`2026-10-08-org-io.md`) already states the order "chain-free phase, then
-at most one read, then apply" for `receive_and_verify` and its self-delete
-twin, with tests in `receive_order.rs`. This item does not restate it: it
-adds what S4 changes around it (the undecoded body and its sender,
-`Checked::Acknowledged`, the `device_secrets` closure, applying the
-`StoreChange`). LLR-7pj5af gets a dated note in task T4 (one method; the
-self-delete twin retired) and T11 (the method is `next_received`).
-
-*Note 2026-10-13 (S4, task T11):* as landed, a refusal of
-`check_received` or `commit_checked` is `ReceiveError::Refused`, a failed
-read or a refused parse of the state read `ReceiveError::Chain`, a store
-change not written `ReceiveError::Store` (the Persona reloaded,
-LLR-murjr6), and a keychain refusal of a secret the commit signs with
-`ReceiveError::Keychain`: the closure keeps the first refusal
-(`Keychain::for_signing_noting_refusal`), and org-node's
-`DeviceSecretNotSupplied` that follows is reported as that refusal
-(REQ-6d9xv6). Tests (`org-io/tests/receive_step.rs`):
-`a_declared_first_admission_is_committed_by_the_one_path`,
-`a_refused_check_reads_no_chain`, `an_accepted_body_reads_the_chain_once`,
-`the_sender_org_node_sees_is_the_handshakes`,
-`an_acknowledgement_is_settled_with_no_chain_read_and_no_store_write`,
-`an_accepted_revocation_signs_with_the_keychain_secret_and_removes_the_store`,
-`a_locked_keychain_refuses_the_revocation_and_changes_nothing`,
-`the_store_write_lands_before_the_outcome_returns`.
-
-*Amended 2026-10-14 before first merge (S4, task T22):* the node is
-released for the read, so a local commit (a submission, a reconcile) can
-change the record the check read before `commit_checked` runs. org-node
-then refuses the commit with `RecordMovedSinceCheck` and nothing is
-committed (org-node's problem report on the stale check, in
-`org-node/docs/problems/`). On that refusal, and only on it,
-`next_received` repeats the step once from `check_received`, under the same
-rules (a refused check reads no chain; an accepted one reads once), and
-returns the result of the repeat, a second `RecordMovedSinceCheck`
-included. Test: `a_check_that_went_stale_is_checked_again_once`
-(`org-io/tests/receive_step.rs`), with the chain read held open by
-`FakeChain::hold_next_read` while the local commit lands.
-
-**LLR-wvgec4**: the accept path takes every inbound connection whose
-handshake completes, whether its path is direct or relayed, applies no
-allow-list of remote ids at accept time, and passes each message with its
-sender to `check_received` (LLR-cvyyr8), so a Device a held record no longer
-lists reaches org-node's member-sender rule and only its `Acknowledgement`
-can be acted on (`Received::Acknowledged`); its `OrgInformation` or
-`Revocation` for that Organisation is refused by `check_received`
-(`SenderNotListed`) before any chain read or store write, and bytes that do
-not decode are refused as `MalformedMessage`.
-satisfies: REQ-ur7z4a
-superseded-by: LLR-j467e9
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; owner rulings
-R6, R7; RC-6m89tr):* an unlisted Device may now also send an admission
-request for an invite this store holds as outstanding; LLR-j467e9 states
-the accept path for the new rule, with no chain read on it.
-
-*Note 2026-10-13 (S4, task T11a):* the revocation the tests send from the
-revoked Device names the receiving Member's own Device (a notice carries
-no signature, so the revoked Device can build one from its own notice):
-that is the notice org-node's member-sender rule refuses as
-`SenderNotListed`; a notice naming another Device is refused earlier, as
-not for this Device. Tests (`org-io/tests/acknowledgement_inbound.rs`):
-`a_revoked_devices_acknowledgement_over_a_direct_connection_is_accepted_and_answered_accepted`,
-`a_revoked_device_sending_anything_but_an_acknowledgement_is_refused_and_served_nothing`,
-`an_acknowledgement_a_member_still_listing_the_device_refuses_is_answered_refused`,
-`an_acknowledgement_relayed_by_another_device_is_refused`,
-`the_accept_path_has_no_allow_list`.
-
-**LLR-unqfj5**: for each inbound message the accept task keeps the
-stream's send half until the receive step answers through the message's
-`oneshot` responder, then writes exactly one byte, `Verdict::Accepted`
-(`0x00`) when the message was acted on and its store change (if any)
-written, `Verdict::Refused` (`0x01`) for any refusal or failure, and
-finishes the stream; when the responder is dropped it writes nothing. No
-other byte is written on an inbound connection by any code in `org-io/src`.
-satisfies: REQ-ur7z4a
-superseded-by: LLR-hhgdk7
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; owner ruling
-R6):* the verdict has four values, `0x02` already received and `0x03`
-refused because the invite was used by another Device joining `0x00` and
-`0x01` (LLR-hhgdk7).
-
-*Ruled 2026-10-08 (owner, plan §16.4 point 1):* one verdict byte,
-accepted or refused, on ack streams, as stated; the item is no longer
-pending a ruling.
-
-*Note 2026-10-13 (S4, task T11a):* as landed, `transport::Verdict`
-(`as_byte`); `OrgEndpoint::recv_answerable` returns the body with an
-`InboundReply` (the connection and the stream's send half), whose
-`answer(verdict)` writes the byte, finishes, and holds the connection
-until the sender closes it or ten seconds pass. Each accept task gives
-every body a responder (`Inbound::verdict`) whose waiting task holds the
-reply apart from the accept loop; `next_received` answers `Accepted` when
-it returns a message and `Refused` for every error, a failed store write
-included; `recv_body` (and a responder dropped unanswered) writes nothing.
-The test dialler is `test_support::dial_direct_as(device_key, addr, body)
--> Result<Vec<u8>, TransportError>`: it binds a Loopback endpoint from the
-Device's keychain item (no seed in hand, so iroh's secret key stays named
-in `bind_from_keychain` alone), dials the direct addresses only and
-returns every byte read back. Tests
-(`org-io/tests/acknowledgement_inbound.rs`):
-`a_revoked_devices_acknowledgement_over_a_direct_connection_is_accepted_and_answered_accepted`,
-`a_revoked_device_sending_anything_but_an_acknowledgement_is_refused_and_served_nothing`,
-`an_acknowledgement_a_member_still_listing_the_device_refuses_is_answered_refused`,
-`a_dropped_responder_writes_nothing`,
-`nothing_but_the_verdict_is_written_on_an_inbound_stream`.
-
 **LLR-szhe7j**: `ReceiveError::Terminal(TerminalCause)`, with
 `TerminalCause::EndpointClosed` and `TerminalCause::BindFailed`, is returned
 when every accept task has ended or an endpoint could not be bound, and for
@@ -700,7 +497,7 @@ binds; `EndpointClosed` by `next_received`, once every accept task has
 ended (each counts itself out before it forwards its endpoint's closure)
 and the bodies they forwarded are taken, or at once when none was
 started. The other variants are `Refused`, `Chain`, `Store`, `Keychain`
-(LLR-cvyyr8's note) and `Connection(TransportError)`, one inbound
+(the receive step's keychain refusal, now LLR-kz9hj4) and `Connection(TransportError)`, one inbound
 connection that failed before it carried a body, after which the loop goes
 on. Tests (`org-io/tests/receive_step.rs`):
 `a_closed_endpoint_is_terminal_endpoint_closed`,
@@ -739,7 +536,7 @@ satisfies: REQ-zmtmd9, REQ-g9cu2c
 
 *Amended 2026-10-07 before first merge (owner ruling of that day):* the
 owner-only mode and Windows ACL clauses are dropped with the requirement
-they satisfied; the atomic replace, which LLR-cvyyr8 relies on, stays.
+they satisfied; the atomic replace, which the receive step (LLR-kz9hj4) relies on, stays.
 
 *Note 2026-10-13 (S4, task T9):* as landed, `write_store(data_dir, write:
 &StoreWrite)` and `StoreFileError { step, path, reason }`, `step` one of
@@ -801,42 +598,7 @@ keeps `reason` as text: carrying the `std::io::Error` beside it grows
 size the crate's `result_large_err` lint allows, and dropping the public
 `reason` field would change the shape LLR-b9bm36's note of 2026-10-13
 states. The transport's errors stay text on purpose: keeping iroh's errors
-would put iroh types in org-io's public API (LLR-3vb4k9, LLR-d5y7ks).
-
-**LLR-amv4mb**: when an `OrgService` operation returns
-`StoreChange::Forgotten { device_key }` (S3a's one removal step: an
-accepted revocation, or a commit that removes the node, on a one-Persona
-store), `remove_store(data_dir, device_key)` removes that Persona's store
-file and, on Unix, syncs the directory, before the method reports success;
-the next listing (LLR-nt8dja) holds no file for that key, no other
-Persona's file is touched, and the Persona's keychain item is left in place
-for the acknowledgement delivery (S3b-io). When the removal fails the
-method reports it and not success, and reloads the Persona from its file as
-LLR-murjr6 does.
-satisfies: REQ-g9cu2c
-superseded-by: LLR-vj2nkb
-
-*Superseded 2026-10-20 (change `worktree-org-io-domain-api`; owner ruling
-Q4' of 2026-10-16 and the rulings of 2026-10-20):* on this node's removal
-org-node no longer returns `StoreChange::Forgotten`; it returns a sealed
-store keeping only the acknowledgements, which org-io writes, keeping the
-file (LLR-zcw3xv). The store file and the keychain item are deleted together
-by LLR-vj2nkb, as soon as no acknowledgement is left or 7 days after the
-verification, and at start when either already holds — which settles the
-2026-10-08 ruling below (the item kept until the acknowledgement delivery
-ends), with 7 days in place of the retry limit.
-
-*Added 2026-10-07 (reconciled with S3a, `60c7d58`):* with one store per
-Persona, S3a's `forget_organisation` empties the store it is applied to, so
-org-node returns a removal instead of sealed bytes.
-
-*Ruled 2026-10-08 (owner, plan §16.4 point 3):* a forgotten Persona's
-keychain item is kept until S3b-io's acknowledgement delivery for it ends or
-the Organisation's acknowledgement retry limit passes (roadmap ruling C,
-default two months), and is then deleted. S4 only removes the store file and
-leaves the item; deleting it, and recording when the Persona was forgotten so
-the limit can be measured, are S3b-io's. Until S3b-io merges the item stays
-(no acknowledgement is delivered before then either).
+would put iroh types in org-io's public API (LLR-4k43dm, LLR-d5y7ks).
 
 **LLR-85zque**: `OrgIo::open` creates the data directory, with any missing
 parents, and opens every Persona's store in it: the file
@@ -907,28 +669,6 @@ only under `test-support`); the scan
 `keyring_is_named_only_in_the_keychain_module_and_its_mock_only_under_test_support`
 allows exactly these two files.
 
-**LLR-n9dnm4**: `write_device_secret(device_key, secret: &DeviceSecret) ->
-Result<(), KeychainError>` calls `secret.lend_to_keychain(|bytes|
-entry.set_secret(bytes))` and nothing else with the bytes; `OrgIo::create_persona`
-writes the keychain item before the store file, and when the keychain write
-fails it drops the new Persona's store from the service, writes no file and
-returns the refusal.
-satisfies: REQ-rz93uz
-superseded-by: LLR-kna4zj
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; owner ruling
-R1):* `create_persona` is gone; a Persona is created by the proposal of a
-founding or a Member, with the same keychain-before-file order
-(LLR-kna4zj), and the Person by `propose_person` (LLR-3cysjk).
-
-*Note 2026-10-13 (S4, task T9):* as landed, `OrgIo::create_persona(rng,
-handle, name, surname) -> Result<PersonaId, CreateError>` replaces S2's
-`NodeBuilders::create_persona`. `CreateError::Keychain` is the refusal.
-When the keychain write succeeds and the store file is then not written,
-the new Persona has no file to reload from: it is dropped too
-(`CreateError::Store(StoreFailure::Dropped)`, LLR-murjr6), and its keychain
-item stays. Both drops use org-node's `OrgService::drop_store`.
-
 **LLR-8erfbu**: `keyring::Error::NoEntry` maps to
 `KeychainError::ItemMissing { device_key }`; `NoStorageAccess` to
 `KeychainError::Locked { device_key }`; every other error to
@@ -976,593 +716,3 @@ seed. Android is deferred (roadmap "(later)" row): `keyring` 3.6.3 builds
 its mock as the default store on any target without a native backend,
 Android included, so an Android build must refuse rather than use the default
 store.
-
-## The invitation exchange runner
-
-**SDD-rr7dtw**: the invitation exchange runner. Code: `org-io/src/exchange.rs`. Moved beside it: the app's invitation operations
-and requirements (producing an Invite, producing a reply, refusing a reply
-that is not outstanding, settling), with their low-level items.
-traces: REQ-a2a6rm, REQ-pnr6kh, REQ-prjja8, REQ-tcutr6, REQ-65xqp8
-superseded-by: SDD-6gb59p
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; owner rulings
-R1–R7):* the Invite reply Blob and its import and admission are replaced by
-the admission request over iroh, the admission by a provisional change, and
-four of the traced requirements are superseded. SDD-6gb59p holds the Invite
-operations (issue, read, cancel); the admission request is SDD-dhh3pw's, the
-provisional changes SDD-frsa73's.
-
-*Amended 2026-10-14 (S4, task T13):* the three moved requirements joined
-`traces:` when they arrived from the app with their low-level items, which
-sit below.
-
-**LLR-h9qf3s**: `OrgIo::issue_invite(org_id, org_name, invitee_name) ->
-Result<String, ExchangeError>` calls `build_invite`, writes the returned
-`StoreWrite`, and only then returns the Invite's Blob; a failed write returns
-the failure and no Blob.
-satisfies: REQ-pnr6kh, REQ-a2a6rm
-superseded-by: LLR-95e3jx
-
-**LLR-9cb443**: `OrgIo::produce_reply(invite_blob, persona_id, confirmed:
-bool) -> Result<String, ExchangeError>` refuses with
-`ExchangeError::NotConfirmed`, parsing nothing and writing nothing, unless
-`confirmed`; otherwise parses the Invite, calls `build_reply`, writes the
-returned `StoreWrite`, and only then returns the reply's Blob.
-satisfies: REQ-a2a6rm
-superseded-by: LLR-adgk9z
-
-**LLR-y4dg74**: `OrgIo::admit_reply(org_id, reply_blob, peer_addr) ->
-Result<AdmitReport, ExchangeError>` runs, stopping at the first refusal:
-parse the reply; `check_reply(reply, org_id)`; `admit_member`, writing its
-`StoreWrite`; the chain write (S2's submit path); `commit_update` with the
-state read back, writing its `StoreWrite`; the send of every
-`OutgoingMessage` (SDD-v2bq89); `settle(org_id, invite_id)`, writing its
-`StoreWrite`. Once `commit_update` has succeeded it settles whatever the
-sends reported, and `AdmitReport { member_id, sends }` carries the per-Device
-outcomes; a failure before the chain write submits nothing.
-satisfies: REQ-a2a6rm
-superseded-by: LLR-un47j8
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`), LLR-h9qf3s,
-LLR-9cb443 and LLR-y4dg74:* `issue_invite` takes no random source and no
-typed Organisation name, and the Invite carries the issuing Device's
-addresses (LLR-95e3jx); the reply Blob is replaced by the admission request
-sent over iroh (LLR-adgk9z); and admitting is a provisional change
-(LLR-un47j8) that the app proposes, writes, verifies and sends in separate
-steps (SDD-mk39e5, SDD-t4z8sz, SDD-2bzgtp), the Invite settled by org-node
-on adoption.
-
-*As landed 2026-10-14 (S4, task T13), LLR-h9qf3s, LLR-9cb443 and
-LLR-y4dg74 (clarification):* each operation takes the caller's random source
-(`rng`) first, as every building method of `OrgIo` does, and takes the node's
-lock inside; `admit_reply` takes the lock for the parse-free check, then
-calls the handle's own `admit_member` and `submit_commit_send` (S2's submit
-path as T12 reshaped it), then takes it again for `settle`, so the chain
-write and the sends run as they do for any submission. `ExchangeError` is
-`NotConfirmed`; `Node(OrgNodeError)` (a Blob that does not parse, naming the
-field; `check_reply`'s `InviteNotOutstanding` and
-`ReplyForAnotherOrganisation`; a build refused); `Store(StoreFailure)` (the
-operation's store write failed, the Persona reloaded or dropped); `Submit`
-(the submission's report as text: nothing committed, or committed but not
-stored, the Persona reloaded from a file that holds no commit, so the pair
-stays outstanding); and `Settle { admitted: AdmitReport, error:
-OperationError }` (committed and sent, the settle refused or not written).
-`AdmitReport`'s `member_id` is read from the committed record by the
-reply's member key. The fourth operation, `OrgIo::import_reply(reply_blob)
--> Result<InviteReply, ExchangeError>`, parses the reply and runs
-`check_reply` for the Organisation the reply names, writing nothing; it is
-LLR-gha5f6's check, which the app's reply panel shows before admitting.
-`InviteReply`, `AdmitReport` and `ExchangeError` joined the handle's return
-allowlist. `OrgIo::expect_admission` is compiled in test builds only: a
-caller declares an expectation through `produce_reply`, behind the
-confirmation; org-io's tests that need a bare expectation keep it.
-
-*Moved 2026-10-14 from app (`app/docs/architecture/2026-10-06-invitation.md`,
-under the app's command-surface item), plan task T13 (ruling A).* The five low-level
-requirements below came with their IDs, their notes and their fourteen tests
-(the app's `tests/invitation.rs`, now `org-io/tests/invitation_exchange.rs`,
-`verifies:` lines unchanged). They were written for the app's functions over
-org-node's service and an outstanding-invites file; each is amended below
-for the runner, whose operations are the ones above. Where their text names
-"this device", it is the node org-io runs.
-
-**LLR-9sraks**: `issue_invite(svc, outstanding, rng, org_id, org_name,
-invitee_name)` returns an Invite Blob carrying `org_name` and `invitee_name`
-as typed, `org_id`, the DevicePublicKey of every Persona of this device bound
-to that Organisation, and an invite identifier of 32 bytes drawn from `rng`,
-which it adds to the outstanding identifiers before returning. For an
-Organisation no Persona of this device is bound to it refuses, issuing no
-Blob and adding no identifier.
-satisfies: REQ-prjja8
-superseded-by: LLR-95e3jx
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; REQ-ek652a
-supersedes REQ-prjja8):* the Invite carries the stored Organisation name,
-the issuing Device's key with its endpoint addresses, and an identifier from
-the handle's own random source (LLR-95e3jx, LLR-v9dkrv).
-
-Normal: `an_invite_carries_what_the_inviter_typed_and_a_fresh_outstanding_id`.
-Abnormal: `no_invite_is_issued_for_an_organisation_no_persona_here_belongs_to`.
-
-*Amended 2026-10-14 (S4, task T13; clarification):* the operation is
-`OrgIo::issue_invite(rng, org_id, org_name, invitee_name)` (LLR-h9qf3s);
-org-node's `build_invite` draws the identifier and keeps the pair in the
-store of the Persona bound to the Organisation (one Persona, one
-Organisation), so "every Persona bound to it" is that one Persona's
-DevicePublicKey. The refusal is org-node's (`OrgNotOnChain`).
-
-**LLR-f35pda**: `OutstandingInvites` keeps each outstanding Invite as the pair
-(Organisation identifier, invite identifier) it was issued for, in one file,
-`outstanding_invites.json` in the data directory, as a JSON list of objects
-`{"org_id": <40 hex>, "invite_id": <64 hex>}`, written before `issue` or
-`settle` returns, so that reopening the file yields exactly the pairs issued
-and not yet settled. `holds(org_id, invite_id)` is true only for a pair it
-keeps — an identifier is not outstanding for any other Organisation — and
-`settle(org_id, invite_id)` removes that one pair and leaves the others. A
-file that is not such a list is refused when opened, naming the file; that
-includes the earlier format, a list of bare invite identifiers, which is not
-migrated (a PoC device deletes the file and issues its Invites again).
-satisfies: REQ-65xqp8, REQ-prjja8
-superseded-by: LLR-95e3jx
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`):* both its
-requirements are superseded; the outstanding pairs in the sealed store, and
-their lifetime to org-node's settle or `cancel_invite`, are LLR-95e3jx's.
-LLR-t4v69b (no `outstanding_invites.json`) stays in force.
-
-*Amended 2026-10-06 (independent review round 2, finding-1).* The file held
-bare invite identifiers, so an identifier was outstanding for every
-Organisation; it now holds the Organisation each was issued for, as
-org-node keys its expected admissions by (Organisation, invite identifier).
-
-*Note 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
-The requirement's text holds. The reason the note above gives does not:
-org-node now keys its expected admissions by Organisation alone. The pair is
-still what binds a reply to the Invite this device issued (REQ-65xqp8).
-
-*Amended 2026-10-14 (S4, task T13; rewritten as plan §3.5 rules, owner
-ruling of 2026-10-06 on the encrypted store, REQ-pnr6kh):* each outstanding
-Invite is the pair (Organisation identifier, invite identifier) it was
-issued for, kept in the sealed store of the Persona that issued it (org-node's
-`outstanding_invites`), written to that Persona's store file before
-`issue_invite` or `admit_reply`'s settle returns, so that reopening the data
-directory yields exactly the pairs issued and not yet settled. A pair is
-outstanding for its own Organisation only, and the settle removes that one
-pair and leaves the others. No `outstanding_invites.json` is read or
-written: a file of that name in the data directory, well formed or not, is
-ignored and refuses nothing, and its pairs are not outstanding (no
-migration). The file-format refusal above is withdrawn with the file.
-Normal: `outstanding_invite_ids_survive_a_reopen_and_settle_one_at_a_time`.
-Abnormal: `an_outstanding_invites_file_in_the_data_dir_is_never_read`
-(rewritten from the file-format refusal test),
-`a_reply_naming_another_held_organisation_with_an_outstanding_invite_id_is_refused`.
-
-**LLR-w4mhd4**: `produce_reply(svc, rng, invite_blob, persona_id, confirmed)`
-refuses, producing nothing and declaring nothing, when `confirmed` is false —
-with a message that begins `confirm first` — when `persona_id` names no
-Persona of this device, and when it names one bound to an Organisation, as
-LLR-rt8gdz states (amended 2026-10-06, review round 1). Otherwise it returns an Invite reply Blob carrying that
-Persona's Member-as-a-group key, DevicePublicKey, handle, name and surname and
-the Invite's Organisation identifier and invite identifier, and before
-returning declares to org-node, through `expect_admission(org_id)`, the
-first admission to that Organisation it expects.
-satisfies: REQ-tcutr6
-superseded-by: LLR-adgk9z
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; REQ-sjqxg2
-supersedes REQ-tcutr6):* no reply Blob is produced; the provisional Member
-and its expected first admission are made by `propose_member`
-(LLR-6d6wfw), and its admission request sent by `request_admission`
-(LLR-adgk9z). The invitee's confirmation is the app's.
-
-*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
-The declaration was `expect_admission(org_id, invite_id)`. REQ-tcutr6 as
-amended declares the Organisation alone, because org-node matches a first
-admission against the Organisation alone; the reply still carries the invite
-identifier back to the inviter.
-
-Normal: `a_confirmed_reply_carries_the_persona_and_declares_the_expected_admission`.
-Abnormal: `no_reply_is_produced_and_nothing_declared_without_confirmation`.
-
-*Amended 2026-10-14 (S4, task T13; clarification):* the operation is
-`OrgIo::produce_reply(rng, invite_blob, persona_id, confirmed)`
-(LLR-9cb443); the unconfirmed refusal is `ExchangeError::NotConfirmed`,
-whose message begins `confirm first`; the declaration is org-node's
-`build_reply`, which records the expectation in the Persona's store, written
-before the Blob returns; the other refusals are org-node's. `satisfies:` was
-REQ-tcutr6 and the app's confirmation requirement, which stays in the app
-and is not exported, so it is named in prose; the app's IPC test of the
-refusal stays in the app.
-
-**LLR-rt8gdz**: a Persona bound to an Organisation is not offered, and is
-refused, as the Persona to found an Organisation with or to reply to an
-Invite as. `produce_reply` refuses a `persona_id` that names a Persona of this
-device bound to an Organisation, with org-node's `PersonaAlreadyBound` message
-for that Persona, after the confirmation check and before declaring any
-expectation, producing no reply. `found_organisation` refuses such a Persona
-with the same message, from org-node's `create_organisation`, before calling
-the chain writer. The webview offers, as the Personas to reply as, only those
-`unboundPersonas` (`app/src/lib/invite.ts`) keeps — the Personas whose
-`org_id` is null, in the order given; the founding panel offers no choice, and
-founds with the Persona it has just created.
-satisfies: derived
-superseded-by: LLR-kna4zj
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; owner ruling
-R1):* no operation takes an existing Persona to found with or join as;
-each proposal creates a new Persona (LLR-kna4zj), so a bound Persona can
-never be chosen.
-
-Normal: `a_bound_persona_cannot_reply_and_an_unbound_one_on_the_same_device_can`.
-Abnormal: `no_reply_is_produced_and_nothing_declared_for_a_bound_persona`,
-`a_bound_persona_founds_nothing_and_the_chain_is_not_written`.
-
-Review round 1, finding-1 (2026-10-06): one Persona, one Organisation (owner
-ruling). Derived, because the founding half has no parent among this unit's
-requirements; the reply half narrows REQ-tcutr6's "a Persona the user chose".
-The `unboundPersonas` filter sits in `invite.ts`, the file of the app's
-revocation-input design item, beside `replyGate`; the backend refusal is
-what holds when the webview is bypassed.
-
-*Amended 2026-10-14 (S4, task T13; narrowing):* the item moved with the
-backend refusals, which are org-io's `produce_reply` and
-`found_organisation` over org-node's `build_reply` and `create_organisation`.
-The webview's offer — the `unboundPersonas` filter and the founding panel's
-lack of a choice — is the app's code and stays the app's; this unit does
-not verify it, and the app's tests of that filter stay in the app. The
-app's design item the text named by ID is named in prose.
-
-**LLR-gha5f6**: `check_reply(outstanding, reply_blob)` refuses, with `this
-reply names no Invite this device has outstanding`, a reply whose pair
-(its `org_id`, its invite identifier) is not outstanding (LLR-f35pda).
-`admit_reply(svc, writer, outstanding, rng, org_id, reply_blob, peer_addr)`
-refuses, acting on nothing, a reply `check_reply` refuses, and
-one whose outstanding pair's Organisation is not `org_id`, with `this reply is
-for another Organisation`. The target Organisation is the one the outstanding
-pair names: `org_id` is kept as the operator's selection in the Admit panel,
-which preselects it from the reply, and is not trusted — it can only confirm
-that Organisation, never choose another. Otherwise `admit_reply` builds
-org-node's `Joiner` from the reply's five values, has org-node build the
-admission to that Organisation, submits it as org-io's write-then-commit-then-send
-order states (the submission item) with the reply's DevicePublicKey as the
-one recipient (the one-send-per-command item, retired 2026-10-13 in S4 task
-T12: the submission now sends to every recipient the commit names), passing
-org-node no Organisation secret, key or invite identifier, and settles that
-pair once the admission has committed — even when the send that follows
-fails; when the submission fails the pair stays outstanding.
-satisfies: REQ-65xqp8
-superseded-by: LLR-zkybw7
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; REQ-xd5a2d
-supersedes REQ-65xqp8):* no reply is imported; an admission request arrives
-over iroh and org-node's check judges it against the outstanding pair
-(LLR-zkybw7).
-
-Normal: `a_reply_is_acted_on_once_and_only_if_its_invite_is_outstanding`.
-Abnormal: the same test's reply to an Invite this device never issued and its
-second use; `a_reply_whose_admission_fails_on_chain_stays_outstanding`,
-`a_reply_admitted_under_another_selected_organisation_is_refused` (a true
-reply, with a second Organisation the inviter does hold selected),
-`a_reply_naming_another_held_organisation_with_an_outstanding_invite_id_is_refused`
-(the reply itself names that second Organisation, and is admitted as the
-shipped panel would, under its own `org_id`),
-`a_reply_is_settled_once_committed_even_when_the_send_fails`.
-Review round 1, finding-4 (2026-10-06): the refusal test used to name an
-Organisation the inviter holds no record of, so admission failed without the
-check; and the "even when the send fails" clause had no test.
-
-*Amended 2026-10-08 (change `worktree-org-io-create`, task T9).* The
-signature was `admit_reply(svc, writer, outstanding, rng, org_id, reply_blob, peer_addr)`
-and is `admit_reply(io, outstanding, rng, org_id, reply_blob, peer_addr)`:
-the service and the chain writer are both behind the org-io handle, whose
-`submit_commit_send` it calls. `satisfies:` was REQ-65xqp8 and REQ-nfr3n2;
-REQ-nfr3n2 moved to org-io, and an app low-level requirement does not
-decompose another unit's requirement, so it was replaced by the app's
-requirement on the decision to admit, handed to org-io. Classification under
-the hybrid rule: a clarification, not a change of meaning; the behaviour
-and the tests are unchanged. *(Carried 2026-10-14 with the item; the app's
-requirement is named in prose.)*
-
-*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
-`admit_reply` took an `org_secret` and passed it, with the reply's invite
-identifier "in the Wire message", to `send_update`. org-node's `send_update`
-now takes neither: the Organisation private key comes from org-node's record,
-and the invite identifier never travels between peers (REQ-tcutr6 as
-amended). The invite identifier still settles the outstanding pair here.
-
-*Amended 2026-10-06 (independent review round 2, finding-1).* The
-Organisation check compared the reply's `org_id` with the `org_id` the panel
-had preselected from that same reply, and the outstanding check looked at the
-invite identifier only, so a reply to an Invite for one Organisation that
-named another this device holds was admitted there. The check is now on the
-pair, and the test `a_reply_for_another_organisation_is_refused` is rewritten
-as `a_reply_admitted_under_another_selected_organisation_is_refused`.
-
-*Amended 2026-10-14 (S4, task T13; clarification):* the operations are
-`OrgIo::import_reply(reply_blob)`, which is the check, and
-`OrgIo::admit_reply(rng, org_id, reply_blob, peer_addr)` (LLR-y4dg74). The
-check is org-node's `check_reply(reply, selected)`: a reply whose
-Organisation is not the selected one is refused as
-`ReplyForAnotherOrganisation`, and one whose pair is not outstanding as
-`InviteNotOutstanding`, both in `ExchangeError::Node`, before anything is
-built (`import_reply` selects the Organisation the reply names). As before,
-only the pair's Organisation can be the target. The send reaches every
-recipient the commit names (LLR-znhmh2, LLR-r9sh6k) and its outcome is
-reported per Device in the `AdmitReport`, not as the call's error; the
-settle follows the commit whatever the sends reported. `satisfies:` was
-REQ-65xqp8 and the app's requirement on the decision to admit, which stays
-in the app and is not exported, so it is named in prose.
-
-## A refused update changes nothing (beside SDD-erzj3m)
-
-*Added 2026-10-15 (S4, owner ruling of that day).* SDD-erzj3m, the
-submission item, is in `2026-10-08-org-io.md`; this item states what
-happens on the submission path when org-node refuses to build the update
-at all, so there is nothing to submit. It gives the moved test
-`a_revocation_of_a_member_the_record_does_not_hold_is_refused_and_sends_nothing`
-(submit_flow), which ran with no `verifies:` line since task T12, an item
-of its own.
-
-**LLR-nqdr97**: When org-node refuses to build an update `OrgIo::revoke_member`
-asks it for (a revocation of a Member id the Organisation's record does not
-hold, or any other refusal org-node returns before an update exists),
-`revoke_member` returns the refusal as its error and nothing on the
-submission path happens: the record is not committed (its epoch is
-unchanged), org-node holds no provisional update for the Organisation,
-nothing is written to the chain (the Organisation's on-chain epoch is
-unchanged), and no body is sent to any Device.
-satisfies: derived
-superseded-by: LLR-6kb33y
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`):* there is no
-submission path to stop; a refused revocation is a provisional change not
-recorded, with nothing written, written to the chain or sent (LLR-6kb33y).
-
-Normal: the revocation in
-`each_command_sends_once_to_one_device_and_the_kind_follows_the_record`
-(submit_flow), where `revoke_member` of a held Member builds an update that
-`submit_commit_send` commits and sends.
-Abnormal: `a_revocation_of_a_member_the_record_does_not_hold_is_refused_and_sends_nothing`
-(submit_flow): an unknown Member id, refused, with the record's epoch, the
-held provisional updates, the chain's epoch and a listening Device all
-checked afterwards.
-
-*Clarified 2026-10-15 (S4 TEST review round 3, notes):* the "Normal:"
-pointer above names a test that verifies LLR-r9sh6k, not this item. This
-item has no normal-case test of its own, and needs none: it states only
-what happens when org-node refuses, and the normal path of
-`revoke_member` (a held Member's revocation builds an update, which is
-submitted, committed and sent) is a successful submission, verified under
-LLR-r9sh6k (the Loopback send,
-`each_command_sends_once_to_one_device_and_the_kind_follows_the_record`)
-and LLR-znhmh2 (the Networked fan-out, `tests/send_fanout.rs`). The
-refusal for a Member id the record does not hold is org-node's
-`OrgNodeError::Trie(OrgMembersError::IdNotFound)`, returned as
-`OperationError::Node`; the abnormal test asserts that variant.
-
-## Sending, and the peer address
-
-### SDD-v2bq89 — Sending committed bodies
-
-**SDD-v2bq89**: the fan-out that sends each body of a committed update to its
-recipient. Code: `org-io/src/send.rs`. Moved beside it: org-node's loopback
-dialling items.
-traces: REQ-6skn67, REQ-8trkps
-superseded-by: SDD-2bzgtp
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`; REQ-nactq6
-supersedes REQ-6skn67):* there is no committed update to send; SDD-2bzgtp
-is the send path for the adopted current epoch, the admission and
-organisation requests and the answers, reading the verdict back.
-
-*Narrowed 2026-10-15 (S4, ARCHITECTURE conformance review finding-5; owner
-ruling of that day):* it read "sending, and the peer address", with
-`org-io/src/peer_addr.rs` beside `send.rs` and REQ-n82q47 among its traces:
-two responsibilities. The peer-address parse is SDD-wr8m5n's (below), with
-REQ-n82q47 and LLR-2b2ghe; this item keeps the fan-out, LLR-znhmh2 and
-LLR-r9sh6k.
-
-*Restructured 2026-10-15 (S4, ARCHITECTURE conformance review finding-2; no
-change of behaviour):* the per-recipient decision is taken by
-`send::plan_send(mode, recipients, addressed)`, a pure function returning
-the whole-send refusal (`NoLoopbackAddress`, `AddressNotARecipient`) or one
-step per recipient (dial by Device, dial at the address, not attempted);
-`send_committed` binds the sender's endpoint and carries the plan out.
-
-**LLR-znhmh2**: in Networked mode `OrgIo::send_committed(outcome: &CommitOutcome,
-peer_addr: Option<PeerAddr>) -> SendReport` dials every
-`OutgoingMessage::recipient` by the endpoint id equal to its Device key,
-sends its body, attempts every recipient whatever happened to the others, and
-returns `SendReport { per_device: Vec<(DevicePublicKey, Result<(),
-SendError>)> }` in `outcome.outgoing`'s order; it ignores `peer_addr`, writes
-nothing, and never undoes the commit.
-satisfies: REQ-6skn67
-superseded-by: LLR-pxqdy4
-
-**LLR-r9sh6k**: in Loopback mode `send_committed` refuses with
-`SendError::NoLoopbackAddress`, sending nothing, when `peer_addr` is `None`,
-and with `SendError::AddressNotARecipient`, sending nothing, when the
-address's endpoint id is the Device key of no recipient; otherwise it sends
-only to that recipient, at that address, and reports every other recipient
-as `SendError::NotAttemptedInLoopback`.
-satisfies: REQ-8trkps
-superseded-by: LLR-34tfm8
-
-*Superseded 2026-10-15 (change `worktree-org-io-domain-api`), LLR-znhmh2
-and LLR-r9sh6k:* `send_committed` and its `CommitOutcome` are gone. The
-fan-out is `send_organisation` of the adopted current epoch (LLR-pxqdy4);
-the Loopback identity check is restated for every send of the send path
-(LLR-34tfm8), the admission request's at the Invite's addresses
-(LLR-qa4nrt).
-
-*As landed 2026-10-13 (S4, task T12), LLR-znhmh2 and LLR-r9sh6k
-(clarification):* `send_committed` is crate-private
-(`org-io/src/send.rs`): the handle's `submit_commit_send(rng, update,
-peer_addr: Option<PeerAddr>)` calls it after the commit's store write, with
-the Device of the Persona the commit names as its sender (LLR-d2pzzk), and
-returns `Submitted { org_id, epoch, root, sends: SendReport }`; no public
-method takes or returns a `CommitOutcome`. `SendError` carries, beyond the
-three named, `Transport(TransportError)` for a failed dial or stream and
-`SenderEndpoint(String)` when the sending Persona's endpoint cannot be had
-(every recipient then reports it, nothing sent). Each refusal of the whole
-send (`NoLoopbackAddress`, `AddressNotARecipient`) is reported against every
-recipient. Recipients are dialled one after another, in the commit's order.
-The sender does not read the verdict byte a receiver writes back
-(LLR-unqfj5): a send is reported delivered once the receiver has
-acknowledged the stream's bytes, as before the verdict existed.
-
-### Moved from org-node: the Loopback dial (S4, task T12)
-
-*Moved 2026-10-13 from org-node's design ledger
-(`org-node/docs/architecture/2026-10-03-decomposition.md`, which keeps a prose
-pointer), plan task T12 of `docs/plans/2026-10-06-org-io-transport.md`
-(ruling A), with org-node's report of the unchecked Loopback address (now in
-`org-io/docs/problems/2026-10-13-loopback-address.md`,
-resolved by LLR-r9sh6k).* Both items stated org-node's `send_update`, which
-the commit's bodies replaced (S4, task T5); the send is org-io's
-`send_committed`. The first was parented to org-node's member-sender
-requirement and the second was derived; both are re-parented to REQ-8trkps,
-which states the Loopback send, and the second is no longer derived. Their
-history notes named org-node items, which are named in prose here; the full
-notes stay in org-node's ledger history.
-
-**LLR-jn5jeh**: in Loopback mode `send_update` dials the recipient at the full
-`EndpointAddr` its caller passes, not by endpoint identity alone. Nothing
-checks that the address names the recipient's DevicePublicKey, so an
-Organisation-information message and the Organisation private key it carries
-go wherever the address points. That is PR-2dmjzj's
-defect, stated here and not endorsed. One of its cures (dial by key in both
-modes) would replace this requirement.
-satisfies: REQ-8trkps
-superseded-by: LLR-34tfm8
-
-*Superseded 2026-10-20 (change `worktree-org-io-domain-api`; owner answer A2
-of 2026-10-16):* no caller passes an address any more; each recipient is
-dialled at the addresses kept for its Device key, in Loopback mode only at
-one whose identity is that key, which LLR-34tfm8 states.
-
-*Amended 2026-10-13 (S4, task T12; narrowing):* `send_committed` dials the
-addressed recipient at the full address the caller passes, not by endpoint
-identity alone. The defect clause ("nothing checks that the address names
-the recipient's DevicePublicKey") is withdrawn: the address is now sent to
-only when its identity is a recipient's Device key (LLR-r9sh6k), which
-resolves PR-2dmjzj. Re-parented from org-node's member-sender requirement to
-REQ-8trkps.
-
-*Amended 2026-10-06 and 2026-10-05 in org-node:* the Organisation secret it
-named became the Organisation private key every Organisation-information
-message carries, and the dial moved from `admit_member` to `send_update`.
-*Reworded 2026-10-04 by org-node's review round 2:* the test that carried it
-called `admit_member` in Loopback mode and saw the admission arrive at the
-endpoint the address named; its negative (the same identity with no
-transports) was a mutation, because iroh retries a live identity past any
-gated timeout. In org-io it is carried by
-`loopback_sends_to_the_matching_recipient_only_and_reports_the_rest_not_attempted`
-(`tests/send_fanout.rs`).
-
-**LLR-pw369n**: in Loopback mode `send_update` refuses with a typed error, and
-sends nothing, when its caller passes no `EndpointAddr`, rather than attempting
-a peer it cannot name; in Loopback mode with an address it dials that full
-address (LLR-jn5jeh).
-satisfies: REQ-8trkps
-superseded-by: LLR-34tfm8
-
-*Superseded 2026-10-20 (change `worktree-org-io-domain-api`; owner answer A2
-of 2026-10-16):* the refusal when no address is held is now per recipient,
-over the addresses kept for its key (`SendError::NoLoopbackAddress`,
-LLR-34tfm8); no caller passes an address.
-
-*Amended 2026-10-13 (S4, task T12; clarification):* the send is
-`send_committed`, and its typed refusal is `SendError::NoLoopbackAddress`,
-reported against every recipient, before any endpoint is bound. Re-parented
-from derived to REQ-8trkps, which states it; its derived assessment moved to
-org-io's risk draft with it.
-
-*Added 2026-10-04 by org-node's review round 3*, as the revocation twin of
-the Loopback dial, which had been evidenced but unstated; *amended 2026-10-05*
-when the chain write left org-node: the refusal then came after a commit the
-chain already agreed with, so a missing address no longer cost an on-chain
-epoch (org-node's revocation-order report).
-
-### SDD-wr8m5n — The peer-address parse
-
-**SDD-wr8m5n**: the total parse of a peer address given as text into the
-transport-owned `PeerAddr`. Code: `org-io/src/transport/peer_addr.rs`
-(re-exported as `org_io::peer_addr`).
-traces: REQ-n82q47
-superseded-by: SDD-2bzgtp
-
-*Superseded 2026-10-20 (change `worktree-org-io-domain-api`, consistency
-pass; owner answer A2):* REQ-n82q47, the only requirement it traced, is
-retired, and so is LLR-2b2ghe: addresses now come with the Invite, the
-admission request and the organisation request and are kept per Device key,
-so no peer address is given as text. Where a send's addresses come from is
-now the send path's (SDD-2bzgtp), which dials the addresses org-node keeps
-for the recipient's key. (A design item cannot be retired, so it is
-superseded by the item that now holds what remains of its responsibility.)
-
-*Added 2026-10-15 (S4, ARCHITECTURE conformance review finding-5; owner
-ruling of that day):* split from SDD-v2bq89, which held the parse beside the
-fan-out. The parse lives in the transport module since the same day's
-finding-1 (LLR-3vb4k9), because `PeerAddr` wraps iroh's address type.
-
-**LLR-2b2ghe**: `parse_peer_addr(text: &str) -> Result<Option<PeerAddr>,
-PeerAddrError>` is total: blank or whitespace-only text is `None`; text that
-is, after at most one `0x`, the hexadecimal of a postcard-encoded
-`iroh::EndpointAddr` is `Some`; every other input is
-`PeerAddrError::{Hex, Decode}` naming the field `peer_addr`; it never panics,
-for any input.
-satisfies: REQ-n82q47
-retired: 2026-10-20 — REQ-n82q47 is retired: no operation takes a peer address as text any more; each send goes to the addresses org-node keeps for the recipient's Device key (owner answer A2, change worktree-org-io-domain-api)
-
-*Re-traced 2026-10-15 (S4, ARCHITECTURE conformance review finding-5):* it
-was SDD-v2bq89's; it is SDD-wr8m5n's, the item the parse now is. The
-statement and its `satisfies:` are unchanged, and so is the parse's
-behaviour (`tests/peer_addr.rs`, `fuzz_peer_addr`).
-
-*As landed 2026-10-13 (S4, task T12), LLR-2b2ghe (clarification):* the
-refusals read `peer_addr_blob hex: …` and `peer_addr decode: …`, the texts
-the app's parse gave, which the moved items below state. Exactly one address
-is accepted: bytes left over after the address are a `Decode` refusal, and a
-bare `0x` (the hexadecimal of no bytes) is not blank, so it is a `Decode`
-refusal too, where the app's parse, which stripped every leading `0x`, read
-it as no address. `PeerAddr` is an opaque newtype: `endpoint_id()` gives the
-identity's bytes and `to_hex()` the text the parse takes; only a test build
-makes one from an `iroh::EndpointAddr`, so org-io's public surface names no
-iroh type for it.
-
-### Moved from the app: the peer-address parse (S4, task T12)
-
-*Moved 2026-10-13 from the app's design ledger
-(`app/docs/architecture/2026-10-05-decomposition.md`, which keeps a prose
-pointer), plan task T12 (ruling A).* The three items stated the parse inside
-the app's `revoke_member` and `admit_member` commands; the parse is org-io's
-`parse_peer_addr` now, which the commands call (task T15 rewires them), and
-the items' tests moved to `org-io/tests/peer_addr.rs`, `verifies:`
-unchanged. The first was parented to the app's requirement that an empty
-peer address is not a ground for refusal, and the other two were derived;
-all three are re-parented to REQ-n82q47, which states the parse, so none is
-derived any more.
-
-*Moved back to the app 2026-10-15 (S4, TEST conformance review finding-4;
-ruling A's move rule, IDs kept).* The three items state what the app's
-`revoke_member` and `admit_member` commands do with the peer-address text
-(blank is absent; a non-blank address is decoded from hexadecimal and then
-as an endpoint address, and refused naming the step that failed). org-io's
-handle takes no peer-address text — its `submit_commit_send` and
-`admit_reply` take an already parsed `Option<PeerAddr>` — and the app's
-commands are the only callers
-of `parse_peer_addr`, so the seam that observes the items is the app's IPC
-commands, not this unit's parse. Their definitions, with their T12
-clarifications, are in the app's design ledger
-(`app/docs/architecture/2026-10-05-decomposition.md`, under the
-command-boundary parsing item), parented to the app's requirement that an
-empty peer address is not a ground for refusal and, for the two decode
-items, derived again; their tests are the app's IPC tests. The parse itself
-stays here: REQ-n82q47 and LLR-2b2ghe, with `tests/peer_addr.rs` and the
-`fuzz_peer_addr` target.
-
-*Corrected in place 2026-10-15 (S4 review round 2, finding-13):* the
-paragraph above said "org-io's handle takes no peer address", which was
-stale: `submit_commit_send` and `admit_reply` take `Option<PeerAddr>`. It
-now says the handle takes no peer-address text, only a parsed address.

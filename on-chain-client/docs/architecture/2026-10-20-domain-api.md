@@ -12,9 +12,8 @@ only. Class C, the unit's class, with no per-item override.
 No new software item. The two steps belong to the chain writer,
 SDD-yg7n55 (`on-chain-client/docs/architecture/2026-10-06-chain-write.md`),
 whose `traces:` gains REQ-v86pyy and REQ-6vh3ht and whose seam gains two
-reads (its note of 2026-10-20). Two of its low-level requirements are
-superseded here: LLR-a2acvh (the one-call ceremony's order) by LLR-hea6y2,
-and LLR-z9vugt (the ceremony's step-naming errors) by LLR-chy957.
+reads (its note of 2026-10-20). The one-call ceremony's order is restated
+here as LLR-hea6y2, and its step-naming errors as LLR-chy957.
 
 ## What changes in the writer
 
@@ -112,7 +111,6 @@ holds an account other than the proxy, and the mapping dispatch as
 `MapAccount`; the record dispatch as `RecordGenesis`. `genesis`, their
 composition, returns the same error.
 satisfies: REQ-v86pyy, REQ-6jefu2
-supersedes: LLR-z9vugt
 
 **LLR-jk76wf**: `found_at` makes no `fund` call when `mapped_account`
 answers the proxy, or when `free_balance(proxy)` is at least `FUND_AMOUNT`,
@@ -141,7 +139,6 @@ signatory, co_signatories, contract, proxy, root, key)` at the proxy it
 returned, and returns `found_at`'s result; on a fresh proxy its seam calls
 are LLR-tge9q8's then LLR-q6buam's, in that order.
 satisfies: REQ-6jefu2, REQ-v86pyy
-supersedes: LLR-a2acvh
 
 **LLR-htp5tk**: `free_balance_of(value: Option<&[u8]>) -> Result<u128,
 WriteError>` is zero for `None` (an account the chain does not hold); for
@@ -167,6 +164,6 @@ target. The chopsticks target `write_genesis_e2e` (ungated, as every
 chopsticks target of this unit is) is where `SubxtWriteOps`'s two new
 fetches meet a chain.
 
-The tests annotated with LLR-a2acvh or LLR-z9vugt alone move to their
-successors (LLR-hea6y2, LLR-chy957), as inherited coverage of the unchanged
-fresh-proxy order, not red-first evidence of the new behaviour.
+The tests of the one-call ceremony's order and step errors carry LLR-hea6y2
+and LLR-chy957 as inherited coverage of the unchanged fresh-proxy order, not
+red-first evidence of the new behaviour.

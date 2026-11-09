@@ -17,7 +17,7 @@ calculated trie, and so used to succeed, now receives an error. No hazard in
 the register has this cause. HAZ-8suua9 is the register's unavailability
 hazard, but its cause is malformed, hostile or oversized input that makes the
 library panic or exhaust memory. Here the cause is a caller error, with no
-adversary and no malformed input. By the same reasoning as the PR-vf5hdm
+adversary and no malformed input. By the same reasoning as the the handle-handover problem report
 analysis (`2026-09-17-design-derived.md`, item 6), that is not HAZ-8suua9. This
 pathway shares only that hazard's harm. The refusal does meet RC-c4truv: it is
 a typed error, not a panic.
@@ -25,7 +25,7 @@ a typed error, not a panic.
 That analysis found a pathway no HAZ covers, and it concluded that
 `analyze-risks` has to rate that pathway. This one owes no rating, because it
 differs in two ways:
-- **Reach.** The PR-vf5hdm pathway is reached by correct code with a correct
+- **Reach.** The the handle-handover problem report pathway is reached by correct code with a correct
   input. This one is reached only by a caller that is itself in error, and no
   such caller remains in the workspace (below).
 - **Detection.** A future caller error would be found in testing, not in the
@@ -37,7 +37,7 @@ assessment, and the owner confirms it by signing the merge.
 
 Every such caller in the workspace is gone. The callers that remained after
 master's `0f85cb9` were removed by this change. The full set:
-- the sites PR-zqvs7t lists, except the `receive_and_verify` fallback, which
+- the sites the recalculate problem report lists, except the `receive_and_verify` fallback, which
   `0f85cb9` removed;
 - the two it missed, fuzz `keys_stay_unique` and org-node `wire_frame_bound`
   (through `test_fixtures.rs`);

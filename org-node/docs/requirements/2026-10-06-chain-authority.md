@@ -1,7 +1,7 @@
 # org-node chain-authority requirements
 
-Decided 2026-10-05 in the `grill-requirements` interview that PR-szkat6
-(`org-node/docs/problems/2026-10-04-org-key-conflation.md`) opened; PR-szkat6
+Decided 2026-10-05 in the `grill-requirements` interview that the resolved problem report on the Organisation key held only by its founder
+(`org-node/docs/problems/2026-10-04-org-key-conflation.md`) opened; the resolved problem report on the Organisation key held only by its founder
 stays open until change 3 (the Organisation key pair, below). The
 node verified every Envelope under the Organisation state's `org_pub_key`, which
 genesis set to the founding Member's key, while the design intends
@@ -9,8 +9,8 @@ genesis set to the founding Member's key, while the design intends
 every Member holds.
 
 *Amended 2026-10-06 (independent review round 2, finding-9).* This said the
-interview "resolves PR-szkat6", contradicting the sequencing below, which
-defers PR-szkat6 to change 3.
+interview "resolves the resolved problem report on the Organisation key held only by its founder", contradicting the sequencing below, which
+defers the resolved problem report on the Organisation key held only by its founder to change 3.
 
 Owner statement (2026-10-05): the right to change Organisation data lies in the
 on-chain multisig proxy and is, for now, wholly independent of org-members and
@@ -22,7 +22,7 @@ against the chain, never against an individual Member's keys.
 Owner rulings (2026-10-05):
 
 - An Envelope carries no authority signature. The on-chain root match at a
-  newer epoch is the sole authority over a received Change set. REQ-ag6kqm and
+  newer epoch is the sole authority over a received Change set. An earlier form of LLR-8528ud and
   RC-pm9kmx are amended in place to that rule, with a dated note; retiring them
   is not expressible in the gate, and a supersession would ask a test to verify
   behaviour that no longer exists.
@@ -34,7 +34,7 @@ Owner rulings (2026-10-05):
   change `worktree-org-io-commit-workflow`).* Reversed in part: an update for
   an Organisation the node holds, and a revocation, are acted on only when the
   sending Device is listed in the receiver's current committed record
-  (REQ-ztdza4 as amended, REQ-ea4qs5, RC-u7kdam). A first admission is still
+  (an earlier form of REQ-uk9rw7 as amended, REQ-ea4qs5, RC-u7kdam). A first admission is still
   accepted from any sender and verified against the chain (owner amendment
   the same day: "to avoid scenarios where something happens to the admin's
   device during this window"; "The invite id plays no role in the update"),
@@ -50,7 +50,7 @@ Owner rulings (2026-10-05):
   carrying one is refused, record unchanged, unless its X25519 public half
   equals the on-chain `org_pub_key`. With none, the stored key is kept only
   while its public half equals the on-chain `org_pub_key`, and is cleared
-  otherwise. This rules on PR-xwek5e. Generating a new key pair on removal
+  otherwise. This rules on the resolved problem report on an update clearing the Organisation secret. Generating a new key pair on removal
   (rotation) is out of scope and recorded as a problem report.
   *Superseded 2026-10-06 by owner ruling* in
   `org-node/docs/requirements/2026-10-07-org-key-pair.md`:
@@ -106,8 +106,7 @@ Owner rulings (2026-10-05):
   an Organisation's multisig. That is advisory, for the app to decide what to
   offer, and is never an input to verification.
 
-*Superseded in part 2026-10-08 (ruling B, change `worktree-org-io-create`;
-`docs/plans/2026-10-06-org-io-roadmap.md` and
+*Superseded in part 2026-10-08 (ruling B, change `worktree-org-io-create` and
 `docs/adr/2026-10-06-org-io-unit.md`).* The last two bullets no longer
 hold. org-node reads no chain and names no on-chain-client: org-io owns the
 `OrgService`, the chain connection, the reader, the writer and the user's
@@ -116,45 +115,6 @@ a value. The signatory read is org-io's own-admin check, not org-node's.
 Verification stays in org-node.
 
 ## Requirements
-
-**REQ-xs4ab8**: The software shall build, for creating an Organisation,
-admitting a Member and revoking a Member, a provisional update — the Change
-set and the Membership root it produces — and keep it in the Persona store,
-alongside any other provisional updates for that Organisation, without writing
-to the chain and without changing its record of the Organisation.
-satisfies: derived
-superseded-by: REQ-dhr58q REQ-4qh2h8
-
-**REQ-uv3v5w**: The software shall, when an update for an Organisation commits
-— one it built or one it received — replace its previous record of that
-Organisation with the new one, keep with the new record the Change set that
-produced it and no earlier one (a record created by genesis keeps none), and
-discard every provisional update it holds for it whose base is no longer its
-record's Membership root.
-satisfies: derived
-superseded-by: REQ-x2dnee
-
-*Amended 2026-10-06 (owner ruling recorded in
-`docs/plans/2026-10-06-org-io-roadmap.md`: no legacy trie, each device keeps
-the delta that produced its current trie; change
-`worktree-org-io-commit-workflow`).* This said the software discards its
-previous record, which discarded the Change set just committed with it, so no
-device could answer a peer one epoch behind with that Change set (stage S6).
-LLR-mkj4bz is amended to match in this change's design.
-
-**REQ-fwfku9**: The software shall refuse, with a typed error naming the limit,
-to keep a provisional update that would bring the provisional updates it holds
-for one Organisation above 1 MiB in their stored form, and shall keep nothing
-in that case.
-satisfies: derived
-superseded-by: REQ-g2537c
-
-REQ-xs4ab8, REQ-uv3v5w and REQ-fwfku9 follow the owner's ruling (2026-10-05)
-that provisional updates are persisted: agreeing a change between
-administrators and writing it to the chain can take days and restarts. A
-Membership record is immutable, so several roots can be held at once, and the
-old one is discarded when a provisional one verifies against the chain. The
-bound is by size, not count (owner ruling), at the wire frame's 1 MiB.
 
 **REQ-tqap3r**: The software shall commit a provisional update it built to its
 own record only after that update verifies against the Organisation state on
@@ -167,17 +127,19 @@ Organisation it holds a record of, reject it with a typed error and without
 reading the chain when it names another Organisation, when its Sequence
 number is not greater than the highest committed, when it or its Change set
 does not decode, or when the Change set's base is not its record's Membership
-root. (implements: RC-mj6gjq)
+root.
+implements: RC-mj6gjq
 satisfies: derived
 
 **REQ-8amu2a**: The software shall read the chain for a first admission only
 when the Organisation it names matches an admission the app has declared it
 expects, and shall reject
 any other first admission with a typed error and without reading the chain,
-leaving every declared expectation in place. (implements: RC-2ferct)
+leaving every declared expectation in place.
+implements: RC-2ferct
 satisfies: derived
 
-*Note 2026-10-13 (S4, task T4 of docs/plans/2026-10-06-org-io-transport.md).*
+*Note 2026-10-13 (S4, task T4).*
 "Reading the chain" is org-io's read, made only for the message
 `check_received` hands back as `Checked::ReadChain`; an unexpected first
 admission is refused there, so org-io reads nothing. The requirement is
@@ -204,18 +166,7 @@ this rule a second founding, or a reply to an Invite made with a Persona
 already in use, moved the Persona's binding: the first Organisation could no
 longer be managed, and the next update received for it read as this node's
 removal and deleted its record, Organisation private key and proxy account.
-It also closes PR-mdv38y.
-
-**REQ-hhva9d**: The software shall, on request, discard a provisional update
-it holds, together with any Organisation private key that update holds, and
-shall refuse with a typed error, changing nothing, a request naming no
-provisional update it holds.
-satisfies: derived
-superseded-by: REQ-x2dnee
-
-REQ-hhva9d follows the owner's ruling (2026-10-06): administrators may never
-agree a drafted change, and a genesis that is never written to the chain would
-otherwise keep its Organisation private key in the store indefinitely.
+It also closes the resolved problem report on the receive path rebinding Personas.
 
 **REQ-kt877x**: The software shall commit a first admission only when the
 Membership record it verified against the chain lists a DevicePublicKey of one
@@ -232,12 +183,12 @@ mismatch. The invite identifier is the one the app's Invite carries
 (`app/docs/requirements/2026-10-06-invitation.md`).
 
 *Note 2026-10-06 (merge of master `5f7c177`):* REQ-f2k4tr's "not greater than
-the highest committed" and master's epoch rule REQ-txvtm9 agree: a committed
+the highest committed" and master's epoch rule an earlier form of REQ-dwb9bq agree: a committed
 Sequence number equals the epoch committed with it, so the chain-free check
 refuses what cannot be newer than the last commit, and the epoch rule, checked
 after the one chain read, refuses the rest.
 
-REQ-xs4ab8 and REQ-tqap3r exist because the owner moved the chain write out of
+The item REQ-dhr58q and REQ-4qh2h8 replaced and REQ-tqap3r exist because the owner moved the chain write out of
 org-node: the administrators update the chain outside it, so what org-node
 builds is provisional until the chain agrees. The sender's own node is held to
 the receivers' checks, so no node's record runs ahead of the chain.
@@ -273,17 +224,16 @@ Sequencing (owner rulings 2026-10-05): four changes, one at a time.
 2. Transport: iroh and all peer communication move to the app; org-node keeps
    serialisation, deserialisation and verification.
 3. The Organisation key pair: X25519 at genesis, `person`'s rule, the receipt
-   check, keep-or-clear, admission sends the key. Resolves PR-szkat6 and
-   PR-xwek5e.
+   check, keep-or-clear, admission sends the key. Resolves the resolved problem report on the Organisation key held only by its founder and
+   the resolved problem report on an update clearing the Organisation secret.
 4. Whatever the first three leave, including the advisory signatory read.
 
 *Superseded 2026-10-08 (change `worktree-org-io-create`).* The sequence was
-replaced by the org-io roadmap (`docs/plans/2026-10-06-org-io-roadmap.md`,
-ADR `docs/adr/2026-10-06-org-io-unit.md`): change 2's transport moves to
+replaced by the org-io roadmap (ADR `docs/adr/2026-10-06-org-io-unit.md`): change 2's transport moves to
 org-io in its stage S4, not to the app, and the signatory read of item 4 is
 org-io's own-admin check (stage S2).
 
-*Note 2026-10-14 (S4, task T14 of `docs/plans/2026-10-06-org-io-transport.md`).*
+*Note 2026-10-14 (S4, task T14).*
 Change 2 is done on the S4 branch: iroh and all peer communication are
 org-io's, and org-node keeps serialisation, deserialisation and
 verification. org-node has no transport, no file IO and no async; its

@@ -165,7 +165,7 @@ pub struct ProposedFoundingDto {
 }
 
 /// An Invite as the invitee is shown it (LLR-b7ywy4). Nothing in it is
-/// verified (RC-wzb48r).
+/// verified (RC-dfzb5q).
 #[derive(Debug, Serialize)]
 pub struct InviteDto {
     pub org_name: String,

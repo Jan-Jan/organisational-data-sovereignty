@@ -2,7 +2,7 @@
 
 Change `worktree-org-node-org-key-pair`, change 3 of the chain-authority
 sequence (`org-node/docs/requirements/2026-10-06-chain-authority.md`,
-"Sequencing"). Resolves PR-szkat6, PR-ve9zw8 and PR-xwek5e.
+"Sequencing"). Resolves the resolved problem report on the Organisation key held only by its founder, the resolved problem report on the unauthenticated Organisation secret and the resolved problem report on an update clearing the Organisation secret.
 
 Owner rulings (2026-10-06):
 
@@ -71,49 +71,10 @@ message's update reaches, as the sending node's record of that Organisation
 holds it, and shall take no Organisation key or secret from its caller.
 satisfies: derived
 
-**REQ-stx9v3**: The software shall, when it calculates the resulting
-Membership root of a provisional update, draw a fresh X25519 Organisation key
-pair, distinct from the record's current Organisation public key and from
-every Member-as-a-group key and DevicePublicKey in the resulting record; keep
-its private key with the provisional update in the encrypted store; and give
-its public key as the update's Organisation public key for the chain write.
-satisfies: derived
-superseded-by: REQ-3pj7rd
-
 **REQ-jy6ybw**: The software shall, when it commits its own provisional update
 after it verified against the chain, replace the Organisation private key its
 record holds with the one the provisional update holds.
 satisfies: derived
-
-**REQ-c29s93**: The software shall refuse with a typed error, leaving the
-store unchanged, a received Wire message of the Organisation-information kind
-that carries no Organisation private key or whose key does not decode as 32
-bytes, before it reads the chain. (implements: RC-9cefcn)
-satisfies: derived
-superseded-by: REQ-zxgd46
-
-*Superseded 2026-10-21 (change `worktree-org-io-domain-api`; owner decision
-of 2026-10-20):* "before it reads the chain" assumes a chain read at
-receipt, and receipt reads none (owner ruling R2 of 2026-10-15); RC-9cefcn
-is superseded by RC-5gbgwb. REQ-zxgd46 keeps this refusal, with no chain
-read, and adds RC-5gbgwb's receipt check that the key's public half equals
-the provisional organisation's stated Organisation public key.
-
-**REQ-bwx7eg**: The software shall refuse with a typed error, leaving the
-store unchanged, a received Organisation-information Wire message whose
-Organisation private key has an X25519 public half different from the
-`org_pub_key` the chain holds for that Organisation, whether or not the node
-holds a record of it. (implements: RC-9cefcn)
-satisfies: derived
-superseded-by: REQ-dwb9bq
-
-*Superseded 2026-10-20 (change `worktree-org-io-domain-api`; owner ruling R2
-of 2026-10-15):* receipt reads no chain, so there is no chain key to refuse a
-received key against there. A received Organisation private key is kept with
-a provisional organisation whose public key is derived from it, and a key
-whose public half is not the chain's is "no match" at verification
-(REQ-dwb9bq): that provisional organisation is never adopted. RC-9cefcn keeps
-its other in-force implementer, REQ-c29s93.
 
 **REQ-ju6vn2**: The software shall, when it commits a received
 Organisation-information Wire message, store the Organisation private key the
@@ -129,8 +90,7 @@ private key, Envelope, Change set or record snapshot; it shall send nothing for
 that update to any other Device.
 satisfies: derived
 
-*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3 of
-`docs/plans/2026-10-06-org-io-roadmap.md`; owner ruling 2 on the sweep of
+*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, stage S3; owner ruling 2 on the sweep of
 `fdf4e77`: a revoked device receives only an absence proof).* This said a
 revocation is "a Wire message of the revocation kind, which carries no
 Organisation private key" — it carried the committed Envelope — sent "to any

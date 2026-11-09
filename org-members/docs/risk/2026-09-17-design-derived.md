@@ -131,41 +131,6 @@ identification is the owner's activity under `analyze-risks`, with a severity, a
 probability and a matrix evaluation, and an architecture change is not where that
 gets decided.
 
-### LLR-72p8bz — four separated hash domains
-
-assesses: LLR-72p8bz
-
-Changes no control's wording; supplies an unstated premise two controls rest on;
-introduces no new hazard.
-
-The plan asked this to be assessed against HAZ-bmv7cy, a member introduced
-through the wire. The honest answer is that the relation is indirect. HAZ-bmv7cy's
-pathway is a serialised record the decoder accepts, and RC-4apk6w — re-validate
-handles and device sets on decode — is the control on it. Nothing in that path
-depends on hashing.
-
-Where domain separation is load-bearing is one step further on. RC-9z65hw applies
-a change set only if its declared base matches, and makes the result usable only
-if its root matches the root expected; RC-ty8qdw refuses to report a root for a
-record whose hashes are stale. Both controls decide by **comparing root values**,
-and both therefore carry an unstated premise: that equal roots mean equal
-membership. Four separated domains are part of what makes that true — a value
-hashed as a device leaf cannot be read as a member leaf or as an interior node,
-so a crafted structure cannot commit to a membership the organisation never
-decided while presenting the root the organisation did decide. Without the
-separation, a cross-domain collision would let a candidate verify against an
-expected root without being the record that root was computed from, and the wire
-path's final bar — root verification, which is the bar RC-4apk6w explicitly does
-not claim to be — would pass on the wrong record.
-
-So: no change to what RC-9z65hw or RC-ty8qdw say, or to how effective they are
-today. The assessment records that they have a premise which was, until this
-ledger, written nowhere, and LLR-72p8bz is now where it is written.
-
-Evidence note: this LLR is one of the two carried by a genuinely new red-first
-test (`hasher_domains_are_separated`, T4), which reds by giving all four hasher
-methods the same domain context.
-
 ### LLR-zbe553 — MSB-first bit addressing of the member identifier
 
 assesses: LLR-zbe553
@@ -283,25 +248,27 @@ went on to say that a violation "would show up as a lawful change refused, which
 is an availability pathway of the HAZ-8suua9 kind". A lawful change **is**
 refused, it does not come through HAZ-8suua9, and both halves needed correcting:
 
-- The refusal is real and is **PR-vf5hdm** (opened 2026-09-17, open) in
-  `../problems/2026-09-17-review2-fixes.md`. A
+- The refusal was real and was **the handle-handover problem report**
+  (opened 2026-09-17, resolved 2026-10-03 by REQ-wx3wpv and LLR-n5t6bn:
+  `apply_delta` now releases every outgoing handle before it checks any
+  incoming one). A
   handle moving between two members — a swap in either identifier order, or a
   one-way handover where the taker's identifier sorts before the giver's — is
   produced successfully by two sequential `update_handle` calls, emitted as a
   canonical two-leaf change set by `calculate_delta`, and then refused with
   `DuplicateHandle` by a receiver holding the byte-identical base trie.
-- The refusal is **not** in the canonical-form check. `validate_canonical_delta`
-  passes the delta. It is the handle-uniqueness block a few lines later in
-  `apply_delta`, which walks the upserts in a single ascending pass and releases
-  a leaf's old handle only when it reaches that leaf, so a handle in flight is
-  still indexed when its acquirer is checked. The narrow sentence about the
+- The refusal was **not** in the canonical-form check. `validate_canonical_delta`
+  passed the delta. It was the handle-uniqueness block a few lines later in
+  `apply_delta`, which then walked the upserts in a single ascending pass and
+  released a leaf's old handle only when it reached that leaf, so a handle in
+  flight was still indexed when its acquirer was checked. The narrow sentence about the
   canonical-form check survives; the conclusion drawn from it does not.
 - **It is not HAZ-8suua9.** That hazard is malformed, hostile or oversized
   input. Here there is no adversary and no malformed input at any step. Nor is it
   HAZ-y8h835, whose causes are all lag-shaped and whose acceptability rests on
   recoverability through the chain anchor — this divergence is not recoverable:
   the receiver has the change, refuses it, and will refuse the identical bytes
-  forever. See the finding recorded under "No hazard covers PR-vf5hdm" below.
+  forever. See the finding recorded under "No hazard covers the handle-handover problem report" below.
 
 Nothing about RC-9z65hw changes. The control decides by root and is unaffected;
 what is affected is the claim that the producer/receiver pair never disagrees.
@@ -544,14 +511,13 @@ that control's effectiveness.
    and it is repeated here because it is a limitation of this unit's risk
    evidence, not merely of its inventory.
 
-6. **No hazard covers PR-vf5hdm: the receiver refusing a well-formed honest
+6. **No hazard covers the handle-handover problem report: the receiver refusing a well-formed honest
    change.** Added 2026-09-17 by the round-2 independent review. `apply_delta`
    refuses a lawful handle handover between two members — a swap in either
    identifier order, a one-way handover whenever the taker's identifier sorts
    before the giver's — so a membership change the producer made successfully
-   cannot be replicated, and the two records stay apart. The mechanism, the two
-   failing shapes and the reason the producer's every step is lawful are in
-   `../problems/2026-09-17-review2-fixes.md`.
+   cannot be replicated, and the two records stay apart. That report was
+   resolved 2026-10-03 by REQ-wx3wpv and LLR-n5t6bn.
 
    The register has no pathway of this shape:
 
@@ -578,38 +544,14 @@ that control's effectiveness.
    either owes a severity, a probability and an acceptability evaluation against
    the matrix, which is the interview's work and not a fix round's.
 
-## Three notes this change owes its reader
-
-### LLR-pys2ek discharges REQ-xdx2c2's forward reference
-
-`org-members/docs/requirements/2026-08-31-org-membership.md` records, under
-REQ-xdx2c2, that the device bound of 4 "belongs in a low-level requirement under
-the software item that owns the sub-trie, which does not exist yet", and that
-until it is written the number "lives only in places no gate reads". The item now
-exists: LLR-pys2ek, under SDD-4yr9ge, states that a member holds at most
-`MAX_DEVICES` device keys and that `MAX_DEVICES` is 4 because the device sub-trie
-is a fixed depth-2 binary tree of four slots. It is carried by three annotated
-tests and was reddened by raising the constant (T3).
-
-The requirement's own text and its note are **not edited**. This project records
-corrections by date rather than by rewrite, and the discharge is recorded here, in
-this change's own risk draft, which is where a reader following the note will be
-sent.
-
-One connected point the register anticipated: its assessment of RC-3ppkf6's
-introduced hazard — a member at the bound cannot enrol another device — says that
-this is "the reason the number belongs in a low-level requirement where it can be
-reconsidered against this hazard rather than against the sub-trie depth alone".
-LLR-pys2ek is now that place. As worded it states the sub-trie justification only;
-the lock-out consideration lives in the register. A later change reconsidering the
-number has both halves in front of it.
+## Two notes this change owes its reader
 
 ### LLR-s97ywt is worded to the implemented behaviour, not to REQ-ewdg2q
 
 REQ-ewdg2q requires the member-as-a-group key to be replaced when a device key is
 removed, **and** requires a replacement key equal to the key being replaced to be
 rejected. RC-mqtks7 carries both clauses. The second is not implemented — nothing
-compares the replacement against the outgoing key — and that is PR-zz4exm, open
+compares the replacement against the outgoing key — and that is the replacement-key problem report, open
 since 2026-08-31.
 
 LLR-s97ywt therefore states what `delete_p2p_device` does: it removes the device
@@ -623,20 +565,20 @@ Worded as it is, the gap stays where it belongs — in an open problem report an
 the register's residual risk statement for HAZ-s39gbh, which is currently
 **unacceptable**.
 
-PR-zz4exm stays open through this change. It is the one item in the register's
+The replacement-key problem report stayed open through that change. It is the one item in the register's
 not-minted list that closes an unacceptable residual risk outright, and fixing it
 is a behaviour change needing its own red-first test. It is not architecture work,
 and it is expected to remain the sole `UNRESOLVED-PR` at this merge, at 16 days
 against the unit's 30-day limit.
 
-(Corrected 2026-10-03: PR-zz4exm resolved in the change that amends LLR-s97ywt
+(Corrected 2026-10-03: the replacement-key problem report resolved in the change that amends LLR-s97ywt
 and LLR-w92psx to state the refusal. The LLRs now carry the requirement's
 second clause, and the tests that this section said could not exist are
 `delete_p2p_device_rejects_unchanged_key` and its siblings. The claim above
 that it "closes an unacceptable residual risk outright" did not hold: HAZ-s39gbh
-stays not acceptable, for the wire path, PR-z463w5 and PR-fzu25w — as the
+stays not acceptable, for the wire path, the earlier-key problem report and the delete-and-re-add problem report — as the
 register's own correction to its not-minted item 1 records. The owner later
-resolved PR-z463w5 and PR-fzu25w by ruling, which transfers those checks to the
+resolved the earlier-key problem report and the delete-and-re-add problem report by ruling, which transfers those checks to the
 caller rather than removing the risk; with the wire path, they remain for
 `analyze-risks` to weigh.)
 
@@ -1039,7 +981,7 @@ by T8, which saw `cargo clippy -p org-members --lib` error on
 denied, and slice indexing and arithmetic panic without going anywhere near
 `unwrap`. Live indexing sites in the crate include:
 
-- `types.rs:66` — `self.0[byte_idx]` in `MemberId::bit`, which is **PR-jq43gx**:
+- `types.rs:66` — `self.0[byte_idx]` in `MemberId::bit`, which is **the out-of-range index problem report**:
   a panic reachable from outside the crate. That report is the concrete instance
   of this obligation, and the reason this one is not merely theoretical.
 - `types.rs:419–421` — the fixed four-slot array fill in `to_fixed_slots`, whose
@@ -1055,7 +997,7 @@ them. Two ways to settle it, both for a later change and neither minted here:
 panicking" — and carry panic-freedom-for-any-input on the fuzz targets, which is
 where it is actually measured; or **(b)** extend the denials to the indexing and
 arithmetic lints and fix what that reddens, which is a real code change and
-would subsume PR-jq43gx. **(b)** is the stronger answer and the more expensive
+would subsume the out-of-range index problem report. **(b)** is the stronger answer and the more expensive
 one. The owner chooses.
 
 ### Obligation C (finding-7) — the SOUP advisory-database gap is disclosed but untracked
@@ -1070,16 +1012,16 @@ The obligation is not the gap — that is honestly disclosed. **It is that the g
 is carried by no item and aged by no gate.** Prose in an inventory and a
 narrative finding in a risk file are both invisible to `check-trace.sh`: nothing
 prints it at a merge, nothing counts its days, and nothing will fail when it is
-still open in six months. Compare PR-zz4exm, which is the same kind of
+still open in six months. Compare the replacement-key problem report, which is the same kind of
 outstanding obligation and *is* surfaced with its age at every merge because it
-is an item with an `opened:` date. (Corrected 2026-10-03: PR-zz4exm is now
+is an item with an `opened:` date. (Corrected 2026-10-03: the replacement-key problem report is now
 resolved; the comparison is with how it was carried while open.)
 
 **Recommendation, not minted here:** give it a tracked item carrying an
 `opened:` date — a problem report is the natural shape, since "the risk
 assessment for nine SOUP crates rests on no advisory data" is an observable
 defect in the evidence, and a PR is what the toolkit ages. The brief for this
-round said to mint nothing beyond PR-jq43gx, so nothing is minted; this
+round said to mint nothing beyond the out-of-range index problem report, so nothing is minted; this
 paragraph is the recommendation and the date it was made.
 
 Note the scope if it is minted: the gap is the **toolchain's**, not this unit's

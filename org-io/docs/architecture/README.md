@@ -2,9 +2,11 @@
 
 This directory is a per-change ledger: each change contributes one dated
 file, `YYYY-MM-DD-<slug>.md`, dated the day the change creates it and never
-renamed. **Edit existing items in the file that defines them.** Use this
-README's Overview section for the system-wide decomposition picture; `soup.md`
-(single file) contains the SOUP inventory.
+renamed. **Edit existing items in the file that defines them.** A reworded
+item keeps its ID; a changed behavior gets a new ID and the old item is
+deleted; a dropped item is deleted. The squash message records each under
+`Items:`. Use this README's Overview section for the system-wide decomposition
+picture; `soup.md` (single file) contains the SOUP inventory.
 
 <!--
 Item grammar (enforced by .guardrails/scripts/check-trace.sh):
@@ -17,6 +19,7 @@ the high-level REQs), written under the software item they belong to:
   **LLR-NNNNNN**: <directly codeable behavior>. satisfies: REQ-NNNNNN[, REQ-...]
   **LLR-NNNNNN**: <behavior with no parent requirement>. satisfies: derived
 
+- An item is terse: no rationale, history or implementation detail.
 - Every design item must trace to at least one requirement.
 - Every LLR satisfies a REQ or is marked derived; derived LLRs must be
   assessed in the risk ledger, where an `assesses:` line names them.
@@ -51,8 +54,7 @@ and from stage S4 the transport
 and storage file IO. org-node takes values and returns values: org-io reads
 the chain, hands org-node the parsed state, and submits the values org-node
 returns. The app depends on org-io alone. The decision and its options are in
-`docs/adr/2026-10-06-org-io-unit.md`; the planned software items
-are in `docs/plans/2026-10-06-org-io-create.md` §2.
+`docs/adr/2026-10-06-org-io-unit.md`.
 
 No software item is defined yet: the crate lands in S2's develop phase. Every
 item is class C, the unit's class, and no segregation is argued.
@@ -67,14 +69,9 @@ software items, by what they hold (the dated files and
 | **The handle** | SDD-z3ychz, SDD-3qwjs2 | The app's one way in, its domain surface and queries; the one random source every operation draws from |
 | **Persons and Personas** | SDD-j7k844, SDD-bzu2jg | The user's Person, kept apart; a new Persona, with its keychain item, store file and endpoint, per founding and per provisional Member |
 | **Invitation** | SDD-zqv3v6, SDD-9rbm8t, SDD-cxh9d8 | The Organisation's outstanding invites, issued or cancelled; an imported Invite read; the kept admission requests listed |
-| **Proposals** | SDD-frsa73 | Recording provisional changes and proposing the updated Organisation; no command discards |
-| **Chain** | SDD-mk39e5, SDD-4bbt47, SDD-f4khqn, SDD-z85ux9, SDD-789u6d | Writing one provisional organisation (the founding in two steps); the read at a finalised block; the own-admin rule (SDD-f4khqn, retired 2026-11-03, owner ruling 6: no code after plan task T16h of `docs/plans/2026-10-16-org-io-publish-2.md`); the connection to a chain; the signatory key |
+| **Proposals** | SDD-7mhqaz, SDD-4drrpr | Recording provisional changes and proposing the updated Organisation; no command discards |
+| **Chain** | SDD-mk39e5, SDD-4bbt47, SDD-z85ux9, SDD-789u6d | Writing one provisional organisation (the founding in two steps); the read at a finalised block; the connection to a chain; the signatory key |
 | **Verification** | SDD-t4z8sz | Judging a held Organisation against the chain through org-node, writing what org-node returns, settling an unknown write |
 | **Transport** | SDD-2bzgtp, SDD-dhh3pw, SDD-2fc2cq, SDD-8uyg4s, SDD-xwft92, SDD-b8tuv3 | The send path to a Device key at its kept addresses; admission and organisation requests; the receive step and its one verdict; the endpoint whose identity is the Device key, one per Persona, and when it exists |
 | **Storage** | SDD-egx8rv, SDD-4fvypt | The sealed store files and the OS keychain |
 | **This node's removal** | SDD-3my66m, SDD-wyn7b6 | Sending the kept acknowledgements on a backoff, having org-node delete each one accepted; keeping the removed Persona's data and deleting its keychain item and then its store file when none is left or after 7 days |
-
-Out of force: SDD-83un8g (split into SDD-3my66m and SDD-wyn7b6, 2026-10-28), SDD-6gb59p (split into SDD-zqv3v6, SDD-9rbm8t and SDD-cxh9d8, 2026-10-28), SDD-erzj3m, SDD-6qz9ms, SDD-6mpmsw, SDD-aw3nka, SDD-v2bq89 and
-SDD-rr7dtw (superseded in that change), and SDD-wr8m5n (the peer-address
-parse, superseded by SDD-2bzgtp when its requirement was retired, owner
-answer A2).

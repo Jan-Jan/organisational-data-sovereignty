@@ -1,7 +1,7 @@
 #![cfg(feature = "test-support")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 //! The Envelope (SDD-kk2y3e): what it binds together and how its Change set
-//! is decoded. The Envelope carries no signature (REQ-ag6kqm): the chain's
+//! is decoded. The Envelope carries no signature (LLR-e7s4ye): the chain's
 //! root at a newer epoch decides, and nothing about the sender is checked
 //! (LLR-p8uu47, LLR-e7s4ye, LLR-pzde8b).
 

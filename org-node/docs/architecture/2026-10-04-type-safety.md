@@ -6,22 +6,22 @@ parse-at-the-system-edge rule (ADR
 belong to software items defined in `2026-10-03-decomposition.md`, each placed
 under the item that owns most of the code it constrains:
 
-- SDD-swtd3w, which owns `types.rs`: LLR-sz4xhc, LLR-s7whrn, LLR-ayrdr8 and
-  LLR-mmdu38;
+- SDD-swtd3w, which owns `types.rs`: LLR-sz4xhc, LLR-s7whrn, LLR-mmdu38 and
+  an earlier form of LLR-mkvx2k;
 - SDD-sxp8hb, which owns `keys.rs`: LLR-56hc77;
-- SDD-af5vnt, which owns `store.rs`: LLR-bwb9pu, LLR-scgk5j, LLR-g76zqd,
-  LLR-q6n25z and LLR-8bum44.
+- SDD-af5vnt, which owns `store.rs`: LLR-bwb9pu, LLR-scgk5j and earlier forms of LLR-pv2rdy,
+  LLR-rjphn4 and LLR-7yu2xy.
 
 Where a requirement also constrains code another item owns, that item names
-it: SDD-pa6p7w names LLR-mmdu38; SDD-vee2fq names LLR-8bum44 and LLR-g76zqd;
-SDD-rx2yvy and SDD-8cpyfa name LLR-8bum44; SDD-89es4z names LLR-g76zqd; and
+it: SDD-pa6p7w names LLR-mmdu38; SDD-vee2fq names the earlier forms of LLR-7yu2xy and LLR-pv2rdy;
+SDD-rx2yvy and the receive-and-commit item SDD-busuj3 and SDD-kegag2 replaced name that of LLR-7yu2xy; SDD-89es4z names that of LLR-pv2rdy; and
 SDD-kwncn7 and SDD-sxp8hb name LLR-bwb9pu. The notes are in
 `2026-10-03-decomposition.md`, where those items are defined.
 
 (Amended 2026-10-05 by the org-node type-safety change, review round 7: each
 requirement now sits under the item owning most of what it constrains.
 LLR-mmdu38 moved from SDD-pa6p7w to SDD-swtd3w, because four of its five
-clauses constrain `OrgPublicKey` in `types.rs`. LLR-8bum44 moved from
+clauses constrain `OrgPublicKey` in `types.rs`. The earlier form of LLR-7yu2xy moved from
 SDD-vee2fq to SDD-af5vnt, because the store open, four of the five records it
 names and `parse_field` are in `store.rs`. The requirements' IDs and text are
 unchanged by the move.)
@@ -48,7 +48,7 @@ without their prefix because both items are withdrawn and a prefixed
 mention of a withdrawn item is a dangling reference.) Tooth 4 then gave org-node its decomposition of nineteen items,
 which own every file these two named. The ten requirements keep their IDs and
 their text and moved under the items above; the one change to a requirement's
-text is LLR-ayrdr8's "every type of this item", which named the value-types
+text is the "every type of this item" of an earlier form of LLR-mkvx2k, which named the value-types
 item and now names `types.rs`. Both items are withdrawn, and their tokens are
 not reused. `types.rs`, new in
 this change, has a fitting owner in tooth 4's items — SDD-swtd3w is "Value
@@ -94,8 +94,7 @@ removed (LLR-qsjde3); the Organisation private key, which the store keeps and
 the Wire message carries in its place, has the same properties as
 `OrgPrivateKey` (LLR-322xfu).
 
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* `DeviceSeed` is removed: the
+*Amended 2026-10-08 (S4, task T3):* `DeviceSeed` is removed: the
 device seed is the move-only `DeviceSecret` (LLR-37k2s3), which is not
 `Clone`, has no `expose_secret` and is never serialised. `MemberSeed` (and
 `OrgPrivateKey`) keep this item's rule.
@@ -126,90 +125,6 @@ only inside `chain_write`". `chain_write/` moves to on-chain-client, and the
 proxy account becomes opaque data org-node holds for the app (owner ruling 6),
 so nothing in org-node converts it.)
 
-**LLR-ayrdr8**: the postcard encoding of a fixed Persona store plaintext (one
-Persona, one Organisation with its Organisation private key, a chain account
-and members, one change-set provisional update holding the private key of its
-Organisation key pair, and one expected admission naming an Organisation
-alone), of a fixed Organisation-information Wire message, whose Envelope
-carries no signature, and of a fixed revocation Wire message, which holds a
-revocation notice (LLR-dc45ur) and no Envelope, are the
-values pinned in `org-node/tests/encoding_golden.rs`: every type `types.rs`
-defines, and the org-members and `person` types org-node holds, serialise
-exactly as the plain values they replace. In the store plaintext, the
-Organisation record has no Organisation-secret bytes after its epoch, and its
-chain account is followed by the 32 bytes of its Organisation private key
-with no option tag (LLR-byjvd9), then by its kept Change set option
-(LLR-d9778a); the expected admission is the Organisation
-identifier's bytes alone. Each Wire message begins with its variant index (00
-for Organisation information, 01 for revocation), and has no invite
-identifier bytes (LLR-ms8njy); the Organisation information has no signature
-bytes after its Change set bytes (LLR-e7s4ye).
-satisfies: derived
-superseded-by: LLR-mkvx2k
-
-*Amended 2026-10-07 (change `worktree-org-io-commit-workflow`, S3 T4;
-LLR-js9dsu and LLR-dc45ur as amended there).* The pinned revocation Wire
-message was `01` followed by the same Envelope as the Organisation
-information. Index `01` now precedes a revocation notice: the Organisation
-identifier, the Member identifier, the Device key and an org-members wire
-absence proof, in that order. The new value was derived from the notice's
-field order, not captured from the code; `encoding_golden.rs` records the
-previous value beside it. The acknowledgement (index `02`, LLR-378cj4) is not
-pinned here.
-
-*Amended 2026-10-07 (owner ruling 12 of
-docs/plans/2026-10-06-org-io-commit-workflow.md, change
-`worktree-org-io-commit-workflow`, S3 T2).* The Organisation record now ends
-with its kept Change set (LLR-d9778a) after its Organisation private key: an
-option, `None` (the byte `00`) in the pinned store. The owner accepted the
-layout change with a new golden pin and no migration; a store written before
-it does not load. The new store value was derived from the previous one by
-inserting that byte, not captured from the code; `encoding_golden.rs` records
-the previous value beside it.
-
-*Amended 2026-10-13 (S4, task T6 of docs/plans/2026-10-06-org-io-transport.md;
-format rule, dated comment).* The pinned store plaintext also holds one
-outstanding Invite: it ends with `outstanding_invites` (LLR-95753m as
-amended), here one pair — the count `01`, the Organisation identifier's 20
-bytes and the invite identifier's 32 bytes, with no option tag. The new value
-was derived from the previous one by appending those 53 bytes, not captured
-from the code; `encoding_golden.rs` records the previous value beside it.
-
-*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
-This pinned an Organisation with an Organisation secret and no Organisation
-private key (the byte `00` after the chain account being `org_private_key:
-None`), an expected admission holding an invite identifier, and one admission
-Wire message with an optional secret and invite identifier. The secret and the
-invite identifier are removed, the record's key is required, and the Wire
-message is an enum of two kinds (LLR-js9dsu); by the owner's later ruling
-the same day a change-set provisional update holds a private key too
-(LLR-e2b7gv). The pinned values are re-derived when the change is
-implemented.
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* The
-pinned values were master's; two changed, each by one of the format changes
-this item names. The two new values were derived from master's bytes, not
-captured from the code; `encoding_golden.rs` records master's values beside
-them.
-
-(Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`):
-this pinned also a pending Invite in the store, the Base64 text of a fixed
-Invite and Join request, and the EVM calldata of a fixed genesis and update.
-Invites, Join requests and their armour leave org-node for the app, and the
-calldata leaves with the chain write for on-chain-client, which pins it there;
-the store now holds provisional updates and expected admissions instead of
-pending Invites, and the Envelope has no signature field. The golden values
-are re-derived when the change is implemented.)
-
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* the store plaintext pinned is one
-Persona's store: one `persona` (no list) whose record holds its Device public
-key in place of its device seed. `GOLDEN_STORE` is re-pinned by the format
-rule, never captured from the code (the derivation is in
-`encoding_golden.rs`).
-
 **LLR-mmdu38**: `OrgPublicKey::parse(&[u8; 32])` and `TryFrom<[u8; 32]>`
 accept a value exactly when `person::x25519::is_valid_public_key` accepts it,
 and refuse any other with `OrgNodeError::InvalidOrgPublicKey`. Its
@@ -229,16 +144,15 @@ narrowing. The parse and `Debug` clauses stand unchanged. The fail-closed
 cache clause (from "A chain state whose Organisation public key the parse
 refuses leaves no cached state" to the end) is retired: `OrgStateCache` and
 `OnChainReader` are deleted with `chain_read.rs`, and org-node caches no
-chain state (PR-k2xxaq resolved by that deletion). The two parse cases of
+chain state (the resolved problem report on the stale cache on a fetch error resolved by that deletion). The two parse cases of
 the deleted `tests/chain_read_state.rs` moved to org-io with
 `org_state_from_chain`; org-node's evidence for this item is
 `node_value_types.rs`.
 
-*Amended 2026-10-05 (owner answer Q4 of that day to
-docs/plans/2026-10-05-switch-trim.md; written by change
+*Amended 2026-10-05 (owner answer Q4 of that day; written by change
 `worktree-person-shared-types`).* This item stated the Edwards-point rule,
 `InvalidKey` and `From<&P2pMemberKey>`, which its own round-5 amendment below
-called interim until PR-szkat6 separated the two keys. This branch separates
+called interim until the resolved problem report on the Organisation key held only by its founder separated the two keys. This branch separates
 them (REQ-ech45n), so the X25519 rule of LLR-3jjgtw applies and the conversion
 is gone. The `Debug` and fail-closed cache clauses are this item's, unchanged.
 A replacement item that stated this text was withdrawn before merge.
@@ -250,11 +164,11 @@ had superseded. By owner ruling a state refused at parse now fails closed.)
 
 (Amended 2026-10-05 after independent review round 5: the Edwards-point rule
 is the interim rule, for what the field holds today — the published signing
-key, the administrator's Member-as-a-group key (PR-szkat6). It conflicts with
+key, the administrator's Member-as-a-group key (the resolved problem report on the Organisation key held only by its founder). It conflicts with
 the owner's ruling recorded in the `person` unit
 (`person/docs/requirements/2026-10-04-identity-types.md`, 2026-10-04) that the
 Organisation public key is an X25519 key belonging to org-node, to be checked
-by `person`'s X25519 rule rather than a copy of it. When PR-szkat6 separates the
+by `person`'s X25519 rule rather than a copy of it. When the resolved problem report on the Organisation key held only by its founder separates the
 two keys, `OrgPublicKey` must take that rule: under the Edwards rule about half
 of valid X25519 keys would be refused here, and small-order points the X25519
 rule rejects would be accepted.)
@@ -285,16 +199,14 @@ handed back has the same public key. Neither key pair has a `from_seed` or a
 `to_seed`, and `SigningKeypair` has no `member_seed`.
 satisfies: derived
 
-*Amended 2026-10-05 (owner answer Q4 of that day to
-docs/plans/2026-10-05-switch-trim.md; written by change
+*Amended 2026-10-05 (owner answer Q4 of that day; written by change
 `worktree-person-shared-types`).* This item named
 `MemberSeed::signing_keypair` and `SigningKeypair::member_seed`. On this
 branch a member seed is the secret of an X25519 key (LLR-ctzkv7), so neither
 exists. The rule, a secret typed by its role at every step, is unchanged. A
 replacement item that stated this text was withdrawn before merge.
 
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* the device seed is a
+*Amended 2026-10-08 (S4, task T3):* the device seed is a
 `DeviceSecret`, not a `DeviceSeed`: `DeviceSeed::signing_keypair` and
 `SigningKeypair::device_seed` are removed; a signing key pair is built from a
 `DeviceSecret` inside the crate only, for one signature or one endpoint bind,
@@ -342,8 +254,7 @@ Organisation private key as an `OrgPrivateKey` (LLR-ecxc76). REQ-y7tsft,
 amended the same day, names the Organisation private key, so the parent note
 below no longer puts the `OrgPrivateKey` clauses outside it.
 
-*Amended 2026-10-05 (owner answer Q4 of that day to
-docs/plans/2026-10-05-switch-trim.md; written by change
+*Amended 2026-10-05 (owner answer Q4 of that day; written by change
 `worktree-person-shared-types`).* This item listed five values and called them
 every value that holds a secret. This branch adds `X25519Keypair` and
 `OrgPrivateKey`, so the list has six values and names the secret types they
@@ -370,142 +281,46 @@ neither stated nor tested.)
 `Debug` rendering of `StoreKey([REDACTED])`.
 satisfies: REQ-y7tsft
 
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* `derive_key` derives the
+*Amended 2026-10-08 (S4, task T3):* `derive_key` derives the
 `StoreKey` by HKDF-SHA-256 from the device secret (LLR-2qqqx6), held as
 `Zeroizing<[u8; 32]>`, wiped on drop; the traits are unchanged: private to
 `store.rs`, no `Display`, not `Copy`, `Debug` rendering
 `StoreKey([REDACTED])`. The test probe takes a `DeviceSecret`.
 
-**LLR-g76zqd**: `PersonaRecord`, `MemberSnapshot` and `Joiner` hold the
-handle, name and surname as `Handle`, `Name` and `Surname`, so a record or a
-joiner is constructed only from parsed values, and `create_persona` takes
-them typed; every other field of `PersonaRecord`, `OrgRecord`,
-`MemberSnapshot`, `ProvisionalUpdate` and `Joiner` that is an array or counter
-holds its typed form (`MemberSeed`, `DeviceSeed`, `OrgPrivateKey`,
-`MemberId`, `RootHash`, `OrgPublicKey`, `P2pMemberKey`, `P2pDeviceKey`,
-`ChainAccount`, `PersonaId`, `OrgId`, `Epoch`, `SequenceNumber`); `OrgRecord`
-has no administrator key and no Organisation secret.
-satisfies: REQ-qn2erx
-superseded-by: LLR-pv2rdy
-
-*Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
-The typed forms listed `OrgSecret`, the type of `OrgRecord.org_secret`. Both
-are removed (LLR-qsjde3, LLR-byjvd9); `OrgRecord.org_private_key` holds an
-`OrgPrivateKey`.
-
-(Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`):
-this named `JoinRequest` and `PendingInvite`, and `OrgRecord`'s typed fields
-included `admin_member_key`. The Join request and the pending Invite leave
-org-node with the invitation exchange; the joiner's details reach
-`admit_member` as a `Joiner`, and the store holds `ProvisionalUpdate`s; the
-owner ruled that there is no administrator key anywhere in org-node.)
-
-**LLR-q6n25z**: `PersonaDetails::parse(handle: &str, name: &str, surname:
-&str) -> Result<PersonaDetails, OrgNodeError>` returns the three values parsed
-by `Handle::parse`, `Name::parse` and `Surname::parse`, in that order, each
-in the NFC form those parses produce — the form in which a Persona created
-from them is stored, listed and exported in its Join request — and
-refuses the first that does not parse with `OrgNodeError::InvalidField` whose
-`field` is `persona.handle`, `persona.name` or `persona.surname`, so a caller
-that parses through it before `OrgService::create_persona` creates nothing for
-a refused detail; a Persona record loaded from a store parses its details
-through it.
-satisfies: REQ-qn2erx
-superseded-by: LLR-rjphn4
-
-(Amended 2026-10-04 after independent review round 2: the item did not say
-that the parsed values are in NFC, although that is what is stored, listed
-and exported for a Persona whose details were given in another normal form;
-see "Observable changes".)
-
-**LLR-8bum44**: opening a Persona store, or decoding a record snapshot
-(`first_admission_base`), whose decoded content holds a handle, name, surname
-or key that its type's parse refuses fails as a whole with
-`OrgNodeError::InvalidField`. Its `field` names the field that failed
-(`persona.*`, `org.*`, `member.*`, `provisional.*`), and nothing is opened or
-extended. Each key is parsed by its own type: a Member-as-a-group key as a
-`PersonPublicKey` (X25519), a DevicePublicKey as a `DevicePublicKey`, and an
-Organisation public key as an `OrgPublicKey` (LLR-mmdu38). A member
-snapshot's DevicePublicKeys are held as a list of parsed keys, so a repeated
-key or more than four is not refused here; org-members refuses them, as a
-`Trie` error, when the members are rebuilt.
-satisfies: REQ-qn2erx
-superseded-by: LLR-7yu2xy
-
-*Amended 2026-10-05 (owner ruling of that day, change
-`worktree-org-node-chain-authority`; written by change
-`worktree-person-shared-types`, docs/plans/2026-10-05-switch-trim.md).* This
-item said 'curve point' for every key; the keys now have three kinds, each
-parsed by its own type. REQ-qn2erx still says "not a curve point", master's
-wording; this item reads it as "not a valid key of its kind".
-
-(Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`):
-this also covered importing a Join request (`join_request.*`) and an Invite,
-and named the pending Invite's fields (`pending_invite.*`). REQ-qn2erx was
-amended by the same ruling to drop both imports, which move to the app's edge;
-the store's provisional updates hold Organisation public keys and member
-snapshots, parsed on open like the rest (`provisional.*`).)
-
-(Amended 2026-10-04 after independent review: the record snapshot decoded by
-`first_admission_base` and the Invite import were refused by the code but not
-stated here, so nothing required them or traced their tests; both are now
-part of the item, the error named as `InvalidField` rather than "an error
-whose text names the field".)
-
-(Amended 2026-10-05 after independent review round 4: "key" here is each key's
-curve-point parse. A member snapshot's device key set is held as a list of
-parsed `P2pDeviceKey`s, not as a `P2pDeviceSlots`, so a repeated key or more
-than four keys is not refused here; org-members refuses them when the members
-are rebuilt (`Trie(DuplicateDevice)`, `Trie(DeviceSlotsFull)`,
-`Trie(EmptyDeviceList)`), by owner ruling narrowing REQ-qn2erx to match.)
-
-(Amended 2026-10-05 by the org-node type-safety change, review round 7: moved
-here from SDD-vee2fq, which is named for the Join request and Invite decode,
-along with SDD-rx2yvy for the import operations and SDD-8cpyfa for
-`first_admission_base`.)
-
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* "opening a Persona store" is
-`PersonaStore::unseal` (LLR-bg538c); the Persona record's Device public key is
-parsed too (`persona.device_key`). The Invite and reply parse returns in task
-T6.
-
 ## SDD-vee2fq — Out-of-band exchange blobs
 
 `org-node/src/blobs.rs` (`JoinRequest`, `RawJoinRequest`,
 `decode_join_request`): what is refused when a decoded Join request or Invite
-does not parse. Also constrained by LLR-8bum44 and LLR-g76zqd, under
+does not parse. Also constrained by earlier forms of LLR-7yu2xy and LLR-pv2rdy, under
 SDD-af5vnt above. No requirement of this change sits under it.
 
 (Amended 2026-10-05 by the org-node type-safety change, review round 7: this
 section claimed the store open and the record-snapshot decode, which are
-`store.rs`'s and `first_admission_base`'s, and held LLR-8bum44. The
+`store.rs`'s and `first_admission_base`'s, and held an earlier form of LLR-7yu2xy. The
 requirement moved to SDD-af5vnt.)
 
 (Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`):
 `blobs.rs` is removed with the invitation exchange, which moves to the app.
 SDD-vee2fq now states that boundary (`2026-10-03-decomposition.md`); the
-Join request decode this section named, and LLR-8bum44's and LLR-g76zqd's
-clauses for it, are withdrawn there and here.)
+Join request decode this section named, and the clauses for it in earlier forms of LLR-7yu2xy and
+LLR-pv2rdy, are withdrawn there and here.)
 
 ### Observable changes
 
-Recorded 2026-10-04, from the code as merged (T1–T5 of
-`docs/plans/2026-10-04-org-node-type-safety.md`). Every value that was
+Recorded 2026-10-04, from the code as merged (T1–T5). Every value that was
 accepted and used before is still accepted; these refusals and error values
 change:
 
 - **Persona creation** takes a parsed `Handle`, `Name` and `Surname`
   (`OrgService::create_persona`); an invalid one is refused where the Persona
   is created — the app's `create_persona` command parses the three through
-  `PersonaDetails::parse` (LLR-q6n25z) and refuses with the field's name as
+  `PersonaDetails::parse` (an earlier form of LLR-rjphn4) and refuses with the field's name as
   prefix (`handle: …`, `name: …`, `surname: …`), creating nothing. It used to be stored, then refused at `create_organisation`
   (`Trie(InvalidHandle)` / `Trie(FieldTooLong)`) or on the administrator's
   device at admission.
 - **Persona details in NFC** (added 2026-10-04 after independent review
   round 2): a handle, name or surname given in a non-NFC form is canonicalised
-  to NFC when the Persona is created (`PersonaDetails::parse`, LLR-q6n25z), so
+  to NFC when the Persona is created (`PersonaDetails::parse`, an earlier form of LLR-rjphn4), so
   what is stored, listed (the app's `PersonaDto`) and exported in a Join
   request changes for such input — `"jose\u{0301}"` becomes `"jos\u{e9}"`. It
   used to be stored and exported as given, and canonicalised only when it
@@ -516,7 +331,7 @@ change:
   Join request import canonicalises the same way (extended 2026-10-05 after
   independent review round 3): `OrgService::import_join_request` parses each
   detail through `Handle::parse`, `Name::parse` and `Surname::parse`
-  (LLR-8bum44), so a Join request whose details are not in NFC imports with
+  (an earlier form of LLR-7yu2xy), so a Join request whose details are not in NFC imports with
   them in NFC, and the app's `import_join_request` command shows the NFC text
   (`"jos\u{e9}"` for `"jose\u{0301}"`); it used to show them as received.
 - **Persona store open** refuses a store holding an invalid handle, name,
@@ -589,7 +404,7 @@ change:
   `OrgSecret([REDACTED])` (LLR-sz4xhc, LLR-bwb9pu), and the store key renders
   `StoreKey([REDACTED])` (LLR-scgk5j). Each of these fields used to render as
   the plain string, byte array or number, with the secrets in clear
-  (PR-hqwpg9). Assessment: the secret half is REQ-y7tsft, and the rest
+  (the resolved problem report on secret key material in debug output). Assessment: the secret half is REQ-y7tsft, and the rest
   redacts personal data and shortens identifiers, which supports the same
   aim. No operation's result changes. A diagnostic, log search or test that
   matched a full handle, key or root in `Debug` output no longer finds it.
@@ -608,7 +423,7 @@ change:
     `SequenceNumber`, re-exported at the crate root;
     `store::PersonaDetails { handle, name, surname }` with
     `PersonaDetails::parse(&str, &str, &str) -> Result<PersonaDetails,
-    OrgNodeError>` (LLR-q6n25z); `blobs::decode_join_request`;
+    OrgNodeError>` (an earlier form of LLR-rjphn4); `blobs::decode_join_request`;
     `chain_read::org_state_from_chain(on_chain_client::OrgState) ->
     Result<OrgState, OrgNodeError>` (was the private `map_state`, infallible);
     `chain_read::OrgStateCache` with `new(OrgId)`, `store_fetched(Option<
@@ -661,7 +476,7 @@ change:
     P2pDeviceKey`; `JoinRequest.handle/.name/.surname` are `Handle`, `Name`,
     `Surname` and `.member_key/.device_key` `P2pMemberKey`/`P2pDeviceKey`;
     the fields of `PersonaRecord`, `OrgRecord`, `MemberSnapshot` and
-    `PendingInvite` hold the types listed in LLR-g76zqd (all were `String`,
+    `PendingInvite` hold the types listed in an earlier form of LLR-pv2rdy (all were `String`,
     `[u8; 32]` or `u64`).
   - *Test seams* (`test-support` only): `test_fixtures::ADMIN_DEVICE_SEED` is
     removed; `member_key`, `device_key`, the `Display`/`Copy` probes

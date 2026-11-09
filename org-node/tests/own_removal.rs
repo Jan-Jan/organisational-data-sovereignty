@@ -705,7 +705,7 @@ fn a_missing_device_secret_is_refused_before_anything_is_deleted() {
 
 // Abnormal: a removal of a Persona with no MemberId is refused before
 // anything is signed, and the store is left as it was.
-// verifies: LLR-5tvn7g, PR-m9betm
+// verifies: LLR-5tvn7g
 #[test]
 fn a_removal_of_a_persona_with_no_member_id_is_refused_with_nothing_deleted() {
     let others = vec![snapshot(2, "bob", 0x11, &[0x21])];

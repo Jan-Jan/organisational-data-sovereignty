@@ -14,7 +14,6 @@ asks, show the user each one's result — in step, adopted, removed, behind
 with the chain's epoch, inconsistent with its reason, or unverified with its
 reason — and, for an Organisation reported behind, ask org-io to request it
 from its Members as REQ-vgn96n states, with no user step.
-supersedes: REQ-363366
 satisfies: derived
 
 From org-io's verify requirement ("when the app starts and whenever the app
@@ -29,14 +28,14 @@ and verification also runs every interval while the app runs (REQ-5q7nyg).
 every Organisation and provisional founding it holds once every
 verification interval, besides when it starts and whenever the user asks,
 and show each result as REQ-akeah6 states.
-(implements: RC-c5tpre)
+implements: RC-c5tpre
 satisfies: derived
 
 **REQ-vgn96n**: The software shall, when org-io's verification reports an
 Organisation behind, ask org-io to request that Organisation from its
 Members with no user step, and ask again at each verification interval until
 a verification reports it in step or adopted.
-(implements: RC-c5tpre)
+implements: RC-c5tpre
 satisfies: derived
 
 **REQ-ergn9z**: The software shall read the verification interval from its
@@ -53,35 +52,36 @@ parsed at the system edge, as every configured value is.
 admission, show the Admin the invitee name they typed for that Invite beside
 the admission request's name, surname and DevicePublicKey, and ask org-io to
 propose it only once the Admin confirms.
-(implements: RC-rv4xhs)
+implements: RC-rv4xhs
 satisfies: derived
 
 **REQ-s3vnmh**: The software shall, when org-io reports that an admission
 request was refused because another Device already used the invite, show the
 user a prominent error stating that and telling them to contact the inviter.
-(implements: RC-rv4xhs)
+implements: RC-rv4xhs
 satisfies: derived
 
 **REQ-pe2c7u**: The software shall, when org-io reports a provisional change
 it discarded because an adopted epoch left it out, show the Admin a notice
 naming the Member and the kind of change until the Admin dismisses it, and
 offer to propose the change again.
-(implements: RC-8h344c)
+implements: RC-8h344c
 satisfies: derived
 
 **REQ-qv4d2z**: The software shall, when org-io's verification reports
 adopted an epoch this node wrote, ask org-io once, at once and with no user
 step, to send it to every Device it concerns, and show the Admin the outcome
 for each Device, offering no retry.
-(implements: RC-c5tpre)
+implements: RC-c5tpre
 satisfies: derived
 
 *Amended in place 2026-10-16 (unmerged draft; owner ruling Q1 of
 2026-10-16):* send once. The way to ask org-io to send again is withdrawn: a
 Device the single send missed is behind at its next periodic verification
 and requests the Organisation (REQ-vgn96n), and a revoked Device is answered
-with its revocation notice when it asks. RC-526ayz, which this item
-implemented, is superseded by RC-c5tpre.
+with its revocation notice when it asks. The control this item implements
+is RC-c5tpre, which replaced the earlier control of a first send with
+manual retries.
 
 **REQ-y53dqn**: The software shall, when it starts, ask org-io for every
 admission request it keeps for each Organisation it holds, and show each
@@ -107,8 +107,7 @@ that the request will reveal the name, surname and preferred Handles entered
 to the Device the Invite names; shall ask org-io to send it only once the user
 confirms; and shall ask org-io to retry that same request with no further
 confirmation.
-(implements: RC-dfzb5q)
-supersedes: REQ-ab2mfz
+implements: RC-dfzb5q
 satisfies: derived
 
 The warning is the same information for safety as before, moved to the step
@@ -119,7 +118,6 @@ did not.
 propose a Person, a founding, a Member, an admission or a revocation, when
 to propose the updated Organisation and when to write it to the chain; and
 shall hand each to org-io and show the outcome org-io returns.
-supersedes: REQ-m8sgjk
 satisfies: derived
 
 The single submission is split into proposing, writing, verifying and

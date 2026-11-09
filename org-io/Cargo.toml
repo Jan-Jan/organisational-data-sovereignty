@@ -112,7 +112,7 @@ name = "dev_seed_env"
 path = "tests/dev_seed_env.rs"
 required-features = ["dev-seed"]
 
-# The keychain module (LLR-677fqq, LLR-8erfbu, LLR-n9dnm4), over
+# The keychain module (LLR-677fqq, LLR-8erfbu, LLR-kna4zj), over
 # `test_support::MemoryKeychain`: its tests install keyring's process-global
 # default credential builder, so they run in their own binary, one at a time.
 [[test]]
@@ -142,7 +142,7 @@ path = "tests/signatory_key.rs"
 required-features = ["test-support"]
 
 # The store files (LLR-nt8dja, LLR-b9bm36, LLR-murjr6, LLR-uzax55,
-# LLR-amv4mb), over `test_support::MemoryKeychain`: each test
+# LLR-vj2nkb), over `test_support::MemoryKeychain`: each test
 # installs its own, so they run one at a time in their own binary.
 [[test]]
 name = "store_files"

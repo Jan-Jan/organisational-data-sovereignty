@@ -1,30 +1,10 @@
 # Problem reports — org-node, the revocation precondition
 
-Opened by the architecture tooth
-(`docs/plans/2026-10-03-org-node-architecture.md`) while writing the test for
+Opened by the architecture tooth while writing the test for
 the Loopback revocation's refusal without an address, after review round 3
 found that clause stated in no low-level requirement. *(That item moved to
 org-io with the send, 2026-10-13, S4 task T12; its ID left the `affects:`
 line below, which names org-node's items alone.)*
-
-**PR-b9wab3**: `revoke_member` in Loopback mode submits the new Membership root
-on chain before it checks that it was given a peer address, so a call with no
-address advances the on-chain epoch and then refuses, leaving the published
-root without the member while the administrator's own record still holds them.
-affects: SDD-72ddm6, LLR-6dc598, LLR-qg9utu
-opened: 2026-10-04
-status: resolved
-resolution: root cause — `revoke_member` wrote the chain before checking the
-Loopback address it would need to send. Change
-worktree-org-node-chain-authority (docs/plans/2026-10-05-chain-authority.md,
-T11) removed the chain write from org-node: `revoke_member` builds a
-provisional update and touches neither the chain nor the record, and the
-address check moved to `send_update`, which runs after a commit the chain
-already agrees with, so a missing address can no longer burn an epoch.
-Reproduced by inverting the pin in
-`a_loopback_revocation_without_an_address_burns_no_epoch`
-(org-node/tests/admission_sender.rs): red before (the chain at epoch 3),
-green after.
 
 ## What was observed
 
@@ -73,6 +53,6 @@ of its own — this one is an architecture ledger and must not alter production
 ordering under cover of documenting it.
 
 *Annotated 2026-10-05 by review round 1 of `worktree-worktree-person-shared-types`
-(finding-6); reworded the same day by docs/plans/2026-10-05-switch-trim.md.* The
+(finding-6); reworded the same day.* The
 items the `affects:` line names are amended in place on that branch rather
 than superseded, so the line names them alone.

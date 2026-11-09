@@ -23,7 +23,8 @@ only one kept; a later one from the same Device, as the transport
 authenticated it, is answered as already received, and one from any other
 Device is refused with a refusal its sender is told of, so that an invitee
 whose invite another Device used first sees a loud error and can tell the
-Admin over another channel. mitigates: HAZ-8u3sv8
+Admin over another channel.
+mitigates: HAZ-8u3sv8
 
 What this control breaks: an invitee whose first request was lost and who
 retries from another Device is refused. That is the intended outcome — one
@@ -205,7 +206,8 @@ first; with several Admins it would be P2.
 
 **RC-dv6mka**: every provisional change an adopted epoch left out is reported
 to the app when it is discarded, so the Admin is told that their revocation
-was not applied and can propose it again. mitigates: HAZ-b5rudd
+was not applied and can propose it again.
+mitigates: HAZ-b5rudd
 
 What this control breaks: nothing; it adds a report.
 
@@ -213,7 +215,7 @@ What this control breaks: nothing; it adds a report.
 with access. Not acceptable under the matrix; **accepted by the owner
 (2026-10-15)** while the demo has a single Admin. Carrying a left-out
 revocation over to the new epoch, and Admins who disagree, are a later
-roadmap stage (`docs/plans/2026-10-06-org-io-roadmap.md`).
+roadmap stage.
 
 ## Acting on one's own removal
 
@@ -222,8 +224,8 @@ roadmap stage (`docs/plans/2026-10-06-org-io-roadmap.md`).
 2026-10-20.* After a Device verifies its own revocation it deletes at once,
 with no user step, everything it holds for that Organisation except the
 acknowledgements it must send, each deleted on acceptance and the rest 7
-days after the verification. The two controls below supersede RC-wqgm2p
-(`2026-09-09-org-node-hazards.md`) and RC-44vvjp
+days after the verification. The two controls below supersede an earlier form of RC-5jkcxz
+(`2026-09-09-org-node-hazards.md`) and an earlier form of RC-45k3zg
 (`2026-10-07-commit-workflow.md`); the hazards they bear on, HAZ-vxabf9 and
 HAZ-h6b34a, are unchanged in their text and re-estimated here.
 
@@ -235,13 +237,13 @@ answer to the Device's organisation request — the node deletes at once, in
 one sealed store image and without asking its user, every piece of data it
 holds for that Organisation and every key the store holds for each Persona
 bound to it, keeping only the acknowledgements RC-45k3zg keeps; verification
-deletes nothing in any other case. mitigates: HAZ-vxabf9
-supersedes: RC-wqgm2p
+deletes nothing in any other case.
+mitigates: HAZ-vxabf9
 
 Implemented by REQ-48zc3e, with REQ-y9p27b keeping the single trigger
-(RC-ub82my). Still a cooperative control, as RC-wqgm2p was: a Device that
+(RC-ub82my). Still a cooperative control, as an earlier form of RC-5jkcxz was: a Device that
 never learns of its removal, or has been altered not to act on it, deletes
-nothing. What it changes from RC-wqgm2p: the trigger is verification (at
+nothing. What it changes from an earlier form of RC-5jkcxz: the trigger is verification (at
 start, on request and each periodic interval, the app's ledger) or a notice
 the Device receives, including in answer to its own request, so a
 cooperating Device that missed the single send learns of its removal within
@@ -260,8 +262,8 @@ verification; it deletes an acknowledgement, with its recipient's key and
 addresses, once the recipient answers it accepted; and whatever is left is
 deleted by its caller, which removes the Persona's store file and keychain
 item as soon as no acknowledgement is left and at the latest 7 days after
-that time, delivered or not. mitigates: HAZ-h6b34a
-supersedes: RC-44vvjp
+that time, delivered or not.
+mitigates: HAZ-h6b34a
 
 Implemented by REQ-48zc3e (what is kept), REQ-h29c8e (signing before the
 deletion, the Device secret key transient), REQ-6tepxq (how many, for whom)
@@ -330,7 +332,7 @@ warrants, and the 7-day bound ends the exposure whatever is delivered.
 ## A received Organisation private key
 
 *Owner decision of 2026-10-20; recorded 2026-10-21.* Receipt reads no chain
-(owner ruling R2 of 2026-10-15), so RC-9cefcn
+(owner ruling R2 of 2026-10-15), so an earlier form of RC-5gbgwb
 (`2026-10-07-org-key-pair.md`), which checks a received key against the
 chain's `org_pub_key` on receipt, no longer describes the software. The
 owner approved this successor, which splits the check between receipt and
@@ -344,7 +346,6 @@ never a public key stated beside it; at verification, that provisional
 organisation is adopted only when that derived public key is the one the
 chain holds for the Organisation, and otherwise nothing of it is adopted.
 mitigates: HAZ-ep6uzs
-supersedes: RC-9cefcn
 
 *Amended in place 2026-10-21 (unmerged draft; owner decision of that day):*
 the receipt half no longer compares the key with a public key the
@@ -354,10 +355,10 @@ fail and no test could exercise it. Deriving it is what makes the chain match
 at verification a check on the key actually received.
 
 Implemented by REQ-zxgd46 (the receipt half, with no chain read; it
-supersedes REQ-c29s93, whose "before it reads the chain" assumed a chain
+supersedes an earlier form of REQ-zxgd46, whose "before it reads the chain" assumed a chain
 read at receipt) and REQ-dwb9bq (the verification half: a provisional
 organisation is adopted only when its Organisation public key is the
-chain's). What it breaks: as RC-9cefcn — a genuine update relayed by a peer
+chain's). What it breaks: as an earlier form of RC-5gbgwb — a genuine update relayed by a peer
 that strips or alters the key is refused, or, if it decodes, is kept unused
 and never adopted, and the update arrives again from the next correct sender
 or is pulled at the next verification. No new hazard.
@@ -399,25 +400,25 @@ Controlled under HAZ-cuj9gn (RC-d4fc4s). The judgement keeps RC-ub82my: a
 state behind the record, or at its epoch with another root, is still refused.
 
 *Re-assessed 2026-10-20 (consistency pass; REQ-dwb9bq now also supersedes
-REQ-bwx7eg):* RC-9cefcn's refusal of a substituted Organisation private key
+an earlier form of REQ-dwb9bq):* an earlier form of RC-5gbgwb's refusal of a substituted Organisation private key
 on receipt is no longer made there, because receipt reads no chain. Its
 effect on HAZ-ep6uzs is kept at verification: the public key of a received
 provisional organisation is derived from the private key it carries, and
 only one whose public key is the chain's is adopted, so a substituted key is
 kept unused until it is discarded and never becomes the record's key.
-REQ-c29s93 (a message carrying no key, or one that does not decode, refused
-before anything is kept) still implements RC-9cefcn. The control's own text,
+An earlier form of REQ-zxgd46 (a message carrying no key, or one that does not decode, refused
+before anything is kept) still implements an earlier form of RC-5gbgwb. The control's own text,
 which says the whole message is refused, now describes more than the code
 does at receipt; its rating is unchanged, and restating it is left to the
 owner.
 
 *Amended in place 2026-10-21 (unmerged draft; owner decision of
 2026-10-20):* the owner restated the control: RC-5gbgwb supersedes
-RC-9cefcn, its receipt half implemented by REQ-zxgd46 (which supersedes
-REQ-c29s93) and its verification half by REQ-dwb9bq; HAZ-ep6uzs's residual
+an earlier form of RC-5gbgwb, its receipt half implemented by REQ-zxgd46 (which supersedes
+an earlier form of REQ-zxgd46) and its verification half by REQ-dwb9bq; HAZ-ep6uzs's residual
 is unchanged (S3/P1, owner-accepted 2026-10-07), as stated under "A received
 Organisation private key" above. REQ-zxgd46 adds no hazard: it refuses at
-receipt, with no chain read, what REQ-c29s93 refused, and a key whose public
+receipt, with no chain read, what an earlier form of REQ-zxgd46 refused, and a key whose public
 half is not the provisional organisation's own stated key.
 assesses: REQ-9ktgwx, REQ-dwb9bq, REQ-g2537c, REQ-zxgd46
 
@@ -507,7 +508,7 @@ authenticated key (REQ-6qxesy, C4) closes a way for one Device to request
 admission for another key; it strengthens RC-sp46zh, whose "same Device, as
 the transport authenticated it" now holds of the key the request names too.
 
-REQ-x2dnee now also supersedes REQ-hhva9d (C5): no command discards a
+REQ-x2dnee now also supersedes an earlier form of REQ-x2dnee (C5): no command discards a
 provisional change or organisation on request; discarding is automatic only,
 as already assessed under the batched epochs and in org-io's ledger. No new
 hazard.
@@ -526,7 +527,7 @@ it accepted, acts only after the removal was verified and deletes only that
 acknowledgement and its recipient's key and addresses; a wrong "accepted"
 costs at most an acknowledgement not delivered, which is HAZ-h6b34a's
 benefit side, not a wrong deletion of Organisation data. REQ-h29c8e is
-REQ-y99c9w's signing unchanged, the refusal with nothing deleted when no
+an earlier form of REQ-h29c8e's signing unchanged, the refusal with nothing deleted when no
 Device secret key is given included, so a missing keychain item still never
 deletes a Device's data without its acknowledgements. REQ-6tepxq draws the
 recipients from the record before the removal, which lists only Devices the
@@ -538,7 +539,7 @@ assesses: REQ-48zc3e, REQ-y9p27b, REQ-h29c8e, REQ-6tepxq, REQ-ayyt5f, REQ-35s4eb
 
 ### No panic on any received body (merge review round 2, MR2-N1, 2026-10-30)
 
-REQ-rv4dwb supersedes REQ-bcxz96 and realises RC-e2uvje against HAZ-5f9jcm
+REQ-rv4dwb supersedes an earlier form of REQ-rv4dwb and realises RC-e2uvje against HAZ-5f9jcm
 on receipt. With `verify_envelope_against_chain` deleted, a received Change
 set is applied on receipt: Organisation information from a Device the
 current record lists is applied to that record, and in a store with no
@@ -624,22 +625,21 @@ assesses: LLR-73sgz2, LLR-5uf4u2
 
 Three derived items restate, over the operations of this change, dated
 derived items whose operations it removes; each was assessed where it was
-first written (`2026-10-03-architecture-derived.md`, sections C, E and F)
-and none changes what those assessments rest on.
+first written (`2026-10-03-architecture-derived.md`, sections C and E, and
+a section F since removed as history) and none changes what those assessments rest on.
 
-- **The Persona's status and binding** (LLR-exaa9u, after LLR-w3fhhg): no
+- **The Persona's status and binding** (LLR-exaa9u, after an earlier form of LLR-exaa9u): no
   hazard impact because a Persona becomes Active only at the first adoption
   in its own store, which follows verification against the chain (RC-d4fc4s),
   and its Organisation is fixed for the life of the store (REQ-yp75u9); a
   store holds one Persona, so no other Persona's status or binding can be
   written by mistake, the failure section F guarded against.
-- **The proxy account held opaquely** (LLR-x5asbx, after LLR-dzte8x,
-  LLR-3v5nu9 and LLR-drgdy8): no hazard impact because org-node derives
+- **The proxy account held opaquely** (LLR-x5asbx, after earlier forms of LLR-x5asbx): no hazard impact because org-node derives
   nothing from the account and writes nothing to the chain; the account
   only tells org-io where to write the next epoch, and a wrong or missing
   one makes that write refused or its verification fail, which adopts
   nothing (RC-d4fc4s).
-- **What a joining Device composes** (LLR-96z2k5, after LLR-836z24): no
+- **What a joining Device composes** (LLR-96z2k5, after an earlier form of LLR-96z2k5): no
   hazard impact because the one path is the parsed admission request, whose
   sender binding (REQ-6qxesy) and outstanding-invite check were assessed
   above under the admission request, and a Member it names joins a record
@@ -652,10 +652,10 @@ assesses: LLR-exaa9u, LLR-x5asbx, LLR-96z2k5
 
 Two derived items restate, over the operations of this change, dated
 derived items it removes or contradicts; each dated item was assessed where
-it was first written (`2026-10-03-architecture-derived.md`, sections C and
-the dialling-address entry).
+it was first written (`2026-10-03-architecture-derived.md`, section C and
+a dialling-address entry since removed as history).
 
-- **A new Persona's status and binding** (LLR-t2adzg, after LLR-v82xds): no
+- **A new Persona's status and binding** (LLR-t2adzg, after an earlier form of LLR-t2adzg): no
   hazard impact because a Persona is created Proposed with no member id and
   becomes Active, with its member id, only at the first adoption in its own
   store, which follows verification against the chain (RC-d4fc4s); a
@@ -663,7 +663,7 @@ the dialling-address entry).
   Organisation, which is fixed for the life of the store (REQ-yp75u9), so
   it cannot be bound to another Organisation later.
 - **Which values carry endpoint addresses** (LLR-ds228z, after
-  LLR-qezw3n): no hazard impact because org-node still dials nothing and
+  an earlier form of LLR-ds228z): no hazard impact because org-node still dials nothing and
   names no transport address; the addresses it now holds and returns are
   the ones owner answer A2 of 2026-10-16 put in the Invite and the
   requests, a disclosure of where a Device can be reached to the Devices it
@@ -674,9 +674,9 @@ the dialling-address entry).
 
 assesses: LLR-t2adzg, LLR-ds228z
 
-### The issuer's addresses kept at the first adoption (PR-8sgsb5, 2026-10-25)
+### The issuer's addresses kept at the first adoption (the resolved problem report on the issuer's addresses lost on first adoption, 2026-10-25)
 
-LLR-q4puca and LLR-h9d65p, amended in place for PR-8sgsb5: a provisional
+LLR-q4puca and LLR-h9d65p, amended in place for the resolved problem report on the issuer's addresses lost on first adoption: a provisional
 Member's first adoption moves the Invite issuer's DevicePublicKey and
 addresses into the address book. No new hazard: the addresses are the ones
 the Invite already disclosed to this Device and the store already held (the

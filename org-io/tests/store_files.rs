@@ -7,8 +7,8 @@
 //! Persona, named for its Device key, written atomically, removed when its
 //! Persona is forgotten, and opened at startup through each Persona's
 //! keychain item; a failed write or removal reloads the Persona from its
-//! file. LLR-nt8dja, LLR-b9bm36, LLR-murjr6, LLR-uzax55, LLR-n9dnm4,
-//! LLR-amv4mb, REQ-6d9xv6 as narrowed (an ordinary save needs no keychain),
+//! file. LLR-nt8dja, LLR-b9bm36, LLR-murjr6, LLR-uzax55, LLR-kna4zj,
+//! LLR-vj2nkb, REQ-6d9xv6 as narrowed (an ordinary save needs no keychain),
 //! and LLR-85zque, per Persona.
 //!
 //! Every test runs over a fresh directory and over org-io's in-memory
@@ -143,8 +143,7 @@ fn the_listing_ignores_every_other_name() {
 
 // ---- LLR-b9bm36: the atomic write -------------------------------------------
 
-// It reproduces PR-n696wv.
-// verifies: LLR-b9bm36, PR-n696wv
+// verifies: LLR-b9bm36
 #[test]
 fn the_file_holds_exactly_the_sealed_bytes() {
     let (_guard, _keychain, dir) = fresh("exact-bytes");
@@ -160,8 +159,7 @@ fn the_file_holds_exactly_the_sealed_bytes() {
 
 // Abnormal: the write is cut off after the temporary file is written and
 // before it replaces the store file.
-// It reproduces PR-n696wv.
-// verifies: LLR-b9bm36, PR-n696wv
+// verifies: LLR-b9bm36
 #[test]
 fn a_write_interrupted_after_the_temporary_leaves_the_old_store_unsealing() {
     let (_guard, _keychain, dir) = fresh("interrupted");

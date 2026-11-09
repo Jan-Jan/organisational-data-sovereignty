@@ -6,7 +6,7 @@ requirements of `app/docs/requirements/2026-10-14-domain-api.md`
 (REQ-akeah6, REQ-88npkt, REQ-s3vnmh, REQ-pe2c7u, REQ-qv4d2z, REQ-2yh3c8,
 REQ-vb5pag, REQ-k7ay5b, and since 2026-10-20 REQ-5q7nyg, REQ-vgn96n,
 REQ-ergn9z and REQ-y53dqn) and keeps the unit's earlier requirements that are
-still in force (REQ-sjkp8z, REQ-vgr7s2, REQ-he8ejb, REQ-tw4cb5, REQ-2k7ys4,
+still in force (REQ-sjkp8z, REQ-he8ejb, REQ-tw4cb5, REQ-2k7ys4,
 REQ-dp95pv). The decisions it carries out are the two accepted records of
 this change in `docs/adr/` — `*-batched-epochs.md` (provisional changes
 batched into one proposed epoch) and `*-write-verify-send.md` (writing,
@@ -30,58 +30,30 @@ app command passes randomness (the app's `rand` leaves the SOUP, see
 `soup.md`). Every IPC command of the surface carries the org-io method's
 name.
 
-**Superseded and retired here** (each old block in its own file carries the
-reciprocal line and a dated note): SDD-rmbr3t, SDD-huk773 and SDD-jx363y
-(their responsibility text names the old commands, the reconcile and the
-reply); LLR-4wcyqy, LLR-p7dfxb, LLR-vzf8j2, LLR-6pmrma, LLR-ty85xv,
-LLR-n6twt7, LLR-8krgzj, LLR-ctrfz4, LLR-pmus9f, LLR-ekz4zn, LLR-8axx7h,
-LLR-hwcj9n, LLR-n2u4uf, LLR-bym4md and LLR-c9r5uf; LLR-pms47e is retired.
-Since 2026-10-20 this change's own LLR-ss4zmh and LLR-4jggyx are retired
-too (owner answer A2), the old items they superseded staying out of force.
-Since 2026-10-28 this change's own SDD-ktsgh5 and SDD-ckqyh3 are superseded
-in place too (round 3 review AR3-5), by SDD-swt9fs and SDD-ua2d9b, and by
-SDD-czjf2c and SDD-7aq69w.
+**Replaced here:** the earlier command surface, reconcile view and
+revocation input decision, whose responsibility text named the old commands,
+the reconcile and the reply, and their low-level requirements for the old
+commands, the reconcile, the Invite reply and the Persona offer of a reply.
+Since 2026-10-28 this change's own verification view and pre-command
+decisions are split (round 3 review AR3-5), into SDD-swt9fs and SDD-ua2d9b,
+and into SDD-czjf2c and SDD-7aq69w.
 
-**The peer address in Loopback.** The Invite now carries the issuing
-Device's endpoint addresses (owner ruling R4), so the invitee needs no
-pasted address to reach the inviter, and the admission takes none: the
-Invite reply's peer address (LLR-ctrfz4) has no successor on
-`propose_admission`. Loopback still needs one elsewhere. A Device the new
-epoch removes is named by no Invite, and in Loopback org-io dials only an
-address it holds whose identity is the recipient's (org-io's Loopback
-identity check), so a revocation notice, and Organisation information to a
-newly admitted Device, still need an address the Admin supplies. REQ-vgr7s2
-(in force) keeps the requirement; with sending split from proposing, the
-address moves from the revocation command to `send_organisation`, where the
-send happens: blank is absent (LLR-ss4zmh), a non-blank one is decoded and
-refused when it fails (LLR-4jggyx), and the webview requires one only for a
-send it repeats in Loopback (LLR-zqy3tq). The automatic send after adoption
-passes none; in Loopback a Device org-io holds no address for is reported
-failed, and the Admin retries it with the address. org-io's
-`send_organisation` therefore takes an optional Loopback address, the
-value the app's `revoke_member` handed to `submit_commit_send` before this
-change.
-
-*Amended in place 2026-10-20 (unmerged draft; owner answer A2 and rulings
-Q1, Q2 of 2026-10-16):* the paragraph above is withdrawn. An admission
-request and an organisation request carry the sender's own endpoint
-addresses, which org-io keeps for that Device's key, so org-io reaches every
-Device it sends to at addresses it holds, and the app takes, parses and
-passes no peer address anywhere: `send_organisation` and
-`request_organisation` are asked with the Organisation alone. LLR-ss4zmh and
-LLR-4jggyx are retired; LLR-zqy3tq is amended in place to state that no
-pre-command decision asks for an address. The send is made once per own
-adoption and never repeated by the app (Q1), and an Organisation reported
-behind is requested with no user step (Q2), so neither `send_organisation`
-nor `request_organisation` is an IPC command any more: both are asked only
-by `verify_and_send`. The surface gains `list_admission_requests` (owner
-answer A3) and the Rust half gains a periodic verification loop
-(SDD-tgu7dp). REQ-vgr7s2 (in force) is kept by LLR-zqy3tq: a revocation is
-accepted with no peer address in every mode, and none is required in
-Loopback either, since org-io holds the removed Device's addresses.
-
-*Amended in place 2026-10-20 (unmerged draft; consistency pass):* REQ-vgr7s2
-is retired (owner decision 2026-10-20, answer A2), and LLR-zqy3tq with it;
+**The peer address.** The Invite carries the issuing Device's endpoint
+addresses (owner ruling R4), so the invitee needs no pasted address to reach
+the inviter, and the admission takes none. An admission request and an
+organisation request carry the sender's own endpoint addresses, which org-io
+keeps for that Device's key (owner answer A2 of 2026-10-16), so org-io
+reaches every Device it sends to at addresses it holds, and the app takes,
+parses and passes no peer address anywhere: `send_organisation` and
+`request_organisation` are asked with the Organisation alone. The send is
+made once per own adoption and never repeated by the app (Q1), and an
+Organisation reported behind is requested with no user step (Q2), so
+neither `send_organisation` nor `request_organisation` is an IPC command:
+both are asked only by `verify_and_send`. The surface gains
+`list_admission_requests` (owner answer A3) and the Rust half gains a
+periodic verification loop (SDD-tgu7dp). A revocation is accepted with no
+peer address in every transport mode. The unit's requirement for a peer
+address in Loopback was retired on 2026-10-20 (owner decision, answer A2);
 the earlier requirements this ledger keeps in force are REQ-sjkp8z,
 REQ-he8ejb, REQ-tw4cb5, REQ-2k7ys4 and REQ-dp95pv.
 
@@ -106,7 +78,6 @@ outcome to a DTO that carries no secret key material, returning org-io's
 refusal as its text; a follow-up SDD-6zqqm8 decides after a verification or
 a write is one more call made here.
 traces: REQ-vb5pag, REQ-akeah6, REQ-qv4d2z, REQ-pe2c7u, REQ-88npkt, REQ-2yh3c8, REQ-s3vnmh, REQ-sjkp8z, REQ-645jq9, REQ-vgn96n, REQ-y53dqn, REQ-yvzef9
-supersedes: SDD-rmbr3t
 
 *Amended 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; plan §0,
 T16g; an extension of the surface, no existing command changes meaning):*
@@ -143,7 +114,8 @@ item reads the entry by its type rather than its JSON (finding 3); they are
 still this item's, under LLR-jf63e4, LLR-73by2q and LLR-cugcu6.
 
 *Amended in place 2026-10-20 (unmerged draft; consistency pass):*
-`traces:` drops REQ-vgr7s2, retired 2026-10-20 (owner answer A2): no
+`traces:` drops the peer-address requirement, retired 2026-10-20 (owner
+answer A2): no
 command takes a peer address.
 *Amended in place 2026-10-20 (unmerged draft; owner rulings Q1, Q2 and
 answers A2, A3 of 2026-10-16):* seventeen commands, not eighteen —
@@ -156,41 +128,11 @@ included write, on a received provisional organisation and each interval
 (SDD-tgu7dp) — sends and requests alike. `traces:` gains REQ-vgn96n and
 REQ-y53dqn.
 
-The low-level requirements SDD-rmbr3t carried that still hold — LLR-5wb4vd
+The low-level requirements the earlier command surface carried that still hold — LLR-5wb4vd
 (the shared handle, no app lock), LLR-yrb6th (the receiver loop's terminal
 stop) and LLR-pguhw5 (the Persona fields) — are unchanged and now sit under
 this item. The command-boundary parses stay SDD-2pa6h6's; the ones this
 change adds are listed under that item below.
-
-**LLR-kk8gc7**: the IPC suite's handler list registers exactly these
-seventeen commands under their snake_case names: `propose_person`,
-`propose_founding_organisation`, `issue_invite`, `read_invite`,
-`propose_member`, `request_admission`, `propose_admission`,
-`propose_revocation`, `cancel_invite`, `propose_updated_organisation`,
-`write_organisation_to_chain`, `verify_organisation`,
-`list_admission_requests`, `list_personas`, `list_orgs`, `connection_status`
-and `start_receiver`; an invocation of any other name,
-`send_organisation`, `request_organisation`, `reconcile_organisations`,
-`produce_invite_reply`, `import_invite_reply`, `admit_member` and
-`revoke_member` included, is refused rather than answered; and the
-`generate_handler!` list in `app/src-tauri/src/lib.rs` names the same set, in
-exactly one `generate_handler!` list in exactly one `invoke_handler` call.
-satisfies: derived
-supersedes: LLR-4wcyqy
-
-The rule of LLR-4wcyqy is kept (one list, the same set in the product and
-the suite, anything else refused); the set and its count change, and five
-old names are now refused, so it takes a new ID.
-
-*Amended in place 2026-10-20 (unmerged draft; owner rulings Q1, Q2 and
-answer A3 of 2026-10-16):* `send_organisation` and `request_organisation`
-leave the set and are refused (no send by hand, no request by hand), and
-`list_admission_requests` joins it: seventeen, not eighteen.
-superseded-by: LLR-ce4hxz
-
-*Superseded 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; plan
-§0, T16g) by LLR-ce4hxz (`2026-11-02-publish-2.md`):* `list_removed_devices`
-joins the set, eighteen commands.
 
 **LLR-k57uqv**: `propose_person` takes `name` and `surname` and no Handle,
 calls org-io's `propose_person` once, and returns the Person's
@@ -199,7 +141,6 @@ as org-io stored them, and `status` `provisional`; a refusal names the field
 it is about (`name:` or `surname:`) and creates nothing (no Person keychain
 item, no Person file).
 satisfies: REQ-vb5pag
-supersedes: LLR-p7dfxb
 
 *Amended in place 2026-10-28 (unmerged draft; round 2 review, ARCHITECTURE
 finding-4):* a refusal crosses IPC as an object, `kind` and `message`:
@@ -298,7 +239,6 @@ free and none was chosen is returned as its text. The webview's
 `proposeAdmission(orgId, inviteId, handle, confirmed)` invokes it with those
 four values alone.
 satisfies: derived
-supersedes: LLR-8krgzj
 
 **LLR-7n4hgr**: `propose_revocation` takes `org_id` and `member_id`, strips
 at most one leading `0x` from the member identifier, refuses a remainder that
@@ -307,7 +247,6 @@ does not decode to exactly thirty-two bytes with `member_id must be 32 bytes
 (64 hex chars)`, and otherwise calls org-io's `propose_revocation` once; it
 takes no peer address and sends nothing.
 satisfies: derived
-supersedes: LLR-6pmrma
 
 **LLR-vqz4s6**: `cancel_invite` takes `org_id` and `invite_id`, calls
 org-io's `cancel_invite` once, and returns nothing on success; a refusal is
@@ -398,7 +337,6 @@ held the list is empty. org-io's `Verified::Store` and `Verified::Keychain`
 returned as `unverified` with org-io's text as `reason`, never as another
 result.
 satisfies: REQ-akeah6
-supersedes: LLR-ekz4zn
 
 *Amended in place 2026-10-28 (unmerged draft; round 3 review AR3-2
 follow-on):* org-io's refusal variant is now `Verified::Refused { error }`,
@@ -521,7 +459,6 @@ with `epoch`), `removed`, `behind` (`chain_epoch`), `inconsistent` or
 `unverified` (each with `reason`), or `not_checked` when no verification has
 run for it on this handle. The other fields of the entry are unchanged.
 satisfies: REQ-akeah6
-supersedes: LLR-8axx7h
 
 *Amended in place 2026-10-22 (unmerged draft; plan detail pass —
 dispatcher decision):* `removed` is added. org-io's last verification of an
@@ -669,28 +606,10 @@ old commands. LLR-ecaw34 (`parse_org_id`) is unchanged.
 before any other argument and before it calls org-io; on a refusal it
 returns the parser's message, and none refuses a well-formed identifier.
 satisfies: REQ-sjkp8z
-supersedes: LLR-vzf8j2
 
 *Amended in place 2026-10-20 (unmerged draft; owner rulings Q1, Q2 of
 2026-10-16):* `send_organisation` and `request_organisation` leave the list
 with the IPC surface; `list_admission_requests` takes no `org_id`.
-
-**LLR-ss4zmh**: `send_organisation` treats a `peer_addr_blob` that is
-absent, empty or only whitespace as absent. It does not decode it and does
-not refuse the request.
-satisfies: REQ-vgr7s2
-supersedes: LLR-ty85xv, LLR-ctrfz4
-retired: 2026-10-20 — owner answer A2 of 2026-10-16: requests carry the sender's own addresses, so send_organisation takes no peer address and there is none to treat as absent; the send is no IPC command (owner ruling Q1).
-
-**LLR-4jggyx**: `send_organisation` decodes a non-blank `peer_addr_blob`
-with org-io's `parse_peer_addr` — hexadecimal, then an endpoint address —
-and does not refuse one that decodes. Text that is not hexadecimal is
-refused with a message beginning `peer_addr_blob hex:`, and bytes that are
-not an endpoint address with one beginning `peer_addr decode:`; neither is
-dropped, and on a refusal nothing is sent.
-satisfies: derived
-supersedes: LLR-n6twt7, LLR-ctrfz4
-retired: 2026-10-20 — owner answer A2 of 2026-10-16: no peer address is pasted or decoded in the app any more; org-io sends to the addresses each Device's own request carried.
 
 **LLR-r8jeu8**: `propose_admission` and `cancel_invite` strip at most one
 leading `0x` from `invite_id` and refuse a remainder that is not hexadecimal
@@ -818,7 +737,6 @@ outcome that states an epoch or root. A `ProvisionalReceived` outcome is
 announced by no event of its own: the at-once verification it triggers
 (LLR-w7m3d4) announces its result (LLR-8grnbb).
 satisfies: REQ-k7ay5b
-supersedes: LLR-bym4md
 
 *Amended in place 2026-10-22 (unmerged draft; plan detail pass —
 dispatcher decision):* the last sentence is added; the item was silent on
@@ -831,7 +749,6 @@ org-io's "revocation notice kept" to a `RevocationNoticeKept` outcome naming
 the Organisation, announced by no event and stating no epoch, and an
 acknowledgement to `AcknowledgementReceived`.
 satisfies: REQ-tw4cb5, REQ-k7ay5b
-supersedes: LLR-bym4md
 
 *Amended in place 2026-10-20 (unmerged draft; consistency pass):* it mapped
 "an accepted revocation notice, or a received message that removed this
@@ -865,13 +782,11 @@ to an `AdmissionRequested` outcome, announced as exactly one
 `name`, `surname` and `preferred_handles` in order, and its
 `device_public_key` (64), verbatim.
 satisfies: REQ-88npkt
-supersedes: LLR-bym4md, LLR-pmus9f
 
 **LLR-t9rdf8**: `outcome_for_arrival` maps org-io's "organisation request
 answered" to an `OrganisationRequestAnswered` outcome naming the
 Organisation and the requesting Device, which is announced by no event.
 satisfies: derived
-supersedes: LLR-bym4md
 
 **LLR-wgr46u**: `classify_receive_error` takes the refusal org-io's
 `ReceiveError::Refused` carries, of type `org_io::node::OrgNodeError` (the
@@ -884,10 +799,9 @@ classifies every other variant of that type as `ReceiveError`, carrying the
 error's message, with no wildcard arm, so a variant org-io's type gains is
 a compile error in the app until it is classified.
 satisfies: REQ-kn5rtx
-supersedes: LLR-7bk6qh
 
 *Added 2026-10-21 (owner decision of 2026-10-20; consistency pass).*
-LLR-7bk6qh named variants org-io's re-exported type no longer has
+The item it replaced named variants org-io's re-exported type no longer has
 (`NoProvisionalUpdate`, `PersonaAlreadyBound`, `OrgKeyMismatch`) and
 omitted those it gained, through which every refusal of org-io's
 chain-free receive step now reaches the app (a sender not listed, a message
@@ -1025,7 +939,7 @@ reports it `behind`, and not at any run after one that reports it
 `in_step` or `adopted`.
 satisfies: REQ-vgn96n
 
-## SDD-ktsgh5 — Verification view (superseded)
+## Verification view
 
 `app/src/lib/verification.ts` (`verificationLine`, `verificationLabel`),
 the wrapper in `app/src/lib/api.ts` (`verifyOrganisations`), the call at
@@ -1033,69 +947,43 @@ start in `app/src/routes/+page.svelte` and the rendering in
 `app/src/lib/components/PersonaList.svelte` (markup SDD-6g3wnh's).
 `app/src/lib/reconcile.ts` is renamed into it.
 
-**SDD-ktsgh5**: what the webview shows of a verification, whether the app
-asked for it, a received provisional organisation did or a periodic run did,
-and when it asks for one; it offers no action to request or send an
-Organisation, which the Rust half does with no user step.
-traces: REQ-akeah6, REQ-k7ay5b, REQ-5q7nyg, REQ-vgn96n
-supersedes: SDD-huk773
-superseded-by: SDD-swt9fs, SDD-ua2d9b
-
-*Superseded in place 2026-10-28 (unmerged draft; round 3 review AR3-5,
-ARCHITECTURE Boundaries 3):* the item stated two responsibilities, what the
-webview shows of a verification and when it asks for one, each with its own
-reason to change (the words of a result; the moments the webview asks). It
-is split into SDD-swt9fs (the display) and SDD-ua2d9b (when the webview
-asks), each owning the files named in its own section below. Its LLRs are
-re-homed: LLR-j2x9jb is SDD-ua2d9b's; LLR-mfzr6z, LLR-njb6mr, LLR-zkpsw5
-and LLR-84cxpt are SDD-swt9fs's. No behaviour changes.
-
-*Amended in place 2026-10-20 (unmerged draft; owner ruling Q2 of
-2026-10-16):* `offersRequest` and `requestOrganisation` leave the file list:
-the request of a behind Organisation is automatic (LLR-nkg8sb). The
-periodic verification is SDD-tgu7dp's, in the Rust half, so it runs whether
-or not a view is listening; its results reach the view as
-`verification-result` events (LLR-84cxpt). `traces:` gains REQ-5q7nyg and
-REQ-vgn96n.
-
-### When the webview asks for a verification (successor of SDD-ktsgh5)
+### When the webview asks for a verification
 
 The wrapper in `app/src/lib/api.ts` (`verifyOrganisations`), the call at
 start in `app/src/routes/+page.svelte` and the "Verify with chain" button in
 `app/src/lib/components/PersonaList.svelte` (markup SDD-6g3wnh's). Added
-2026-10-28 (round 3 review AR3-5), SDD-ktsgh5's asking half.
+2026-10-28 (round 3 review AR3-5), the asking half of the verification
+view's earlier single item.
 
 **SDD-ua2d9b**: when the webview asks org-io for a verification: once when
 the main page mounts, again each time the user asks, never on a timer of
 its own.
 traces: REQ-akeah6, REQ-5q7nyg
-supersedes: SDD-ktsgh5
 
 **LLR-j2x9jb**: the main page calls `verifyOrganisations()` once when it
 mounts, and the Organisation list calls it again when the user presses its
 "Verify with chain" button; the wrapper invokes `verify_organisation` with
 no `org_id`. The webview runs no timer of its own that calls it.
 satisfies: REQ-akeah6
-supersedes: LLR-hwcj9n
 
 *Amended in place 2026-10-20 (unmerged draft; owner ruling Q2 of
 2026-10-16):* the at-start and on-request verifications stay here; the
 periodic one is LLR-3ampqm's, in the Rust half, and the webview adds no
 second timer (one would double the requests each interval).
 
-### The verification display (successor of SDD-ktsgh5)
+### The verification display
 
 `app/src/lib/verification.ts` (`verificationLine`, `verificationLabel`,
 `fileVerificationResults`) and the rendering in
 `app/src/lib/components/PersonaList.svelte` (markup SDD-6g3wnh's). Added
-2026-10-28 (round 3 review AR3-5), SDD-ktsgh5's display half.
+2026-10-28 (round 3 review AR3-5), the display half of the verification
+view's earlier single item.
 
 **SDD-swt9fs**: what the webview shows of a verification, whichever
 verification produced it (one the user asked for, one a received provisional
 organisation triggered, a periodic run); it offers no action to request or
 send an Organisation, which the Rust half does with no user step.
 traces: REQ-akeah6, REQ-k7ay5b, REQ-5q7nyg, REQ-vgn96n
-supersedes: SDD-ktsgh5
 
 **LLR-mfzr6z**: `verificationLine` renders each result as one line naming
 the Organisation and the result, with the epoch for `in_step` and
@@ -1103,7 +991,6 @@ the Organisation and the result, with the epoch for `in_step` and
 `inconsistent` and `unverified`; a `removed`, `behind`, `inconsistent` or
 `unverified` result is never rendered as in step or adopted.
 satisfies: REQ-akeah6
-supersedes: LLR-hwcj9n
 
 *Amended in place 2026-10-22 (unmerged draft; dispatcher decision, plan
 assembly):* a result carrying a `write` label (LLR-jf63e4's settled
@@ -1116,7 +1003,6 @@ rendered.
 `in step`, `adopted`, `removed`, `behind (chain at epoch N)`,
 `inconsistent: <reason>`, `unverified: <reason>` or `not checked`.
 satisfies: REQ-akeah6
-supersedes: LLR-hwcj9n
 
 *Amended in place 2026-10-22 (unmerged draft; dispatcher decision O3, plan
 assembly):* `removed` is added to the labels, as LLR-g8wfy9 (amended
@@ -1433,55 +1319,22 @@ Membership panel; neither panel says that a change was submitted, sent or
 is awaited from a peer.
 satisfies: REQ-vb5pag
 
-## SDD-ckqyh3 — Pre-command input decisions (superseded)
+## Pre-command input decisions
 
 `app/src/lib/revoke.ts` (`validateRevokeInput`) and `app/src/lib/invite.ts`
 (`ADMISSION_REQUEST_WARNING`, `admissionRequestGate`).
 
-**SDD-ckqyh3**: the decisions, made before any command is invoked, whether
-a revocation may be proposed, and what the invitee is told before the first
-admission request and whether it may be sent; none of them asks for a peer
-address.
-traces: REQ-he8ejb, REQ-2yh3c8
-supersedes: SDD-jx363y
-superseded-by: SDD-czjf2c, SDD-7aq69w
-
-*Superseded in place 2026-10-28 (unmerged draft; round 3 review AR3-5,
-ARCHITECTURE Boundaries 3):* the item joined two unrelated gates, the
-Admin's revocation input (`revoke.ts`) and the invitee's confirmation before
-the first admission request (`invite.ts`), each with its own reason to
-change. It is split into SDD-czjf2c (the revocation input) and SDD-7aq69w
-(the admission-request confirmation), each owning the file named in its own
-section below. Its LLRs are re-homed: LLR-csbs5v
-(`2026-10-05-decomposition.md`) and the retired LLR-zqy3tq are
-SDD-czjf2c's; LLR-qcg6bz and LLR-prh433 are SDD-7aq69w's. No behaviour
-changes.
-
-*Amended in place 2026-10-20 (unmerged draft; consistency pass):*
-`traces:` drops REQ-vgr7s2, retired 2026-10-20 (owner answer A2), and
-LLR-zqy3tq, which served it alone, is retired with it.
-*Amended in place 2026-10-20 (unmerged draft; owner ruling Q1 and answer A2
-of 2026-10-16):* there is no repeated send and no pasted address, so
-`app/src/lib/send.ts` (`validateSendAddress`) and the decision "whether a
-send may be repeated with the address given" leave the item.
-
-LLR-csbs5v (`validateRevokeInput`'s member-identifier rule, REQ-he8ejb) is
-unchanged and sat under this item until 2026-10-28; it is SDD-czjf2c's. `validateRevokeInput` no longer
-takes a peer address; that clause was LLR-zqy3tq's, retired 2026-10-20 with
-REQ-vgr7s2.
-
-### The admission-request confirmation (successor of SDD-ckqyh3)
+### The admission-request confirmation
 
 `app/src/lib/invite.ts` (`ADMISSION_REQUEST_WARNING`,
 `admissionRequestGate`), used by `app/src/lib/components/Invite.svelte`
-(markup SDD-6g3wnh's). Added 2026-10-28 (round 3 review AR3-5), SDD-ckqyh3's
-admission-request half.
+(markup SDD-6g3wnh's). Added 2026-10-28 (round 3 review AR3-5), the
+admission-request half of the pre-command decisions' earlier single item.
 
 **SDD-7aq69w**: the invitee's confirmation before the first admission
 request: the warning shown, on whose confirmation alone `request_admission`
 may be invoked.
 traces: REQ-2yh3c8
-supersedes: SDD-ckqyh3
 
 **LLR-qcg6bz**: `ADMISSION_REQUEST_WARNING` states that nothing has verified
 who sent the Invite, that nothing has verified the Organisation name it
@@ -1491,7 +1344,6 @@ Member whose request the user has not yet confirmed, `admissionRequestGate`
 refuses, naming the missing confirmation, until the user confirms, and
 allows the request only then.
 satisfies: REQ-2yh3c8
-supersedes: LLR-n2u4uf
 
 **LLR-prh433**: `admissionRequestGate` allows, with no confirmation asked, a
 request for a provisional Member whose earlier request the user confirmed;
@@ -1499,39 +1351,19 @@ the retry then invokes `request_admission` with `confirmed` true and no
 warning is shown again.
 satisfies: REQ-2yh3c8
 
-### The revocation input decision (successor of SDD-ckqyh3)
+### The revocation input decision
 
 `app/src/lib/revoke.ts` (`validateRevokeInput`), used by
 `app/src/lib/components/Revoke.svelte` (markup SDD-6g3wnh's). Added
-2026-10-28 (round 3 review AR3-5), SDD-ckqyh3's revocation half.
+2026-10-28 (round 3 review AR3-5), the revocation half of the pre-command
+decisions' earlier single item.
 
 **SDD-czjf2c**: whether a revocation may be proposed for the member
 identifier the Admin typed, decided before `propose_revocation` is invoked;
 it asks for no peer address.
 traces: REQ-he8ejb
-supersedes: SDD-ckqyh3
 
-LLR-csbs5v (`2026-10-05-decomposition.md`) is its LLR in force; LLR-zqy3tq,
-retired, is kept below with its history.
-
-**LLR-zqy3tq**: `validateRevokeInput` decides from the member identifier
-alone: it allows a well-formed one in Loopback and in Networked transport
-alike, takes no peer address and refuses no revocation for the lack of one,
-and no pre-command decision under `app/src/lib` asks for a peer address.
-satisfies: REQ-vgr7s2
-supersedes: LLR-c9r5uf
-retired: 2026-10-20 — REQ-vgr7s2, the requirement it served, is retired: addresses now come with the Invite, the admission request and the organisation request and are kept per Device key, so no decision asks for a peer address (owner answer A2, change worktree-org-io-domain-api); LLR-csbs5v states what validateRevokeInput still checks
-
-*Amended in place 2026-10-20 (unmerged draft; owner answer A2 and ruling Q1
-of 2026-10-16):* it stated `validateSendAddress`'s Loopback address for a
-repeated send. Requests carry the sender's own addresses and the send is not
-repeated, so no address is asked for anywhere; the item now states that a
-revocation is accepted with no peer address in every mode. That keeps
-REQ-vgr7s2's obligation (revocation reachable in Networked transport,
-RC-jrkn7w); its Loopback clause requires an address *only* in Loopback,
-and with org-io holding the removed Device's addresses none is needed
-there either. REQ-vgr7s2's own text, written for the pasted address, is
-left for the requirements to restate or retire; it is not this ledger's.
+LLR-csbs5v (`2026-10-05-decomposition.md`) is its LLR.
 
 ## SDD-g5wmxt — The creation form's refused-Person decision
 
@@ -1586,8 +1418,9 @@ satisfies: REQ-vb5pag
 ## SDD-6g3wnh — what this change adds to the untested shell
 
 *Amended 2026-10-15 in `2026-10-05-decomposition.md`:* its `traces:` loses
-the requirements now out of force (REQ-prjja8, REQ-tcutr6, REQ-ab2mfz,
-REQ-m8sgjk) and gains REQ-vb5pag, REQ-2yh3c8, REQ-akeah6 and REQ-k7ay5b,
+the requirements now out of force (the Invite's and the Invite reply's
+production, the Invite
+reply's warning and the submission decision) and gains REQ-vb5pag, REQ-2yh3c8, REQ-akeah6 and REQ-k7ay5b,
 realised at call sites no gated test reaches: the Svelte panels for the
 Person, the founding, the Invite, the Member proposal, the admission
 request, the confirmation, the proposal and the write; the receiver loop's

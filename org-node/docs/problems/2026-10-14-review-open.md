@@ -9,14 +9,14 @@ so any holder of a `PersonaStore` — a dependent crate included — can change
 the store's data without a `StoreWrite`: nothing is sealed and nothing is
 returned for the caller to write, so memory and the sealed bytes on disk can
 differ with no write pending.
-affects: LLR-bvt5up, SDD-asxwp8
+affects: LLR-ay8nvu, SDD-asxwp8
 opened: 2026-10-14
 status: open
 
 Where: `PersonaStore::data_mut` (`org-node/src/store.rs`, beside `data`).
 Its only users are inside org-node: `OrgService::adopt` and the store
 swap in `service.rs`, which seal the change themselves, and
-`test_fixtures.rs`. LLR-bvt5up states that every `OrgService` operation that
+`test_fixtures.rs`. An earlier form of LLR-ay8nvu stated that every `OrgService` operation that
 changes a store returns exactly one `StoreWrite`; a store opened by
 `PersonaStore::unseal` and changed through `data_mut` before or outside the
 service is changed by no such operation. A crate-private `data_mut` (with a

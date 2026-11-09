@@ -1,7 +1,7 @@
 # Absence proofs — hazards and controls
 
-Risk analysis for S1 of `docs/plans/2026-10-06-org-io-roadmap.md`: absence
-proofs (REQ-535jcd, REQ-tk2qqj) and PR-jq43gx. Matrix and method are the ones
+Risk analysis for stage S1 of the org-io roadmap: absence proofs, and the
+panics the verifier's path primitives had on an out-of-range index. Matrix and method are the ones
 in `README.md` and `2026-09-02-membership-hazards.md` ("Method, and what the
 harms are"). Losing access to organisational records at the moment a decision
 needs them is that register's unavailability pathway, which it assesses as S3;
@@ -22,7 +22,8 @@ can hand the node bytes.
 **RC-j2znx8**: an absence proof is accepted only when it resolves to the
 membership root it is checked against and shows absence for the exact MemberId
 and Device key it is checked for; every other proof is rejected with a typed
-error. mitigates: HAZ-adm7gv
+error.
+mitigates: HAZ-adm7gv
 
 Which root the proof is checked against is not decided here. Owner ruling,
 2026-10-06: org-io reads the latest on-chain state and has the proof checked
@@ -40,21 +41,10 @@ stays open until org-io's control exists.
 
 ## Member data disclosed through a proof
 
-**HAZ-gwbn5n**: an absence proof for a Device key removed from a Member who
-remains carries that Member's leaf (MemberId, handle, name, surname, member
-key, Device keys); a proof that reaches anyone other than a former device of
-that Member discloses that Member's identity and keys; exposure of a protected
-identity in the deployments this project is classified for. Severity: S3.
-Probability: P2.
-superseded-by: HAZ-r5tc4m
-
-P2: a proof is produced on request, and without a control the content would
-be whatever the producer chose to include.
-
 **RC-qa2758**: an absence proof carries no Member's data when its MemberId
 holds no Member, and only the data of the Member under its MemberId
-otherwise; it never carries another Member's data. mitigates: HAZ-gwbn5n,
-HAZ-r5tc4m
+otherwise; it never carries another Member's data.
+mitigates: HAZ-r5tc4m
 
 To whom a proof is given is not decided here. Owner ruling, 2026-10-06:
 exclusion is by design, part of the path that produces the proof. A node
@@ -76,19 +66,21 @@ input causes a panic. No new hazard is minted. The proof type is parsed under a
 fixed bound before use, so an oversized or truncated proof is a typed error.
 The sibling list is bounded at 256 while decoding; a Leaf ending's handle,
 name and surname are decoded before validation and bounded only by the
-input's length, as for any received MemberLeaf. PR-jq43gx is a defect of
-RC-c4truv, in the two primitives the verifier walks (`MemberId::bit`,
-`DefaultHashes::at_level`), and is resolved in this change. HAZ-8suua9's
+input's length, as for any received MemberLeaf. A panic on an out-of-range
+index in the two primitives the verifier walks (`MemberId::bit`,
+`DefaultHashes::at_level`) was a defect of RC-c4truv, and is resolved in this
+change. HAZ-8suua9's
 probability is unchanged: the surface grows, but so does the control's
 coverage, and the one known breach of the control on this path is closed.
 
 ## Derived requirements assessment
 
-REQ-535jcd and REQ-tk2qqj exist because the owner chose to tell a revoked
-device about its revocation with a proof, not with the membership record.
-REQ-tk2qqj is RC-j2znx8's realisation. REQ-535jcd produces what HAZ-gwbn5n
-discloses, and REQ-yyuxh8, RC-qa2758's realisation, bounds that. None of them
-changes how any existing control works; production and verification add a
-surface to HAZ-8suua9, assessed above. Owner confirmed S3/P2 for both new
-hazards on 2026-10-06.
-assesses: REQ-535jcd, REQ-tk2qqj, REQ-yyuxh8
+The absence-proof requirements exist because the owner chose to tell a
+revoked device about its revocation with a proof, not with the membership
+record. Verification is RC-j2znx8's realisation. Production yields what
+HAZ-r5tc4m discloses, and REQ-yyuxh8, RC-qa2758's realisation, bounds that.
+None of them changes how any existing control works; production and
+verification add a surface to HAZ-8suua9, assessed above. Owner confirmed
+S3/P2 for both new hazards on 2026-10-06. Production and verification are now
+REQ-sb2frw and REQ-65xrgh, assessed in `2026-10-23-two-level-absence-proofs.md`.
+assesses: REQ-yyuxh8

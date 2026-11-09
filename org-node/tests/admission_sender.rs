@@ -406,9 +406,9 @@ fn a_first_admission_records_the_chains_key_the_private_key_and_the_member() {
     assert_eq!(on_disk.org_private_key_for_test().clone(), held_by_a);
 }
 
-// PR-szkat6: an admitted Member holds the Organisation private key, the one
+// Regression: an admitted Member holds the Organisation private key, the one
 // the founder's record holds and the private half of the chain's key.
-// verifies: LLR-qw8tyu, REQ-szq3ud, REQ-ju6vn2, PR-szkat6
+// verifies: LLR-qw8tyu, REQ-szq3ud, REQ-ju6vn2
 #[test]
 fn pr_szkat6_an_admitted_member_holds_the_organisation_private_key() {
     let (mut founder, _) = sweep::founded();
@@ -419,14 +419,14 @@ fn pr_szkat6_an_admitted_member_holds_the_organisation_private_key() {
     assert_eq!(held.x25519_keypair().org_public_key().unwrap(), bob.chain.org_pub_key);
 }
 
-// PR-ve9zw8: Organisation information whose Organisation private key a relay
+// Regression: Organisation information whose Organisation private key a relay
 // substituted is refused from the relay (`SenderNotListed`) and, from A's
 // listed Device, kept under the public key derived from the substituted key:
 // no match for the chain, so verification reports Behind and B's record and
 // both keys stay as they were. The genuine message is then kept and adopted
 // with the chain's key. Which record is adopted is decided by the chain
 // state alone, never by the delivering Device.
-// verifies: LLR-8528ud, LLR-qw8tyu, PR-ve9zw8, REQ-mr5abb, LLR-4tsgfh
+// verifies: LLR-8528ud, LLR-qw8tyu, REQ-mr5abb, LLR-4tsgfh
 #[test]
 fn pr_ve9zw8_an_update_carrying_a_substituted_key_is_refused_from_a_relay_and_not_adopted_from_a_listed_device() {
     use org_node::service::Checked;
@@ -523,11 +523,11 @@ fn each_adopted_update_gives_the_record_the_new_key_pair() {
     );
 }
 
-// PR-u4c2vp: A's genuine Organisation information about C's admission,
+// Regression: A's genuine Organisation information about C's admission,
 // relayed to B by a Device B's record does not list, is refused with
 // `SenderNotListed` with nothing kept and no change; the same body from A's
 // listed Device is kept and adopted.
-// verifies: LLR-283x6f, PR-u4c2vp
+// verifies: LLR-283x6f
 #[test]
 fn pr_u4c2vp_an_update_relayed_by_a_non_member_is_refused() {
     use rand::rngs::OsRng;

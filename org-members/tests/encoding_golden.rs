@@ -3,9 +3,7 @@
 //! Values captured on master @ 0f85cb9 (2026-10-04), before the newtype
 //! refactor. Never update them to make this test pass.
 //! Re-derived once (2026-10-04) when the member key became X25519: only the
-//! member-key input changed. The evidence is in
-//! `docs/plans/2026-10-04-person-shared-types-implementation.md`, the block
-//! "Steps 5, 6, 8 for org-members done (9e93bfc)": the old member key (last
+//! member-key input changed. The evidence, measured at 9e93bfc: the old member key (last
 //! byte 0xc8, top bit set) is not a canonical X25519 key; the two leaf
 //! encodings differ only in the 32 member-key bytes (`8092f31a…98c8` →
 //! `bf74dcf9…be78`); `GOLDEN_ROOT` `2e81afbd…a19d` → `4740435a…efd4`; hashing

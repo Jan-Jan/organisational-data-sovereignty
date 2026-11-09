@@ -71,7 +71,7 @@ fn every_rejection_variant_is_distinct_from_every_other() {
         // The two first-admission refusals (REQ-8amu2a, REQ-kt877x).
         OrgNodeError::AdmissionNotExpected { org_id: OrgId::new([1; 20]) },
         OrgNodeError::AdmissionNotOurs { org_id: OrgId::new([1; 20]) },
-        // The bound on one Organisation's provisional updates (REQ-fwfku9).
+        // The bound on one Organisation's provisional updates (REQ-g2537c).
         OrgNodeError::ProvisionalLimit { limit: 1 },
         // The three refusals of a received Wire message LLR-3sddey keeps.
         OrgNodeError::MalformedMessage,

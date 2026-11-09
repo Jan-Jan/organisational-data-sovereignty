@@ -10,7 +10,7 @@ left open.
 the store encode and the Blob encode; and `build_invite` on an Organisation
 no Persona is bound to is refused as `OrgNotOnChain` rather than as an
 Organisation not held by a bound Persona.
-affects: SDD-asxwp8, SDD-xshv5b, LLR-nr8df3
+affects: SDD-asxwp8, SDD-n2x3gb, SDD-42cjqk, LLR-h9f5c9
 opened: 2026-10-14
 status: open
 

@@ -103,12 +103,12 @@ stolen device reported as cleanly retired would otherwise keep access.
 
 **The mitigation is incomplete as implemented.** The replacement key is not
 compared against the key it replaces, so a caller passing the current key back
-performs a removal that mitigates nothing (PR-zz4exm). Until that is fixed, this
+performs a removal that mitigates nothing (the replacement-key problem report). Until that is fixed, this
 requirement's contribution to the retained-access path is conditional on the
 caller, which is precisely the property a risk control must not have. Tooth 5
 should treat this as a control whose effectiveness is currently unverified
 rather than as one in place. (Corrected 2026-10-03: fixed — an unchanged
-replacement key is refused with `P2pKeyNotReplaced`; PR-zz4exm resolved.)
+replacement key is refused with `P2pKeyNotReplaced`; the replacement-key problem report resolved.)
 
 assesses: REQ-r784fu
 

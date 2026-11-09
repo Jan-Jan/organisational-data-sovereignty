@@ -2,9 +2,11 @@
 
 This directory is a per-change ledger: each change contributes one dated
 file, `YYYY-MM-DD-<slug>.md`, dated the day the change creates it and never
-renamed. **Edit existing items in the file that defines them.** Use this
-README's Overview section for the system-wide decomposition picture; `soup.md`
-(single file) contains the SOUP inventory.
+renamed. **Edit existing items in the file that defines them.** A reworded
+item keeps its ID; a changed behavior gets a new ID and the old item is
+deleted; a dropped item is deleted. The squash message records each under
+`Items:`. Use this README's Overview section for the system-wide decomposition
+picture; `soup.md` (single file) contains the SOUP inventory.
 
 <!--
 Item grammar (enforced by .guardrails/scripts/check-trace.sh):
@@ -17,6 +19,7 @@ the high-level REQs), written under the software item they belong to:
   **LLR-NNNNNN**: <directly codeable behavior>. satisfies: REQ-NNNNNN[, REQ-...]
   **LLR-NNNNNN**: <behavior with no parent requirement>. satisfies: derived
 
+- An item is terse: no rationale, history or implementation detail.
 - Every design item must trace to at least one requirement.
 - Every LLR satisfies a REQ or is marked derived; derived LLRs must be
   assessed in the risk ledger, where an `assesses:` line names them.
@@ -45,8 +48,7 @@ the high-level REQs), written under the software item they belong to:
 <!-- System decomposition, key interfaces, and the segregation rationale
      between items of different safety classes (if any). -->
 
-*First written 2026-10-03 by the architecture tooth
-(`docs/plans/2026-10-03-org-node-architecture.md`). This section is the
+*First written 2026-10-03 by the architecture tooth. This section is the
 standing picture; each change amends it rather than restating it in a dated
 file.*
 
@@ -103,7 +105,7 @@ SDD-af5vnt and SDD-vee2fq in `2026-10-04-type-safety.md`; it adds no item.*
 of the ten now sits under the item owning most of what it constrains —
 SDD-swtd3w, SDD-sxp8hb and SDD-af5vnt — and every other item it constrains
 names it, in the decomposition file. LLR-mmdu38 moved from SDD-pa6p7w to
-SDD-swtd3w, and LLR-8bum44 from SDD-vee2fq to SDD-af5vnt.)*
+SDD-swtd3w, and an earlier form of LLR-7yu2xy from SDD-vee2fq to SDD-af5vnt.)*
 
 | Layer | Items | What it decides |
 |---|---|---|
@@ -123,7 +125,7 @@ The nineteen items stand; none is deleted.
 *Amended 2026-10-08 (ruling B, change `worktree-org-io-create`).* The
 chain-connection item moved to org-io (2026-10-07), so org-node holds
 eighteen items and the supplier edge reads nothing: SDD-msb6xh and
-SDD-rq6nv4 state absences, and LLR-mn5c2q states that org-node names no
+SDD-rq6nv4 state absences, and LLR-7en38k states that org-node names no
 chain library and reads no chain.
 
 *Amended 2026-10-20 (change `worktree-org-io-domain-api`, consistency
@@ -142,11 +144,8 @@ files and `2026-10-16-domain-api.md` define them):
 | **The Person** | SDD-27p679 | The user's own Person store, apart from every Persona |
 | **The supplier edge** | SDD-msb6xh, SDD-rq6nv4 | Absences: no calldata, no multisig, no chain read |
 
-Out of force since that change: SDD-8cpyfa (by SDD-kegag2 and SDD-busuj3),
-SDD-72ddm6 (by SDD-z4m57w), SDD-uck4tz (by SDD-73emgx), SDD-esg2kc (by
-SDD-busuj3), SDD-bm27xt (by SDD-qzv5mn), SDD-xshv5b (by SDD-xexu3k), and,
-split on 2026-10-28 (round 2 review), SDD-73emgx (by SDD-gatf4h and
-SDD-8zzmav) and SDD-xexu3k (by SDD-n2x3gb and SDD-42cjqk).
+Every SDD in force is in the table above; the items the earlier table named
+and this one does not are deleted.
 org-node now consumes `org-members` and `person` alone and is consumed by
 org-io; the app names no org-node item.
 
@@ -196,7 +195,7 @@ form: that code *is* exercised, by `chain_genesis_e2e`, `finality_polling` and
 because they spawn a chopsticks fork, so no mutation to the code they cover
 would redden this unit's gate. Writing low-level requirements there would
 assert properties no gate can observe. The remedy — bringing those targets
-into the gate — is booked in `docs/plans/2026-09-05-ratchet-setup.md`.
+into the gate — is not yet done.
 *Amended 2026-10-08 (change `worktree-org-io-create`).* That shell and its
 deviation are org-io's now (ruling A, moved 2026-10-07; the chain code left
 org-node with ruling B), so org-node carries no chain shell; its remaining
@@ -228,17 +227,17 @@ decomposition file lists them, each with its reason:
 - four requirements that are compile-enforced, not test-enforced;
 - the IPv4-required loopback item (org-io's since S4 task T10), which no
   gated test can reach;
-- the first-admission clause of LLR-u6rq4s, where the skip it describes is
+- the first-admission clause of an earlier form of LLR-283x6f, where the skip it describes is
   unnecessary rather than unverified;
-- the administrator-key exclusion in LLR-e5c9ud, which sits inside PR-mdv38y's
+- the administrator-key exclusion in an earlier form of LLR-exaa9u, which sits inside the resolved problem report on the receive path rebinding Personas's
   defect.
 
 *Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-The last two exceptions go with the behaviour they described: LLR-u6rq4s now
-states that no sender is checked, and LLR-e5c9ud has no administrator-key
+The last two exceptions go with the behaviour they described: the earlier form of LLR-283x6f then
+stated that no sender is checked, and that of LLR-exaa9u had no administrator-key
 exclusion. The compile-enforced requirements grow: besides the four, the
-requirements that now state an absence — LLR-na7p4w, the no-Invite item
-(retired 2026-10-13, S4 T6), LLR-8qxwst, LLR-zj88e6, LLR-qezw3n and those of
+requirements that now state an absence — an earlier form of LLR-8528ud, the no-Invite item
+(retired 2026-10-13, S4 T6), LLR-8qxwst, LLR-zj88e6, LLR-ds228z and those of
 SDD-msb6xh and SDD-rq6nv4 — are enforced by the compiler, since what they
 forbid does not exist to call. *(2026-10-13, S4 T6: LLR-8qxwst and LLR-zj88e6
 are rewritten as the Invite returns to org-node.)*
@@ -252,38 +251,9 @@ exceptions, and the list above it naming two of the five unobservable
 behaviours. It now names the exceptions and where they live, rather than a
 count each round changes.*
 
-Seven known defects are pinned rather than fixed, each by a test that asserts
-today's behaviour and reddens when it is corrected: PR-vt244s, PR-b9wab3,
-PR-mdv38y, the endpoint-bound-once report, PR-xwek5e, PR-322qst and PR-u4c2vp, in
-`org-node/docs/problems/`. *PR-u4c2vp added 2026-10-05 by review round 8; its
-pin was written in round 7.* *(2026-10-13, S4 task T10: the
-endpoint-bound-once report moved to org-io's problems ledger and is resolved
-there by one endpoint per Persona.)*
-PR-mdv38y and the endpoint-bound-once report share one cause: the code assumes one Persona, one
-Organisation and one endpoint per store, and nothing enforces that. PR-322qst,
-PR-xwek5e and PR-u4c2vp do not. Each reproduces on a store holding one Persona and one
-Organisation, and each has a cause of its own. *Corrected 2026-10-04 by review
-round 7, which measured that this sentence said "the last four".*
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`).*
-The design of this change removes the behaviour three of these pins assert, so
-each pin is expected to redden when it is implemented: PR-u4c2vp (an update
-relayed by a non-member committed on the self-delete path) becomes the
-required behaviour on every path (LLR-3q63zv); PR-322qst (an own revocation
-committed as an update) is replaced by deletion on every commit path
-(LLR-b27jr6); and PR-b9wab3 (a Loopback revocation with no address burning an
-epoch) loses its mechanism, because org-node no longer submits to the chain
-(the Loopback revocation's refusal without an address, an item org-io's since
-2026-10-13, S4 task T12). PR-vt244s is narrowed — the sender's record no longer runs ahead
-of the chain, and a failed send no longer leaves it an epoch behind — and stays
-open by owner ruling. PR-mdv38y, the endpoint-bound-once report (its sending side) and PR-xwek5e
-are unchanged. Whether the three are resolved by this change is for its plan.
-
-*Note 2026-10-06 (independent review round 3, finding-1).* That change
-resolved PR-b9wab3, PR-322qst and, by the owner's ruling of one Persona per
-Organisation (REQ-yp75u9), PR-mdv38y; PR-u4c2vp was already resolved on master.
-Of the seven pinned defects named above, PR-vt244s, the endpoint-bound-once
-report and PR-xwek5e remain open and pinned.
+The defects once pinned here by tests asserting the faulty behaviour are all
+resolved; none is pinned today. The open problem reports are in
+`org-node/docs/problems/`.
 
 `test_paths` reads `verifies:` annotations only from `org-node/tests`, so a
 test in a `#[cfg(test)]` module under `src` cannot carry one. Twenty-two such

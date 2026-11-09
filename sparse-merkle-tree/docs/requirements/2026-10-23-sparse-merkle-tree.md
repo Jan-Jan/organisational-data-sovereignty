@@ -36,7 +36,7 @@ consumer that changes one versions it.
 **REQ-6cej5z**: The software shall refuse to add a leaf whose position holds a
 leaf of a different identity, with an error that names a collision and no
 other cause, and shall leave the tree unchanged.
-(implements: RC-5zyczk)
+implements: RC-5zyczk
 satisfies: derived
 exported: yes
 
@@ -62,7 +62,7 @@ only when the proof resolves to a given root at the verifier's own depth and
 shows that the identity's position is empty or holds a leaf of a different
 identity; it shall reject every other proof with an error that says which of
 these failed.
-(implements: RC-5zyczk)
+implements: RC-5zyczk
 satisfies: derived
 exported: yes
 
@@ -96,7 +96,7 @@ accepted risk, recorded in this unit's risk file.
 **REQ-dyjq33**: The software shall report every rejected operation, every
 rejected proof included, as an error, shall not panic on any input, and shall
 reject a proof larger than its depth allows before using any of it.
-(implements: RC-gy5f5r)
+implements: RC-gy5f5r
 satisfies: derived
 exported: yes
 
@@ -118,7 +118,7 @@ exported: yes
 when the proof resolves to a given root at the verifier's own depth with that
 leaf at its identity's position; it shall reject every other proof with an
 error that says which of these failed.
-(implements: RC-5zyczk)
+implements: RC-5zyczk
 satisfies: derived
 exported: yes
 

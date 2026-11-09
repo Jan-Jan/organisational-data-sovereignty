@@ -33,9 +33,9 @@ fn the_domain_keys_and_sentinel_are_the_documented_bytes() {
     assert_eq!(PersonDeviceRootHasher::device_content_hash(), keyed(PERSON_DEVICE_CONTENT_KEY, &[]));
 }
 
-/// Pinned values: see "Golden values" in
-/// docs/plans/2026-10-24-sparse-merkle-tree.md (T7). A change here is a
-/// change of the V1 encoding (LLR-qwp8d7).
+/// Pinned values: the record of the device root, which the structural tests
+/// recompute from `blake3::keyed_hash` alone; never re-pinned to make a red
+/// test pass. A change here is a change of the V1 encoding (LLR-qwp8d7).
 /// verifies: LLR-qwp8d7
 #[test]
 fn the_person_device_root_is_pinned() {

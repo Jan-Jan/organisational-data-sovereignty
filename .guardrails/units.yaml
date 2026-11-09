@@ -28,10 +28,12 @@
 # class, its documents (all inside the unit's subtree), its depends_on: and
 # — where a lower-class provider is argued safe — its segregated_from:.
 #
-# The verification records (docs/verification), the ADRs (docs/adr), the
-# plans (docs/plans) and the interface glossary (docs/CONTEXT.md) are
-# repository-level and live under the disclaimed `docs` below on purpose:
-# check-review.sh reads docs/verification by branch, not by unit.
+# The ADRs (docs/adr), the plans (docs/plans), the older verification
+# records (docs/verification) and the interface glossary (docs/CONTEXT.md)
+# are repository-level and live under the disclaimed `docs` below on purpose.
+# Since guardrails d6e285e a change's verification record is its signed
+# squash commit message, checked by check-review.sh at merge-change step 6c
+# and by finish-merge.sh; docs/verification holds only older records.
 #
 # Four depends_on: edges are declared (2026-09-06): org-node -> org-members,
 # org-node -> on-chain-client, app -> org-node, app -> on-chain-client. Each

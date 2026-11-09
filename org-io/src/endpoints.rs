@@ -8,11 +8,11 @@
 //! bounded in time and in number, so one that stalls stops no other
 //! (LLR-8uf9a5). The accept tasks still running are counted, so the
 //! receive step knows when every one has ended (LLR-szhe7j). An endpoint
-//! that has closed is not reused (PR-tcd2ta): the next send or
+//! that has closed is not reused (LLR-d2pzzk): the next send or
 //! `start_receiving` for its Persona binds it again, and `start_receiving`
 //! gives a new accept task to an endpoint whose task has ended. Once
 //! `start_receiving` has run, an endpoint bound by a send accepts too
-//! (PR-47aycj), so a rebind while the receive loop runs is not left deaf.
+//! (LLR-z35vbh), so a rebind while the receive loop runs is not left deaf.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -28,7 +28,7 @@ use crate::transport::{
 };
 
 /// One received body, the Device the handshake authenticated as its
-/// sender, and the responder its verdict goes back through (LLR-unqfj5):
+/// sender, and the responder its verdict goes back through (LLR-hhgdk7):
 /// dropped unanswered, nothing is written.
 pub(crate) struct Inbound {
     /// The DevicePublicKey of the endpoint the body reached: the receiving Persona's store.
@@ -72,7 +72,7 @@ pub(crate) struct Endpoints {
     /// forwards its endpoint's closure.
     accepting: Arc<AtomicUsize>,
     /// Whether `start_accepting` has run: from then on every endpoint bound,
-    /// by a send too, gets an accept task (PR-47aycj). Written
+    /// by a send too, gets an accept task (LLR-z35vbh). Written
     /// and read under `bound`'s lock.
     receiving: AtomicBool,
     /// How long one inbound connection may take, handshake to body
@@ -126,7 +126,7 @@ impl Endpoints {
     /// The endpoint of `device_key`, bound from its keychain item on first
     /// use and the same one on every later call while it is open; once it
     /// has closed, bound again (LLR-d2pzzk). Once the node receives, an
-    /// endpoint bound here accepts too (PR-47aycj; LLR-z35vbh), so a send that binds a closed endpoint again while the
+    /// endpoint bound here accepts too (LLR-z35vbh), so a send that binds a closed endpoint again while the
     /// receive loop runs leaves it accepting.
     pub(crate) async fn endpoint(&self, device_key: &DevicePublicKey) -> Result<Arc<OrgEndpoint>, TransportError> {
         let mut bound = self.bound.lock().await;
@@ -146,7 +146,7 @@ impl Endpoints {
     }
 
     /// An endpoint that reports closed, or closing (`OrgEndpoint::is_closed`),
-    /// is dropped and bound again (PR-tcd2ta). Its accept task, if any, is left to end on
+    /// is dropped and bound again (LLR-d2pzzk). Its accept task, if any, is left to end on
     /// its own: it sees the closure and counts itself out of `accepting`,
     /// which an abort would skip. Binding happens under the map's lock, so
     /// one Device key never has two open endpoints.
@@ -176,10 +176,10 @@ impl Endpoints {
 
     /// Bind the endpoint of each of `device_keys` and give each one running
     /// accept task (LLR-z35vbh): a closed endpoint is bound again, and an
-    /// endpoint whose accept task has ended gets a new one (PR-tcd2ta). A
+    /// endpoint whose accept task has ended gets a new one (LLR-d2pzzk). A
     /// bind that fails is returned; the endpoints bound before it keep
     /// accepting. From the first call on, the node is receiving: every
-    /// endpoint bound later, by a send too, accepts (PR-47aycj).
+    /// endpoint bound later, by a send too, accepts (LLR-z35vbh).
     pub(crate) async fn start_accepting(&self, device_keys: &[DevicePublicKey]) -> Result<(), TransportError> {
         let mut bound = self.bound.lock().await;
         self.receiving.store(true, Ordering::SeqCst);
@@ -192,7 +192,7 @@ impl Endpoints {
 
     /// When the node receives, bind the endpoint of `device_key` and give it
     /// a running accept task, as `start_accepting` does for one key; when it
-    /// does not, nothing (PR-y6t5kt): a
+    /// does not, nothing (LLR-z35vbh): a
     /// Persona created, or replying, while the receive loop runs is received
     /// on (LLR-z35vbh). The flag is read and the task counted under the
     /// map's lock.
@@ -288,7 +288,7 @@ impl Drop for Endpoints {
 /// the count stays exact (LLR-szhe7j): no body of this endpoint can arrive
 /// after it. When the channel closes it counts itself out and ends, and its
 /// connections' tasks end with it. Each body's stream send half waits,
-/// apart from the loop, for the receive step's verdict (LLR-unqfj5).
+/// apart from the loop, for the receive step's verdict (LLR-hhgdk7).
 async fn accept(
     endpoint: Arc<OrgEndpoint>,
     receiver: DevicePublicKey,

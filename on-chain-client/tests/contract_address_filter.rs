@@ -7,8 +7,8 @@
 //! payload's `contract` field, or a caller that matches every contract, lets
 //! *any* contract on Asset Hub emit a log carrying the OrgRegistry signature
 //! hash and a victim organisation's indexed admin, which every subscriber
-//! receives as a genuine event with an attacker-chosen root (HAZ-werm85,
-//! PR-p5ngya). The control is in two halves: the decoder carries the address
+//! receives as a genuine event with an attacker-chosen root (HAZ-werm85; the
+//! reader once shipped with both faults). The control is in two halves: the decoder carries the address
 //! out in `EmittedEvent`, and the caller compares it against the address the
 //! reader was constructed for.
 //!

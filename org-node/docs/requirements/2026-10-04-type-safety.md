@@ -3,7 +3,7 @@
 Decided 2026-10-04 in the `grill-requirements` interview that brings org-node
 under the parse-at-the-system-edge rule (ADR
 `docs/adr/2026-10-04-parse-at-the-system-edge.md`, `org-node/AGENTS.md`).
-PR-hqwpg9 recorded that the member seed, device seed and Organisation secret
+The resolved problem report on secret key material in debug output recorded that the member seed, device seed and Organisation secret
 were printed in clear by any `{:?}` of a structure holding them; REQ-hzm4kt
 keeps them out of the store file only.
 
@@ -22,11 +22,11 @@ Owner rulings (2026-10-04):
   as the plain bytes. Member and device seeds alone yield a signing key pair.
 - `P2pMemberKey::parse` and `P2pDeviceKey::parse` accept exactly what
   deserialization accepted before (the bytes decompress to a curve point);
-  rejecting weak and non-canonical keys is an open problem in org-members'
-  ledger (`ed25519-small-order`); the non-strict signature check is PR-vkw22m.
+  rejecting weak and non-canonical keys was a problem in org-members'
+  ledger, since resolved (a resolved org-members problem report); the non-strict signature check is the resolved problem report on non-strict signature verification.
 - `org_pub_key` is the Organisation public key — the public half of a key pair
   shared with every Member — not an administrator key. It gets its own type,
-  `OrgPublicKey`; that Envelopes are verified under it is PR-szkat6.
+  `OrgPublicKey`; that Envelopes are verified under it is the resolved problem report on the Organisation key held only by its founder.
 - Chain accounts (`AccountId32`) get a tag type, `ChainAccount`, converted to
   subxt's type or raw bytes only where a chain call is built.
 - Identifiers and counters get tag types: `PersonaId`, `Epoch`,
@@ -40,15 +40,14 @@ Owner rulings (2026-10-04):
 device seed, an Organisation private key or the store encryption key in the debug
 formatting of that value or of any record, store or wire message that holds
 it, and shall offer no display formatting for these values.
-(implements: RC-8a4xjb)
+implements: RC-8a4xjb
 satisfies: derived
 
 *Amended 2026-10-06 (owner ruling, change `worktree-org-node-org-key-pair`).*
 The item named the Organisation secret, which that change removes in favour of
 the Organisation private key (REQ-szq3ud).
 
-*Clarified 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* unchanged in substance; it covers
+*Clarified 2026-10-08 (S4, task T3):* unchanged in substance; it covers
 the device secret (`DeviceSecret`, `Debug` `DeviceSecret([REDACTED])`,
 LLR-37k2s3) and the HKDF-derived store key (LLR-scgk5j).
 
@@ -64,35 +63,3 @@ parsed values, so the refusal moves to the Member's own device, and
 request, Invite or record snapshot holding a handle, name, surname or key that
 its parse refuses is refused when it is loaded, imported or decoded, with no
 migration (no store has been deployed).
-
-**REQ-qn2erx**: The software shall refuse to create a Persona, open a Persona
-store, or decode the record snapshot a first admission extends, whose handle,
-name or surname the member-record rules would refuse or one of whose keys is
-not a curve point, reporting the field that failed, and shall create, store or
-extend nothing in that case.
-(implements: RC-zutc67)
-satisfies: derived
-superseded-by: REQ-kd34f5
-
-*Amended 2026-10-05 (owner ruling, change `worktree-org-node-chain-authority`):*
-the Join request and Invite imports are removed from this item, because the
-invitation exchange leaves org-node for the app, which parses both at its own
-edge (`app/docs/requirements/`, the invitation exchange). The Invite's parenthesis went with them.
-
-(Amended 2026-10-05 after independent review round 3: by owner ruling the
-requirement covers keys as well as the handle, name and surname — a store, Join
-request, Invite or record snapshot holding a key that is not a curve point is
-refused — and names the Invite import and the record-snapshot decode, which
-LLR-8bum44 already required and the code already refused, so the requirement
-and its design item now state the same scope.)
-
-(Amended 2026-10-05 after independent review round 4: by owner ruling the key
-clause is narrowed to each key's curve-point parse. The rules on a member's
-device key set — at most four keys, none repeated, at least one for a member
-admitted through `MemberLeaf::new` — are not applied when a record is loaded or
-decoded; org-members enforces them when the members are rebuilt
-(`trie_from_snapshots`), reporting its own errors.)
-
-*Amended 2026-10-08 (S4, task T3 of
-docs/plans/2026-10-06-org-io-transport.md):* "open a Persona store" is "unseal
-a Persona store" (LLR-bg538c); the Invite and reply parse returns in task T6.

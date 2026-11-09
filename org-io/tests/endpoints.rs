@@ -105,7 +105,7 @@ async fn a_locked_keychain_refuses_the_bind() {
 // proposal's binding of its new Persona while the node receives is
 // LLR-jvx6j9's, tested in `persona_creation.rs`.
 
-// ---- A send goes out from its own Persona's endpoint (PR-8qsnhx, PR-tcd2ta, PR-47aycj)
+// ---- A send goes out from its own Persona's endpoint -----------------------
 
 /// Party `party` of test `tag`, over `chain`'s slots, admitted to `org` by
 /// `io`, which must be receiving: it proposes its Member from an Invite `io`
@@ -135,7 +135,7 @@ async fn sent_from(io: &OrgIo, org: OrgId, to: &OrgIo) -> (DevicePublicKey, Send
 // node administering two Organisations through two Personas sends each
 // Organisation's epoch from its own Persona's endpoint, under that Persona's
 // Device key, whichever was bound first.
-// verifies: LLR-d2pzzk, PR-8qsnhx
+// verifies: LLR-d2pzzk
 #[tokio::test(flavor = "multi_thread")]
 async fn a_second_organisations_message_goes_out_under_its_own_personas_key() {
     let _guard = LOCK.lock().await;
@@ -159,7 +159,7 @@ async fn a_second_organisations_message_goes_out_under_its_own_personas_key() {
 
 // After a Persona's endpoint has closed, a send from that Persona binds the
 // endpoint again and goes out under the Persona's Device key.
-// verifies: LLR-d2pzzk, PR-tcd2ta
+// verifies: LLR-d2pzzk
 #[tokio::test(flavor = "multi_thread")]
 async fn after_its_endpoint_closes_a_send_binds_it_again() {
     let _guard = LOCK.lock().await;
@@ -189,7 +189,7 @@ async fn after_its_endpoint_closes_a_send_binds_it_again() {
 // send from the first Persona binds its endpoint again; that endpoint
 // accepts too: a message to its Device reaches the receive channel, and the
 // other Persona's endpoint still delivers.
-// verifies: LLR-z35vbh, LLR-d2pzzk, PR-47aycj
+// verifies: LLR-z35vbh, LLR-d2pzzk
 #[tokio::test(flavor = "multi_thread")]
 async fn a_send_that_rebinds_a_closed_endpoint_while_the_receiver_runs_accepts_on_it() {
     let _guard = LOCK.lock().await;
@@ -225,7 +225,7 @@ async fn a_send_that_rebinds_a_closed_endpoint_while_the_receiver_runs_accepts_o
 // is kept, and the next send, once the keychain answers, binds the endpoint
 // again and it accepts. The count of accept tasks stays exact: once both
 // endpoints close, the receive channel ends.
-// verifies: LLR-z35vbh, LLR-d2pzzk, PR-47aycj
+// verifies: LLR-z35vbh, LLR-d2pzzk
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_rebind_while_the_receiver_runs_binds_and_accepts_on_the_next_send() {
     let _guard = LOCK.lock().await;
@@ -318,7 +318,7 @@ async fn a_message_to_either_personas_device_reaches_the_receive_channel() {
     }
 }
 
-// ---- A closed endpoint is not reused (PR-tcd2ta) ----------------------------
+// ---- A closed endpoint is not reused ----------------------------------------
 
 /// Close `persona_id`'s endpoint, as a permanent transport failure would,
 /// and wait until the receive channel reports every accept task ended.
@@ -346,7 +346,7 @@ async fn delivered_to(io: &OrgIo, persona_id: &PersonaId, sender_seed: [u8; 32],
 // After a Persona's endpoint has closed, `start_receiving` binds it again
 // from the keychain item and accepts on it: a message to that Persona's
 // Device reaches the receive channel, and one endpoint is bound, not two.
-// verifies: LLR-z35vbh, LLR-d2pzzk, PR-tcd2ta
+// verifies: LLR-z35vbh, LLR-d2pzzk
 #[tokio::test(flavor = "multi_thread")]
 async fn after_its_endpoint_closes_start_receiving_binds_it_again_and_receives() {
     let _guard = LOCK.lock().await;
@@ -373,7 +373,7 @@ async fn after_its_endpoint_closes_start_receiving_binds_it_again_and_receives()
 // Abnormal: the keychain refuses the rebind of a closed endpoint.
 // `start_receiving` reports the failed bind, keeps nothing closed in its
 // place, and binds once the keychain answers again.
-// verifies: LLR-z35vbh, LLR-d2pzzk, PR-tcd2ta
+// verifies: LLR-z35vbh, LLR-d2pzzk
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_rebind_is_a_failed_bind_and_the_next_start_binds() {
     let _guard = LOCK.lock().await;
@@ -451,7 +451,7 @@ async fn a_closing_endpoint_is_not_handed_out_again() {
     close.await;
 }
 
-// ---- A stalled connection (PR-d2p5y2) --------------------------------------
+// ---- A stalled connection ---------------------------------------------------
 
 /// A peer that completes the handshake with `persona_id`'s endpoint and
 /// then opens no stream: the connection, held open by the caller.

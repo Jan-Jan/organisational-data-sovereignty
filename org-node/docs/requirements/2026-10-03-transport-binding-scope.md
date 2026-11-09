@@ -1,6 +1,6 @@
 # Requirements — the scope of the transport bind
 
-*Moved 2026-10-13 (S4, task T10 of `docs/plans/2026-10-06-org-io-transport.md`,
+*Moved 2026-10-13 (S4, task T10,
 ruling A):* both requirements this file defined moved to org-io with the
 transport, to `org-io/docs/requirements/2026-10-06-transport.md`
 ("The binding scope of the transport"), with their verification notes; their
@@ -9,7 +9,7 @@ assessments moved to org-io's S4 risk draft, and their tests to
 kept as written except that the two requirements are named in prose: **the
 binding-scope requirement** and **the sockets requirement**.
 
-Two requirements, minted while resolving PR-d4nye8: the binding-scope
+Two requirements, minted while resolving the resolved problem report on the loopback transport timeout: the binding-scope
 requirement, which states
 which addresses Loopback mode may bind and advertise, and the sockets
 requirement, which
@@ -88,8 +88,7 @@ it silently un-confines the mode, and no gated test will notice. Closing it
 needs an assertion after `online()` resolves, which measures whether this host
 can reach a relay rather than how the endpoint is configured, and iroh exposes
 no relay map on `Endpoint` for a synchronous alternative. Recorded as a gap in
-this change's verification record,
-`docs/verification/2026-10-03-worktree-org-node-loopback-timeout.md`.
+this change's verification record.
 
 ## Which sockets must come up
 
@@ -97,7 +96,7 @@ this change's verification record,
 Loopback mode, no endpoint without an IPv4 loopback socket; an endpoint
 without an IPv6 one.)*
 
-This is the policy the fix for PR-d4nye8 chose and did not, at first, write
+This is the policy the fix for the resolved problem report on the loopback transport timeout chose and did not, at first, write
 down anywhere a gate could see — which is the defect that report is about,
 repeated inside its own fix and caught by review round 2.
 
