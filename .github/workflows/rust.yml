@@ -101,7 +101,7 @@ jobs:
       - run: |
           cargo test -p org-io --features test-support --lib \
             --test key_custody_config --test fuzz_seed_parse --test signatory_key \
-            --test absences --test chain_read_rule --test signatory_rule \
+            --test absences --test chain_read_rule \
             --test app_boundary --test open --test keychain \
             --test keychain_contract --test store_files --test transport_handshake \
             --test transport_networked --test endpoints --test preflight_transport \

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
 license = "GPL-3.0-only"
-description = "ODS: all IO for an Organisation — the chain read and write, the user's signatory key, the own-admin check"
+description = "ODS: all IO for an Organisation — the chain read and write, the user's signatory key"
 publish = false
 
 [features]
@@ -111,13 +111,6 @@ required-features = ["test-support"]
 name = "dev_seed_env"
 path = "tests/dev_seed_env.rs"
 required-features = ["dev-seed"]
-
-# The own-admin check (LLR-qhyc3n, LLR-vyd5d3, LLR-c9fyun): the pure rule,
-# then the handle over `test_support::FakeChain`'s signatory-set slots.
-[[test]]
-name = "signatory_rule"
-path = "tests/signatory_rule.rs"
-required-features = ["test-support"]
 
 # The keychain module (LLR-677fqq, LLR-8erfbu, LLR-n9dnm4), over
 # `test_support::MemoryKeychain`: its tests install keyring's process-global

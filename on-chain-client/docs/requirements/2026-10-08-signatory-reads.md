@@ -33,6 +33,13 @@ its own block rebuilt PR-ksm2ua's shape). Narrowing: the pinned read also
 fails when the runtime has no `Any` proxy type, so in that runtime this
 read gives an error where it gave an answer.
 
+*Note 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; owner
+ruling R3 of 2026-11-02):* no consumer since 2026-11-02; kept for the
+several-Admins stage. Its only consumer, org-io's own-admin check, is
+removed (change `worktree-org-io-publish-2`, org-io's owner ruling 6;
+citation corrected 2026-11-09, merge review MR1-C4); this read, its export and
+its tests stay as they are.
+
 **REQ-v8jczx**: The software shall provide a read of an account's proxy
 delegates (`Proxy.Proxies`) at the latest finalised block, returning every
 delegate account the stored definitions name, an empty list when the account

@@ -17,10 +17,10 @@ mod support;
 use org_members::{Handle, MemberId, Name, RootHash, Surname};
 use org_node::ids::OrgId;
 use org_node::invitation::{EndpointAddresses, InviteId};
-use org_node::revocation::RevocationNotice;
+use org_node::revocation::{RevocationNotice, Signature64};
 use org_node::service::first_admission_base;
 use org_node::store::{
-    ExpectedAdmission, MemberSnapshot, OrgRecord, OrgRecordParts, Origin, PersonaRecord, PersonaRecordParts, PersonaStatus, PersonaStore, ProvisionalChange,
+    ExpectedAdmission, KeptNotice, MemberSnapshot, OrgRecord, OrgRecordParts, Origin, PersonaRecord, PersonaRecordParts, PersonaStatus, PersonaStore, ProvisionalChange,
     ProvisionalMember, SealedStore, StoreData,
 };
 use org_node::test_fixtures::{bob_absence_notice, device_key, device_secret, member_key, seal_plaintext_for_test};
@@ -149,7 +149,7 @@ fn a_store_of_valid_records_opens_with_every_field_parsed() {
     assert_eq!(opened.data().unwrap().record.as_ref().unwrap().trie_members[0].member_key, member_key(0x21));
 }
 
-/// The store plaintext as its wire form (LLR-d925uu's field order), every
+/// The store plaintext as its wire form (LLR-f5wrjx's field order), every
 /// fallible field held as the plain value it is decoded from, so a test can
 /// make any one of them invalid (postcard encodes a struct as the tuple of
 /// its fields; names are not encoded).
@@ -163,12 +163,16 @@ struct WireStore {
     founding: Option<WireFounding>,
     member: Option<WireProvisionalMember>,
     kept_admission_requests: Vec<WireKeptRequest>,
-    kept_revocation_notices: Vec<RevocationNotice>,
+    kept_revocation_notices: Vec<(RevocationNotice, [u8; 32])>,
     expected_admissions: Vec<[u8; 20]>,
     outstanding_invites: Vec<([u8; 20], [u8; 32], String)>,
     revoked_devices: Vec<(MemberId, [u8; 32])>,
     address_book: Vec<([u8; 32], Vec<String>)>,
+    acknowledged: Vec<(WireAcknowledgement, MemberId)>,
 }
+
+/// An acknowledgement's fields in order, its Device key as plain bytes.
+type WireAcknowledgement = (OrgId, MemberId, [u8; 32], Epoch, RootHash, Signature64);
 
 #[derive(serde::Serialize)]
 struct WirePersona {
@@ -357,11 +361,15 @@ fn wire_store() -> WireStore {
             device_key: *device_key(0x24).as_bytes(),
             addresses: vec!["198.51.100.7:7000".into()],
         }],
-        kept_revocation_notices: vec![bob_absence_notice(OrgId::new([5u8; 20]))],
+        kept_revocation_notices: vec![(bob_absence_notice(OrgId::new([5u8; 20])), *device_key(0x21).as_bytes())],
         expected_admissions: vec![[0x77; 20]],
         outstanding_invites: vec![([5u8; 20], [0x61; 32], "Carol Coder".into())],
         revoked_devices: vec![(MemberId::new([3u8; 32]), *device_key(0x25).as_bytes())],
         address_book: vec![(*device_key(0x22).as_bytes(), vec!["203.0.113.9:7000".into()])],
+        acknowledged: vec![(
+            (OrgId::new([5u8; 20]), MemberId::new([3u8; 32]), *device_key(0x25).as_bytes(), Epoch::new(1), RootHash::new([0x66; 32]), Signature64([0x5b; 64])),
+            MemberId::new([3u8; 32]),
+        )],
     }
 }
 
@@ -410,11 +418,18 @@ fn a_store_with_every_epoch_state_kind_opens_with_every_field_parsed() {
     let request = &content.kept_admission_requests[0];
     assert_eq!((request.from, request.member_key), (device_key(0x24), member_key(0x36)));
     assert_eq!(request.addresses.as_slice(), ["198.51.100.7:7000".to_string()].as_slice());
-    assert_eq!(content.kept_revocation_notices, vec![bob_absence_notice(OrgId::new([5u8; 20]))]);
+    assert_eq!(
+        content.kept_revocation_notices,
+        vec![KeptNotice { notice: bob_absence_notice(OrgId::new([5u8; 20])), from: device_key(0x21) }]
+    );
     assert_eq!(content.expected_admissions, vec![ExpectedAdmission { org_id: OrgId::new([0x77; 20]) }]);
     assert_eq!(content.outstanding_invites[0].invitee_name, "Carol Coder");
     assert_eq!(content.revoked_devices[0].device_key, device_key(0x25));
     assert_eq!(content.address_book[0].0, device_key(0x22));
+    assert_eq!(
+        (content.acknowledged[0].acknowledgement.device, content.acknowledged[0].member_id),
+        (device_key(0x25), MemberId::new([3u8; 32]))
+    );
     assert_eq!(content.behind, None, "the behind marker is not encoded");
 }
 
@@ -423,8 +438,8 @@ fn a_store_with_every_epoch_state_kind_opens_with_every_field_parsed() {
 // store whose record ends in an option tag and no key — a legacy layout — is
 // refused, not read or migrated. The record is followed by its two kept
 // options (`kept_change_set`, `kept_base_snapshot`: `00 00`) and the store
-// by eleven empty or absent fields (the Organisation name, nine lists and
-// the two options of LLR-d925uu), so the key is the 32 bytes ending 13
+// by twelve empty or absent fields (the Organisation name, ten lists and
+// the two options of LLR-f5wrjx), so the key is the 32 bytes ending 14
 // bytes before the end.
 // verifies: LLR-78jfrd
 #[test]
@@ -432,12 +447,12 @@ fn a_record_carries_its_organisation_private_key_and_a_store_without_one_is_refu
     let store_data = StoreData { org_name: String::new(), ..store_with_record() };
     let plaintext = postcard::to_allocvec(&store_data).unwrap();
     let key = org_with_member().org_private_key_for_test().clone();
-    assert_eq!(&plaintext[plaintext.len() - 45..plaintext.len() - 13], key.expose_secret(), "no option tag");
-    assert_eq!(&plaintext[plaintext.len() - 13..], &[0u8; 13], "two kept options, then the empty epoch state");
+    assert_eq!(&plaintext[plaintext.len() - 46..plaintext.len() - 14], key.expose_secret(), "no option tag");
+    assert_eq!(&plaintext[plaintext.len() - 14..], &[0u8; 14], "two kept options, then the empty epoch state");
     assert_eq!(open(&seal(&plaintext)).unwrap().data().unwrap().record.as_ref().unwrap().org_private_key_for_test(), &key);
 
-    let mut legacy = plaintext[..plaintext.len() - 45].to_vec();
-    legacy.extend_from_slice(&[0x00; 14]); // `org_private_key: None`, then the kept options and the empty epoch state
+    let mut legacy = plaintext[..plaintext.len() - 46].to_vec();
+    legacy.extend_from_slice(&[0x00; 15]); // `org_private_key: None`, then the kept options and the empty epoch state
     assert!(open(&seal(&legacy)).is_err(), "a record without the key is not read");
 }
 
@@ -486,14 +501,15 @@ fn a_store_with_two_invalid_fields_in_one_record_reports_the_first_in_record_ord
 
 /// One invalid field in each epoch-state kind — a provisional change, a
 /// provisional organisation (key and origin), the provisional founding, the
-/// provisional Member, a kept admission request, a revoked Device, an
-/// address-book entry and a member snapshot inside a provisional
-/// organisation — is refused naming it, and nothing is opened.
-/// verifies: LLR-7yu2xy
+/// provisional Member, a kept admission request, a kept notice's sender, a
+/// revoked Device, an address-book entry, an acknowledged entry and a member
+/// snapshot inside a provisional organisation — is refused naming it, and
+/// nothing is opened.
+/// verifies: LLR-7yu2xy, LLR-f5wrjx
 #[test]
 fn unseal_refuses_an_invalid_field_of_each_epoch_state_kind_naming_it() {
     type Spoil = fn(&mut WireStore);
-    let cases: [(&str, Spoil); 10] = [
+    let cases: [(&str, Spoil); 12] = [
         ("provisional.handle", |store| store.provisional_changes[0] = WireChange::Admit { invite_id: [0x61; 32], handle: "Carol".into() }),
         ("provisional.org_pub_key", |store| store.provisional_organisations[0].org_pub_key = off_curve_key()),
         ("provisional.origin", |store| store.provisional_organisations[0].origin = WireOrigin::Received { from: off_curve_key() }),
@@ -502,8 +518,10 @@ fn unseal_refuses_an_invalid_field_of_each_epoch_state_kind_naming_it() {
         ("provisional_member.issuer", |store| store.member.as_mut().unwrap().issuer = off_curve_key()),
         ("admission.member_key", |store| store.kept_admission_requests[0].member_key = off_curve_key()),
         ("admission.addresses", |store| store.kept_admission_requests[0].addresses = vec!["a".repeat(257)]),
+        ("org.kept_revocation_notices", |store| store.kept_revocation_notices[0].1 = off_curve_key()),
         ("org.revoked_devices", |store| store.revoked_devices[0].1 = off_curve_key()),
         ("org.address_book", |store| store.address_book[0].1 = vec![String::new(); 17]),
+        ("org.acknowledged", |store| store.acknowledged[0].0 .2 = off_curve_key()),
     ];
     for (field, spoil) in cases {
         let mut wire = wire_store();

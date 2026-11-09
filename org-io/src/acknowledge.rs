@@ -1,8 +1,10 @@
 //! The removal acknowledgements' delivery (SDD-3my66m): after verification
 //! reports this node removed, one task per removed Persona sends each
 //! acknowledgement org-node keeps to its recipient, from the Persona's own
-//! identity over a direct-only bind (LLR-zzsqj4, LLR-cqr26z, LLR-3w22wc),
-//! in rounds on the schedule of LLR-bv6wkz read from the handle's clock.
+//! identity over a direct-only bind, or, for a dial by key alone in
+//! Networked mode, a bind with the relay server and address lookup
+//! (LLR-zzsqj4, LLR-spckm6, LLR-u2j6u8), in rounds on the schedule of
+//! LLR-bv6wkz read from the handle's clock.
 //! org-io learns them only from org-node's list, and removes one only
 //! through org-node's `acknowledgement_accepted` (LLR-sn5ded, LLR-6ux6yw).
 //! The task holds the node's lock only to read the list and around an
@@ -11,6 +13,7 @@
 //! to the deletion (SDD-wyn7b6, `retention.rs`).
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use org_node::service::{KeptAcknowledgements, OrgService};
@@ -162,13 +165,16 @@ impl Drop for Tasks {
 pub(crate) struct Context {
     pub(crate) service: Arc<tokio::sync::Mutex<OrgService>>,
     pub(crate) mode: TransportMode,
+    /// The handle's bind plan, with the relay server and address lookup in
+    /// Networked mode: the one a dial by key alone binds (LLR-spckm6).
+    pub(crate) bind_plan: BindPlan,
     pub(crate) deliveries: Arc<Deliveries>,
     /// The handle's store write: its data directory and its random source.
     pub(crate) store: crate::StoreWriter,
     pub(crate) clock: Arc<dyn Clock>,
 }
 
-/// The direct-only plan for `mode` (LLR-cqr26z).
+/// The direct-only plan for `mode` (LLR-spckm6).
 fn direct_plan(mode: TransportMode) -> BindPlan {
     match mode {
         TransportMode::Loopback => BindPlan::Loopback,
@@ -304,7 +310,7 @@ async fn deliver(context: Context, device_key: DevicePublicKey, org_id: OrgId, v
             return;
         }
         // A bind that fails is every recipient's outcome for the round, its
-        // cause in the reason; the next round binds again (LLR-cqr26z).
+        // cause in the reason; the next round binds again (LLR-spckm6).
         let bound = match endpoint {
             Some(ref bound) => Ok(bound),
             None => match OrgEndpoint::bind_from_keychain(&device_key, direct_plan(context.mode)).await {
@@ -368,9 +374,9 @@ pub(crate) async fn wait_for(context: &Context, due: Option<u64>) {
     }
 }
 
-/// One round (LLR-3w22wc): every kept acknowledgement, in org-node's
+/// One round (LLR-u2j6u8): every kept acknowledgement, in org-node's
 /// order, each recipient tried at its kept addresses in order until one
-/// accepts; one recipient's outcome never stops the others. An `Accepted`
+/// accepts, or by its key alone in Networked mode when none may be dialled; one recipient's outcome never stops the others. An `Accepted`
 /// has org-node delete the acknowledgement and the store written before
 /// the next recipient (LLR-6ux6yw); any other outcome is recorded and
 /// nothing else (LLR-xwz3nu). How many are still kept, or why org-node
@@ -397,7 +403,7 @@ async fn round(
             Err(error) => Delivery::NotDelivered { reason: SendError::SenderEndpoint(format!("the direct bind failed: {error}")) },
             Ok(endpoint) => {
                 let addresses = addresses.map(|addresses| addresses.as_slice().to_vec()).unwrap_or_default();
-                try_addresses(endpoint, context.mode, &recipient, &addresses, &message.body).await
+                try_addresses(context, device_key, endpoint, &recipient, &addresses, &message.body).await
             }
         };
         let outcome = match delivery {
@@ -466,20 +472,58 @@ async fn accepted(context: &Context, device_key: &DevicePublicKey, recipient: De
     Ok(left)
 }
 
-/// Dial each address alone, in order, stopping at the first `Delivered`;
-/// the last address's outcome otherwise, `NoAddress` when none may be
-/// dialled.
-async fn try_addresses(endpoint: &OrgEndpoint, mode: TransportMode, recipient: &DevicePublicKey, addresses: &[String], body: &[u8]) -> Delivery {
-    let mut last = Delivery::NotDelivered { reason: SendError::NoAddress };
-    // The send path's one address rule (LLR-34tfm8). Its two refusals, no
-    // address kept and none the recipient's, both mean no address may be
-    // dialled, which this delivery reports as `NoAddress` (LLR-3w22wc).
+/// The dials one delivery to `recipient` makes, each a socket list
+/// (LLR-u2j6u8): each socket the send path's address rule (LLR-34tfm8)
+/// gives, alone and in order. With none, Networked mode dials once by the
+/// key alone, an empty socket list, as `send_all` does: discovery finds
+/// the key (REQ-kn8zg6). Loopback mode has no discovery, so it dials
+/// nothing. The rule's two Loopback refusals, no address kept and none the
+/// recipient's, both mean no address may be dialled.
+pub(crate) fn dial_plan(mode: TransportMode, recipient: &DevicePublicKey, addresses: &[String]) -> Vec<Vec<SocketAddr>> {
     let sockets = sockets_for(mode, recipient, Some(addresses)).unwrap_or_default();
-    for socket in sockets {
-        last = send_one(endpoint, recipient, &[socket], body).await;
+    if sockets.is_empty() && mode == TransportMode::Networked {
+        return vec![Vec::new()];
+    }
+    sockets.into_iter().map(|socket| vec![socket]).collect()
+}
+
+/// Make each dial of the plan in order, stopping at the first `Delivered`;
+/// the last dial's outcome otherwise, `NoAddress` when nothing was dialled.
+/// A dial with a socket goes from the direct-only `endpoint`; the dial by
+/// key alone, from an endpoint bound for it (`dial_by_key`).
+async fn try_addresses(
+    context: &Context,
+    device_key: &DevicePublicKey,
+    endpoint: &OrgEndpoint,
+    recipient: &DevicePublicKey,
+    addresses: &[String],
+    body: &[u8],
+) -> Delivery {
+    let mut last = Delivery::NotDelivered { reason: SendError::NoAddress };
+    for sockets in dial_plan(context.mode, recipient, addresses) {
+        last = if sockets.is_empty() {
+            dial_by_key(context, device_key, recipient, body).await
+        } else {
+            send_one(endpoint, recipient, &sockets, body).await
+        };
         if matches!(last, Delivery::Delivered) {
             break;
         }
     }
     last
+}
+
+/// The one dial by `recipient`'s key alone (LLR-spckm6): the direct-only
+/// endpoint has no address lookup, so it could never find the key; this
+/// dial goes from an endpoint of `device_key`'s identity bound with the
+/// relay server and address lookup, closed once the verdict is read. A bind
+/// that fails is this recipient's outcome; the next round binds again.
+async fn dial_by_key(context: &Context, device_key: &DevicePublicKey, recipient: &DevicePublicKey, body: &[u8]) -> Delivery {
+    let relayed = match OrgEndpoint::bind_from_keychain(device_key, context.bind_plan.clone()).await {
+        Ok(relayed) => relayed,
+        Err(error) => return Delivery::NotDelivered { reason: SendError::SenderEndpoint(format!("the relay bind failed: {error}")) },
+    };
+    let delivery = send_one(&relayed, recipient, &[], body).await;
+    relayed.close().await;
+    delivery
 }

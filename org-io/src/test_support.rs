@@ -1,23 +1,19 @@
 //! Test-only substitutes (the `test-support` feature; never in production
 //! builds). `FakeChain` stands in for the chain on both sides of org-io's
 //! seams: its writes (`ChainWriter`) move a set of `ChainSlots`, and its
-//! reads (`StateReader`) answer from them, counted; its signatory-set read
-//! (`SignatorySetReader`) answers from a mapped account per Organisation, a
-//! definition list per account and an `Any` index, counted apart. It
-//! generalises the app's former `FakeWriter`.
+//! reads (`StateReader`) answer from them, counted.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use async_trait::async_trait;
-use on_chain_client::write::{AccountId, GenesisStep, WriteError, WriteWindow};
+use on_chain_client::write::{GenesisStep, WriteError, WriteWindow};
 use on_chain_client::ClientError;
 use org_node::test_fixtures::ChainSlots;
 use org_node::{ChainAccount, Epoch, OrgId, OrgNodeError, OrgPublicKey, OrgState, RootHash};
 
 use crate::chain_read::StateReader;
-use crate::signatory::{ProxyDefinition, SignatorySetReader, SignatorySetView};
 use crate::write::{ChainWriteError, ChainWriter};
 
 /// A substitute chain. Clones share everything. The switches:
@@ -44,23 +40,17 @@ use crate::write::{ChainWriteError, ChainWriter};
 ///   `sharing_slots_with`): the write window is born at it and
 ///   `finalised_block` answers it, counted apart (`finalised_reads`);
 ///   `read_failing` fails that read too.
-/// - `original_account_failing`, `delegates_failing`: the signatory-set read
-///   fails at the mapped account, or (for a mapped H160) at its definitions;
-///   the storage values it reads are counted (`signatory_reads`).
 /// - `hold_next_read`: the next state read waits until the test releases it.
 #[derive(Clone, Default)]
 pub struct FakeChain {
     slots: ChainSlots,
     proxies: Arc<Mutex<HashMap<[u8; 32], OrgId>>>,
-    signatory_set: Arc<Mutex<SignatorySlots>>,
     pub write_failing: Arc<AtomicBool>,
     pub write_hanging: Arc<AtomicBool>,
     pub read_failing: Arc<AtomicBool>,
     pub parse_refusing: Arc<AtomicBool>,
     pub state_hidden: Arc<AtomicBool>,
     pub epoch_ahead: Arc<AtomicBool>,
-    pub original_account_failing: Arc<AtomicBool>,
-    pub delegates_failing: Arc<AtomicBool>,
     pub write_lands_then_hangs: Arc<AtomicBool>,
     pub write_window_failing: Arc<AtomicBool>,
     pub write_window_hanging: Arc<AtomicBool>,
@@ -68,7 +58,6 @@ pub struct FakeChain {
     founding_log: Arc<Mutex<FoundingLog>>,
     next_proxy: Arc<AtomicU8>,
     reads: Arc<AtomicUsize>,
-    signatory_reads: Arc<AtomicUsize>,
     finalised: Arc<AtomicU64>,
     finalised_reads: Arc<AtomicUsize>,
     update_writes: Arc<AtomicUsize>,
@@ -103,67 +92,21 @@ impl ReadHold {
     }
 }
 
-/// What the signatory-set read answers from: `Revive.OriginalAccount` per
-/// Organisation, `Proxy.Proxies` per account, and the runtime's `Any` index
-/// (0 unless set).
-#[derive(Default)]
-struct SignatorySlots {
-    original_accounts: HashMap<OrgId, AccountId>,
-    definitions: HashMap<AccountId, Vec<ProxyDefinition>>,
-    any_proxy_type: u8,
-}
-
 impl FakeChain {
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// The same slots, proxies and signatory set as `other` (one chain),
+    /// The same slots and proxies as `other` (one chain),
     /// with its own read counters and its own switches: another node's view
     /// of that chain.
     pub fn sharing_slots_with(other: &FakeChain) -> Self {
         Self {
             slots: other.slots.clone(),
             proxies: other.proxies.clone(),
-            signatory_set: other.signatory_set.clone(),
             finalised: other.finalised.clone(),
             ..Self::default()
         }
-    }
-
-    /// Map `org_id`'s H160 to `account` (`Revive.OriginalAccount`).
-    pub fn map_original_account(&self, org_id: OrgId, account: AccountId) {
-        self.signatory_set().original_accounts.insert(org_id, account);
-    }
-
-    /// Set `account`'s proxy definitions to each delegate's founding
-    /// definition, `(delegate, Any, 0)`.
-    pub fn set_delegates(&self, account: AccountId, delegates: Vec<AccountId>) {
-        let any = self.signatory_set().any_proxy_type;
-        let definitions =
-            delegates.into_iter().map(|delegate| ProxyDefinition { delegate, proxy_type: any, delay: 0 }).collect();
-        self.set_definitions(account, definitions);
-    }
-
-    /// Set `account`'s proxy definitions (`Proxy.Proxies`), in stored order.
-    pub fn set_definitions(&self, account: AccountId, definitions: Vec<ProxyDefinition>) {
-        self.signatory_set().definitions.insert(account, definitions);
-    }
-
-    /// Set the runtime's `Any` proxy-type index the read reports.
-    pub fn set_any_proxy_type(&self, index: u8) {
-        self.signatory_set().any_proxy_type = index;
-    }
-
-    /// How many signatory-set storage values this view has read:
-    /// `Revive.OriginalAccount` on every read, `Proxy.Proxies` only for a
-    /// mapped H160, as on-chain-client's pinned read fetches them.
-    pub fn signatory_reads(&self) -> usize {
-        self.signatory_reads.load(Ordering::SeqCst)
-    }
-
-    fn signatory_set(&self) -> MutexGuard<'_, SignatorySlots> {
-        self.signatory_set.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// The slots the writes move and the reads answer from.
@@ -285,29 +228,6 @@ impl StateReader for FakeChain {
 }
 
 #[async_trait]
-impl SignatorySetReader for FakeChain {
-    async fn signatory_set(&self, org_id: OrgId) -> Result<SignatorySetView, String> {
-        self.signatory_reads.fetch_add(1, Ordering::SeqCst);
-        if self.original_account_failing.load(Ordering::SeqCst) {
-            return Err("node unreachable".into());
-        }
-        let slots = self.signatory_set();
-        let original_account = slots.original_accounts.get(&org_id).copied();
-        let definitions = match original_account {
-            None => Vec::new(),
-            Some(account) => {
-                self.signatory_reads.fetch_add(1, Ordering::SeqCst);
-                if self.delegates_failing.load(Ordering::SeqCst) {
-                    return Err("node unreachable".into());
-                }
-                slots.definitions.get(&account).cloned().unwrap_or_default()
-            }
-        };
-        Ok(SignatorySetView { original_account, definitions, any_proxy_type: slots.any_proxy_type })
-    }
-}
-
-#[async_trait]
 impl ChainWriter for FakeChain {
     async fn create_proxy(&self) -> Result<(OrgId, ChainAccount), ChainWriteError> {
         self.founding_log().push(("create_proxy", None));
@@ -382,9 +302,6 @@ impl ChainWriter for FakeChain {
 pub struct ProductionChain {
     pub reader: crate::chain_read::OnChainStateReader,
     pub writer: crate::write::OnChainWriter,
-    pub signatory_set: crate::signatory::OnChainSignatorySetReader,
-    /// The account the writer dispatches from: the signatory key's own.
-    pub controller: AccountId,
 }
 
 /// `ProductionChain` over `settings`, signing with the seed `ODS_ADMIN_SEED` holds.
@@ -394,15 +311,12 @@ pub async fn production_chain(settings: &crate::ChainSettings) -> Result<Product
     let signatory = crate::custody::signatory_from_environment()
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "ODS_ADMIN_SEED is not set".to_string())?;
-    let controller = signatory.account_id();
     let (api, registry) =
         crate::connect::connect(&settings.ws_url, settings.contract_h160).await.map_err(|error| error.to_string())?;
     let ops = SubxtWriteOps::new(api, FinalitySink);
     Ok(ProductionChain {
         reader: crate::chain_read::OnChainStateReader::new(registry.clone()),
-        writer: crate::write::OnChainWriter::new(ops, registry.clone(), signatory, Vec::new(), settings.contract_h160),
-        signatory_set: crate::signatory::OnChainSignatorySetReader::new(registry),
-        controller,
+        writer: crate::write::OnChainWriter::new(ops, registry, signatory, Vec::new(), settings.contract_h160),
     })
 }
 

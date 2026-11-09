@@ -319,7 +319,7 @@ impl OrgIo {
             NodeVerified::Removed { org_id, .. } => {
                 // The removed store is written; with the node's lock released, the Persona's
                 // endpoint is closed and its acknowledgements' delivery started (LLR-zzsqj4,
-                // LLR-cqr26z).
+                // LLR-spckm6).
                 drop(service);
                 self.local.endpoints.close(&device_key).await;
                 crate::acknowledge::start(self.delivery_context(), device_key).await;

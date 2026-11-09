@@ -116,7 +116,21 @@ alone if postcard fails to encode the tuple, so a signature made then would
 cover no Organisation, Member, Device, epoch or root.
 affects: LLR-bs6yxf
 opened: 2026-10-30
-status: open
+status: resolved
+resolution: fixed 2026-11-04 (change `worktree-org-io-publish-2`, plan task
+T18, owner ruling Q4 of 2026-11-03) by the fix outline's second option:
+`signed_bytes` appends the domain, then each fixed-size field's bytes and
+the epoch's LEB128 varint written by hand, which is the tuple's postcard
+encoding with no step that can fail, so the `pub` signature and LLR-bs6yxf
+stay as written. Reproduced first by
+`revocation.rs::signed_bytes_are_the_domain_then_the_tuple_with_no_fallback`
+(`org-node/tests/revocation.rs`, `verifies: LLR-bs6yxf, PR-y6ay44`), red on
+its scan for the fallback before the fix; its first assertion holds the
+hand-written bytes equal to postcard's at a two-byte epoch.
+*Note 2026-11-04 (conformance round 1, T1-N2):* the source scan is dropped;
+the test is now
+`revocation.rs::signed_bytes_are_the_domain_then_the_tuple_at_each_varint_length`,
+which holds the same equality at epochs 127, 128, 300 and `u64::MAX`.
 
 Found by merge review round 3 of change `worktree-org-io-domain-api`
 (org-node finding-6, low). `signed_bytes` (`org-node/src/revocation.rs`)

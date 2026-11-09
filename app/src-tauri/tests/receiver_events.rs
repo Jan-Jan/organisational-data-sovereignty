@@ -525,7 +525,7 @@ fn a_chain_failure_is_classified_as_a_receiver_error() {
     assert_eq!(out[0].payload["message"], serde_json::json!(e.to_string()));
 }
 
-// verifies: LLR-7bk6qh, LLR-usxk57
+// verifies: LLR-wgr46u, LLR-usxk57
 #[test]
 fn a_chain_failure_emits_no_verification_event_for_any_message() {
     // Abnormal inputs: an empty message, one that reads like a closed
@@ -651,7 +651,7 @@ fn terminal_cases() -> Vec<(ReceiveError, String)> {
 }
 
 // inherited from LLR-a9rjtf (superseded by LLR-zw6jqy)
-// verifies: LLR-zw6jqy, LLR-a9rjtf
+// verifies: LLR-zw6jqy
 #[test]
 fn every_real_terminal_message_stops_the_loop() {
     for (e, rendered) in terminal_cases() {
@@ -666,7 +666,7 @@ fn every_real_terminal_message_stops_the_loop() {
 }
 
 // inherited from LLR-a9rjtf (superseded by LLR-zw6jqy)
-// verifies: LLR-zw6jqy, LLR-a9rjtf
+// verifies: LLR-zw6jqy
 #[test]
 fn a_non_terminal_failure_does_not_stop_the_loop() {
     // Abnormal inputs: a transport hiccup, a chain timeout, a local startup
@@ -702,7 +702,7 @@ fn a_non_terminal_failure_does_not_stop_the_loop() {
 }
 
 // inherited from LLR-a9rjtf (superseded by LLR-zw6jqy)
-// verifies: LLR-zw6jqy, LLR-a9rjtf
+// verifies: LLR-zw6jqy
 #[test]
 fn the_stop_is_announced_after_the_failure_for_the_same_error() {
     // REQ-jfxah3 says the stop is announced "before that loop exits", and what a
@@ -968,7 +968,7 @@ fn terminal_is_decided_by_the_error_variant_not_its_text() {
         );
     }
 
-    // A refusal keeps org-node's classification (LLR-7bk6qh) and never stops.
+    // A refusal keeps org-node's classification (LLR-wgr46u) and never stops.
     let verdict = ReceiveError::Refused(OrgNodeError::RootMismatch);
     assert_eq!(
         events::outcomes_for_receive_error(&verdict),

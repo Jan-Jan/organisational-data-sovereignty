@@ -603,7 +603,7 @@ fn adoption_drops_provisional_organisations_up_to_its_epoch_and_every_kept_notic
     stores::receive(&mut svc, stores::ADA, stores::BOB, &dave_body);
     let mut held = stores::held(&svc, stores::ADA).clone();
     held.provisional_organisations[1].epoch = Epoch::new(5);
-    held.kept_revocation_notices.push(stores::absence_notice(&base));
+    held.kept_revocation_notices.push(org_node::store::KeptNotice { notice: stores::absence_notice(&base), from: device_key(0x21) });
     let mut svc = stores::service(stores::ADA, held);
     let (adopted, sealed) = stores::verify(&mut svc, stores::ADA, Some(stores::chain(4, root, org_pub_key)), &asked).unwrap();
     assert!(matches!(adopted, Verified::Adopted { .. }), "{adopted:?}");

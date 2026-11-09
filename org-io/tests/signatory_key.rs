@@ -104,32 +104,6 @@ async fn a_build_without_dev_seed_never_asks_for_the_seed_on_a_write_or_a_read()
     }
 }
 
-// REQ-8zuka3 through LLR-rgdx22: built without
-// `dev-seed`, the own-admin check's "not configured" report, and each
-// signatory-set read the unconfigured handle refuses, say that the signing
-// seed is read only by development builds.
-// verifies: LLR-rgdx22
-#[cfg(not(feature = "dev-seed"))]
-#[tokio::test]
-async fn a_build_without_dev_seed_says_why_the_own_admin_check_is_not_configured() {
-    // The one `signatory_set` read needs no `AccountId`, only the `OrgId`.
-    use org_node::OrgId;
-    use org_io::signatory::{OwnAdminError, SignatorySetNotConfigured, SignatorySetReader};
-
-    let dir = std::env::temp_dir().join(format!("org-io-own-admin-not-configured-{}", std::process::id()));
-    // A directory an earlier run left is cleared; none there is fine.
-    let _ = std::fs::remove_dir_all(&dir);
-    let handle = org_io::OrgIo::open(&dir, org_io::transport::TransportMode::Loopback).unwrap();
-
-    let refused = handle.is_own_admin(OrgId::new([7; 20])).await.unwrap_err();
-    assert_eq!(refused, OwnAdminError::NotConfigured);
-    let read = SignatorySetNotConfigured.signatory_set(OrgId::new([7; 20])).await.unwrap_err();
-    for message in [refused.to_string(), read] {
-        assert!(message.contains("read only by development builds"), "{message}");
-        assert!(!message.contains("set ODS_CHAIN_WS"), "{message}");
-    }
-}
-
 // LLR-rgdx22, the hand-back: a refused connect returns
 // the service it was given, store and Personas intact, with a typed reason,
 // so the caller builds its unconfigured handle without opening the store

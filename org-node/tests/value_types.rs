@@ -89,7 +89,7 @@ fn every_rejection_variant_is_distinct_from_every_other() {
 
 // Normal: each first-admission refusal names its Organisation; abnormal: two
 // Organisations' refusals, and the two refusals of one, are not the same error.
-// verifies: LLR-mxskg9, REQ-8amu2a, REQ-kt877x
+// verifies: REQ-8amu2a, REQ-kt877x
 #[test]
 fn the_first_admission_refusals_name_their_organisation() {
     let org = OrgId::new([0xa0; 20]);

@@ -156,6 +156,27 @@ fn acknowledgement_signed_bytes_are_the_domain_then_the_postcard_tuple() {
     assert_eq!(ACK_DOMAIN, b"ods/org-node/revocation-acknowledgement/v1");
 }
 
+/// verifies: LLR-bs6yxf, PR-y6ay44
+///
+/// PR-y6ay44: the signed bytes are the domain, then exactly the tuple's
+/// postcard encoding. Boundary: the epoch's varint at one byte (127), two
+/// bytes (128, 300) and its longest (`u64::MAX`, ten bytes).
+#[test]
+fn signed_bytes_are_the_domain_then_the_tuple_at_each_varint_length() {
+    for epoch in [127, 128, 300, u64::MAX] {
+        let ack = Acknowledgement {
+            org_id: org(),
+            member_id: bob_id(),
+            device: org_node::test_fixtures::bob_device().device_key().unwrap(),
+            epoch: Epoch::new(epoch),
+            root: RootHash::new([0x66; 32]),
+            signature: Signature64([0; 64]),
+        };
+        let tuple = postcard::to_allocvec(&(ack.org_id, ack.member_id, ack.device, ack.epoch, ack.root)).unwrap();
+        assert_eq!(ack.signed_bytes(), [ACK_DOMAIN, &tuple[..]].concat(), "epoch {epoch}");
+    }
+}
+
 // --- Deciding a notice ---
 
 /// `encodable`'s postcard encoding.

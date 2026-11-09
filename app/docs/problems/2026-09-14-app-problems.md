@@ -19,7 +19,8 @@ Tauri's `setup` hook, so a user whose persona store cannot be opened sees a
 process abort rather than a diagnosable message.
 affects: RC-xt4qr3, RC-djzms3
 opened: 2026-09-14
-status: open
+status: accepted
+disposition: ruled on 2026-11-08 — owner accepted; to be fixed in a later app change, so the software does not change until then
 
 `app/src-tauri/src/lib.rs` wraps the call as
 `AppState::init(tauri_data_dir).unwrap_or_else(|e| panic!("AppState init failed: {e}"))`.
@@ -51,7 +52,8 @@ as a not-minted control.
 the component's history rather than the receiver's.
 affects: RC-nyy73d, RC-8abufw
 opened: 2026-09-14
-status: open
+status: accepted
+disposition: ruled on 2026-11-08 — owner accepted; to be fixed in a later app change, so the software does not change until then
 
 Switching away from the "S4: Membership" tab and back destroys and remounts the
 component, resetting `receiverStarted` to `false`. The UI then offers "Start
@@ -110,7 +112,8 @@ re-evaluated, so a chain connection that drops after startup is reported as
 healthy for the remaining life of the process.
 affects: RC-a7fenm
 opened: 2026-09-14
-status: open
+status: accepted
+disposition: ruled on 2026-11-09 — owner accepted; the defect still holds under today's names (`AppState::chain_endpoint`, `ConnectionStatus::chain_configured`, decided once in `AppState::init`; `app/src-tauri/src/policy.rs:151`); to be fixed in a later app change, so the software does not change until then
 
 `build_chain_ops()` runs exactly once, inside `init`, and its outcome is stored
 on `AppState` and never revisited. Nothing re-checks the WS connection, and
@@ -202,7 +205,8 @@ rather than once, so malformed input carrying a doubled prefix is silently
 normalised into a valid value instead of being refused.
 affects: REQ-sjkp8z, REQ-he8ejb, REQ-bvx4nh
 opened: 2026-09-14
-status: open
+status: accepted
+disposition: ruled on 2026-11-08 — owner accepted; to be fixed in a later app change, so the software does not change until then
 
 Found by the verification gate's round 4 in `app/src-tauri/src/parsing.rs`, and
 then — while fixing that — found in six more places by the fix task itself,
@@ -345,7 +349,8 @@ requirements that do not describe them, and the unit glossary declares two terms
 as defined in the root glossary where they are not defined at all.
 affects: REQ-a83vqr, REQ-jfxah3, REQ-dp95pv
 opened: 2026-09-14
-status: open
+status: accepted
+disposition: ruled on 2026-11-08 — owner accepted; to be fixed in a later app change, so the software does not change until then
 
 Found by the second independent review. Recorded rather than fixed, on the
 owner's decision of 2026-09-14: the change had already run two review rounds and

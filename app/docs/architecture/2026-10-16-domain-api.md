@@ -87,8 +87,8 @@ REQ-he8ejb, REQ-tw4cb5, REQ-2k7ys4 and REQ-dp95pv.
 
 ## SDD-6pjvhc — The command surface
 
-`app/src-tauri/src/commands.rs`: the seventeen command handlers (eighteen
-until 2026-10-20), their DTOs (the verification entry's in
+`app/src-tauri/src/commands.rs`: the eighteen command handlers (eighteen
+until 2026-10-20, seventeen from then until 2026-11-03), their DTOs (the verification entry's in
 `app/src-tauri/src/entry.rs` since 2026-10-28),
 `verify_and_send` (the body `verify_organisation` and the receiver loop
 share) and the handler list the IPC suite registers;
@@ -98,15 +98,29 @@ low-level requirements below are the parts the IPC harness and org-io's
 substitute chain (`AppState::for_test_over`) reach.
 
 **SDD-6pjvhc**: the IPC command surface, the one way the webview reaches
-org-io. Its seventeen commands are the thirteen that call org-io's domain
+org-io. Its eighteen commands are the fourteen that call org-io's domain
 surface under its names, then `list_personas`, `list_orgs`,
 `connection_status`, `start_receiver`. Each calls the shared org-io handle
 with values parsed at the IPC edge, passes no randomness, maps org-io's
 outcome to a DTO that carries no secret key material, returning org-io's
 refusal as its text; a follow-up SDD-6zqqm8 decides after a verification or
 a write is one more call made here.
-traces: REQ-vb5pag, REQ-akeah6, REQ-qv4d2z, REQ-pe2c7u, REQ-88npkt, REQ-2yh3c8, REQ-s3vnmh, REQ-sjkp8z, REQ-645jq9, REQ-vgn96n, REQ-y53dqn
+traces: REQ-vb5pag, REQ-akeah6, REQ-qv4d2z, REQ-pe2c7u, REQ-88npkt, REQ-2yh3c8, REQ-s3vnmh, REQ-sjkp8z, REQ-645jq9, REQ-vgn96n, REQ-y53dqn, REQ-yvzef9
 supersedes: SDD-rmbr3t
+
+*Amended 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; plan §0,
+T16g; an extension of the surface, no existing command changes meaning):*
+eighteen commands: `list_removed_devices` joins, calling org-io's
+`OrgIo::removed_devices` (LLR-dmfvv6, LLR-ce4hxz in
+`2026-11-02-publish-2.md`), and `traces:` gains REQ-yvzef9. The webview's
+view of it is SDD-g9ugu7's.
+
+*Amended in place 2026-11-09 (change `worktree-org-io-publish-2`, merge
+review round 1, MR1-A2; meaning unchanged):* the item and the section
+preamble above still read "seventeen commands are the thirteen that call
+org-io's domain surface" and "the seventeen command handlers (eighteen until
+2026-10-20)" after `list_removed_devices` joined on 2026-11-03; they now
+give eighteen and fourteen, as the 2026-11-03 note above states.
 
 *Amended in place 2026-10-28 (unmerged draft; round 3 review AR3-5, sweep
 for ARCHITECTURE Boundaries 3):* reworded so its responsibility is stated in
@@ -172,6 +186,11 @@ old names are now refused, so it takes a new ID.
 answer A3 of 2026-10-16):* `send_organisation` and `request_organisation`
 leave the set and are refused (no send by hand, no request by hand), and
 `list_admission_requests` joins it: seventeen, not eighteen.
+superseded-by: LLR-ce4hxz
+
+*Superseded 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; plan
+§0, T16g) by LLR-ce4hxz (`2026-11-02-publish-2.md`):* `list_removed_devices`
+joins the set, eighteen commands.
 
 **LLR-k57uqv**: `propose_person` takes `name` and `surname` and no Handle,
 calls org-io's `propose_person` once, and returns the Person's

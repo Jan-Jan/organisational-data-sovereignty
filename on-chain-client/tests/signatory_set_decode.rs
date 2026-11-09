@@ -283,7 +283,7 @@ fn typed_definitions(definitions: &[([u8; 32], u8, u32)]) -> Vec<u8> {
 
 // Normal: every definition keeps its delegate, type byte and delay, in the
 // order the chain stored them; no definitions is an empty list.
-// verifies: LLR-n2vx5q, LLR-a9bb7b
+// verifies: LLR-n2vx5q
 #[test]
 fn definitions_decode_with_type_and_delay_in_stored_order() {
     let bytes = typed_definitions(&[([1u8; 32], 0, 0), ([1u8; 32], 3, 0), ([2u8; 32], 0, 10)]);
@@ -305,7 +305,7 @@ fn definitions_decode_with_type_and_delay_in_stored_order() {
 
 // Abnormal: trailing bytes, too few bytes, a length prefix larger than the
 // bytes that follow, and no bytes at all are each `Malformed`.
-// verifies: LLR-n2vx5q, LLR-a9bb7b
+// verifies: LLR-n2vx5q
 #[test]
 fn a_malformed_definitions_value_is_refused() {
     let good = typed_definitions(&[([1u8; 32], 0, 0), ([2u8; 32], 1, 5)]);

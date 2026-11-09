@@ -45,7 +45,12 @@ dependency is added or changed.
 ## The epoch state in the Persona store
 
 **SDD-undd7q**: the epoch state of one Organisation in its Persona store. Code: `org-node/src/store.rs` (`StoreData`, `ProvisionalChange`, `ProvisionalOrganisation`, `ProvisionalFounding`, `ProvisionalMember`, `KeptAdmissionRequest`, `MAX_PROVISIONAL_BYTES`) and the routing in `org-node/src/service.rs`. It holds what one Persona knows of its one Organisation beyond the current record, within a bound, sealed with the rest of the store; it decides nothing about the chain. This item adds no cross-unit edge (org-node depends on org-members and person alone, unchanged).
-traces: REQ-dhr58q, REQ-3pj7rd, REQ-9ktgwx, REQ-g2537c, REQ-hx4r8y, REQ-6qxesy, REQ-akfwf3, REQ-4qh2h8, REQ-ky5tyd, REQ-kd34f5, REQ-x2dnee, REQ-x3jrh8, REQ-qthum6, REQ-yp75u9, REQ-ech45n, REQ-ttv8k7, REQ-p4hwuv
+traces: REQ-dhr58q, REQ-3pj7rd, REQ-9ktgwx, REQ-g2537c, REQ-hx4r8y, REQ-6qxesy, REQ-akfwf3, REQ-4qh2h8, REQ-ky5tyd, REQ-kd34f5, REQ-x2dnee, REQ-x3jrh8, REQ-qthum6, REQ-yp75u9, REQ-ech45n, REQ-ttv8k7, REQ-p4hwuv, REQ-h7y5ur, REQ-32cp7f
+
+*Traces amended 2026-11-03 (change `worktree-org-io-publish-2`, task T13b):*
+REQ-h7y5ur and REQ-32cp7f join the line, for the store's new field and the
+kept notice's sender (LLR-f5wrjx). The acknowledged record itself is
+SDD-acnpu4's.
 
 *Amended in place 2026-10-28 (unmerged draft; round 3 review AR3-5, sweep
 for ARCHITECTURE Boundaries 3):* a sentence reworded so no clause is joined by "and"; the responsibility, the epoch state, its code and its LLRs are unchanged.
@@ -81,6 +86,19 @@ Every field reaches the sealed store and is read back unchanged by
 (LLR-6zaeb6).
 satisfies: REQ-dhr58q, REQ-3pj7rd, REQ-9ktgwx, REQ-hx4r8y, REQ-6qxesy, REQ-ky5tyd
 supersedes: LLR-95753m
+superseded-by: LLR-f5wrjx
+
+*Superseded 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; owner
+rulings R2 and 5 as cut down by the plan's §0) by LLR-f5wrjx
+(`2026-11-02-publish-2.md`):* each kept revocation notice is kept with the
+Device it came from, and the store gains the acknowledged record, last. The
+store encoding changes, so the successor has its own ID; every other field is
+as stated here.
+
+*Noted 2026-11-09 (change `worktree-org-io-publish-2`, merge review round 1,
+MR1-N4):* LLR-f5wrjx also drops this item's clause "no `ProvisionalUpdate`
+type exists". Its field list is exhaustive and still holds no
+`provisional_updates` field, so the store keeps no provisional update.
 
 *Amended in place 2026-10-20 (unmerged draft; owner answer A2 and owner
 rulings Q3 and Q4' of 2026-10-16):* adds the last two fields, and the
@@ -1172,8 +1190,12 @@ org-io can send the acknowledgements under the revoked Device's identity;
 org-io deletes them once none is left, and at the latest after 7 days.
 
 **SDD-z4m57w**: the removed store, from the node's own removal until its last acknowledgement is accepted. Code: `org-node/src/removal.rs` (new: `StoreContent`, `RemovedStore`, `KeptAcknowledgement`, `StoreData::into_removed`, the recipient choice) and `OrgService::acknowledgement_accepted` and `OrgService::kept_acknowledgements` in `org-node/src/service.rs`. When verification finds the Persona removed, the store is replaced, in one sealed image, by a removed store holding only the signed acknowledgements, each with its recipient's DevicePublicKey and addresses, with the verification time; afterwards an acknowledgement its recipient accepted is deleted, what is still kept is listed. It reads no clock; it removes no file or keychain item, which are org-io's.
-traces: REQ-48zc3e, REQ-y9p27b, REQ-h29c8e, REQ-6tepxq, REQ-ayyt5f, REQ-35s4eb, REQ-m2xh8q, REQ-2yduet
+traces: REQ-48zc3e, REQ-y9p27b, REQ-h29c8e, REQ-6tepxq, REQ-ayyt5f, REQ-35s4eb, REQ-m2xh8q, REQ-2yduet, REQ-32cp7f
 supersedes: SDD-72ddm6
+
+*Traces amended 2026-11-03 (change `worktree-org-io-publish-2`, task T13b):*
+REQ-32cp7f joins the line: the recipient choice (LLR-6fsnma) puts the
+delivering Device first (owner ruling R2).
 
 *Amended in place 2026-10-28 (unmerged draft; round 3 review AR3-5, sweep
 for ARCHITECTURE Boundaries 3):* it read "the node's own removal and what it keeps", which names two subjects; it is reworded to the one responsibility its code holds, the removed store over its life. Its code and LLRs are unchanged.
@@ -1195,6 +1217,12 @@ returns it as its one `StoreChange::Sealed`; no other store the service
 holds is read or changed (LLR-f9x3vf).
 satisfies: REQ-48zc3e
 supersedes: LLR-pba7yu LLR-6p4pj2 LLR-jwhzh3
+
+*Clarified 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; a
+clarification, the ID is kept):* "holding nothing else" also drops the
+acknowledged record (LLR-py43n3) and each kept notice's sender
+(LLR-gb7p7c), which the store gains in this change; the list above names
+the fields as of 2026-10-30.
 
 *Amended in place 2026-10-22 (unmerged draft; plan detail pass —
 dispatcher decision):* "each Organisation private key zeroised on drop" is
@@ -1289,6 +1317,13 @@ ascending order of the key's 32 bytes. Each recipient is distinct, and its
 `recipient_addresses` are its address-book entry (LLR-h9d65p), or `None`
 when the store keeps none for it.
 satisfies: REQ-6tepxq
+superseded-by: LLR-6fsnma
+
+*Superseded 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; owner
+ruling R2 of 2026-11-02) by LLR-6fsnma (`2026-11-02-publish-2.md`):* the
+Device the removal was received from is the first recipient; the order
+below it, and the count, are as stated here. A change of the recipient
+order, so a new ID.
 
 **LLR-85kves**: `OrgService::acknowledgement_accepted(rng, device_key,
 recipient: DevicePublicKey) -> Result<(usize, StoreChange), OrgNodeError>`,
@@ -1400,8 +1435,18 @@ amended on 2026-10-07 (`ChainStateConflict`), is kept, in the same order.
 ## The receive path
 
 **SDD-busuj3**: one chain-free receive path. Code: `OrgService::check_received` and `Checked` in `org-node/src/service.rs`. It decides from a received body, the receiving Persona's store and the DevicePublicKey the transport authenticated what is kept, answered, settled or refused; it never adopts and takes no chain state.
-traces: REQ-ncv4sc, REQ-9ktgwx, REQ-6qxesy, REQ-p4hwuv, REQ-eqt23j, REQ-8amu2a, REQ-uk9rw7, REQ-ea4qs5, REQ-zxgd46, REQ-b462sh, REQ-g2537c, REQ-2yduet, REQ-f2k4tr, REQ-ky5tyd, REQ-y9p27b, REQ-rv4dwb
+traces: REQ-ncv4sc, REQ-9ktgwx, REQ-6qxesy, REQ-p4hwuv, REQ-eqt23j, REQ-8amu2a, REQ-uk9rw7, REQ-ea4qs5, REQ-zxgd46, REQ-b462sh, REQ-g2537c, REQ-2yduet, REQ-f2k4tr, REQ-ky5tyd, REQ-y9p27b, REQ-rv4dwb, REQ-h7y5ur, REQ-32cp7f
 supersedes: SDD-esg2kc SDD-8cpyfa
+
+*Traces amended 2026-11-03 (change `worktree-org-io-publish-2`, task T13b):*
+REQ-h7y5ur and REQ-32cp7f join the line: the acknowledgement arm keeps an
+accepted acknowledgement (LLR-xudkh4, under SDD-acnpu4) and a kept notice
+keeps its sender (LLR-gb7p7c).
+
+*Noted 2026-11-09 (change `worktree-org-io-publish-2`, merge review round 1,
+MR1-N6):* LLR-xudkh4 is this item's, not SDD-acnpu4's: the append is the
+acknowledgement arm of `check_received`. SDD-acnpu4 holds the data it
+appends to. The note above read "LLR-xudkh4, under SDD-acnpu4".
 
 *Amended in place 2026-10-30 (change `worktree-org-io-domain-api`, merge
 review round 2, MR2-N1):* traces REQ-rv4dwb, the bound on receipt of any
@@ -1530,6 +1575,12 @@ no longer lists), takes no chain state, and returns `Checked::Acknowledged`
 with no `StoreChange`, or that function's refusal unchanged with none.
 satisfies: REQ-b462sh, REQ-ncv4sc
 supersedes: LLR-3aysup
+superseded-by: LLR-xudkh4
+
+*Superseded 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; plan
+§0, T16g) by LLR-xudkh4 (`2026-11-02-publish-2.md`):* an accepted
+acknowledgement from a Device held as revoked is now kept, with a store
+change; "with no `StoreChange`" no longer holds for it.
 
 **LLR-76bhw9**: Organisation information from a listed Device is checked
 against the current record with `check_chain_free` (`OrgIdMismatch`,
@@ -1628,6 +1679,12 @@ receipt. A notice that comes in answer to this Device's organisation request
 is a `Revocation` body like any other and is kept the same way; only
 `verify` acts on it (LLR-jhy6t6).
 satisfies: REQ-ncv4sc, REQ-ea4qs5, REQ-2yduet, REQ-y9p27b
+superseded-by: LLR-gb7p7c
+
+*Superseded 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; owner
+ruling R2 of 2026-11-02) by LLR-gb7p7c (`2026-11-02-publish-2.md`):* the
+notice is kept with its sender, which the removal names as its delivering
+Device.
 
 *Amended in place 2026-10-20 (unmerged draft; owner rulings Q3 and Q4' of
 2026-10-16):* checked against the new rulings — unchanged in rule; states
@@ -2003,6 +2060,18 @@ operation writes it, and only `into_removed` drops it. A Device is held as
 revoked exactly when `revoked_devices` holds its DevicePublicKey and the
 current record does not list it.
 satisfies: REQ-p4hwuv
+
+*Note 2026-11-03 (change `worktree-org-io-publish-2`, task T13b, plan task
+T18; a clarification, the ID is kept).* **TODO (roadmap S5):** the S5
+shared revoked-device CRDT replaces `revoked_devices`; T18 puts the same
+TODO on the field in `org-node/src/store.rs`. **Residual:** a Device admitted
+and removed between two epochs this Member adopted (the Member jumped them
+through an organisation answer, or the later epoch's base already lacks it)
+is never held as revoked, so this Member refuses its organisation request
+(`SenderNotListed`) and keeps no acknowledgement from it (LLR-xudkh4).
+Assessed in `org-node/docs/risk/2026-11-02-publish-2.md` ("The
+held-as-revoked residual"); acceptable until S5, as the owner ruled on
+2026-11-03 (owner ruling Q5, accepting the analyst's rating as drafted).
 
 **LLR-j338wq**: an organisation request from a Device held as revoked
 (LLR-bgj2ff) is answered, without asking the user, with

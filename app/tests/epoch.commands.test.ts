@@ -14,6 +14,7 @@ vi.mock('@tauri-apps/api/event', async () => ({ listen: (await import('./fake-ta
 import { screen, fireEvent, within } from '@testing-library/svelte';
 import { tauri } from './fake-tauri';
 import { openApp, openTab, settle } from './page';
+import backend from './contract/backend.json';
 import { cancelInvite, proposeUpdatedOrganisation } from '../src/lib/api';
 
 const ORG = 'ab'.repeat(20);
@@ -335,6 +336,7 @@ describe('what a proposal is said to have done', () => {
 	// verifies: LLR-b59vcx
 	it('the Revoke panel says the revocation is proposed and written only with the next epoch, never submitted', async () => {
 		tauri.answer('list_orgs', HELD);
+		tauri.answer('list_removed_devices', backend.answers.list_removed_devices.none);
 		tauri.answer('propose_revocation', null);
 		await openApp();
 		await openTab('S5: Revoke');
@@ -350,6 +352,7 @@ describe('what a proposal is said to have done', () => {
 	// verifies: LLR-b59vcx
 	it('a refused proposal says nothing was proposed, and the one that follows says it is proposed', async () => {
 		tauri.answer('list_orgs', HELD);
+		tauri.answer('list_removed_devices', backend.answers.list_removed_devices.none);
 		tauri.refuse('propose_revocation', 'the Member is not held');
 		await openApp();
 		await openTab('S5: Revoke');

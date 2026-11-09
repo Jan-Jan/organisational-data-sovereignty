@@ -292,3 +292,49 @@ fn nothing_but_the_verdict_is_written_on_an_inbound_stream() {
     assert!(other_writes.is_empty(), "another write on the receive side:\n{}", other_writes.join("\n"));
     assert_eq!(verdict_writes.len(), 1, "exactly one verdict write: {verdict_writes:?}");
 }
+
+// Normal: the Admin lists Bob as removed once its epoch removing him is
+// adopted, with Bob's MemberId and no acknowledgement, and with the epoch
+// Bob's acknowledgement names once Bob's own delivery has been accepted by
+// the Admin's receive step. Each query reads no chain and writes nothing
+// to the Admin's store. Abnormal: an Organisation no Persona holds is
+// `NotHeld`.
+// verifies: LLR-3ydu9e
+#[tokio::test(flavor = "multi_thread")]
+async fn the_admin_lists_a_removed_device_and_then_its_acknowledgement() {
+    use org_io::test_support::store_writes_to;
+    use org_io::{RemovedDevice, RemovedDevicesRefused};
+    let (_guard, _keychain) = fresh_keychain();
+    let tag = "ack-in-removed-list";
+    let admin = journey::admin(tag).await;
+    admin.io.start_receiving().await.unwrap();
+    let bob = journey::invited(&admin, tag, "b", "bob").await;
+    journey::admit_over_transport(&admin, &bob).await;
+    let (admin, touched) = (&admin, &|| (admin.chain.reads(), store_writes_to(&admin.dir, &admin.device_key).len()));
+    let removed_devices = move |org_id| async move {
+        let before = touched();
+        let listed = admin.io.removed_devices(org_id).await;
+        assert_eq!(touched(), before, "the query read no chain and wrote no store");
+        listed
+    };
+    assert_eq!(removed_devices(admin.org).await.unwrap(), vec![], "none removed yet");
+    let bob_member = journey::member_id_of(admin, bob.device_key).await;
+    journey::revoke(admin, bob.device_key).await;
+    let unacknowledged = RemovedDevice { member_id: bob_member, device_key: bob.device_key, acknowledged_epoch: None };
+    assert_eq!(removed_devices(admin.org).await.unwrap(), vec![unacknowledged.clone()]);
+    let (notice, _) = journey::deliver_epoch(&admin.io, admin.org, &bob.io).await;
+    assert!(matches!(notice, Ok(Received::RevocationNoticeKept { .. })), "{notice:?}");
+    let (received, verified) = tokio::join!(journey::next(&admin.io), bob.io.verify_all());
+    assert!(matches!(verified.as_slice(), [(_, Verified::Removed { .. })]), "{verified:?}");
+    let Ok(Received::Acknowledged(acknowledgement)) = received else { panic!("{received:?}") };
+    let acknowledgement = acknowledgement.into_inner();
+    assert_eq!((acknowledgement.member_id, acknowledgement.device), (bob_member, bob.device_key));
+    assert_eq!(
+        removed_devices(admin.org).await.unwrap(),
+        vec![RemovedDevice { acknowledged_epoch: Some(acknowledgement.epoch), ..unacknowledged }]
+    );
+    assert!(matches!(
+        removed_devices(org_node::OrgId::new([0xee; 20])).await,
+        Err(RemovedDevicesRefused::NotHeld { .. })
+    ));
+}

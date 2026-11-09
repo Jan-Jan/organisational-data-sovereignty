@@ -587,31 +587,25 @@ async fn fake_chain_meets_the_founding_contract() {
 }
 
 // The contract test of `FakeChain`'s state and finalised-block reads, its write window and
-// update, and its signatory-set read (Doubles 3):
+// update (Doubles 3):
 // `common::chain_contract`'s assertions, over the fake. The same assertions run against the
 // production halves on a chopsticks fork in `tests/chain_writer_contract.rs`, outside the gates.
-// The fake's mapped account and definitions are set as a founding leaves them on the real chain;
-// its `state_hidden` and `parse_refusing` switches answer as the real reader does for no state and
+// The fake's `state_hidden` and `parse_refusing` switches answer as the real reader does for no state and
 // for a key org-node's parse refuses, and `epoch_ahead` as the chain does once another update at
 // the same root and key landed.
-// verifies: LLR-js7wgk, LLR-j4nkx5, LLR-bwerd2
+// verifies: LLR-js7wgk, LLR-j4nkx5
 #[tokio::test]
 async fn fake_chain_meets_the_reader_and_writer_contract() {
-    use common::chain_contract::{reader_and_writer_contract, signatory_set_contract, ChainUnderTest};
-    use on_chain_client::write::AccountId;
+    use common::chain_contract::{reader_and_writer_contract, ChainUnderTest};
     use org_io::chain_read::{org_state_from_chain, StateReader};
 
     let chain = FakeChain::new();
-    let under = ChainUnderTest { reader: &chain, writer: &chain, signatory_set: &chain };
+    let under = ChainUnderTest { reader: &chain, writer: &chain };
     let (org, proxy) = reader_and_writer_contract(&under, || {
         chain.advance_finalised(1);
         async {}
     })
     .await;
-    let (controller, account) = (AccountId([0xab; 32]), AccountId(*proxy.as_bytes()));
-    chain.map_original_account(org, account);
-    chain.set_delegates(account, vec![controller]);
-    signatory_set_contract(&under, org, proxy, controller).await;
 
     chain.state_hidden.store(true, Ordering::SeqCst);
     assert_eq!(chain.read_state(org).await.unwrap(), None, "state_hidden reads as no state, clause 2");
@@ -635,7 +629,7 @@ async fn fake_chain_meets_the_reader_and_writer_contract() {
     assert_eq!(
         chain.read_state(org).await.unwrap(),
         Some(ahead),
-        "epoch_ahead reads as the chain does once an update at its root and key landed, clause 5"
+        "epoch_ahead reads as the chain does once an update at its root and key landed, clause 4"
     );
 }
 

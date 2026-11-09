@@ -25,7 +25,8 @@ pub enum ConnectFailure {
     /// A configuration value was refused (the seed or the co-signer).
     Config(ConfigError),
     /// The co-signer is the account of the node's own signatory key
-    /// (LLR-qhyc3n: the controller and the writer would disagree).
+    /// (LLR-rgdx22: the writer would dispatch with the sender among
+    /// the other signatories).
     CoSignerIsOwnAccount,
     /// The chain connection at `ws_url` failed.
     Chain { ws_url: String, error: OrgNodeError },

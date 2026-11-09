@@ -26,7 +26,7 @@ use org_io::transport::TransportMode;
 use org_io::{ChainSettings, OrgIo};
 
 mod common;
-use common::chain_contract::{reader_and_writer_contract, signatory_set_contract, ChainUnderTest};
+use common::chain_contract::{reader_and_writer_contract, ChainUnderTest};
 use common::chopsticks_fork::{spawn_fork, ChopsticksHandle};
 use common::chopsticks_reorg::mine_block;
 
@@ -135,22 +135,21 @@ async fn the_production_writer_meets_the_founding_contract() {
     fork.stop().await;
 }
 
-// The contract test of `FakeChain`'s reads, write window, update and signatory-set read, against
-// the real dependency.
-// verifies: LLR-js7wgk, LLR-j4nkx5, LLR-bwerd2
+// The contract test of `FakeChain`'s reads, write window and update, against the real
+// dependency.
+// verifies: LLR-js7wgk, LLR-j4nkx5
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_production_chain_meets_the_reader_and_writer_contract() {
     let Some(fork) = Fork::start("the_production_chain_meets_the_reader_and_writer_contract").await else { return };
     let chain = production_chain(&fork.settings).await.unwrap_or_else(|error| panic!("the production chain: {error}"));
-    let under = ChainUnderTest { reader: &chain.reader, writer: &chain.writer, signatory_set: &chain.signatory_set };
+    let under = ChainUnderTest { reader: &chain.reader, writer: &chain.writer };
     let fork_client = fork.fork.clone();
-    let (org, proxy) = reader_and_writer_contract(&under, || {
+    reader_and_writer_contract(&under, || {
         let fork_client = fork_client.clone();
         async move {
             mine_block(&fork_client).await.expect("a block mined");
         }
     })
     .await;
-    signatory_set_contract(&under, org, proxy, chain.controller).await;
     fork.stop().await;
 }

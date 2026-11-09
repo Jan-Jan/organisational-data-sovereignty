@@ -597,3 +597,40 @@ organisation's Ahead limit. org-node's type is `VerificationTime`.
 finding-7):* it said the time was kept only in a Removed store; LLR-4tsgfh
 also keeps it as the stamp the Ahead limit counts from.
 _Avoid_: timestamp, removal time
+
+*The two terms below were added 2026-11-03 (change
+`worktree-org-io-publish-2`, task T13b):* the change puts them in the
+interface between org-node, org-io and the app.
+
+**Acknowledged record**:
+The Removal acknowledgements a Member's Device has accepted from Devices it
+holds as revoked, kept in that Persona's store, at most one per Device, only
+ever added to, never shared, and deleted with the store's data only on that
+Persona's own removal. What the app shows the Admin of removed Devices. A
+local stand-in until roadmap stage S5's shared revoked-device list replaces
+it. org-node's field is `acknowledged`.
+_Avoid_: revocation log, ack log, revoked list (S5's shared list, a
+different thing)
+
+**Delivering Device**:
+The Device a removed Device received its removal from: the sender of the
+Organisation information or organisation answer whose epoch its
+Verification matched, or the sender of the revocation notice its
+Verification accepted, pushed or in answer to its own request. The first
+recipient of its Removal acknowledgements.
+_Avoid_: sender, origin, notifying Device
+
+*The term below was added 2026-11-04 (change `worktree-org-io-publish-2`,
+conformance round 1, A1-1 and C1-N4):* the change puts it in the public
+interfaces of org-node, org-io and the app, and in the app's text.
+
+**Removed Device**:
+A Device that an adopted epoch of the Organisation no longer lists, as seen
+by another Member's Persona store: the store **holds it as revoked**, which
+is the name org-node's code uses (`RevokedDevice`, the field
+`revoked_devices`). The Admin is shown each removed Device with the Removal
+acknowledgement the Acknowledged record keeps from it, if any. Not the
+**Removed store**, which is what a Persona's own store becomes on that
+Persona's own removal. org-node's query is `removed_devices`, its view
+`RemovedDeviceView`.
+_Avoid_: kicked Device, deleted Device

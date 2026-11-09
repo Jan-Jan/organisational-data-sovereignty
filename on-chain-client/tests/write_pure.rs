@@ -172,7 +172,7 @@ fn expected_proxied(real: u8, call: Value) -> Value {
 // Abnormal: wrapping is total — a proxied call wrapped again nests unchanged:
 // the outer call's `call` field is the inner proxied call, itself carrying
 // the remark unchanged.
-// verifies: LLR-59kxsr, LLR-ywhd23
+// verifies: LLR-59kxsr
 #[test]
 fn proxied_wraps_any_call_unchanged_even_another_proxied_call() {
     let inner = proxied(acct(1), remark());
@@ -187,7 +187,7 @@ fn proxied_wraps_any_call_unchanged_even_another_proxied_call() {
 // the dynamic encoder resolves against the runtime's metadata (never a
 // constant index); `map_account_call` is `Revive.map_account` with no
 // arguments.
-// verifies: LLR-59kxsr, LLR-ywhd23
+// verifies: LLR-59kxsr
 #[test]
 fn proxied_forces_the_any_proxy_type_by_name() {
     let expected = Value::variant(
@@ -213,7 +213,7 @@ fn proxied_forces_the_any_proxy_type_by_name() {
 
 // Abnormal: no other proxy type and no absent type is ever forced — the
 // writer's call is not the unforced `None` shape, nor a type given by index.
-// verifies: LLR-59kxsr, LLR-ywhd23
+// verifies: LLR-59kxsr
 #[test]
 fn proxied_never_leaves_the_proxy_type_unforced_or_forced_by_index() {
     let call = proxied(acct(7), remark());

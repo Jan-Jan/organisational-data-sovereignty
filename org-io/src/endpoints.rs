@@ -64,7 +64,7 @@ struct Bound {
 /// The node's endpoints, keyed by Device public key, and the receive
 /// channel their accept tasks feed.
 pub(crate) struct Endpoints {
-    plan: BindPlan,
+    bind_plan: BindPlan,
     bound: Mutex<HashMap<DevicePublicKey, Bound>>,
     inbound_sender: mpsc::Sender<Accepted>,
     inbound: Mutex<mpsc::Receiver<Accepted>>,
@@ -87,11 +87,11 @@ impl Default for Endpoints {
 }
 
 impl Endpoints {
-    /// No endpoint bound yet; each will be bound for `plan`.
-    pub(crate) fn new(plan: BindPlan) -> Self {
+    /// No endpoint bound yet; each will be bound for `bind_plan`.
+    pub(crate) fn new(bind_plan: BindPlan) -> Self {
         let (inbound_sender, inbound) = mpsc::channel(INBOUND_CAPACITY);
         Self {
-            plan,
+            bind_plan,
             bound: Mutex::new(HashMap::new()),
             inbound_sender,
             inbound: Mutex::new(inbound),
@@ -109,10 +109,15 @@ impl Endpoints {
         self.connection_time_limit = limit;
     }
 
+    /// The handle's bind plan: the plan each endpoint is bound for.
+    pub(crate) fn bind_plan(&self) -> BindPlan {
+        self.bind_plan.clone()
+    }
+
     /// The transport mode the endpoints are bound in (an in-process relay
     /// plan dials by id, as Networked does).
     pub(crate) fn transport_mode(&self) -> TransportMode {
-        match self.plan {
+        match self.bind_plan {
             BindPlan::Loopback => TransportMode::Loopback,
             _ => TransportMode::Networked,
         }
@@ -125,7 +130,7 @@ impl Endpoints {
     /// receive loop runs leaves it accepting.
     pub(crate) async fn endpoint(&self, device_key: &DevicePublicKey) -> Result<Arc<OrgEndpoint>, TransportError> {
         let mut bound = self.bound.lock().await;
-        let entry = Self::bound_or_bind(&mut bound, &self.plan, device_key).await?;
+        let entry = Self::bound_or_bind(&mut bound, &self.bind_plan, device_key).await?;
         if self.receiving.load(Ordering::SeqCst) {
             self.keep_accepting(device_key, entry);
         }
@@ -179,7 +184,7 @@ impl Endpoints {
         let mut bound = self.bound.lock().await;
         self.receiving.store(true, Ordering::SeqCst);
         for device_key in device_keys {
-            let entry = Self::bound_or_bind(&mut bound, &self.plan, device_key).await?;
+            let entry = Self::bound_or_bind(&mut bound, &self.bind_plan, device_key).await?;
             self.keep_accepting(device_key, entry);
         }
         Ok(())
@@ -194,7 +199,7 @@ impl Endpoints {
     pub(crate) async fn accept_if_receiving(&self, device_key: &DevicePublicKey) -> Result<(), TransportError> {
         let mut bound = self.bound.lock().await;
         if self.receiving.load(Ordering::SeqCst) {
-            let entry = Self::bound_or_bind(&mut bound, &self.plan, device_key).await?;
+            let entry = Self::bound_or_bind(&mut bound, &self.bind_plan, device_key).await?;
             self.keep_accepting(device_key, entry);
         }
         Ok(())
@@ -218,7 +223,7 @@ impl Endpoints {
     }
 
     /// Close and forget the endpoint of `device_key`, if bound (a removed
-    /// Persona's, before its delivery binds it direct-only; LLR-cqr26z). Its
+    /// Persona's, before its delivery binds it direct-only; LLR-spckm6). Its
     /// accept task sees the closure and counts itself out.
     pub(crate) async fn close(&self, device_key: &DevicePublicKey) {
         let entry = self.bound.lock().await.remove(device_key);

@@ -360,10 +360,11 @@ fn a_revocation_from_an_unlisted_sender_is_refused_in_the_check() {
 }
 
 // B's acknowledgement of its removal: decided in the check, from the Device
-// it names only, and only when the record no longer lists that Device. B's
+// it names only, and only when the record no longer lists that Device; A's
+// adopted removal holds B's Device as revoked, so it is kept. B's
 // acknowledgement is signed with `revocation::sign_acknowledgement` over the
 // state of A's removal.
-// verifies: LLR-5wg8cu, LLR-5azhry
+// verifies: LLR-xudkh4, LLR-5azhry
 #[test]
 fn an_acknowledgement_is_decided_in_the_check_from_its_named_device_only() {
     let tag = "rp-ack";
@@ -378,15 +379,17 @@ fn an_acknowledgement_is_decided_in_the_check_from_its_named_device_only() {
     let acknowledgement = sign_acknowledgement(&b_store.persona, story.org_id, &state, &secret).unwrap();
     let ack_body = encode_message(&WireMessage::Acknowledgement(acknowledgement.clone())).unwrap();
 
-    let before = encoded_stores(&story.node_a);
     match check(&mut story.node_a, &a_persona_id, b_device, &ack_body) {
-        Ok((Checked::Acknowledged(verified), None)) => assert_eq!(verified.into_inner(), acknowledgement),
-        other => panic!("not decided as an acknowledgement: {other:?}"),
+        Ok((Checked::Acknowledged(verified), Some(_))) => assert_eq!(verified.into_inner(), acknowledgement),
+        other => panic!("not decided and kept as an acknowledgement: {other:?}"),
     }
-    assert_eq!(encoded_stores(&story.node_a), before, "no store change");
+    let kept = &story.node_a.store_of(&a_persona_id).acknowledged;
+    assert_eq!((kept.len(), &kept[0].acknowledgement), (1, &acknowledgement), "kept once");
 
+    let before = encoded_stores(&story.node_a);
     let relayed = check(&mut story.node_a, &a_persona_id, rogue(), &ack_body).map(|_| ());
     assert_eq!(relayed, Err(OrgNodeError::AcknowledgementNotFromItsDevice { org_id: story.org_id }));
+    assert_eq!(encoded_stores(&story.node_a), before, "a refusal changes nothing");
 
     // A record that still lists B's Device (a store this software never
     // writes, sealed back as org-io would hold it).
@@ -402,8 +405,8 @@ fn an_acknowledgement_is_decided_in_the_check_from_its_named_device_only() {
 // use, Organisation information and a revocation notice alike; an
 // acknowledgement is held to its own rule — `check_acknowledgement` with the
 // sender, no listing — so B's genuine one from B's own, no longer listed,
-// Device is decided.
-// verifies: LLR-283x6f, LLR-5wg8cu
+// Device is decided (and kept, B's Device being held as revoked).
+// verifies: LLR-283x6f, LLR-xudkh4
 #[test]
 fn a_held_organisations_messages_from_an_unlisted_device_are_refused_before_use() {
     let tag = "rp-held-unlisted";
@@ -415,13 +418,13 @@ fn a_held_organisations_messages_from_an_unlisted_device_are_refused_before_use(
     for message in [update, WireMessage::Revocation(notice)] {
         assert_eq!(check(&mut story.node_a, &a_persona_id, rogue(), &encode_message(&message).unwrap()).map(|_| ()), not_listed);
     }
+    assert_eq!(encoded_stores(&story.node_a), before, "nothing kept");
     let b_device = story.b_device_keypair.device_key().unwrap();
     let state = story.chain.get(&story.org_id).unwrap();
     let secret = story.node_b.keychain.secret(&b_device).unwrap();
     let acknowledgement = sign_acknowledgement(&story.node_b.store_of(&story.b_persona_id).persona, story.org_id, &state, &secret).unwrap();
     let body = encode_message(&WireMessage::Acknowledgement(acknowledgement)).unwrap();
-    assert!(matches!(check(&mut story.node_a, &a_persona_id, b_device, &body), Ok((Checked::Acknowledged(_), None))));
-    assert_eq!(encoded_stores(&story.node_a), before, "nothing kept");
+    assert!(matches!(check(&mut story.node_a, &a_persona_id, b_device, &body), Ok((Checked::Acknowledged(_), Some(_)))));
 }
 
 // The `RevocationNotHeld` refusal is reached through `check_received`, so
@@ -750,7 +753,10 @@ mod notices {
         fewest_exceeding(|count| {
             let mut filled = store_data.clone();
             filled.provisional_changes = revokes(count);
-            filled.kept_revocation_notices.push(notice.clone());
+            filled.kept_revocation_notices.push(org_node::store::KeptNotice {
+                notice: notice.clone(),
+                from: org_node::test_fixtures::device_key(0x21),
+            });
             bound_len(&filled)
         })
     }
@@ -761,7 +767,7 @@ mod notices {
 // record, the Persona and every other field stay as they were, and no
 // secret is asked for (`check_received` takes none). A notice
 // `check_notice` refuses keeps nothing.
-// verifies: LLR-r4qtqe
+// verifies: LLR-gb7p7c
 #[test]
 fn a_notice_check_notice_passes_is_kept_and_nothing_is_deleted() {
     let bob_device = org_node::test_fixtures::device_key(notices::BOB);
@@ -773,7 +779,7 @@ fn a_notice_check_notice_passes_is_kept_and_nothing_is_deleted() {
 
     let (checked, change) = svc.check_received(&mut rand::rngs::OsRng, &bob_device, ada_device, &body).unwrap();
     assert!(matches!(checked, org_node::service::Checked::RevocationNoticeKept));
-    expected.kept_revocation_notices.push(notice.clone());
+    expected.kept_revocation_notices.push(org_node::store::KeptNotice { notice: notice.clone(), from: ada_device });
     assert_eq!(
         notices::encoded(&svc, notices::BOB),
         postcard::to_allocvec(&expected).unwrap(),
@@ -786,7 +792,10 @@ fn a_notice_check_notice_passes_is_kept_and_nothing_is_deleted() {
         org_node::test_fixtures::device_secret([notices::BOB; 32]),
     )
     .unwrap();
-    assert_eq!(reopened.data().unwrap().kept_revocation_notices, vec![notice.clone()]);
+    assert_eq!(
+        reopened.data().unwrap().kept_revocation_notices,
+        vec![org_node::store::KeptNotice { notice: notice.clone(), from: ada_device }]
+    );
     assert!(reopened.data().unwrap().record.is_some(), "the record stays");
 
     let held = notices::encoded(&svc, notices::BOB);
@@ -801,7 +810,7 @@ fn a_notice_check_notice_passes_is_kept_and_nothing_is_deleted() {
 // The bound counts kept notices: with one padding change fewer than fills
 // the bound the notice is kept; at the filling count it is refused with
 // `ProvisionalLimit`, no store change, the store as it was.
-// verifies: LLR-r4qtqe, LLR-m76r4k
+// verifies: LLR-gb7p7c, LLR-m76r4k
 #[test]
 fn a_kept_notice_counts_against_the_bound() {
     let bob_device = org_node::test_fixtures::device_key(notices::BOB);
@@ -836,7 +845,7 @@ fn a_kept_notice_counts_against_the_bound() {
 // change; relayed by another unlisted Device it is that function's
 // refusal, not the listing rule's; for a Device the record lists it is
 // that function's own refusal, unchanged.
-// verifies: LLR-5wg8cu
+// verifies: LLR-xudkh4
 #[test]
 fn an_acknowledgement_is_decided_by_check_acknowledgement_with_the_sender_and_no_store_change() {
     let ada = org_node::test_fixtures::device_key(notices::ADA);
@@ -859,4 +868,94 @@ fn an_acknowledgement_is_decided_by_check_acknowledgement_with_the_sender_and_no
     let mut listing = notices::service(notices::ADA, notices::ada_store(3, &[notices::ada(), notices::dave()]));
     let refused = listing.check_received(&mut rand::rngs::OsRng, &ada, dave, &body);
     assert!(matches!(refused, Err(org_node::error::OrgNodeError::AcknowledgementForListedDevice { .. })));
+}
+
+// Normal: an acknowledgement from a Device held as revoked is accepted,
+// kept once with the MemberId it was listed under (the held
+// RevokedDevice's, not the one the acknowledgement names), and sealed; a
+// second one from that Device, for another epoch, is accepted and keeps
+// nothing.
+// verifies: LLR-xudkh4, LLR-py43n3
+#[test]
+fn an_acknowledgement_from_a_device_held_as_revoked_is_kept_once_and_sealed() {
+    let ada = org_node::test_fixtures::device_key(notices::ADA);
+    let dave = org_node::test_fixtures::device_key(notices::DAVE);
+    let ack = notices::ack_by_dave(3);
+    let body = org_node::wire::encode_message(&org_node::wire::WireMessage::Acknowledgement(ack.clone())).unwrap();
+    let mut store_data = notices::ada_store(3, &[notices::ada()]);
+    let listed_under = org_node::MemberId::new([0x0d; 32]);
+    assert_ne!(listed_under, ack.member_id, "the held MemberId differs from the acknowledgement's");
+    store_data.revoked_devices = vec![org_node::store::RevokedDevice { member_id: listed_under, device_key: dave }];
+    let mut svc = notices::service(notices::ADA, store_data);
+
+    let (checked, change) = svc.check_received(&mut rand::rngs::OsRng, &ada, dave, &body).unwrap();
+    assert!(matches!(checked, org_node::service::Checked::Acknowledged(_)));
+    let Some(org_node::service::StoreChange::Sealed(write)) = change else { panic!("kept and sealed") };
+    let reopened = org_node::store::PersonaStore::unseal(&write.sealed, ada, org_node::test_fixtures::device_secret([notices::ADA; 32])).unwrap();
+    assert_eq!(
+        reopened.data().unwrap().acknowledged,
+        vec![org_node::store::AcknowledgedEntry { acknowledgement: ack, member_id: listed_under }]
+    );
+
+    let again = org_node::wire::encode_message(&org_node::wire::WireMessage::Acknowledgement(notices::ack_by_dave(2))).unwrap();
+    let before = notices::encoded(&svc, notices::ADA);
+    let (checked, change) = svc.check_received(&mut rand::rngs::OsRng, &ada, dave, &again).unwrap();
+    assert!(matches!(checked, org_node::service::Checked::Acknowledged(_)));
+    assert!(change.is_none(), "one entry per Device");
+    assert_eq!(notices::encoded(&svc, notices::ADA), before);
+}
+
+// Abnormal: from a Device the record does not list and the store does
+// not hold as revoked, the acknowledgement is accepted and nothing is
+// kept (owner ruling Q3 of 2026-11-03).
+// verifies: LLR-xudkh4
+#[test]
+fn an_acknowledgement_from_a_device_not_held_as_revoked_is_accepted_and_not_kept() {
+    let ada = org_node::test_fixtures::device_key(notices::ADA);
+    let dave = org_node::test_fixtures::device_key(notices::DAVE);
+    let body = org_node::wire::encode_message(&org_node::wire::WireMessage::Acknowledgement(notices::ack_by_dave(3))).unwrap();
+    let mut svc = notices::service(notices::ADA, notices::ada_store(3, &[notices::ada()]));
+    let (checked, change) = svc.check_received(&mut rand::rngs::OsRng, &ada, dave, &body).unwrap();
+    assert!(matches!(checked, org_node::service::Checked::Acknowledged(_)));
+    assert!(change.is_none());
+    assert!(svc.store_data(&ada).unwrap().acknowledged.is_empty());
+}
+
+// Normal: each Device held as revoked, in held order, with its entry
+// of the Acknowledged record or none. Abnormal: an unknown key is
+// `PersonaNotHeld`; a store with no record `OrgNotHeld`. It changes
+// nothing.
+// verifies: LLR-dsjht5
+#[test]
+fn removed_devices_lists_each_device_held_as_revoked_with_its_acknowledgement() {
+    use org_node::service::RemovedDeviceView;
+    use org_node::store::{AcknowledgedEntry, RevokedDevice};
+    let ada = org_node::test_fixtures::device_key(notices::ADA);
+    let dave = org_node::test_fixtures::device_key(notices::DAVE);
+    let erin = org_node::test_fixtures::device_key(0x2e);
+    let mut store_data = notices::ada_store(3, &[notices::ada()]);
+    store_data.revoked_devices = vec![
+        RevokedDevice { member_id: notices::dave().id, device_key: dave },
+        RevokedDevice { member_id: org_node::MemberId::new([0x0e; 32]), device_key: erin },
+    ];
+    store_data.acknowledged = vec![AcknowledgedEntry { acknowledgement: notices::ack_by_dave(3), member_id: notices::dave().id }];
+    let svc = notices::service(notices::ADA, store_data);
+    let before = notices::encoded(&svc, notices::ADA);
+    assert_eq!(
+        svc.removed_devices(&ada).unwrap(),
+        vec![
+            RemovedDeviceView { member_id: notices::dave().id, device_key: dave, acknowledgement: Some(notices::ack_by_dave(3)) },
+            RemovedDeviceView { member_id: org_node::MemberId::new([0x0e; 32]), device_key: erin, acknowledgement: None },
+        ]
+    );
+    assert_eq!(notices::encoded(&svc, notices::ADA), before);
+    assert!(matches!(
+        svc.removed_devices(&org_node::test_fixtures::device_key(0x7f)),
+        Err(org_node::error::OrgNodeError::PersonaNotHeld { .. })
+    ));
+    let unrecorded = notices::service(notices::ADA, org_node::test_fixtures::empty_store(notices::persona(&notices::ada(), 0x61)));
+    assert!(matches!(
+        unrecorded.removed_devices(&ada),
+        Err(org_node::error::OrgNodeError::OrgNotHeld { org_id }) if org_id == support::the_org()
+    ));
 }

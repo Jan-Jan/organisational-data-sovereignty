@@ -33,10 +33,20 @@ block, so a caller pairing them rebuilt PR-ksm2ua's two-block shape. The
 item's one fetch is `signatory_set`'s, at one pinned block (LLR-sc79gq).
 The decoders stay.
 
+*Note 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; owner
+ruling R3 of 2026-11-02):* no consumer since 2026-11-02; kept for the
+several-Admins stage. The item, its decoders, `signatory_set` and
+`any_proxy_type_index` stay exported with their tests; the chain write needs
+none of them (`proxied()` forces `Any` by variant name, LLR-59kxsr).
+
 **LLR-m3tjvp**: `decode_original_account(bytes: &[u8]) -> Result<AccountId, SignatorySetError>`
 accepts exactly 32 bytes and returns them as the account; any other length is
 `SignatorySetError::Malformed`.
 satisfies: REQ-8p2veg
+
+*Note 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; owner
+ruling R3 of 2026-11-02):* no consumer since 2026-11-02; kept for the
+several-Admins stage, with its tests.
 
 **LLR-a9bb7b**: `decode_proxy_delegates(bytes: &[u8]) -> Result<Vec<AccountId>, SignatorySetError>`
 decodes the SCALE value `(BoundedVec<ProxyDefinition<AccountId32, ProxyType, u32>>, u128)`

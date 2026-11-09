@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! The epoch state of one Organisation in its Persona store (SDD-undd7q):
-//! `StoreData`'s fields and their encoding order (LLR-d925uu), the Persona
+//! `StoreData`'s fields and their encoding order (LLR-f5wrjx), the Persona
 //! record built from parsed types (LLR-pv2rdy) and the endpoint addresses one
 //! Device keeps for another (LLR-h4gwns).
 
@@ -9,7 +9,7 @@ mod support;
 use org_members::{Handle, MemberId, Name, RootHash, Surname};
 use org_node::invitation::{EndpointAddresses, EndpointAddressesError, InviteId};
 use org_node::store::{
-    ExpectedAdmission, OrgRecord, OrgRecordParts, Origin, OutstandingInvite,
+    AcknowledgedEntry, ExpectedAdmission, KeptNotice, OrgRecord, OrgRecordParts, Origin, OutstandingInvite,
     PersonaRecord, PersonaRecordParts, PersonaStore, ProvisionalChange, ProvisionalFounding,
     ProvisionalFoundingParts, ProvisionalMember, ProvisionalOrganisation, ProvisionalOrganisationParts, RevokedDevice,
     StoreData,
@@ -17,6 +17,7 @@ use org_node::store::{
 use org_node::test_fixtures::{
     bob_absence_notice, device_key, device_secret, member_key, seal_for_test, store_for_test,
 };
+use org_node::revocation::{Acknowledgement, Signature64};
 use org_node::{ChainAccount, Epoch, OrgPrivateKey, OrgPublicKey};
 use rand::rngs::OsRng;
 use support::fixtures::{addresses, bob, kept_request, persona_parts, record_parts};
@@ -92,7 +93,7 @@ fn provisional_member() -> ProvisionalMember {
     }
 }
 
-/// A store holding a value in every field of LLR-d925uu.
+/// A store holding a value in every field of LLR-f5wrjx.
 fn full_store() -> StoreData {
     StoreData {
         persona: persona(Some(handle("alice"))),
@@ -106,7 +107,7 @@ fn full_store() -> StoreData {
         founding: Some(founding()),
         member: Some(provisional_member()),
         kept_admission_requests: vec![kept_request(InviteId::new([0x61; 32]), 0x36, 0x24, "carol")],
-        kept_revocation_notices: vec![bob_absence_notice(the_org())],
+        kept_revocation_notices: vec![KeptNotice { notice: bob_absence_notice(the_org()), from: device_key(0x21) }],
         expected_admissions: vec![ExpectedAdmission { org_id: the_org() }],
         outstanding_invites: vec![OutstandingInvite {
             org_id: the_org(),
@@ -115,6 +116,17 @@ fn full_store() -> StoreData {
         }],
         revoked_devices: vec![RevokedDevice { member_id: MemberId::new([3; 32]), device_key: device_key(0x25) }],
         address_book: vec![(device_key(0x22), addresses(&["203.0.113.9:7000"]))],
+        acknowledged: vec![AcknowledgedEntry {
+            acknowledgement: Acknowledgement {
+                org_id: the_org(),
+                member_id: MemberId::new([3; 32]),
+                device: device_key(0x25),
+                epoch: Epoch::new(1),
+                root: RootHash::new([0x11; 32]),
+                signature: Signature64([0x5b; 64]),
+            },
+            member_id: MemberId::new([3; 32]),
+        }],
         behind: Some(Epoch::new(9)),
     }
 }
@@ -126,11 +138,11 @@ fn round_trip(store_data: StoreData) -> StoreData {
     PersonaStore::unseal(&write.sealed, write.device_key, device_secret([DEVICE; 32])).unwrap().data().unwrap().clone()
 }
 
-// Normal: the store's encoding is its thirteen encoded fields, in LLR-d925uu's
+// Normal: the store's encoding is its fourteen encoded fields, in LLR-f5wrjx's
 // order, each encoded as its own type encodes; sealed and opened again it is
 // the same value in every encoded field. The behind marker is not encoded:
 // set, it changes no byte, and it opens `None`.
-// verifies: LLR-d925uu
+// verifies: LLR-f5wrjx
 #[test]
 fn store_data_holds_its_fields_in_encoding_order_and_round_trips_through_the_sealed_store() {
     let store_data = full_store();
@@ -138,10 +150,11 @@ fn store_data_holds_its_fields_in_encoding_order_and_round_trips_through_the_sea
         (&store_data.persona, &store_data.record, &store_data.org_name, &store_data.provisional_changes, &store_data.provisional_organisations),
         (&store_data.founding, &store_data.member, &store_data.kept_admission_requests, &store_data.kept_revocation_notices),
         (&store_data.expected_admissions, &store_data.outstanding_invites, &store_data.revoked_devices, &store_data.address_book),
+        &store_data.acknowledged,
     ))
     .unwrap();
     let encoded = postcard::to_allocvec(&store_data).unwrap();
-    assert_eq!(encoded, in_order, "the fields in LLR-d925uu's order and nothing else");
+    assert_eq!(encoded, in_order, "the fields in LLR-f5wrjx's order and nothing else");
     let unmarked = StoreData { behind: None, ..store_data.clone() };
     assert_eq!(postcard::to_allocvec(&unmarked).unwrap(), encoded, "the behind marker is not encoded");
 
@@ -156,15 +169,46 @@ fn store_data_holds_its_fields_in_encoding_order_and_round_trips_through_the_sea
     );
 }
 
-// Abnormal: the store holds one record and its epoch state: its source
-// names no provisional-update field or type and no `orgs` list of records.
-// verifies: LLR-d925uu
+// Normal: the store's encoding is its fourteen encoded fields, in
+// LLR-f5wrjx's order, the kept notices with their senders and the
+// acknowledged record last; sealed and opened it is the same value.
+// verifies: LLR-f5wrjx
+#[test]
+fn store_data_holds_its_fourteen_fields_in_order_with_the_notices_senders_and_the_acknowledged_record() {
+    let store_data = full_store();
+    assert!(!store_data.acknowledged.is_empty() && !store_data.kept_revocation_notices.is_empty(), "fixture holds both");
+    let in_order = postcard::to_allocvec(&(
+        (&store_data.persona, &store_data.record, &store_data.org_name, &store_data.provisional_changes, &store_data.provisional_organisations),
+        (&store_data.founding, &store_data.member, &store_data.kept_admission_requests, &store_data.kept_revocation_notices),
+        (&store_data.expected_admissions, &store_data.outstanding_invites, &store_data.revoked_devices, &store_data.address_book),
+        &store_data.acknowledged,
+    ))
+    .unwrap();
+    let encoded = postcard::to_allocvec(&store_data).unwrap();
+    assert_eq!(encoded, in_order, "the fields in LLR-f5wrjx's order and nothing else");
+    let reopened = round_trip(store_data);
+    assert_eq!(postcard::to_allocvec(&reopened).unwrap(), encoded, "every encoded field reads back unchanged");
+}
+
+// Abnormal: the store holds one record and its epoch state: its encoding,
+// with every field holding a value, names no provisional-update field and
+// no `orgs` list of records, only LLR-f5wrjx's fields.
+// verifies: LLR-f5wrjx
 #[test]
 fn store_data_holds_no_provisional_updates_field() {
-    let source = include_str!("../src/store.rs");
-    for absent in ["provisional_updates", "ProvisionalUpdate", "pub orgs:", "insert_provisional", "forget_organisation"] {
-        assert!(!source.contains(absent), "store.rs names `{absent}`");
+    let encoded = serde_json::to_value(full_store()).unwrap();
+    let fields: Vec<&str> = encoded.as_object().unwrap().keys().map(String::as_str).collect();
+    for absent in ["provisional_updates", "orgs"] {
+        assert!(!fields.contains(&absent), "the store encodes `{absent}`");
     }
+    // serde_json's map lists keys sorted: this is the set of fields.
+    let mut expected = [
+        "persona", "record", "org_name", "provisional_changes", "provisional_organisations", "founding", "member",
+        "kept_admission_requests", "kept_revocation_notices", "expected_admissions", "outstanding_invites",
+        "revoked_devices", "address_book", "acknowledged",
+    ];
+    expected.sort_unstable();
+    assert_eq!(fields, expected, "LLR-f5wrjx's fields and nothing else");
     let store_data = StoreData::new(persona(None));
     assert!(store_data.record.is_none() && store_data.provisional_changes.is_empty() && store_data.provisional_organisations.is_empty());
 }
@@ -172,7 +216,7 @@ fn store_data_holds_no_provisional_updates_field() {
 // Normal: an outstanding invite keeps the invitee name beside its pair, and
 // reopens with it; abnormal: two invites differing only in that name are
 // two values.
-// verifies: LLR-d925uu
+// verifies: LLR-f5wrjx
 #[test]
 fn an_outstanding_invite_keeps_its_invitee_name() {
     let invite = |name: &str| OutstandingInvite { org_id: the_org(), invite_id: InviteId::new([0x61; 32]), invitee_name: name.into() };

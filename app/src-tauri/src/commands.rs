@@ -24,7 +24,7 @@ use org_io::verify::UnverifiedReason;
 use org_io::view::PersonStatus;
 use org_io::{CreateError, OrgIo, OrgSummary, PersonSummary, PersonaSummary};
 use org_io::{Delivery, HeldTarget, Verified, WriteReport};
-use org_io::KeptAdmissionRequestSummary;
+use org_io::{KeptAdmissionRequestSummary, RemovedDevice};
 
 use crate::entry::{attach_report, entry_for, EntryOrg, EntryResultDto, VerificationEntryDto};
 use crate::parsing::{parse_founder, parse_invite_id, parse_member_id, parse_org_id};
@@ -799,4 +799,33 @@ impl From<&KeptAdmissionRequestSummary> for AdmissionRequestDto {
 #[tauri::command]
 pub async fn list_admission_requests(state: State<'_, AppState>) -> Result<Vec<AdmissionRequestDto>, String> {
     Ok(state.org_io.admission_requests().await.iter().map(AdmissionRequestDto::from).collect())
+}
+
+/// One Device an Organisation's store holds as revoked, as `list_removed_devices` returns it
+/// (LLR-dmfvv6): lowercase hex identifiers, the acknowledged epoch as a number or null. No key
+/// material but the public DevicePublicKey.
+#[derive(Debug, Serialize)]
+pub struct RemovedDeviceDto {
+    pub member_id: String,
+    pub device_key: String,
+    pub acknowledged_epoch: Option<u64>,
+}
+
+impl From<&RemovedDevice> for RemovedDeviceDto {
+    fn from(removed: &RemovedDevice) -> Self {
+        Self {
+            member_id: hex::encode(removed.member_id.as_bytes()),
+            device_key: hex::encode(removed.device_key.as_bytes()),
+            acknowledged_epoch: removed.acknowledged_epoch.map(|epoch| epoch.get()),
+        }
+    }
+}
+
+/// LLR-dmfvv6: the Devices `org_id`'s store holds as revoked, in org-io's order; org-io's refusal
+/// as its text.
+#[tauri::command]
+pub async fn list_removed_devices(state: State<'_, AppState>, org_id: String) -> Result<Vec<RemovedDeviceDto>, String> {
+    let org_id = parse_org_id(&org_id)?;
+    let removed_devices = state.org_io.removed_devices(org_id).await.map_err(|error| error.to_string())?;
+    Ok(removed_devices.iter().map(RemovedDeviceDto::from).collect())
 }

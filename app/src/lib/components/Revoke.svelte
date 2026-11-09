@@ -14,6 +14,7 @@
 	import { validateRevokeInput } from '$lib/revoke';
 	import { NEXT_EPOCH_NOTE } from '$lib/epoch';
 	import { subscribeAll, type Unlisten } from '$lib/receiver';
+	import RemovedDevices from '$lib/components/RemovedDevices.svelte';
 
 	interface Props {
 		notifyReload?: () => void;
@@ -143,6 +144,12 @@
 		<button class="revoke-btn" onclick={doRevoke} disabled={revokeBusy || orgs.length === 0}>
 			{revokeBusy ? 'Proposing…' : 'Propose revocation'}
 		</button>
+	{/if}
+
+	{#if selectedOrgId}
+		{#key selectedOrgId}
+			<RemovedDevices orgId={selectedOrgId} />
+		{/key}
 	{/if}
 
 	<!-- Live revoked events -->

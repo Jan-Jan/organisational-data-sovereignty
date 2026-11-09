@@ -482,13 +482,14 @@ fn org_node_hands_out_no_stored_x25519_secret() {
 const HANDLE_RETURN_ALLOWLIST: &[&str] = &[
     // Containers, primitives and path segments.
     "Result", "Option", "Vec", "Box", "Self", "String", "bool", "usize", "u64", "crate", "org_node", "connect",
-    "signatory", "view", "send", "std",
+    "view", "send", "std",
     // The handle and its connect refusal.
     "OrgIo", "ConnectFailed",
     // Ids, public keys, roots, epochs.
     "OrgId", "PersonaId", "MemberId", "DevicePublicKey", "PersonPublicKey", "OrgPublicKey", "RootHash", "Epoch",
     // The queries' public-only summaries.
     "PersonaSummary", "OrgSummary", "PersonSummary", "KeptAdmissionRequestSummary", "AcknowledgementReport",
+    "RemovedDevice", "RemovedDevicesRefused",
     // LLR-gh4rw3's list: what the domain methods return.
     "ProposedFounding", "ProposedMember", "InviteSummary", "ProvisionalChangeSummary", "ProposedOrganisation",
     "HeldTarget", "WriteReport", "WriteRefused", "Verified", "WriteOutcome", "SendReport", "SendRefused", "Delivery",
@@ -496,7 +497,7 @@ const HANDLE_RETURN_ALLOWLIST: &[&str] = &[
     // Typed refusals: reasons as text, paths, Device public keys, the
     // keychain's, the store files', the transport's and org-node's typed
     // refusals.
-    "AdminStatus", "OwnAdminError", "OrgNodeError", "OpenError", "CreateError", "OperationError", "ExchangeError",
+    "OrgNodeError", "OpenError", "CreateError", "OperationError", "ExchangeError",
     "TransportError", "ReceiveError", "TerminalCause",
 ];
 
@@ -526,8 +527,8 @@ fn named_types(returns: &str) -> Vec<String> {
 // and `send`), `OrgEndpoint`, `WireMessage`, `OrgRecord`, `PersonaRecord`,
 // `ProvisionalUpdate` or anything else unreviewed; and no handle type
 // dereferences to another type, which would offer that type's methods
-// beyond the exact surface LLR-4usfu2 states.
-// verifies: LLR-gh4rw3, LLR-4usfu2
+// beyond the exact surface LLR-zhdc9f states.
+// verifies: LLR-gh4rw3, LLR-zhdc9f
 #[test]
 fn the_handle_returns_only_allowlisted_public_types() {
     let mut ways_out = vec![];
@@ -579,6 +580,7 @@ const DOMAIN_RETURN_TYPES: &[&str] = &[
     "PersonSummary", "ProposedFounding", "ProposedMember", "InviteSummary", "ProvisionalChangeSummary",
     "ProposedOrganisation", "WriteReport", "WriteRefused", "Verified", "WriteOutcome", "SendReport", "SendRefused",
     "Delivery", "RequestError", "Received", "KeptAdmissionRequestSummary", "AcknowledgementReport",
+    "RemovedDevice", "RemovedDevicesRefused",
 ];
 
 /// What no returned type may hold, at any depth org-io defines.
@@ -645,19 +647,19 @@ fn org_io_methods() -> Vec<(String, String)> {
     methods
 }
 
-// The handle's production surface is exactly the domain's (LLR-4usfu2):
-// the methods and queries the design names, `open`, `connect`,
-// `not_configured` and `is_own_admin`; none of the removed ones; no
+// The handle's production surface is exactly the domain's (LLR-zhdc9f):
+// the methods and queries the design names, `open`, `connect` and
+// `not_configured`; none of the removed ones; no
 // parameter is a `PeerAddr`; no method sends, deletes or resends an
 // acknowledgement.
-// verifies: LLR-4usfu2
+// verifies: LLR-zhdc9f
 #[test]
 fn the_handles_production_methods_are_exactly_the_domain_surface() {
     let expected = [
-        "acknowledgement_report", "admission_requests", "cancel_invite", "connect", "is_own_admin", "issue_invite",
+        "acknowledgement_report", "admission_requests", "cancel_invite", "connect", "issue_invite",
         "next_received", "not_configured", "open", "organisation", "organisations", "person", "personas",
         "propose_admission", "propose_founding_organisation", "propose_member", "propose_person", "propose_revocation",
-        "propose_updated_organisation", "read_invite", "request_admission", "request_organisation", "send_organisation",
+        "propose_updated_organisation", "read_invite", "removed_devices", "request_admission", "request_organisation", "send_organisation",
         "start_receiving", "verification", "verify_all", "verify_organisation", "write_organisation_to_chain",
     ];
     let methods = org_io_methods();
@@ -666,6 +668,21 @@ fn the_handles_production_methods_are_exactly_the_domain_surface() {
     for (name, signature) in &methods {
         assert!(!signature.contains("PeerAddr"), "{name} takes a peer address: {signature}");
         assert!(name == "acknowledgement_report" || !name.contains("acknowledg"), "{name}: no acknowledgement command");
+    }
+}
+
+// None of the methods LLR-zhdc9f names as removed is among the handle's
+// production public methods, the own-admin check (`is_own_admin`, owner
+// ruling 6) among them.
+// verifies: LLR-zhdc9f
+#[test]
+fn the_handle_offers_none_of_the_removed_methods() {
+    let removed = [
+        "is_own_admin", "create_persona", "found_organisation", "admit_member", "revoke_member", "expect_admission", "produce_reply",
+        "import_reply", "admit_reply", "submit_commit_send", "settle_unknown", "reconcile", "reconcile_held",
+    ];
+    for (name, signature) in org_io_methods() {
+        assert!(!removed.contains(&name.as_str()), "the handle offers the removed `{name}`: {signature}");
     }
 }
 

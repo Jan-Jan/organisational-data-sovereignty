@@ -90,6 +90,11 @@ reader as well, so neither the app nor org-node depends on this unit. org-io
 also calls the two signatory-set reads of SDD-rxfu6h. No item's meaning
 changes.
 
+*Note 2026-11-09 (change `worktree-org-io-publish-2`, merge review MR1-C2):*
+org-io no longer calls the signatory-set reads of SDD-rxfu6h: its own-admin
+check is removed, and since 2026-11-02 nothing calls them; they are kept for
+the several-Admins stage (owner ruling R3).
+
 *Amended 2026-10-20 (change `worktree-org-io-domain-api`, owner answer A4).*
 The writer's genesis ceremony is also offered in two steps, `create_proxy`
 then `found_at`, the second resumable from chain reads (REQ-v86pyy,

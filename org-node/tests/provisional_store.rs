@@ -116,7 +116,10 @@ fn a_keep_that_would_exceed_the_bound_is_refused_and_nothing_changes() {
     );
     let mut store_data = story.node_b.store_of(&b_persona_id).clone();
     store_data.provisional_changes.clear();
-    store_data.kept_revocation_notices.push(org_node::test_fixtures::bob_absence_notice(story.org_id));
+    store_data.kept_revocation_notices.push(org_node::store::KeptNotice {
+        notice: org_node::test_fixtures::bob_absence_notice(story.org_id),
+        from: org_node::test_fixtures::device_key(0x21),
+    });
     story.node_b.put(store_data);
     assert_eq!(
         check(&mut story.node_b, &b_persona_id, a_device, &body).err(),

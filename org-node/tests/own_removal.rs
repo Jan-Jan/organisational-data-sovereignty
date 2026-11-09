@@ -11,7 +11,7 @@ use org_node::removal::{KeptAcknowledgement, RemovedStore, StoreContent};
 use org_node::revocation::{Acknowledgement, RevocationNotice, Signature64};
 use org_node::service::{KeptAcknowledgements, OrgService, StoreChange};
 use org_node::store::{
-    KeptAdmissionRequest, MemberSnapshot, Origin, OutstandingInvite, PersonaStatus,
+    KeptAdmissionRequest, KeptNotice, MemberSnapshot, Origin, OutstandingInvite, PersonaStatus,
     PersonaStore, ProvisionalChange, ProvisionalOrganisation, ProvisionalOrganisationParts, RevokedDevice, SealedStore,
     StoreData, StoreWrite,
 };
@@ -81,7 +81,7 @@ fn rich_data() -> StoreData {
         device_key: device_key(0x23),
         addresses: addresses(&["192.0.2.23:4433"]),
     }];
-    store_data.kept_revocation_notices = vec![notice_removing_own(&store_data)];
+    store_data.kept_revocation_notices = vec![KeptNotice { notice: notice_removing_own(&store_data), from: device_key(0x21) }];
     store_data.address_book = vec![(device_key(0x21), addresses(&["192.0.2.21:4433"]))];
     store_data.revoked_devices = vec![RevokedDevice { member_id: MemberId::new([9; 32]), device_key: device_key(0x29) }];
     store_data
@@ -335,6 +335,17 @@ fn every_other_operation_on_a_removed_store_is_organisation_removed() {
     assert!(svc.drop_store(&removed_device), "drop_store still removes it");
 }
 
+// Abnormal: the removed Devices of a removed store are refused with
+// `OrganisationRemoved` for its Organisation, and nothing changes.
+// verifies: LLR-dsjht5
+#[test]
+fn the_removed_devices_of_a_removed_store_are_organisation_removed() {
+    let removed = removed_store();
+    let svc = removed_service(&removed);
+    assert_eq!(svc.removed_devices(&own()).unwrap_err(), OrgNodeError::OrganisationRemoved { org_id: the_org() });
+    assert_eq!(svc.store_content(&own()), Some(&StoreContent::Removed(removed)), "nothing changed");
+}
+
 // --- Deciding this node's removal and signing its acknowledgements ---
 
 /// A chain state at `epoch` with `members`' root and the key whose private half is `seed`.
@@ -411,7 +422,7 @@ fn a_match_not_listing_this_device_is_removed_and_seals_the_removed_store() {
 #[test]
 fn a_kept_notice_accepted_against_the_chain_is_removed_after_the_inconsistent_checks() {
     let mut store_data = member_data(vec![snapshot(2, "bob", 0x11, &[0x21])]);
-    store_data.kept_revocation_notices = vec![notice_removing_own(&store_data)];
+    store_data.kept_revocation_notices = vec![KeptNotice { notice: notice_removing_own(&store_data), from: device_key(0x21) }];
     let without = removed_members(&store_data);
     let mut svc = own_service(store_data);
 
@@ -440,7 +451,7 @@ fn a_kept_notice_accepted_against_the_chain_is_removed_after_the_inconsistent_ch
 #[test]
 fn a_kept_notice_accept_refuses_stays_kept_and_the_judgement_continues() {
     let mut store_data = member_data(vec![snapshot(2, "bob", 0x11, &[0x21])]);
-    store_data.kept_revocation_notices = vec![notice_removing_own(&store_data)];
+    store_data.kept_revocation_notices = vec![KeptNotice { notice: notice_removing_own(&store_data), from: device_key(0x21) }];
     let still_listing = vec![alice(), snapshot(4, "dave", 0x14, &[0x24])];
     let mut svc = own_service(store_data);
     let before = own_encoded(&svc);
@@ -532,8 +543,8 @@ fn recipients_by_match(previous: Vec<MemberSnapshot>, next: Vec<MemberSnapshot>)
 // signed, no secret asked for), 1 for one or two, 2 for three or four and 3
 // for five or more; the match listing every candidate, they are the first k
 // in ascending order. Every case is reached through `verify`, which
-// LLR-vq5d5n's rule binds.
-// verifies: LLR-vq5d5n
+// LLR-6fsnma's rule binds.
+// verifies: LLR-6fsnma
 #[test]
 fn a_removal_by_a_match_keeps_three_two_one_or_no_recipients() {
     let gina = vec![snapshot(7, "gina", 0x17, &[0x27])];
@@ -553,7 +564,9 @@ fn a_removal_by_a_match_keeps_three_two_one_or_no_recipients() {
 // lists come first, then the others, each group ascending; on a removal by
 // a kept notice all candidates are taken ascending. Each fixture puts a
 // still-listed candidate where plain ascending order would not take it.
-// verifies: LLR-vq5d5n
+// The delivering Device (0x21, or the kept notice's 0x21) is no candidate,
+// so it changes nothing here.
+// verifies: LLR-6fsnma
 #[test]
 fn the_still_listed_come_first_on_a_match_and_all_ascending_on_a_notice() {
     let all = ascending(&[0x31, 0x32, 0x33, 0x34, 0x35]);
@@ -571,7 +584,7 @@ fn the_still_listed_come_first_on_a_match_and_all_ascending_on_a_notice() {
 
     // A kept notice: all five candidates, the three lowest taken.
     let mut store_data = member_data(others(5));
-    store_data.kept_revocation_notices = vec![notice_removing_own(&store_data)];
+    store_data.kept_revocation_notices = vec![KeptNotice { notice: notice_removing_own(&store_data), from: device_key(0x21) }];
     let without = removed_members(&store_data);
     let mut svc = own_service(store_data);
     let (verified, change) = svc
@@ -580,6 +593,75 @@ fn the_still_listed_come_first_on_a_match_and_all_ascending_on_a_notice() {
     assert!(matches!(verified, Verified::Removed { acknowledgements_kept: 3, .. }), "{verified:?}");
     let kept: Vec<DevicePublicKey> = removed_of(change).acknowledgements.iter().map(|kept| kept.recipient).collect();
     assert_eq!(kept, all[..3].to_vec(), "all candidates, ascending");
+}
+
+/// `store_data` holding one provisional organisation for epoch 4 whose members are `next`, from `origin`.
+fn with_held_from(mut store_data: StoreData, next: Vec<MemberSnapshot>, seed: u8, origin: Origin) -> StoreData {
+    let (private, public) = org_key_pair(seed);
+    store_data.provisional_organisations.push(ProvisionalOrganisation::from(ProvisionalOrganisationParts {
+        epoch: Epoch::new(4),
+        base_root: store_data.record.as_ref().unwrap().root_hash,
+        root: root_of(&next),
+        members: next,
+        org_pub_key: public,
+        org_private_key: private,
+        change_set: Some(vec![1]),
+        base_snapshot: Some(vec![2]),
+        origin,
+        applied: Vec::new(),
+        first_ahead_at: None,
+    }));
+    store_data
+}
+
+/// The recipients `verify` keeps acknowledgements for when `store_data` is removed against `chain`.
+fn recipients_after(store_data: StoreData, chain: OrgState) -> Vec<DevicePublicKey> {
+    let mut svc = own_service(store_data);
+    let (verified, change) = svc
+        .verify(&mut OsRng, &own(), Some(chain), VerificationTime(12), org_node::AheadLimit(1200), |_: &[DevicePublicKey]| vec![own_secret()])
+        .unwrap();
+    assert!(matches!(verified, Verified::Removed { .. }), "{verified:?}");
+    removed_of(change).acknowledgements.iter().map(|kept| kept.recipient).collect()
+}
+
+// Normal: on a removal by a match the Device the match came from is the
+// first recipient, then the others in the still-listed-first order; with
+// k = 1 it is the only one. Each fixture picks a delivering Device the
+// still-listed-first order would not take first. Boundary: an `Own` match
+// has no delivering Device, and that order stands.
+// verifies: LLR-6fsnma
+#[test]
+fn the_device_a_match_came_from_is_the_first_recipient() {
+    let all = ascending(&[0x31, 0x32, 0x33, 0x34, 0x35]);
+    let next = others(5);
+    let from_highest = with_held_from(member_data(others(5)), next.clone(), 0x63, Origin::Received { from: all[4] });
+    assert_eq!(recipients_after(from_highest, chain_listing(&next, 4, 0x63)), vec![all[4], all[0], all[1]]);
+
+    let candidates = ascending(&[0x31, 0x32]);
+    let answered = with_held_from(member_data(others(2)), others(2), 0x63, Origin::Answer { from: candidates[1] });
+    assert_eq!(recipients_after(answered, chain_listing(&others(2), 4, 0x63)), vec![candidates[1]], "k = 1: the delivering Device alone");
+
+    let own_match = with_held_from(member_data(others(5)), next.clone(), 0x63, Origin::Own);
+    assert_eq!(recipients_after(own_match, chain_listing(&next, 4, 0x63)), all[..3].to_vec(), "no delivering Device: the still-listed-first order");
+}
+
+// Normal: on a removal by a kept notice its Delivering Device is the first
+// recipient, then the others ascending; of two kept notices the first
+// that `accept` takes names it.
+// verifies: LLR-6fsnma, LLR-gb7p7c
+#[test]
+fn the_delivering_device_of_the_accepted_notice_is_the_first_recipient() {
+    let all = ascending(&[0x31, 0x32, 0x33, 0x34, 0x35]);
+    let mut store_data = member_data(others(5));
+    let notice = notice_removing_own(&store_data);
+    let mut refused = notice.clone();
+    refused.member_id = MemberId::new([0x0f; 32]);
+    store_data.kept_revocation_notices = vec![
+        KeptNotice { notice: refused, from: all[2] },
+        KeptNotice { notice, from: all[3] },
+    ];
+    let without = removed_members(&store_data);
+    assert_eq!(recipients_after(store_data, chain_listing(&without, 4, 0x63)), vec![all[3], all[0], all[1]]);
 }
 
 // verifies: LLR-5tvn7g
@@ -599,7 +681,7 @@ fn a_removal_that_cannot_sign_deletes_nothing() {
 #[test]
 fn a_signing_refusal_is_returned_unchanged_with_nothing_deleted() {
     let mut store_data = member_data(vec![snapshot(2, "bob", 0x11, &[0x21])]);
-    store_data.kept_revocation_notices = vec![notice_removing_own(&store_data)];
+    store_data.kept_revocation_notices = vec![KeptNotice { notice: notice_removing_own(&store_data), from: device_key(0x21) }];
     let without = removed_members(&store_data);
     let mut svc = own_service(store_data);
     let before = own_encoded(&svc);
@@ -619,6 +701,23 @@ fn a_missing_device_secret_is_refused_before_anything_is_deleted() {
     let refused = svc.verify(&mut OsRng, &own(), Some(chain_listing(&without, 4, 0x63)), VerificationTime(11), org_node::AheadLimit(1200), crate::support::none_held);
     assert!(matches!(refused, Err(OrgNodeError::DeviceSecretNotSupplied { .. })));
     assert_eq!(own_encoded(&svc), before, "every field as it was: record, key, Persona, epoch state");
+}
+
+// Abnormal: a removal of a Persona with no MemberId is refused before
+// anything is signed, and the store is left as it was.
+// verifies: LLR-5tvn7g, PR-m9betm
+#[test]
+fn a_removal_of_a_persona_with_no_member_id_is_refused_with_nothing_deleted() {
+    let others = vec![snapshot(2, "bob", 0x11, &[0x21])];
+    let mut store_data = with_received(member_data(others.clone()), others.clone(), 0x63);
+    store_data.persona.member_id = None;
+    let mut svc = own_service(store_data);
+    let before = own_encoded(&svc);
+    let refused = svc.verify(&mut OsRng, &own(), Some(chain_listing(&others, 4, 0x63)), VerificationTime(9), org_node::AheadLimit(1200), |_: &[DevicePublicKey]| {
+        vec![own_secret()]
+    });
+    assert_eq!(refused.map(|(verified, _)| verified).unwrap_err(), OrgNodeError::OrgNotHeld { org_id: the_org() });
+    assert_eq!(own_encoded(&svc), before, "every field as it was");
 }
 
 // verifies: LLR-5tvn7g, LLR-f9mcsq
@@ -863,4 +962,30 @@ fn on_an_active_store_nothing_but_the_removal_deletes_and_each_operation_removes
     assert_eq!(after["kept_admission_requests"], start["kept_admission_requests"], "Dave is not in the adopted record: his request stays");
     assert_eq!(after["outstanding_invites"], start["outstanding_invites"]);
     assert_eq!(after["address_book"][0], start["address_book"][0], "existing entries are kept");
+}
+
+// Normal: an adoption keeps the acknowledged record whole. Abnormal (a
+// scan): the field, its type and its append carry the S5 TODO.
+// verifies: LLR-py43n3
+#[test]
+fn an_adoption_keeps_the_acknowledged_record_and_the_field_carries_the_s5_todo() {
+    let bob = snapshot(2, "bob", 0x11, &[0x21]);
+    let mut store_data = member_data(vec![bob.clone()]);
+    let acknowledged_entry = org_node::store::AcknowledgedEntry { acknowledgement: sample_ack(0x5b), member_id: MemberId::new([9; 32]) };
+    store_data.acknowledged = vec![acknowledged_entry.clone()];
+    let next = vec![alice(), bob];
+    let mut svc = own_service(with_received(store_data, next.clone(), 0x63));
+    let (verified, _) = svc
+        .verify(&mut OsRng, &own(), Some(chain_listing(&next, 4, 0x63)), VerificationTime(10), org_node::AheadLimit(1200), never_asked)
+        .unwrap();
+    assert!(matches!(verified, Verified::Adopted { .. }), "{verified:?}");
+    assert_eq!(svc.store_data(&own()).unwrap().acknowledged, vec![acknowledged_entry]);
+    let source = include_str!("../src/store.rs");
+    let todo_just_before = |item: &str| {
+        let at = source.find(item).unwrap_or_else(|| panic!("{item}"));
+        source[..at].rfind("TODO(S5): the S5 revoked-device CRDT replaces this record").is_some_and(|todo| at - todo < 400)
+    };
+    assert!(todo_just_before("pub acknowledged:"), "the TODO sits on the field");
+    assert!(todo_just_before("pub struct AcknowledgedEntry"), "and on its type");
+    assert!(include_str!("../src/service.rs").contains("TODO(S5): the S5 revoked-device CRDT replaces this record"), "and on the append");
 }

@@ -42,10 +42,12 @@ _Avoid_: user, administrator, end user
 **Command**:
 One named operation the frontend may ask the backend to perform, registered in
 the Tauri invoke handler and reachable from the frontend by that name and no
-other. Seventeen exist (the app's design draft lists them, LLR-kk8gc7). A
+other. Eighteen exist (the app's design draft lists them, LLR-ce4hxz). A
 command is the only way the frontend can cause anything to happen.
 *Amended 2026-10-28 (change `worktree-org-io-domain-api`, ARCHITECTURE review round 3, AR3-7):* "Twelve" became seventeen with
 the domain surface.
+*Amended 2026-11-09 (change `worktree-org-io-publish-2`, merge review round 1, MR1-A2):* "Seventeen" became eighteen
+with `list_removed_devices`, and the list's item is LLR-ce4hxz, which supersedes LLR-kk8gc7.
 _Avoid_: handler, endpoint, IPC call, action
 
 **Event**:

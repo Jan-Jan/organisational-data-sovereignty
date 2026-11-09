@@ -45,8 +45,9 @@ the high-level REQs), written under the software item they belong to:
 <!-- System decomposition, key interfaces, and the segregation rationale
      between items of different safety classes (if any). -->
 
-org-io does all IO for an Organisation: the chain (read, write and the
-own-admin check, through on-chain-client), and from stage S4 the transport
+org-io does all IO for an Organisation: the chain (read and write, through
+on-chain-client; the own-admin check is retired, owner ruling 6, 2026-11-03),
+and from stage S4 the transport
 and storage file IO. org-node takes values and returns values: org-io reads
 the chain, hands org-node the parsed state, and submits the values org-node
 returns. The app depends on org-io alone. The decision and its options are in
@@ -67,7 +68,7 @@ software items, by what they hold (the dated files and
 | **Persons and Personas** | SDD-j7k844, SDD-bzu2jg | The user's Person, kept apart; a new Persona, with its keychain item, store file and endpoint, per founding and per provisional Member |
 | **Invitation** | SDD-zqv3v6, SDD-9rbm8t, SDD-cxh9d8 | The Organisation's outstanding invites, issued or cancelled; an imported Invite read; the kept admission requests listed |
 | **Proposals** | SDD-frsa73 | Recording provisional changes and proposing the updated Organisation; no command discards |
-| **Chain** | SDD-mk39e5, SDD-4bbt47, SDD-f4khqn, SDD-z85ux9, SDD-789u6d | Writing one provisional organisation (the founding in two steps); the read at a finalised block; the own-admin rule; the connection to a chain; the signatory key |
+| **Chain** | SDD-mk39e5, SDD-4bbt47, SDD-f4khqn, SDD-z85ux9, SDD-789u6d | Writing one provisional organisation (the founding in two steps); the read at a finalised block; the own-admin rule (SDD-f4khqn, retired 2026-11-03, owner ruling 6: no code after plan task T16h of `docs/plans/2026-10-16-org-io-publish-2.md`); the connection to a chain; the signatory key |
 | **Verification** | SDD-t4z8sz | Judging a held Organisation against the chain through org-node, writing what org-node returns, settling an unknown write |
 | **Transport** | SDD-2bzgtp, SDD-dhh3pw, SDD-2fc2cq, SDD-8uyg4s, SDD-xwft92, SDD-b8tuv3 | The send path to a Device key at its kept addresses; admission and organisation requests; the receive step and its one verdict; the endpoint whose identity is the Device key, one per Persona, and when it exists |
 | **Storage** | SDD-egx8rv, SDD-4fvypt | The sealed store files and the OS keychain |

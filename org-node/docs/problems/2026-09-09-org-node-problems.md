@@ -354,7 +354,17 @@ doc-comment is the one that is wrong: a reader sizing the wire message, or
 reasoning about what a revocation carries, is misled about both.
 affects: RC-gfn6kr
 opened: 2026-09-10
-status: open
+status: resolved
+resolution: obsolete, by owner ruling of 2026-11-08 — the code this report
+describes no longer exists. Change `worktree-org-node-org-key-pair` (commit
+1f52c36, "Organisation key pair") removed `WireMessage::genesis_snapshot`
+and `org-node/src/transport/wire.rs`, the last commit in which `git log -S
+genesis_snapshot -- org-node/src` finds the name. `WireMessage`
+(`org-node/src/wire.rs`) is now an enum of six kinds in which "no field is
+optional"; the revocation kind, `Revocation(RevocationNotice)`, carries the
+revoked Device's identity and an absence proof and no snapshot, so there is
+no doc-comment left to contradict the send path. A grep of org-node/src,
+org-io/src and app/src-tauri/src on 2026-11-08 finds no `genesis_snapshot`.
 
 Where: `org-node/src/transport/wire.rs:15` ("`None` for non-admission messages
 (e.g. revocations)") and the field's own comment at `:21` ("None for

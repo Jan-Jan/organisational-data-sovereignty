@@ -24,11 +24,11 @@ use crate::ids::OrgId;
 use crate::invitation::{EndpointAddresses, Invite, InviteId};
 use crate::keys::{DeviceSecret, X25519Keypair};
 use crate::removal::{KeptAcknowledgement, StoreContent};
-use crate::revocation::{RevocationNotice, VerifiedAcknowledgement};
+use crate::revocation::{Acknowledgement, RevocationNotice, VerifiedAcknowledgement};
 use crate::sequence::SeqGuard;
 use crate::store::{
-    check_preferred_handles, ensure_within_bound, parse_field, parse_members, ExpectedAdmission, FoundingView,
-    KeptAdmissionRequest, MemberSnapshot, OrgRecord, Origin, OutstandingInvite, PersonaRecord, PersonaRecordView,
+    check_preferred_handles, ensure_within_bound, parse_field, parse_members, AcknowledgedEntry, ExpectedAdmission,
+    FoundingView, KeptAdmissionRequest, KeptNotice, MemberSnapshot, OrgRecord, Origin, OutstandingInvite, PersonaRecord, PersonaRecordView,
     PersonaStatus, PersonaStore, PersonaView, ProvisionalChange, ProvisionalFounding, ProvisionalMember, ProvisionalOrganisation,
     ProvisionalOrganisationView, RawMemberSnapshot, RecordView, StoreData, StoreWrite,
 };
@@ -348,11 +348,13 @@ impl OrgService {
     /// provisional organisation (LLR-76bhw9, LLR-s3vq6d), within the bound of
     /// LLR-m76r4k.
     ///
-    /// A revocation notice `revocation::check_notice` passes is kept,
-    /// within the same bound, and never acted on at receipt
-    /// (`RevocationNoticeKept`, LLR-r4qtqe). An acknowledgement is decided by
-    /// `revocation::check_acknowledgement` with `sender` and changes nothing
-    /// (`Acknowledged`, LLR-5wg8cu).
+    /// A revocation notice `revocation::check_notice` passes is kept with
+    /// `sender`, within the same bound, and never acted on at receipt
+    /// (`RevocationNoticeKept`, LLR-gb7p7c). An acknowledgement is decided by
+    /// `revocation::check_acknowledgement` with `sender` (`Acknowledged`,
+    /// LLR-xudkh4); an accepted one from a Device held as revoked, the first
+    /// from that Device, is appended to the acknowledged record and sealed;
+    /// any other changes nothing.
     ///
     /// An organisation request is answered with the record and its key to a
     /// listed Device and with its notice to a revoked one, the sender's
@@ -395,17 +397,37 @@ impl OrgService {
         }
         match message {
             WireMessage::Acknowledgement(ack) => {
-                // LLR-5wg8cu: no listing rule; the sender the transport
-                // authenticated is the only key passed.
+                // LLR-xudkh4: no listing rule; the sender the transport
+                // authenticated is the only key passed. Kept only from a
+                // Device held as revoked, once per Device, so the record
+                // stays bounded by `revoked_devices` (owner ruling Q3).
+                let already_kept = data.acknowledged.iter().any(|kept| kept.acknowledgement.device == ack.device);
+                let to_keep = if already_kept {
+                    None
+                } else {
+                    data.revoked_devices
+                        .iter()
+                        .find(|revoked| revoked.device_key == ack.device)
+                        .map(|revoked| AcknowledgedEntry { acknowledgement: ack.clone(), member_id: revoked.member_id })
+                };
                 let verified = crate::revocation::check_acknowledgement(data, sender, ack)?;
-                Ok((Checked::Acknowledged(verified), None))
+                let Some(acknowledged_entry) = to_keep else {
+                    return Ok((Checked::Acknowledged(verified), None));
+                };
+                // TODO(S5): the S5 revoked-device CRDT replaces this record (LLR-xudkh4).
+                let ((), write) = self.change(index, rng, |data| {
+                    data.acknowledged.push(acknowledged_entry);
+                    Ok(())
+                })?;
+                Ok((Checked::Acknowledged(verified), Some(StoreChange::Sealed(write))))
             }
             WireMessage::Revocation(notice) => {
-                // LLR-r4qtqe: kept, under the bound, never acted on at
-                // receipt; only `verify` decides a kept notice (LLR-jhy6t6).
+                // LLR-gb7p7c: kept with its sender, under the bound, never
+                // acted on at receipt; only `verify` decides a kept notice
+                // (LLR-jhy6t6).
                 crate::revocation::check_notice(data, &notice)?;
                 let ((), write) = self.change(index, rng, |data| {
-                    data.kept_revocation_notices.push(notice);
+                    data.kept_revocation_notices.push(KeptNotice { notice, from: sender });
                     ensure_within_bound(data)
                 })?;
                 Ok((Checked::RevocationNoticeKept, Some(StoreChange::Sealed(write))))
@@ -984,8 +1006,12 @@ impl OrgService {
         // After the Inconsistent checks, a kept notice accepted against the chain is this
         // Persona's removal (LLR-jhy6t6).
         let inconsistent = matches!(judgement, Judgement::Done(Verified::Inconsistent { .. }));
-        if !inconsistent && crate::verify_org::accepted_notice(data, &chain) {
-            return self.remove_own(index, rng, &chain, None, verified_at, device_secrets);
+        if !inconsistent {
+            if let Some(accepted) = crate::verify_org::accepted_notice(data, &chain) {
+                // The accepted notice's Delivering Device is the first recipient (LLR-6fsnma).
+                let delivering = accepted.from;
+                return self.remove_own(index, rng, &chain, None, Some(delivering), verified_at, device_secrets);
+            }
         }
         // A match not listing this Persona's Device is its removal (LLR-jhy6t6).
         if let Judgement::Adopt(matched) = judgement {
@@ -993,7 +1019,12 @@ impl OrgService {
             let own = data.persona.device_key;
             if !proposal.members.iter().any(|member| member.device_keys.contains(&own)) {
                 let members = proposal.members.clone();
-                return self.remove_own(index, rng, &chain, Some(members), verified_at, device_secrets);
+                // The Device the match came from is the first recipient (LLR-6fsnma).
+                let delivering = match proposal.origin {
+                    Origin::Own => None,
+                    Origin::Received { from } | Origin::Answer { from } => Some(from),
+                };
+                return self.remove_own(index, rng, &chain, Some(members), delivering, verified_at, device_secrets);
             }
         }
         let (next, verified) = match judgement {
@@ -1192,6 +1223,29 @@ impl OrgService {
             .collect())
     }
 
+    /// Each Device the store of `device_key` holds as revoked, in held
+    /// order, with its entry of the Acknowledged record or `None` (LLR-dsjht5).
+    /// A store with no current record is refused as `current_record`
+    /// refuses it, a removed store `OrganisationRemoved`, an unknown key
+    /// `PersonaNotHeld`. It changes nothing.
+    pub fn removed_devices(&self, device_key: &DevicePublicKey) -> Result<Vec<RemovedDeviceView>, OrgNodeError> {
+        let data = self.stores[self.store_index(device_key)?].data()?;
+        current_record(data)?;
+        Ok(data
+            .revoked_devices
+            .iter()
+            .map(|revoked| RemovedDeviceView {
+                member_id: revoked.member_id,
+                device_key: revoked.device_key,
+                acknowledgement: data
+                    .acknowledged
+                    .iter()
+                    .find(|kept| kept.acknowledgement.device == revoked.device_key)
+                    .map(|kept| kept.acknowledgement.clone()),
+            })
+            .collect())
+    }
+
     /// A copy of the public values of `device_key`'s store (LLR-8ru6mv):
     /// the Persona's DevicePublicKey and binding, the Organisation name, the
     /// current record's values, the provisional founding's with its proxy,
@@ -1355,17 +1409,19 @@ impl OrgService {
         Ok(StoreChange::Sealed(write))
     }
 
-    /// This Persona's own removal (LLR-jhy6t6, LLR-5tvn7g, LLR-vq5d5n): choose the recipients among
-    /// the record's other Devices and, when there is at least one, call `device_secrets` once for the
-    /// Persona's key, sign one acknowledgement and keep it for each recipient with its address-book
-    /// entry. Then seal the removed store. With no secret it refuses `DeviceSecretNotSupplied`, changing
+    /// This Persona's own removal (LLR-jhy6t6, LLR-5tvn7g, LLR-6fsnma): choose the recipients among
+    /// the record's other Devices, `delivering` first when it is one of them, and, when there is at
+    /// least one, call `device_secrets` once for the Persona's key, sign one acknowledgement and keep
+    /// it for each recipient with its address-book entry. Then seal the removed store. With no secret it refuses `DeviceSecretNotSupplied`, changing
     /// nothing. Every secret is dropped before return.
+    #[allow(clippy::too_many_arguments)]
     fn remove_own<R: RngCore + CryptoRng>(
         &mut self,
         index: usize,
         rng: &mut R,
         chain: &OrgState,
         matched: Option<Vec<MemberSnapshot>>,
+        delivering: Option<DevicePublicKey>,
         verified_at: VerificationTime,
         device_secrets: impl FnOnce(&[DevicePublicKey]) -> Vec<DeviceSecret>,
     ) -> Result<(Verified, Option<StoreChange>), OrgNodeError> {
@@ -1373,7 +1429,7 @@ impl OrgService {
         let record = data.record.as_ref().ok_or(OrgNodeError::OrgNotOnChain)?;
         let org_id = record.org_id;
         let own = data.persona.device_key;
-        let recipients = crate::removal::recipients(&record.trie_members, &own, matched.as_deref());
+        let recipients = crate::removal::recipients(&record.trie_members, &own, matched.as_deref(), delivering.as_ref());
         let mut acknowledgements = Vec::with_capacity(recipients.len());
         if !recipients.is_empty() {
             let secrets = device_secrets(&[own]);
@@ -1557,6 +1613,15 @@ pub struct KeptAcknowledgements {
     pub acknowledgements: Vec<(OutgoingMessage, Option<EndpointAddresses>)>,
 }
 
+/// One removed Device (a Device the store holds as revoked, docs/CONTEXT.md),
+/// with its entry of the Acknowledged record, if any (LLR-dsjht5).
+#[derive(Debug, PartialEq, Eq)]
+pub struct RemovedDeviceView {
+    pub member_id: MemberId,
+    pub device_key: DevicePublicKey,
+    pub acknowledgement: Option<Acknowledgement>,
+}
+
 impl std::fmt::Debug for OutgoingMessage {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -1579,7 +1644,7 @@ pub enum Checked {
     ProvisionalOrganisationKept { epoch: Epoch },
     /// Organisation information whose identity is already held (LLR-s3vq6d).
     AlreadyHeld,
-    /// A revocation notice kept for verification (LLR-r4qtqe).
+    /// A revocation notice kept, with its sender, for verification (LLR-gb7p7c).
     RevocationNoticeKept,
     /// An admission request, with what was decided (LLR-6gkxpg).
     AdmissionRequest { outcome: AdmissionRequestOutcome },
@@ -1587,7 +1652,7 @@ pub enum Checked {
     OrganisationRequest { answer: OutgoingMessage },
     /// An organisation answer kept for `epoch` (LLR-kd7u2r).
     OrganisationAnswerKept { epoch: Epoch },
-    /// An acknowledgement `check_acknowledgement` accepted (LLR-5wg8cu).
+    /// An acknowledgement `check_acknowledgement` accepted (LLR-xudkh4).
     Acknowledged(VerifiedAcknowledgement),
 }
 

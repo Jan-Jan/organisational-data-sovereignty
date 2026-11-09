@@ -99,6 +99,7 @@ fn harness_of(dir: tempfile::TempDir, state: AppState) -> Harness {
             commands::write_organisation_to_chain,
             commands::verify_organisation,
             commands::list_admission_requests,
+            commands::list_removed_devices,
             commands::list_personas,
             commands::list_orgs,
             commands::connection_status,
@@ -232,7 +233,7 @@ fn connection_status_reports_transport_mode_over_ipc() {
     );
 }
 
-// verifies: LLR-8tzbzn, LLR-kk8gc7
+// verifies: LLR-8tzbzn, LLR-ce4hxz
 #[test]
 fn connection_status_is_registered_under_its_name() {
     let harness = harness();
@@ -258,7 +259,7 @@ fn connection_status_is_registered_under_its_name() {
 // Robustness
 // ---------------------------------------------------------------------------
 
-// verifies: LLR-8tzbzn, LLR-kk8gc7
+// verifies: LLR-8tzbzn, LLR-ce4hxz
 // It holds the precondition every REQ above depends on: that the handler list
 // is CLOSED, so a command renamed in lib.rs but not in api.ts is an error the
 // frontend can see rather than a silent undefined.
@@ -296,7 +297,7 @@ fn without_line_comments(source: &str) -> String {
         .join("\n")
 }
 
-// verifies: LLR-kk8gc7
+// verifies: LLR-ce4hxz
 // The harness registers its own copy of the handler list; this test gates the
 // product's copy against it. It reads both files as text and edits neither.
 #[test]
@@ -310,12 +311,12 @@ fn product_registers_the_same_commands_as_the_harness() {
     assert_eq!(code.matches(".invoke_handler(").count(), 1, "lib.rs must call invoke_handler exactly once");
     let product = handler_list(&lib);
     let harness = handler_list(&read_source("tests/ipc.rs"));
-    // LLR-kk8gc7's seventeen commands.
-    assert_eq!(harness.len(), 17, "the harness registers seventeen commands: {harness:?}");
+    // LLR-ce4hxz's eighteen commands.
+    assert_eq!(harness.len(), 18, "the harness registers eighteen commands: {harness:?}");
     assert_eq!(product, harness, "lib.rs and the ipc harness register different commands");
 }
 
-// verifies: LLR-kk8gc7
+// verifies: LLR-ce4hxz
 // It holds the other precondition: that the managed state is reachable from a
 // handler at all, so a failure above is a failure of the behaviour under test
 // and not of this suite's wiring.
@@ -1279,7 +1280,7 @@ fn list_orgs_reports_not_checked_before_any_reconcile() {
 
 // ---------------------------------------------------------------------------
 // The kept admission requests, the handler set, the org-id parse
-// (LLR-y7nc6x, LLR-kk8gc7, LLR-97hujy)
+// (LLR-y7nc6x, LLR-ce4hxz, LLR-97hujy)
 // ---------------------------------------------------------------------------
 
 /// A source file of this crate, read as text.
@@ -1298,8 +1299,8 @@ fn parser_refusal(org_id: &str) -> String {
     ods_poc_lib::parsing::parse_org_id(org_id).expect_err("a malformed org id is refused")
 }
 
-/// LLR-kk8gc7's seventeen commands.
-const SEVENTEEN: [&str; 17] = [
+/// LLR-ce4hxz's eighteen commands.
+const EIGHTEEN: [&str; 18] = [
     "propose_person",
     "propose_founding_organisation",
     "issue_invite",
@@ -1313,6 +1314,7 @@ const SEVENTEEN: [&str; 17] = [
     "write_organisation_to_chain",
     "verify_organisation",
     "list_admission_requests",
+    "list_removed_devices",
     "list_personas",
     "list_orgs",
     "connection_status",
@@ -1348,10 +1350,10 @@ fn list_admission_requests_returns_each_kept_request_with_the_events_fields_and_
     assert_eq!(invoke(&ex.inviter, "list_orgs", serde_json::json!({})).expect("list_orgs"), orgs);
 }
 
-// verifies: LLR-kk8gc7
+// verifies: LLR-ce4hxz
 #[test]
-fn the_harness_registers_exactly_the_seventeen_commands_and_refuses_the_old_names() {
-    let expected: std::collections::BTreeSet<String> = SEVENTEEN.iter().map(|name| format!("commands::{name}")).collect();
+fn the_harness_registers_exactly_the_eighteen_commands_and_refuses_the_old_names() {
+    let expected: std::collections::BTreeSet<String> = EIGHTEEN.iter().map(|name| format!("commands::{name}")).collect();
     assert_eq!(handler_list(&read_source("tests/ipc.rs")), expected, "the IPC suite's list");
     assert_eq!(handler_list(&read_source("src/lib.rs")), expected, "the product's list");
     let harness = harness();
@@ -1375,6 +1377,140 @@ fn the_harness_registers_exactly_the_seventeen_commands_and_refuses_the_old_name
     // The argument-free ones answer.
     for name in ["list_personas", "list_orgs", "connection_status", "list_admission_requests"] {
         invoke(&harness, name, serde_json::json!({})).unwrap_or_else(|refusal| panic!("{name} is registered: {refusal}"));
+    }
+}
+
+// Abnormal, both: an Organisation the fresh store does not hold is refused
+// as org-io refuses it, and a malformed Organisation identifier is refused
+// at the IPC edge with the parser's text. The normal listing is the next
+// test's.
+// verifies: LLR-dmfvv6
+#[test]
+fn list_removed_devices_refuses_an_unheld_or_malformed_organisation() {
+    let harness = harness();
+    let unheld = invoke_err(&harness, "list_removed_devices", serde_json::json!({ "orgId": "ab".repeat(20) }));
+    let org_io_refusal = block_on(org_io_of(&harness).removed_devices(OrgId::new([0xab; 20])))
+        .expect_err("org-io refuses an unheld Organisation")
+        .to_string();
+    assert_eq!(unheld, org_io_refusal, "org-io's refusal as its text");
+    for bad in malformed_org_ids() {
+        assert_eq!(invoke_err(&harness, "list_removed_devices", serde_json::json!({ "orgId": bad })), parser_refusal(&bad), "{bad}");
+    }
+}
+
+// verifies: LLR-dmfvv6
+// The real exchange produces the listing's three backend.json answers (none,
+// one_unacknowledged, one_acknowledged), so the webview's fake cannot drift
+// from them.
+#[test]
+fn the_removed_devices_answers_have_the_fakes_shapes() {
+    let chain = FakeChain::new();
+    let inviter = harness_over(&chain);
+    let (org_id, _) = founded_org(&inviter);
+    let org = ods_poc_lib::parsing::parse_org_id(&org_id).expect("an org id");
+    invoke(&inviter, "start_receiver", serde_json::json!({})).expect("start_receiver");
+    let none = invoke(&inviter, "list_removed_devices", serde_json::json!({ "orgId": org_id })).expect("list_removed_devices");
+    assert_backend_holds("answers", "list_removed_devices", "none", &none);
+
+    let blob = invoke(&inviter, "issue_invite", serde_json::json!({ "orgId": org_id, "inviteeName": "Bob Builder" }))
+        .expect("issue_invite");
+    let invitee = harness_over(&FakeChain::sharing_slots_with(&chain));
+    let member = invoke(
+        &invitee,
+        "propose_member",
+        serde_json::json!({ "inviteBlob": blob, "name": "Bob", "surname": "Builder", "preferredHandles": ["bob"] }),
+    )
+    .expect("propose_member")["persona_id"]
+        .clone();
+    invoke(&invitee, "start_receiver", serde_json::json!({})).expect("start_receiver");
+    let asked = invoke(&invitee, "request_admission", serde_json::json!({ "personaId": member, "confirmed": true }))
+        .expect("request_admission");
+    assert_eq!(asked, serde_json::json!({ "result": "delivered" }));
+    let invite_id = hex::encode(kept_requests(&inviter, 1)[0].invite_id.as_bytes());
+    invoke(&inviter, "propose_admission", admission_args(&org_id, &invite_id, serde_json::Value::Null, true))
+        .expect("propose_admission");
+    let admitted = adopt_next_epoch(&inviter, &org_id);
+    let inviter_io = org_io_of(&inviter);
+    block_on(inviter_io.send_organisation(org)).expect("the epoch admitting Bob is sent");
+    let invitee_io = org_io_of(&invitee);
+    within_seconds(30, "Bob adopts his admission", || block_on(invitee_io.organisation(org)).is_some());
+
+    let bob = admitted.members.iter().find(|listed| listed.handle.to_string() == "bob").expect("Bob is a Member").id;
+    invoke(&inviter, "propose_revocation", serde_json::json!({ "orgId": org_id, "memberId": hex::encode(bob.as_bytes()) }))
+        .expect("propose_revocation");
+    adopt_next_epoch(&inviter, &org_id);
+    let unacknowledged = invoke(&inviter, "list_removed_devices", serde_json::json!({ "orgId": org_id })).expect("list_removed_devices");
+    assert_backend_holds("answers", "list_removed_devices", "one_unacknowledged", &unacknowledged);
+    block_on(inviter_io.send_organisation(org)).expect("the epoch removing Bob is sent");
+    within_seconds(30, "the inviter receives Bob's acknowledgement", || {
+        // The inviter holds the Organisation, so a refusal is a failure now,
+        // not a "not yet".
+        block_on(inviter_io.removed_devices(org))
+            .expect("org-io lists the removed Devices of a held Organisation")
+            .iter()
+            .any(|removed| removed.acknowledged_epoch.is_some())
+    });
+    let listed = invoke(&inviter, "list_removed_devices", serde_json::json!({ "orgId": org_id })).expect("list_removed_devices");
+    assert_backend_holds("answers", "list_removed_devices", "one_acknowledged", &listed);
+}
+
+// A list of one entry or none cannot tell org-io's order from any other, so
+// two Members are removed here.
+// verifies: LLR-dmfvv6
+#[test]
+fn list_removed_devices_answers_two_devices_in_org_ios_order() {
+    let (ex, _) = requested(&["bob"]);
+    let carol_blob = invoke(&ex.inviter, "issue_invite", serde_json::json!({ "orgId": ex.org_id, "inviteeName": "Carol Jones" }))
+        .expect("issue_invite");
+    let carol = harness_with(TransportModeName::Loopback, None);
+    let carol_persona = invoke(
+        &carol,
+        "propose_member",
+        serde_json::json!({ "inviteBlob": carol_blob, "name": "Carol", "surname": "Jones", "preferredHandles": ["carol"] }),
+    )
+    .expect("propose_member")["persona_id"]
+        .clone();
+    let asked = invoke(&carol, "request_admission", serde_json::json!({ "personaId": carol_persona, "confirmed": true }))
+        .expect("request_admission");
+    assert_eq!(asked, serde_json::json!({ "result": "delivered" }));
+    let kept = kept_requests(&ex.inviter, 2);
+    assert_eq!(kept.len(), 2, "the inviter keeps both requests");
+    for request in &kept {
+        let invite_id = hex::encode(request.invite_id.as_bytes());
+        invoke(&ex.inviter, "propose_admission", admission_args(&ex.org_id, &invite_id, serde_json::Value::Null, true))
+            .unwrap_or_else(|refusal| panic!("propose_admission {invite_id}: {refusal}"));
+    }
+    let admitted = adopt_next_epoch(&ex.inviter, &ex.org_id);
+    for handle in ["bob", "carol"] {
+        let member = admitted.members.iter().find(|listed| listed.handle.to_string() == handle).expect("a Member").id;
+        invoke(&ex.inviter, "propose_revocation", serde_json::json!({ "orgId": ex.org_id, "memberId": hex::encode(member.as_bytes()) }))
+            .expect("propose_revocation");
+    }
+    adopt_next_epoch(&ex.inviter, &ex.org_id);
+
+    let org = ods_poc_lib::parsing::parse_org_id(&ex.org_id).expect("an org id");
+    let in_org_ios_order: Vec<serde_json::Value> = block_on(org_io_of(&ex.inviter).removed_devices(org))
+        .expect("org-io lists a held Organisation's removed Devices")
+        .iter()
+        .map(|removed| {
+            serde_json::json!({
+                "member_id": hex::encode(removed.member_id.as_bytes()),
+                "device_key": hex::encode(removed.device_key.as_bytes()),
+                "acknowledged_epoch": removed.acknowledged_epoch.map(|epoch| epoch.get()),
+            })
+        })
+        .collect();
+    assert_eq!(in_org_ios_order.len(), 2, "both Members' Devices are removed");
+    let listed = invoke(&ex.inviter, "list_removed_devices", serde_json::json!({ "orgId": ex.org_id })).expect("list_removed_devices");
+    assert_eq!(listed, serde_json::Value::Array(in_org_ios_order));
+}
+
+/// Wait until `holds`, polling, or fail naming `what` after `seconds`.
+fn within_seconds(seconds: u64, what: &str, mut holds: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+    while !holds() {
+        assert!(std::time::Instant::now() < deadline, "{what}: not within {seconds} s");
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
 }
 
@@ -1572,7 +1708,7 @@ fn assert_backend_holds(group: &str, name: &str, variant: &str, real: &serde_jso
 
 /// Every entry of backend.json, as the tests below drive it: an entry with
 /// no real producer here would be a fake answer nothing checks.
-const BACKEND_PRODUCED: [(&str, &str, &str); 39] = [
+const BACKEND_PRODUCED: [(&str, &str, &str); 42] = [
     ("answers", "connection_status", "loopback_no_chain"),
     ("answers", "list_personas", "none"),
     ("answers", "list_personas", "provisional_member"),
@@ -1612,9 +1748,12 @@ const BACKEND_PRODUCED: [(&str, &str, &str); 39] = [
     ("events", "verification-result", "adopted_send_refused"),
     ("events", "verification-result", "behind_request_refused"),
     ("answers", "write_organisation_to_chain", "unknown"),
+    ("answers", "list_removed_devices", "none"),
+    ("answers", "list_removed_devices", "one_unacknowledged"),
+    ("answers", "list_removed_devices", "one_acknowledged"),
 ];
 
-// verifies: LLR-kk8gc7
+// verifies: LLR-ce4hxz
 // The fixture names only commands the surface registers and only entries
 // the tests below drive.
 #[test]

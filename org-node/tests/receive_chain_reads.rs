@@ -15,10 +15,11 @@ use org_node::wire::{encode_message, WireMessage};
 
 use support::*;
 
-/// verifies: LLR-5wg8cu, LLR-5azhry
+/// verifies: LLR-xudkh4, LLR-5azhry
 ///
 /// A's receive path reports B's acknowledgement, sent from B's own Device —
-/// `Acknowledged`, decided in the check — with no write; an acknowledgement
+/// `Acknowledged`, decided in the check — and, B's Device being held as
+/// revoked by A's adopted removal, keeps it once; an acknowledgement
 /// with a forged signature from B's Device is refused, and B's genuine
 /// acknowledgement from a random relay is refused with
 /// `AcknowledgementNotFromItsDevice`; nothing written. B's acknowledgement
@@ -35,13 +36,16 @@ fn an_acknowledgement_is_checked_and_reported() {
     let secret = story.node_b.keychain.secret(&b_device).unwrap();
     let acknowledgement =
         sign_acknowledgement(&story.node_b.store_of(&story.b_persona_id).persona, story.org_id, &state, &secret).unwrap();
-    let before = store_bytes("ack-report", "a");
     let b_seed = story.node_b.keychain.seed(&b_device);
 
     let checked =
         receive_message_from(&mut story.node_a, &a_persona_id, b_seed, &WireMessage::Acknowledgement(acknowledgement.clone())).unwrap();
     let Checked::Acknowledged(verified) = checked else { panic!("not decided as an acknowledgement: {checked:?}") };
     assert_eq!(verified.into_inner(), acknowledgement);
+    let kept = &story.node_a.store_of(&a_persona_id).acknowledged;
+    assert_eq!(kept.len(), 1, "kept once");
+    assert_eq!(kept[0].acknowledgement, acknowledgement);
+    let before = store_bytes("ack-report", "a");
 
     let not_from_its_device = Err(OrgNodeError::AcknowledgementNotFromItsDevice { org_id: story.org_id });
     let relayed =

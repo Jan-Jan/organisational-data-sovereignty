@@ -222,6 +222,18 @@ export function listAdmissionRequests(): Promise<AdmissionRequestDto[]> {
 	return invoke<AdmissionRequestDto[]>('list_admission_requests');
 }
 
+/** LLR-dmfvv6: one Device an Organisation's store holds as revoked, as list_removed_devices returns it. */
+export interface RemovedDeviceDto {
+	member_id: string; // 64 hex chars
+	device_key: string; // 64 hex chars
+	acknowledged_epoch: number | null;
+}
+
+/** LLR-dmfvv6, LLR-x9qbhu: the Devices `orgId`'s store holds as revoked, in org-io's order. */
+export function listRemovedDevices(orgId: string): Promise<RemovedDeviceDto[]> {
+	return invoke<RemovedDeviceDto[]>('list_removed_devices', { orgId });
+}
+
 /** LLR-y3zykm: an Invite for this Organisation; no Organisation name and no address are passed. */
 export function issueInvite(orgId: string, inviteeName: string): Promise<string> {
 	return invoke<string>('issue_invite', { orgId, inviteeName });

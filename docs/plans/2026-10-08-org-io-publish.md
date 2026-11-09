@@ -291,6 +291,8 @@ Items (design done in T13a): org-io SDD-6mpmsw with LLR-2yjuaj, LLR-t98pk9, LLR-
 
 ## 10. Tasks — part 2 (revocation delivery; after S4 merges)
 
+*Superseded 2026-10-16 by owner rulings (delivery by pull, the revocation log in place of the S5 CRDT, `is_own_admin` dropped):* part 2 is replanned on the domain API in `docs/plans/2026-10-16-org-io-publish-2.md`. T16c and T16d are dropped, PR-vt244s moves to change `worktree-org-io-domain-api`, and the other tasks are reshaped there (its §2). The text below is kept as history.
+
 Named and scoped; written in full by T13b once S4's names are merged. The owner's rulings D2, D6, D7 bind them. Each task's red tests come from the old plan's T16 list as amended 2026-10-07 (ruling R5), adjusted to S4's names.
 
 - **T13b — Mint proposed 5–9 and 11**, and org-io's control for HAZ-h6b34a's retained state (ruling R5's residual), in org-io's ledgers; proposed 5 as one requirement with S4's REQ-6skn67; proposed 9's inbound half cites S4's REQ-ur7z4a; proposed 7's org-node values-out addition (the up to three kept DevicePublicKeys, delivering Device first, returned beside the acknowledgements by `commit_checked`/the removal step) designed with org-node's LLR amendments. Dated note on REQ-cz753a's exception list. Proposed 11 states D6. PR-vt244s's resolution is part 2's.

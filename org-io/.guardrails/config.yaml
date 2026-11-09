@@ -56,13 +56,14 @@ test_paths:
 # needs on-chain/scripts/node_modules. `keychain_contract`'s OS-keychain run
 # is `#[ignore]`d and runs only with ODS_REAL_KEYCHAIN_TESTS=1.
 verify_commands:
-  - cargo test -p org-io --features test-support --lib --test key_custody_config --test fuzz_seed_parse --test signatory_key --test absences --test chain_read_rule --test signatory_rule --test app_boundary --test open --test keychain --test keychain_contract --test store_files --test transport_handshake --test transport_networked --test endpoints --test preflight_transport --test receive_step --test acknowledgement_inbound --test send_fanout --test invitation_exchange --test expectations_met --test rng_source --test person --test persona_creation --test propose --test chain_write --test verification --test requests --test acknowledgements
+  - cargo test -p org-io --features test-support --lib --test key_custody_config --test fuzz_seed_parse --test signatory_key --test absences --test chain_read_rule --test app_boundary --test open --test keychain --test keychain_contract --test store_files --test transport_handshake --test transport_networked --test endpoints --test preflight_transport --test receive_step --test acknowledgement_inbound --test send_fanout --test invitation_exchange --test expectations_met --test rng_source --test person --test persona_creation --test propose --test chain_write --test verification --test requests --test acknowledgements
   - cargo test -p org-io --features test-support,dev-seed --test key_custody_config --test signatory_key --test dev_seed_env
   - cargo build -p org-io
   - cargo clippy -p org-io --all-targets --features test-support,dev-seed -- -D warnings
   - cargo clippy -p org-io --all-targets -- -D warnings
 
-problem_age_days: 30
+# 60, by owner ruling 2026-11-03, matching org-node and app.
+problem_age_days: 60
 # 15, by owner ruling 2026-10-15, which files a review's larger lows as one
 # open umbrella report.
 problem_open_max: 15

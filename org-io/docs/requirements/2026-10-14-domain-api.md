@@ -368,6 +368,21 @@ adopted the removing epoch still lists the Device and refuses. When an
 acknowledgement that has not been accepted is sent again is set by REQ-jqmpz5
 (owner ruling of 2026-10-20: a backoff schedule).
 
+*Note 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; owner
+ruling Q1 (c) of 2026-11-03, as recommended; a clarification, the ID is kept):* REQ-kn8zg6 adds what
+happens to a recipient with no kept address that may be dialled: in
+Networked mode it is sent to by its Device key alone. "With no relay" here
+is ruling D7's: no other Device forwards the acknowledgement; iroh's relay
+server may carry the connection.
+
+*Note 2026-11-09 (change `worktree-org-io-publish-2`, merge review round 1,
+MR1-O2; a clarification narrowing the note of 2026-11-03, the ID and the
+item's text are kept):* the relay server's part is confined to REQ-kn8zg6's
+dial. The dial by a recipient's key alone when no kept address may be
+dialled is REQ-kn8zg6's, outside this item's "at the endpoint addresses
+kept with it"; every dial at a kept address stays direct with no relay
+(LLR-spckm6), as this item's text states.
+
 **REQ-sd7ayv**: The software shall, when a recipient answers an
 acknowledgement accepted, have org-node delete that acknowledgement with its
 recipient's key and addresses and write the sealed store it returns; and on

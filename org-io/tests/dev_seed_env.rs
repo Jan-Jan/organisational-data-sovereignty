@@ -26,12 +26,11 @@ fn the_development_build_reads_the_seed_once_and_none_when_unset() {
     assert!(signatory_from_environment().unwrap().is_none());
 }
 
-// A co-signer equal to the node's own account would make `controller_of`
-// and the writer disagree (the writer would dispatch with the sender among
-// the other signatories), so `connect` refuses it before any connection;
-// the address is unreachable, so a connect that went on would not return
-// a refusal within the bound.
-// verifies: LLR-qhyc3n
+// A co-signer equal to the node's own account would have the writer
+// dispatch with the sender among the other signatories, so `connect`
+// refuses it before any connection; the address is unreachable, so a
+// connect that went on would not return a refusal within the bound.
+// verifies: LLR-rgdx22
 #[test]
 fn connect_refuses_a_co_signer_equal_to_the_own_account() {
     use org_io::connect::{ConnectFailed, ConnectFailure};

@@ -526,6 +526,12 @@ satisfies: derived
 
 Which of those Devices are chosen as recipients is not ruled.
 
+*Narrowed 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; owner
+ruling R2 of 2026-11-02):* which Devices are chosen is now ruled by
+REQ-32cp7f (`2026-11-02-publish-2.md`): the Device the removal was received
+from first, the others from the record's other Devices. The count is
+unchanged.
+
 **REQ-ayyt5f**: The software shall, at its caller's request naming an
 acknowledgement it keeps for an Organisation whose recipient answered it
 accepted, delete that acknowledgement with its recipient's DevicePublicKey

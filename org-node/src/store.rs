@@ -1,6 +1,6 @@
 //! The sealed per-Persona store (SDD-asxwp8, SDD-undd7q): one Persona's view
 //! of its one Organisation — the current record and the epoch state beside
-//! it (LLR-d925uu) — AEAD-sealed under a key derived from that Persona's
+//! it (LLR-f5wrjx) — AEAD-sealed under a key derived from that Persona's
 //! device secret (LLR-2qqqx6), given out as `StoreWrite` bytes and taken back
 //! in by `PersonaStore::unseal` (LLR-bg538c, LLR-7yu2xy). org-node names no
 //! path and touches no file: org-io writes and reads the bytes.
@@ -18,7 +18,8 @@ pub use crate::error::StoreRefusal;
 use crate::ids::OrgId;
 use crate::invitation::{EndpointAddresses, InviteId};
 use crate::keys::DeviceSecret;
-use crate::revocation::RevocationNotice;
+use crate::removal::RawAcknowledgement;
+use crate::revocation::{Acknowledgement, RevocationNotice};
 use crate::types::{ChainAccount, Epoch, MemberSeed, OrgPrivateKey, OrgPublicKey, PersonaId, SequenceNumber};
 use crate::removal::StoreContent;
 use crate::verify_org::VerificationTime;
@@ -928,12 +929,36 @@ pub struct ExpectedAdmission {
 }
 
 /// An Invite this store's Persona issued and not yet settled, with the
-/// invitee name the inviter typed for it (LLR-d925uu, LLR-h9f5c9).
+/// invitee name the inviter typed for it (LLR-f5wrjx, LLR-h9f5c9).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutstandingInvite {
     pub org_id: OrgId,
     pub invite_id: InviteId,
     pub invitee_name: String,
+}
+
+/// A revocation notice kept with the Device the transport authenticated for it (LLR-gb7p7c).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct KeptNotice {
+    pub notice: RevocationNotice,
+    pub from: DevicePublicKey,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct RawKeptNotice {
+    notice: RevocationNotice,
+    from: [u8; 32],
+}
+
+impl TryFrom<RawKeptNotice> for KeptNotice {
+    type Error = OrgNodeError;
+
+    fn try_from(raw: RawKeptNotice) -> Result<Self, Self::Error> {
+        Ok(Self {
+            notice: raw.notice,
+            from: parse_field("org.kept_revocation_notices", DevicePublicKey::parse(&raw.from))?,
+        })
+    }
 }
 
 /// A Device an adopted epoch dropped, held as revoked (LLR-bgj2ff).
@@ -960,9 +985,32 @@ impl TryFrom<RawRevokedDevice> for RevokedDevice {
     }
 }
 
-/// One Persona's view of one Organisation (LLR-d925uu), in encoding order:
+/// An entry of the acknowledged record: an acknowledgement accepted from a Device held as revoked,
+/// with the MemberId that Device was listed under (LLR-py43n3).
+// TODO(S5): the S5 revoked-device CRDT replaces this record.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct AcknowledgedEntry {
+    pub acknowledgement: Acknowledgement,
+    pub member_id: MemberId,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct RawAcknowledgedEntry {
+    acknowledgement: RawAcknowledgement,
+    member_id: MemberId,
+}
+
+impl TryFrom<RawAcknowledgedEntry> for AcknowledgedEntry {
+    type Error = OrgNodeError;
+
+    fn try_from(raw: RawAcknowledgedEntry) -> Result<Self, Self::Error> {
+        Ok(Self { acknowledgement: raw.acknowledgement.parse("org.acknowledged")?, member_id: raw.member_id })
+    }
+}
+
+/// One Persona's view of one Organisation (LLR-f5wrjx), in encoding order:
 /// the Persona, the current record, the Organisation name and the epoch
-/// state beside the record. `behind` is the one field that is not encoded:
+/// state beside the record, the acknowledged record last. `behind` is the one field that is not encoded:
 /// it lives in the open store and is `None` after `unseal` (LLR-zk7fx2). Not
 /// `Serialize` outside test builds: it holds the member seed and
 /// Organisation private keys; `seal` encodes it through `StoreDataEncoding`.
@@ -976,11 +1024,15 @@ pub struct StoreData {
     pub founding: Option<ProvisionalFounding>,
     pub member: Option<ProvisionalMember>,
     pub kept_admission_requests: Vec<KeptAdmissionRequest>,
-    pub kept_revocation_notices: Vec<RevocationNotice>,
+    pub kept_revocation_notices: Vec<KeptNotice>,
     pub expected_admissions: Vec<ExpectedAdmission>,
     pub outstanding_invites: Vec<OutstandingInvite>,
+    // TODO(S5): the S5 revoked-device CRDT replaces revoked_devices (LLR-bgj2ff).
     pub revoked_devices: Vec<RevokedDevice>,
     pub address_book: Vec<(DevicePublicKey, EndpointAddresses)>,
+    /// The acknowledged record (LLR-py43n3): one entry per Device held as revoked, only appended.
+    // TODO(S5): the S5 revoked-device CRDT replaces this record.
+    pub acknowledged: Vec<AcknowledgedEntry>,
     pub behind: Option<Epoch>,
 }
 
@@ -1002,6 +1054,7 @@ impl StoreData {
             outstanding_invites: Vec::new(),
             revoked_devices: Vec::new(),
             address_book: Vec::new(),
+            acknowledged: Vec::new(),
             behind: None,
         }
     }
@@ -1038,11 +1091,12 @@ pub(crate) struct RawStoreData {
     founding: Option<RawProvisionalFounding>,
     member: Option<RawProvisionalMember>,
     kept_admission_requests: Vec<RawKeptAdmissionRequest>,
-    kept_revocation_notices: Vec<RevocationNotice>,
+    kept_revocation_notices: Vec<RawKeptNotice>,
     expected_admissions: Vec<ExpectedAdmission>,
     outstanding_invites: Vec<OutstandingInvite>,
     revoked_devices: Vec<RawRevokedDevice>,
     address_book: Vec<([u8; 32], Vec<String>)>,
+    acknowledged: Vec<RawAcknowledgedEntry>,
 }
 
 impl TryFrom<RawStoreData> for StoreData {
@@ -1070,7 +1124,11 @@ impl TryFrom<RawStoreData> for StoreData {
                 .into_iter()
                 .map(KeptAdmissionRequest::try_from)
                 .collect::<Result<_, _>>()?,
-            kept_revocation_notices: raw.kept_revocation_notices,
+            kept_revocation_notices: raw
+                .kept_revocation_notices
+                .into_iter()
+                .map(KeptNotice::try_from)
+                .collect::<Result<_, _>>()?,
             expected_admissions: raw.expected_admissions,
             outstanding_invites: raw.outstanding_invites,
             revoked_devices: raw.revoked_devices.into_iter().map(RevokedDevice::try_from).collect::<Result<_, _>>()?,
@@ -1084,6 +1142,11 @@ impl TryFrom<RawStoreData> for StoreData {
                     ))
                 })
                 .collect::<Result<_, OrgNodeError>>()?,
+            acknowledged: raw
+                .acknowledged
+                .into_iter()
+                .map(AcknowledgedEntry::try_from)
+                .collect::<Result<_, _>>()?,
             behind: None,
         })
     }
@@ -1108,11 +1171,12 @@ struct StoreDataEncoding<'a> {
     founding: Option<ProvisionalFoundingEncoding<'a>>,
     member: &'a Option<ProvisionalMember>,
     kept_admission_requests: &'a [KeptAdmissionRequest],
-    kept_revocation_notices: &'a [RevocationNotice],
+    kept_revocation_notices: &'a [KeptNotice],
     expected_admissions: &'a [ExpectedAdmission],
     outstanding_invites: &'a [OutstandingInvite],
     revoked_devices: &'a [RevokedDevice],
     address_book: &'a [(DevicePublicKey, EndpointAddresses)],
+    acknowledged: &'a [AcknowledgedEntry],
 }
 
 impl<'a> From<&'a StoreData> for StoreDataEncoding<'a> {
@@ -1131,6 +1195,7 @@ impl<'a> From<&'a StoreData> for StoreDataEncoding<'a> {
             outstanding_invites: &data.outstanding_invites,
             revoked_devices: &data.revoked_devices,
             address_book: &data.address_book,
+            acknowledged: &data.acknowledged,
         }
     }
 }

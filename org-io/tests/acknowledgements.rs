@@ -18,6 +18,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use iroh::address_lookup::MemoryLookup;
+
 use org_io::send::SendError;
 use org_io::test_support::{store_writes_to, Refusal, TestClock};
 use org_io::transport::{BindPlan, OrgEndpoint, TransportMode, Verdict};
@@ -33,7 +35,7 @@ use common::journey;
 const QUIET: Duration = Duration::from_secs(2);
 
 // The tests that count a refusing endpoint's arrivals keep only its first
-// address: a round tries each kept address after a refusal (LLR-3w22wc),
+// address: a round tries each kept address after a refusal (LLR-u2j6u8),
 // so an endpoint bound on two sockets would be reached twice per round.
 
 /// Wait, up to `limit`, until `io` reports no removal of `org`: its Persona
@@ -131,7 +133,7 @@ async fn org_io_learns_and_removes_acknowledgements_only_through_org_node() {
 // Loopback endpoint the relay cannot reach — is dialled directly; its real
 // receive step accepts the acknowledgement, which it does only from the
 // removed Device's own identity.
-// verifies: LLR-cqr26z
+// verifies: LLR-spckm6
 #[tokio::test(flavor = "multi_thread")]
 async fn acknowledgements_go_from_the_removed_personas_own_identity_over_a_direct_bind() {
     let (_guard, _keychain) = fresh_keychain();
@@ -171,7 +173,7 @@ async fn ack_arrived(arrivals: &mut [journey::Arrivals]) -> usize {
 // recipient (the record listed three other Devices, so two are chosen),
 // nothing is sent, and the next round, the keychain answering again, binds
 // again and reaches both.
-// verifies: LLR-cqr26z
+// verifies: LLR-spckm6
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_direct_bind_is_every_recipients_outcome_and_the_next_round_binds_again() {
     let (_guard, keychain) = fresh_keychain();
@@ -252,7 +254,7 @@ async fn answering_once(device_key: org_node::DevicePublicKey, verdict: Verdict)
 // the accepting one twice. Every address holds the recipient's identity,
 // so the refusing endpoint closes once it has answered: the dialler's iroh
 // endpoint remembers the paths of one identity across dials.
-// verifies: LLR-3w22wc
+// verifies: LLR-u2j6u8
 #[tokio::test(flavor = "multi_thread")]
 async fn a_round_tries_each_recipients_addresses_in_order_until_accepted() {
     let (_guard, _keychain) = fresh_keychain();
@@ -450,7 +452,7 @@ async fn any_other_answer_or_not_delivered_keeps_the_acknowledgement() {
 // second (a verdict byte other than `Accepted`), and after both the
 // acknowledgement stays kept, nothing written or deleted, the recipient
 // reported `Refused`.
-// verifies: LLR-xwz3nu, LLR-3w22wc
+// verifies: LLR-xwz3nu, LLR-u2j6u8
 #[tokio::test(flavor = "multi_thread")]
 async fn already_received_or_invite_used_keeps_the_acknowledgement() {
     let (_guard, keychain) = fresh_keychain();
@@ -478,7 +480,7 @@ async fn already_received_or_invite_used_keeps_the_acknowledgement() {
 // Device's identity, so no address may be dialled: the round reports the
 // recipient `NotDelivered` for no address, and nothing reaches the other
 // Device.
-// verifies: LLR-3w22wc
+// verifies: LLR-u2j6u8
 #[tokio::test(flavor = "multi_thread")]
 async fn a_recipient_with_no_address_of_its_own_is_not_delivered_for_no_address() {
     let (_guard, _keychain) = fresh_keychain();
@@ -497,6 +499,203 @@ async fn a_recipient_with_no_address_of_its_own_is_not_delivered_for_no_address(
         "{report:?}"
     );
     assert!(journey::next_arrival(&mut stranger_gets, QUIET).await.is_none(), "another Device's address is not dialled");
+}
+
+// Boundary (Networked: both handles bound for the in-process relay and
+// address lookup, the Admin's receiving endpoint online and in the lookup):
+// no address is kept for the Admin, so the round makes one dial by the
+// Admin's key alone, from an endpoint of Bob's identity bound with the relay
+// and the lookup. The Admin's real receive step accepts the acknowledgement,
+// and with none left Bob's Persona is deleted at once.
+// verifies: LLR-spckm6, LLR-u2j6u8
+#[tokio::test(flavor = "multi_thread")]
+async fn networked_a_recipient_with_no_kept_address_is_dialled_by_its_key() {
+    acknowledged_by_key_with_kept("ack-networked-by-key", vec![]).await;
+}
+
+// Abnormal (Networked, as above): the only address kept for the Admin does
+// not parse, so it names no socket; the recipient is dialled by its key the
+// same way, and accepts.
+// verifies: LLR-spckm6, LLR-u2j6u8
+#[tokio::test(flavor = "multi_thread")]
+async fn networked_a_recipient_whose_only_kept_address_does_not_parse_is_dialled_by_its_key() {
+    acknowledged_by_key_with_kept("ack-networked-unparsed", vec!["not an endpoint address".into()]).await;
+}
+
+// Abnormal (Networked, as above, with the handle's clock): the endpoint
+// bound for the dial by key cannot be bound. At T the Admin is not yet in the
+// lookup, so the dial by key fails for a transport reason (that the direct
+// endpoint stays bound is
+// `networked_after_a_failed_relay_bind_the_other_recipients_are_dialled_as_before`'s
+// to show). At T+1 min the keychain is locked: the relay bind
+// fails, and that is the recipient's outcome, naming the sender's endpoint.
+// At T+5 min, the keychain answering and the Admin in the lookup, the round
+// binds again and the Admin accepts.
+// verifies: LLR-spckm6
+#[tokio::test(flavor = "multi_thread")]
+async fn networked_a_failed_relay_bind_is_the_recipients_outcome_and_the_next_round_binds_again() {
+    let (_guard, keychain) = fresh_keychain();
+    let verified_at = 21_500_000u64;
+    let clock = TestClock::at(verified_at);
+    let tag = "ack-networked-relay-bind-fails";
+    let (relay_map, _relay_url, _relay_server) = iroh::test_utils::run_relay_server().await.unwrap();
+    let lookup = MemoryLookup::new();
+    let plan = BindPlan::Relay(relay_map, lookup.clone());
+    let mut admin = journey::admin(tag).await;
+    let mut bob = journey::member(&admin, tag, "b", "bob", &[]).await;
+    bob.io = bob.io.with_clock_for_test(clock.clone());
+    journey::keep_addresses(&bob.io, admin.org, &admin.io, admin.device_key, vec![]).await;
+    journey::revoked(&admin, &bob, &[]).await;
+    admin.io = admin.io.with_bind_plan_for_test(plan.clone());
+    let receiver = relayed_receiver(&admin.io).await;
+    bob.io = bob.io.with_bind_plan_for_test(plan);
+
+    assert!(matches!(bob.io.verify_all().await.as_slice(), [(_, Verified::Removed { .. })]));
+    let report = ack_report_when(&bob.io, admin.org, NET, |report| report.next_round == Some(verified_at + 60)).await;
+    assert!(
+        matches!(report.recipients.as_slice(), [(_, AcknowledgementOutcome::NotDelivered { reason })] if matches!(reason.get(), SendError::Transport(_))),
+        "not in the lookup yet: {report:?}"
+    );
+
+    keychain.refuse_as(Some(Refusal::Locked));
+    clock.set(verified_at + 60);
+    bob.io.wake_deliveries_for_test();
+    let relay_bind_failed = |outcome: &AcknowledgementOutcome| {
+        matches!(outcome, AcknowledgementOutcome::NotDelivered { reason }
+            if matches!(reason.get(), SendError::SenderEndpoint(_)) && reason.to_string().contains("relay bind failed"))
+    };
+    let report = ack_report_when(&bob.io, admin.org, NET, |report| {
+        report.next_round == Some(verified_at + 300) && report.recipients.iter().all(|(_, outcome)| relay_bind_failed(outcome))
+    })
+    .await;
+    keychain.refuse_as(None);
+    assert_eq!(report.recipients.len(), 1, "{report:?}");
+    assert!(journey::reports_nothing(&admin.io, QUIET).await, "nothing sent without the endpoint");
+
+    lookup.add_endpoint_info(receiver.inner().addr());
+    clock.set(verified_at + 300);
+    bob.io.wake_deliveries_for_test();
+    let acknowledged = journey::next(&admin.io).await;
+    assert!(matches!(acknowledged, Ok(Received::Acknowledged(_))), "the next round binds again: {acknowledged:?}");
+    assert_deleted_at_once(&keychain, &admin, &bob).await;
+}
+
+// Abnormal (Networked, both handles bound for the in-process relay, the
+// Admin's receiving handle online and in the lookup): the one address kept
+// for the Admin is dialled and refuses, so an address was dialled and no
+// dial by the Admin's key alone follows. The recipient's outcome is that
+// dial's `Refused`, and the Admin's receiving handle takes nothing.
+// verifies: LLR-u2j6u8
+#[tokio::test(flavor = "multi_thread")]
+async fn networked_a_recipient_whose_kept_addresses_all_fail_is_not_dialled_by_its_key() {
+    let (_guard, _keychain) = fresh_keychain();
+    let tag = "ack-networked-no-key-dial";
+    let (relay_map, _relay_url, _relay_server) = iroh::test_utils::run_relay_server().await.unwrap();
+    let lookup = MemoryLookup::new();
+    let plan = BindPlan::Relay(relay_map, lookup.clone());
+    let admin = journey::admin(tag).await;
+    let (refusing, mut refusing_gets) = answering_once(admin.device_key, Verdict::Refused).await;
+    let (mut admin, mut bob) = ack_about_to_be_removed_with(admin, tag, refusing[..1].to_vec()).await;
+    admin.io = admin.io.with_bind_plan_for_test(plan.clone());
+    let receiver = relayed_receiver(&admin.io).await;
+    lookup.add_endpoint_info(receiver.inner().addr());
+    bob.io = bob.io.with_bind_plan_for_test(plan);
+
+    assert!(matches!(bob.io.verify_all().await.as_slice(), [(_, Verified::Removed { .. })]));
+    assert!(journey::next_arrival(&mut refusing_gets, NET).await.is_some(), "the kept address is dialled");
+    let report = ack_report_when(&bob.io, admin.org, NET, |report| report.next_round.is_some()).await;
+    assert!(matches!(report.recipients.as_slice(), [(_, AcknowledgementOutcome::Refused)]), "the kept address's verdict: {report:?}");
+    assert!(journey::reports_nothing(&admin.io, QUIET).await, "no dial by the Admin's key alone");
+}
+
+// Abnormal (Networked, both handles bound for the in-process relay, with
+// the handle's clock; the record lists three other Devices, so two are
+// chosen, the Admin, which delivered the notice, first): no address is kept
+// for the Admin, and each other Device is a stand-in kept at one direct
+// address, refusing. At T both rounds' dials are made. At T+1 min the
+// keychain is locked: the relay bind for the dial by the Admin's key fails,
+// which is the Admin's outcome, and the other recipient is still dialled
+// from the direct endpoint bound at T, which is not bound again.
+// verifies: LLR-spckm6
+#[tokio::test(flavor = "multi_thread")]
+async fn networked_after_a_failed_relay_bind_the_other_recipients_are_dialled_as_before() {
+    let (_guard, keychain) = fresh_keychain();
+    let verified_at = 21_600_000u64;
+    let clock = TestClock::at(verified_at);
+    let tag = "ack-networked-relay-fails-others-dialled";
+    let (relay_map, _relay_url, _relay_server) = iroh::test_utils::run_relay_server().await.unwrap();
+    let plan = BindPlan::Relay(relay_map, MemoryLookup::new());
+    let admin = journey::admin(tag).await;
+    let mut bob = journey::member(&admin, tag, "b", "bob", &[]).await;
+    let carol = journey::member(&admin, tag, "c", "carol", &[&bob]).await;
+    let dave = journey::member(&admin, tag, "d", "dave", &[&bob, &carol]).await;
+    bob.io = bob.io.with_clock_for_test(clock.clone());
+    journey::keep_addresses(&bob.io, admin.org, &admin.io, admin.device_key, vec![]).await;
+    let (mut arrivals, mut ends) = (vec![], vec![]);
+    for (io, device_key) in [(&carol.io, carol.device_key), (&dave.io, dave.device_key)] {
+        let (addresses, recipient_arrivals, endpoint) = journey::answering_acknowledgements(device_key, BindPlan::Loopback, vec![Some(Verdict::Refused); 4]).await;
+        journey::keep_addresses(&bob.io, admin.org, io, device_key, addresses[..1].to_vec()).await;
+        arrivals.push(recipient_arrivals);
+        ends.push(endpoint);
+    }
+    journey::revoked(&admin, &bob, &[&carol, &dave]).await;
+    bob.io = bob.io.with_bind_plan_for_test(plan);
+
+    assert!(matches!(bob.io.verify_all().await.as_slice(), [(_, Verified::Removed { .. })]));
+    assert_eq!(ack_arrived(&mut arrivals).await, 1, "the round at T dials the other recipient");
+    ack_report_when(&bob.io, admin.org, NET, |report| report.next_round == Some(verified_at + 60)).await;
+
+    keychain.refuse_as(Some(Refusal::Locked));
+    clock.set(verified_at + 60);
+    bob.io.wake_deliveries_for_test();
+    let report = ack_report_when(&bob.io, admin.org, NET, |report| report.next_round == Some(verified_at + 300)).await;
+    let arrived = ack_arrived(&mut arrivals).await;
+    keychain.refuse_as(None);
+    assert!(
+        matches!(report.recipients.iter().find(|(recipient, _)| *recipient == admin.device_key), Some((_, AcknowledgementOutcome::NotDelivered { reason }))
+            if matches!(reason.get(), SendError::SenderEndpoint(_)) && reason.to_string().contains("relay bind failed")),
+        "the Admin's outcome is the failed relay bind: {report:?}"
+    );
+    assert!(
+        matches!(report.recipients.iter().find(|(recipient, _)| *recipient != admin.device_key), Some((_, AcknowledgementOutcome::Refused))),
+        "the other recipient's outcome is its dial's: {report:?}"
+    );
+    assert_eq!(arrived, 1, "the other recipient is dialled as before, from the direct endpoint");
+}
+
+/// `io`'s first Persona's endpoint, receiving and online at the relay `io`
+/// is bound for.
+async fn relayed_receiver(io: &OrgIo) -> Arc<OrgEndpoint> {
+    io.start_receiving().await.unwrap();
+    let persona_id = io.personas().await[0].persona_id.clone();
+    let receiver = io.endpoint_for_test(&persona_id).await.unwrap();
+    tokio::time::timeout(NET, receiver.online()).await.unwrap();
+    receiver
+}
+
+/// Bob removed, keeping `addresses` for the Admin, with both handles bound
+/// for an in-process relay and a shared lookup holding the Admin's
+/// receiving endpoint; the Admin's receive step acknowledges Bob's
+/// acknowledgement, and Bob's Persona is deleted at once.
+async fn acknowledged_by_key_with_kept(tag: &str, addresses: Vec<String>) {
+    let (_guard, keychain) = fresh_keychain();
+    let (relay_map, _relay_url, _relay_server) = iroh::test_utils::run_relay_server().await.unwrap();
+    let lookup = MemoryLookup::new();
+    let plan = BindPlan::Relay(relay_map, lookup.clone());
+    let mut admin = journey::admin(tag).await;
+    let mut bob = journey::member(&admin, tag, "b", "bob", &[]).await;
+    journey::keep_addresses(&bob.io, admin.org, &admin.io, admin.device_key, addresses).await;
+    journey::revoked(&admin, &bob, &[]).await;
+    admin.io = admin.io.with_bind_plan_for_test(plan.clone());
+    let receiver = relayed_receiver(&admin.io).await;
+    lookup.add_endpoint_info(receiver.inner().addr());
+    bob.io = bob.io.with_bind_plan_for_test(plan);
+
+    assert!(matches!(bob.io.verify_all().await.as_slice(), [(_, Verified::Removed { .. })]));
+    let acknowledged = tokio::time::timeout(NET, admin.io.next_received()).await;
+    let report = bob.io.acknowledgement_report(admin.org).await;
+    assert!(matches!(acknowledged, Ok(Ok(Received::Acknowledged(_)))), "dialled by key and accepted: {acknowledged:?}; Bob's report: {report:?}");
+    assert_deleted_at_once(&keychain, &admin, &bob).await;
 }
 
 /// Bob (party `b` of `tag`) admitted over the transport and reading

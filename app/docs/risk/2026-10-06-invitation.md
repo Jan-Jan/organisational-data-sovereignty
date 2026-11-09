@@ -47,6 +47,11 @@ org-io's own-admin check in S2 (owner ruling of 2026-10-07). The residual
 and its acceptance below are unchanged. Classification: a clarification of
 the rationale, not a change of meaning.
 
+*Note 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; org-io's
+owner ruling 6):* the signatory read mentioned above, org-io's own-admin
+check, is removed (plan task T16h). The control itself is unchanged, and
+its successor RC-dfzb5q never relied on it.
+
 What this control breaks: nothing a user relies on; it adds one confirmation
 to joining.
 

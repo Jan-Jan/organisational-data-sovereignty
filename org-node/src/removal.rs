@@ -51,7 +51,7 @@ pub struct RemovedStore {
 }
 
 /// One acknowledgement kept for one recipient, with that recipient's addresses when the store kept any
-/// (LLR-6zaeb6, LLR-vq5d5n).
+/// (LLR-6zaeb6, LLR-6fsnma).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct KeptAcknowledgement {
     pub ack: Acknowledgement,
@@ -84,6 +84,20 @@ pub(crate) struct RawAcknowledgement {
     signature: Signature64,
 }
 
+impl RawAcknowledgement {
+    /// The acknowledgement with its Device key re-parsed, a refusal naming `field`.
+    pub(crate) fn parse(self, field: &'static str) -> Result<Acknowledgement, OrgNodeError> {
+        Ok(Acknowledgement {
+            org_id: self.org_id,
+            member_id: self.member_id,
+            device: parse_field(field, DevicePublicKey::parse(&self.device))?,
+            epoch: self.epoch,
+            root: self.root,
+            signature: self.signature,
+        })
+    }
+}
+
 impl TryFrom<RawRemovedStore> for RemovedStore {
     type Error = OrgNodeError;
 
@@ -93,14 +107,7 @@ impl TryFrom<RawRemovedStore> for RemovedStore {
             .into_iter()
             .map(|kept| {
                 Ok(KeptAcknowledgement {
-                    ack: Acknowledgement {
-                        org_id: kept.ack.org_id,
-                        member_id: kept.ack.member_id,
-                        device: parse_field("removed.ack.device", DevicePublicKey::parse(&kept.ack.device))?,
-                        epoch: kept.ack.epoch,
-                        root: kept.ack.root,
-                        signature: kept.ack.signature,
-                    },
+                    ack: kept.ack.parse("removed.ack.device")?,
                     recipient: parse_field("removed.recipient", DevicePublicKey::parse(&kept.recipient))?,
                     recipient_addresses: kept
                         .recipient_addresses
@@ -149,7 +156,7 @@ impl RemovedStore {
     }
 }
 
-/// How many recipients to take from `candidate_count` candidates (LLR-vq5d5n's `k` for `n`): 3 for five
+/// How many recipients to take from `candidate_count` candidates (LLR-6fsnma's `k` for `n`): 3 for five
 /// or more, 2 for three or four, 1 for one or two, 0 for none.
 pub(crate) fn recipient_count(candidate_count: usize) -> usize {
     match candidate_count {
@@ -160,15 +167,17 @@ pub(crate) fn recipient_count(candidate_count: usize) -> usize {
     }
 }
 
-/// The recipients of a removal (LLR-vq5d5n). The candidates are the distinct DevicePublicKeys that
+/// The recipients of a removal (LLR-6fsnma). The candidates are the distinct DevicePublicKeys that
 /// `previous` lists other than `own`. For a removal by a match (`matched` is `Some`), the ones the
 /// match still lists come first, then the others; for a removal by a notice, all of them. Each group
 /// is in ascending order of the key's bytes, and the first `recipient_count` of the candidate count
-/// are taken.
+/// are taken. When `delivering`, the Device the removal came from, is a candidate, it is the first,
+/// followed by the first `recipient_count` − 1 of the others in that order.
 pub(crate) fn recipients(
     previous: &[MemberSnapshot],
     own: &DevicePublicKey,
     matched: Option<&[MemberSnapshot]>,
+    delivering: Option<&DevicePublicKey>,
 ) -> Vec<DevicePublicKey> {
     let mut candidates: Vec<DevicePublicKey> = Vec::new();
     for device in previous.iter().flat_map(|member| member.device_keys.iter()) {
@@ -181,8 +190,15 @@ pub(crate) fn recipients(
     let still_listed = |device: &DevicePublicKey| {
         matched.is_some_and(|members| members.iter().any(|member| member.device_keys.contains(device)))
     };
-    let (mut first, rest): (Vec<_>, Vec<_>) = candidates.into_iter().partition(|device| still_listed(device));
-    first.extend(rest);
-    first.truncate(taken);
-    first
+    let (mut ordered, rest): (Vec<_>, Vec<_>) = candidates.into_iter().partition(|device| still_listed(device));
+    ordered.extend(rest);
+    // A candidate exists only when `taken` is not zero, so a found delivering Device is always taken.
+    if let Some(delivering_key) = delivering {
+        if let Some(position) = ordered.iter().position(|device| device == delivering_key) {
+            let first = ordered.remove(position);
+            ordered.insert(0, first);
+        }
+    }
+    ordered.truncate(taken);
+    ordered
 }

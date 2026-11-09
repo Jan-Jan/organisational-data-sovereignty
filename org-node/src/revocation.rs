@@ -69,13 +69,30 @@ pub struct Acknowledgement {
 impl Acknowledgement {
     /// The bytes the Device signs: [`ACK_DOMAIN`], then the postcard encoding
     /// of `(org_id, member_id, device, epoch, root)`. LLR-bs6yxf.
+    ///
+    /// Written by hand so that no step can fail (PR-y6ay44): postcard
+    /// encodes each fixed-size byte array as its bytes, with no length, and
+    /// the epoch as its LEB128 varint.
     pub fn signed_bytes(&self) -> Vec<u8> {
         let mut bytes = ACK_DOMAIN.to_vec();
-        if let Ok(tuple) = postcard::to_allocvec(&(self.org_id, self.member_id, self.device, self.epoch, self.root)) {
-            bytes.extend(tuple);
-        }
+        bytes.extend_from_slice(self.org_id.as_bytes());
+        bytes.extend_from_slice(self.member_id.as_bytes());
+        bytes.extend_from_slice(self.device.as_bytes());
+        push_varint(&mut bytes, self.epoch.get());
+        bytes.extend_from_slice(self.root.as_bytes());
         bytes
     }
+}
+
+/// Appends the epoch number `epoch` as postcard's unsigned varint: LEB128,
+/// seven bits a byte, low group first, the high bit set on every byte but
+/// the last.
+fn push_varint(bytes: &mut Vec<u8>, mut epoch: u64) {
+    while epoch >= 0x80 {
+        bytes.push((epoch & 0x7f) as u8 | 0x80);
+        epoch >>= 7;
+    }
+    bytes.push(epoch as u8);
 }
 
 /// One notice per Device listed in `previous` and in no Member of

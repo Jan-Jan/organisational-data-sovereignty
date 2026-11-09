@@ -21,4 +21,8 @@ calls `get_org_state` and reports only that the call succeeded and the epoch
 it returned. It is a diagnostic of reachability, it acts on nothing it read,
 and the key never leaves it, so no unchecked key reaches a decision there
 either.
+
+*Note 2026-11-09 (change `worktree-org-io-publish-2`, merge review MR1-C1):*
+that test (`on-chain-client/tests/type_widths.rs`) now cites only REQ-54txzh,
+not the superseded REQ-2qa5r5; what it verifies is unchanged.
 assesses: REQ-54txzh

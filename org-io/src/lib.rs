@@ -16,10 +16,10 @@ mod persona;
 pub mod preflight;
 mod propose;
 mod receiver;
+mod removed;
 mod retention;
 mod rng;
 pub mod send;
-pub mod signatory;
 pub mod store_file;
 #[cfg(feature = "test-support")]
 pub mod test_support;
@@ -46,6 +46,7 @@ pub use crate::keychain::KeychainError;
 pub use crate::persona::{ProposedFounding, ProposedMember};
 pub use crate::propose::{ProposedOrganisation, ProvisionalChangeSummary};
 pub use crate::receiver::{ReceiveError, Received, TerminalCause};
+pub use crate::removed::{RemovedDevice, RemovedDevicesRefused};
 pub use crate::send::{Delivery, RequestError, SendError, SendRefused, SendReport};
 pub use crate::verify::{Verified, WriteOutcome};
 pub use crate::view::{
@@ -54,7 +55,6 @@ pub use crate::view::{
 };
 pub use crate::write::{HeldTarget, WriteFailure, WriteRefused, WriteReport};
 
-use on_chain_client::write::AccountId;
 use org_node::service::OrgService;
 use org_node::store::PersonaStore;
 use org_node::{DevicePublicKey, OrgId, OrgNodeError, StoreChange};
@@ -65,7 +65,6 @@ use crate::chain_read::StateReader;
 use crate::endpoints::Endpoints;
 use crate::keychain::{Keychain, UnsealFailure};
 use crate::rng::HandleRng;
-use crate::signatory::{AdminStatus, OwnAdminError, SignatorySetReader};
 use crate::store_file::StoreFileError;
 #[cfg(feature = "test-support")]
 use crate::transport::TransportError;
@@ -92,8 +91,8 @@ pub(crate) fn ahead_limit_from(limit: std::time::Duration) -> org_node::AheadLim
     org_node::AheadLimit(limit.as_secs())
 }
 
-/// The app's one way in (SDD-z3ychz): org-node's service, the chain read,
-/// the chain write and the signatory-set reads. The signatory key is held by
+/// The app's one way in (SDD-z3ychz): org-node's service, the chain read
+/// and the chain write. The signatory key is held by
 /// the writer alone and never handed out (LLR-u2pk5y). The service is behind
 /// the handle's own lock and every method takes `&self`; each takes the lock
 /// inside and returns owned public values.
@@ -105,10 +104,6 @@ pub struct OrgIo {
     writer: Box<dyn ChainWriter>,
     /// The unknown writes, one per target, kept in memory (SDD-mk39e5, LLR-7y46be).
     publish: tokio::sync::Mutex<write::PublishState>,
-    signatory_reader: Box<dyn SignatorySetReader>,
-    /// The account of the signatory key this node holds; `None` when it holds none.
-    own_account: Option<AccountId>,
-    co_signers: Vec<AccountId>,
     /// The removal acknowledgements' delivery tasks, one at most per Persona (LLR-zzsqj4);
     /// dropping the handle stops them.
     deliveries: acknowledge::Tasks,
@@ -469,9 +464,8 @@ impl std::fmt::Display for CreateError {
 
 impl std::error::Error for CreateError {}
 
-/// The handle's production surface (LLR-4usfu2): the domain's methods,
-/// these queries, `open`, `connect`, `not_configured` and
-/// `is_own_admin`. Each returns public data only, of the types
+/// The handle's production surface (LLR-zhdc9f): the domain's methods,
+/// these queries, `open`, `connect` and `not_configured`. Each returns public data only, of the types
 /// `tests/absences.rs`'s `HANDLE_RETURN_ALLOWLIST` lists (LLR-gh4rw3).
 impl OrgIo {
     /// Every Persona this node holds, public fields only.
@@ -499,7 +493,7 @@ impl OrgIo {
     }
 
     /// The Persona's Member-as-a-group key and DevicePublicKey (org-node's
-    /// `persona_public_keys`; test builds only, LLR-4usfu2).
+    /// `persona_public_keys`; test builds only, LLR-zhdc9f).
     #[cfg(feature = "test-support")]
     pub async fn persona_public_keys(&self, persona_id: &PersonaId) -> Result<(PersonPublicKey, DevicePublicKey), OrgNodeError> {
         self.service.lock().await.persona_public_keys(persona_id)
@@ -527,9 +521,6 @@ impl OrgIo {
             reader: Box::new(connect::StateReaderNotConfigured),
             writer: Box::new(write::WriterNotConfigured),
             publish: Default::default(),
-            signatory_reader: Box::new(signatory::SignatorySetNotConfigured),
-            own_account: None,
-            co_signers: Vec::new(),
             deliveries: Default::default(),
             ahead_limit: None,
         }
@@ -627,7 +618,7 @@ impl OrgIo {
             Err(error) => return Err(ConnectFailed::boxed(service, local, ConnectFailure::Config(error))),
         };
         // The writer dispatches with the co-signers as the other signatories;
-        // the own account among them is refused by the chain (LLR-qhyc3n).
+        // the own account among them is refused by the chain (LLR-rgdx22).
         if co_signatories.contains(&signatory.account_id()) {
             return Err(ConnectFailed::boxed(service, local, ConnectFailure::CoSignerIsOwnAccount));
         }
@@ -638,23 +629,19 @@ impl OrgIo {
                 return Err(ConnectFailed::boxed(service, local, reason));
             }
         };
-        let own_account = signatory.account_id();
         let writer = write::OnChainWriter::new(
             SubxtWriteOps::new(api, FinalitySink),
             registry.clone(),
             signatory,
-            co_signatories.clone(),
+            co_signatories,
             settings.contract_h160,
         );
         Ok(Self {
             service,
             local,
-            reader: Box::new(chain_read::OnChainStateReader::new(registry.clone())),
+            reader: Box::new(chain_read::OnChainStateReader::new(registry)),
             writer: Box::new(writer),
             publish: Default::default(),
-            signatory_reader: Box::new(signatory::OnChainSignatorySetReader::new(registry)),
-            own_account: Some(own_account),
-            co_signers: co_signatories,
             // The handle's delivery tasks go on in the connected handle.
             deliveries: self.deliveries,
             ahead_limit: Some(ahead_limit_from(settings.ahead_limit)),
@@ -668,8 +655,7 @@ impl OrgIo {
         Err(ConnectFailed::boxed(self.service, self.local, ConnectFailure::DevSeedNotBuilt))
     }
 
-    /// Over a substitute chain: `chain` is the read, the write and the
-    /// signatory-set reads. No signatory account: see `with_own_account`.
+    /// Over a substitute chain: `chain` is the read and the write.
     #[cfg(feature = "test-support")]
     pub fn for_test(service: OrgService, chain: &test_support::FakeChain) -> Self {
         Self {
@@ -678,16 +664,13 @@ impl OrgIo {
             reader: Box::new(chain.clone()),
             writer: Box::new(chain.clone()),
             publish: Default::default(),
-            signatory_reader: Box::new(chain.clone()),
-            own_account: None,
-            co_signers: Vec::new(),
             deliveries: Default::default(),
             ahead_limit: Some(ahead_limit_from(test_support::TEST_AHEAD_LIMIT)),
         }
     }
 
-    /// `open`, over a substitute chain: `chain` is the read, the write and
-    /// the signatory-set reads (test builds only): for the app's tests,
+    /// `open`, over a substitute chain: `chain` is the read and the write
+    /// (test builds only): for the app's tests,
     /// which build their handle from a data directory and cannot name
     /// org-node's service to hand `for_test`.
     #[cfg(feature = "test-support")]
@@ -700,7 +683,6 @@ impl OrgIo {
         let mut handle = Self::open(data_dir, transport_mode)?;
         handle.reader = Box::new(chain.clone());
         handle.writer = Box::new(chain.clone());
-        handle.signatory_reader = Box::new(chain.clone());
         handle.ahead_limit = Some(ahead_limit_from(test_support::TEST_AHEAD_LIMIT));
         Ok(handle)
     }
@@ -720,23 +702,6 @@ impl OrgIo {
     pub fn with_bind_plan_for_test(mut self, plan: transport::BindPlan) -> Self {
         self.local.endpoints = Endpoints::new(plan);
         self
-    }
-
-    /// The account and co-signers the own-admin check uses, as a node holding
-    /// that account's key would have them (test builds only).
-    #[cfg(feature = "test-support")]
-    pub fn with_own_account(mut self, own_account: AccountId, co_signers: Vec<AccountId>) -> Self {
-        self.own_account = Some(own_account);
-        self.co_signers = co_signers;
-        self
-    }
-
-    /// Whether this node is an admin of `org_id` (LLR-7qdjqn, LLR-2hkqv2):
-    /// `NotConfigured` when it holds no signatory key, `Read` when the one
-    /// signatory-set read fails (never `NotAdmin`), otherwise the rule of
-    /// `signatory::admin_status`. Nothing in part 1 acts on the answer.
-    pub async fn is_own_admin(&self, org_id: OrgId) -> Result<AdminStatus, OwnAdminError> {
-        signatory::own_admin_status(&*self.signatory_reader, self.own_account, &self.co_signers, org_id).await
     }
 
     /// The endpoint of `persona_id`'s Device, bound on first use (test builds
@@ -776,6 +741,7 @@ impl OrgIo {
         acknowledge::Context {
             service: self.service.clone(),
             mode: self.local.endpoints.transport_mode(),
+            bind_plan: self.local.endpoints.bind_plan(),
             deliveries: self.deliveries.0.clone(),
             store: self.local.writer(),
             clock: self.local.clock.clone(),

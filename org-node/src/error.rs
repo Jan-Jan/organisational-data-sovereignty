@@ -142,7 +142,7 @@ pub enum OrgNodeError {
     SenderNotListed { org_id: OrgId },
 
     /// An acknowledgement delivered by a Device other than the one it names
-    /// (LLR-5azhry, LLR-5wg8cu).
+    /// (LLR-5azhry, LLR-xudkh4).
     #[error("acknowledgement for organisation {org_id:?} was not sent by the device it names")]
     AcknowledgementNotFromItsDevice { org_id: OrgId },
 

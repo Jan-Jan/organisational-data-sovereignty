@@ -284,17 +284,11 @@ SPARSE_MERKLE_TREE_REGIONS := 95
 # (SDD-z85ux9, which carries no low-level requirements) that no gated test
 # reaches without a chain: bin/preflight.rs and preflight.rs 0.00% (89 lines),
 # connect.rs 8.57%, the body of `OrgIo::connect` past the custody checks
-# (lib.rs), `OnChainStateReader` (chain_read.rs), `OnChainSignatorySetReader`
-# (signatory.rs), `OnChainWriter` and `SignatoryKey::keypair`, which only it
-# calls (submit.rs, custody.rs). The rest, outside the shell:
+# (lib.rs), `OnChainStateReader` (chain_read.rs), `OnChainWriter` and
+# `SignatoryKey::keypair`, which only it calls (submit.rs, custody.rs). The rest, outside the shell:
 #   - custody.rs, `SignatoryKey::from_seed`'s `NotAKey` arm and
 #     `parse_32_hex`'s `let … else`: unreachable defensive code (an sr25519
 #     mini secret key accepts any 32 bytes; `chunks_exact(2)` yields pairs);
-#   - signatory.rs, `OwnAdminError`'s `Display` for `Read`: no LLR states how
-#     that error renders, so no test is owed. (Its `NotConfigured` arm and
-#     `SignatorySetNotConfigured`'s reads are covered since review round 2,
-#     finding 6: in a build without `dev-seed` they say the seed is read only
-#     by development builds, REQ-8zuka3.)
 #   (test_support.rs's hand-written `Default for FakeChain`, uncovered at T12,
 #   is a derive since the review pass.)
 # Covered since T12b (LLR-7pj5af, LLR-9r2bxd, LLR-qhjp6g): `WriterNotConfigured`,
@@ -329,8 +323,11 @@ SPARSE_MERKLE_TREE_REGIONS := 95
 #   org-io                     84.33%     83.53%   (2378 of 2820 lines; 4442 of 5318 regions)
 #
 # Floors one point below, rounded down. The shell left uncovered is as above: bin/preflight.rs 27.59%, preflight.rs 40.00%,
-# connect.rs 30.00%, chain_read.rs 54.17%, signatory.rs 72.92%,
+# connect.rs 30.00%, chain_read.rs 54.17%,
 # transport/mod.rs 72.73%, and the production writer in write.rs (77.48%).
+# (Note 2026-11-09, change worktree-org-io-publish-2, merge review MR1-C3:
+# signatory.rs, 72.92% in this measurement, is deleted with org-io's own-admin
+# check; the merge gate measures org-io's coverage afresh.)
 ORG_IO_LINES := 83
 ORG_IO_REGIONS := 82
 
@@ -601,7 +598,7 @@ coverage-sparse-merkle-tree:
 ORG_IO_COVERAGE_ARGS := -p org-io --features test-support,dev-seed \
 	--lib --test key_custody_config --test fuzz_seed_parse --test signatory_key \
 	--test dev_seed_env --test absences --test chain_read_rule \
-	--test signatory_rule --test app_boundary --test open \
+	--test app_boundary --test open \
 	--test keychain --test keychain_contract --test store_files --test transport_handshake \
 	--test transport_networked --test endpoints --test preflight_transport \
 	--test receive_step --test acknowledgement_inbound --test send_fanout \

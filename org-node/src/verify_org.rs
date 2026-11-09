@@ -10,7 +10,7 @@ use crate::error::OrgNodeError;
 use crate::ids::OrgId;
 use crate::invitation::InviteId;
 use crate::store::{
-    KeptAdmissionRequest, MemberSnapshot, OrgRecord, Origin, PersonaStatus, ProvisionalChange, ProvisionalFounding,
+    KeptAdmissionRequest, KeptNotice, MemberSnapshot, OrgRecord, Origin, PersonaStatus, ProvisionalChange, ProvisionalFounding,
     ProvisionalOrganisation, RevokedDevice, StoreData,
 };
 use crate::service::trie_from_snapshots;
@@ -108,10 +108,10 @@ pub(crate) fn judge(store: &StoreData, chain: &OrgState) -> Judgement {
     }
 }
 
-/// Whether a kept notice, tried in kept order, is one `revocation::accept` takes against `chain`
-/// (LLR-jhy6t6). A refused notice stays kept and is skipped (LLR-f9mcsq).
-pub(crate) fn accepted_notice(store: &StoreData, chain: &OrgState) -> bool {
-    store.kept_revocation_notices.iter().any(|notice| crate::revocation::accept(store, notice, Some(*chain)).is_ok())
+/// The first kept notice, in kept order, that `revocation::accept` takes against `chain`
+/// (LLR-jhy6t6, LLR-gb7p7c). A refused notice stays kept and is skipped (LLR-f9mcsq).
+pub(crate) fn accepted_notice<'a>(store: &'a StoreData, chain: &OrgState) -> Option<&'a KeptNotice> {
+    store.kept_revocation_notices.iter().find(|kept| crate::revocation::accept(store, &kept.notice, Some(*chain)).is_ok())
 }
 
 /// The one held provisional organisation whose epoch, root and

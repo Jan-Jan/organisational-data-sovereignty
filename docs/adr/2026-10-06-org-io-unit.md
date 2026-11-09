@@ -225,6 +225,15 @@ How org-io meets org-node was a second choice:
     Owner ruling of 2026-10-07: S2 implements the check in org-io
     (`OrgIo::is_own_admin`, with its tests) and does not wire it into the
     app; its first caller is S3b-io (stage S3's org-io half).
+    *Note 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; owner
+    ruling 6 of 2026-10-16, re-confirmed by ruling R1 of 2026-11-02):* S3b-io
+    never called it: its one planned caller, part 1's limit-setting command,
+    was dropped with the limits, and the check is removed (change
+    `worktree-org-io-publish-2`, owner ruling 6; REQ-ntkjk6 retired;
+    citation corrected 2026-11-09, merge review MR1-C4).
+    on-chain-client's signatory-set read stays, with no consumer, for the
+    several-Admins stage (owner ruling R3). The decision this ADR records,
+    org-io as the unit for all IO, is unchanged.
   - Coverage of the chain writer: PR-b795an's fix (the `write` feature and its
     four targets measured by `coverage-on-chain-client`) lands with S2,
     because org-io becomes the writer's consumer.

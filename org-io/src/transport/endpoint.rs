@@ -40,7 +40,7 @@ pub enum BindPlan {
     /// [`TransportMode::Networked`].
     Networked,
     /// Relay disabled, no address lookup, the default (wildcard) sockets:
-    /// Networked mode's direct sockets only (LLR-cqr26z). Loopback mode's
+    /// Networked mode's direct sockets only (LLR-spckm6). Loopback mode's
     /// plan is already direct.
     Direct,
     /// A Networked-style endpoint whose ONLY relay is the `RelayMap` and
@@ -246,7 +246,7 @@ impl OrgEndpoint {
     }
 
     /// Close the endpoint: it accepts and dials nothing more, and its
-    /// accept task ends (LLR-cqr26z, LLR-vj2nkb).
+    /// accept task ends (LLR-spckm6, LLR-vj2nkb).
     pub async fn close(&self) {
         self.inner.close().await;
     }

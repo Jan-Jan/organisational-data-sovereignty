@@ -232,6 +232,10 @@ successor, LLR-59kxsr, as inherited coverage, not red-first evidence. The
 trace gate at guardrails 6a9d6eb fails a test whose `verifies:` names only
 out-of-force items.
 
+*Note 2026-11-09 (change `worktree-org-io-publish-2`, merge review MR1-C1):*
+the `write_pure.rs` tests named above now carry `// verifies: LLR-59kxsr`
+only; none cites this superseded item.
+
 **LLR-gjx3jn**: `multi_account_id(signatories, threshold)` returns the
 blake2-256 of the SCALE encoding of `("modlpy/utilisuba", sorted signatories,
 threshold)`, sorting the signatories before hashing, so the account it derives

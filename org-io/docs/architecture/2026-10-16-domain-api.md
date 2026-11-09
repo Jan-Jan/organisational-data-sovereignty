@@ -1689,8 +1689,26 @@ directory), `org-io/src/clock.rs` (`Clock`,
 `SystemClock`), and the direct-only bind in `endpoints.rs`. It reaches
 org-node only through its exported listing (REQ-35s4eb) and deletion
 (REQ-ayyt5f) of kept acknowledgements. SOUP: `tokio` (`time`, `spawn`).
-traces: REQ-k6kcgd, REQ-sd7ayv, REQ-jqmpz5, REQ-bg5whd, REQ-kh2uth, REQ-36gxmg
+traces: REQ-k6kcgd, REQ-sd7ayv, REQ-jqmpz5, REQ-bg5whd, REQ-kh2uth, REQ-36gxmg, REQ-kn8zg6
 supersedes: SDD-83un8g
+
+*Traces amended 2026-11-03 (change `worktree-org-io-publish-2`, task T13b;
+owner ruling Q1 (c) of 2026-11-03, as recommended):* REQ-kn8zg6 joins the line, the dial by key of
+LLR-u2j6u8.
+
+*Note 2026-11-04 (change `worktree-org-io-publish-2`, task q1r; owner
+ruling Q1' of 2026-11-04):* "directly" and "the direct-only bind" hold for
+every dial that has an address; the one dial by key alone in Networked mode
+goes from an endpoint of the Persona's identity bound for it with iroh's
+relay server and address lookup, closed after the dial (LLR-spckm6, which
+supersedes LLR-cqr26z). No other Device forwards it (ruling D7). The code is
+`acknowledge.rs`'s `dial_by_key`, binding the handle's bind plan (`Endpoints::bind_plan`).
+
+*Amended in place 2026-11-09 (change `worktree-org-io-publish-2`, merge
+review round 1, MR1-O4; a wording change, the ID is kept):* the note of
+2026-11-04 above named `Endpoints::plan`, which task o2 renamed
+`Endpoints::bind_plan` (LLR-spckm6's o2 note); the note now names
+`Endpoints::bind_plan`.
 
 *Amended in place 2026-10-28 (unmerged draft; round 3 review, AR3-4 sweep, ARCHITECTURE Boundaries 3):* the responsibility is restated in one sentence without "and", the detail it listed moved to the sentences after it. No behaviour change.
 
@@ -1770,6 +1788,15 @@ bind that fails is the round's outcome for every recipient
 (`NotDelivered { reason: SenderEndpoint }`), and the next round binds
 again.
 satisfies: REQ-k6kcgd
+superseded-by: LLR-spckm6
+
+*Superseded 2026-11-04 (change `worktree-org-io-publish-2`, task q1r;
+owner ruling Q1' of 2026-11-04) by LLR-spckm6 (`2026-11-02-publish-2.md`):*
+every clause stands; in Networked mode the one dial by a recipient's key
+alone (REQ-kn8zg6, LLR-u2j6u8) goes from an endpoint of the same identity
+bound with iroh's relay server and address lookup, since the direct-only
+endpoint can never find a key; every dial that has an address keeps the
+direct-only bind.
 
 **LLR-3w22wc**: in a round, the delivery takes the kept acknowledgements in
 org-node's order and, for each recipient, dials its kept addresses one at a
@@ -1783,6 +1810,13 @@ result, `NotDelivered { reason: NoAddress }` when no address may be dialled;
 one recipient's outcome never stops the others. The node's lock is not held
 while a dial or a verdict read is in progress.
 satisfies: REQ-k6kcgd
+superseded-by: LLR-u2j6u8
+
+*Superseded 2026-11-03 (change `worktree-org-io-publish-2`, task T13b;
+owner ruling Q1 (c) of 2026-11-03, as recommended) by LLR-u2j6u8 (`2026-11-02-publish-2.md`):* in
+Networked mode a recipient with no kept address that may be dialled is
+dialled once by its key alone instead of reported `NoAddress`
+(REQ-kn8zg6); Loopback mode is unchanged.
 
 **LLR-rav7dr**: `OrgIo::acknowledgement_report(org_id) ->
 Option<AcknowledgementReport>` returns, for the removed Persona bound to
@@ -2179,6 +2213,11 @@ text a user gave.
 satisfies: REQ-xuzw32
 supersedes: LLR-3vb4k9
 
+*Note 2026-11-04 (change `worktree-org-io-publish-2`, task q1r):* the
+bind plan's rule is now LLR-spckm6's (successor of LLR-cqr26z): direct only,
+or relayed for a dial by key alone in Networked mode. No change to this
+item's rule.
+
 *Added 2026-10-21 (unmerged draft; design gap G2 of the plan):* LLR-3vb4k9
 named the dial at a transport-owned `PeerAddr` (`OrgEndpoint::send_body_at`,
 SDD-wr8m5n's parse), which this change removes with the peer-address parse
@@ -2273,6 +2312,11 @@ satisfies: REQ-6fk4qj
 ruling Q4' of 2026-10-16):* the queries gain `admission_requests`
 (LLR-dm2h8u) and `acknowledgement_report` (LLR-rav7dr); no method takes a
 peer address; the acknowledgement delivery is org-io's own, with no command.
+superseded-by: LLR-zhdc9f
+
+*Superseded 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; owner
+ruling 6 and plan §0's T16g) by LLR-zhdc9f (`2026-11-02-publish-2.md`):*
+`is_own_admin` leaves the list and `removed_devices` joins the queries.
 
 **LLR-n2srhc**: no public field of a type `org-io/src` defines is declared
 with the type `OrgService`, and no public function of `org-io/src` outside
@@ -2302,6 +2346,19 @@ co_signers), &set))` — `Admin`, `DelegateCannotDispatch` or `NotAdmin` by
 LLR-2hkqv2's rule.
 satisfies: REQ-ntkjk6
 supersedes: LLR-c9fyun
+retired: 2026-11-03 — owner ruling 6 of 2026-10-16: OrgIo::is_own_admin is removed in plan task T16h of change worktree-org-io-publish-2 (REQ-ntkjk6 retired the same day)
+
+*Deleted 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; owner
+ruling 6; plan task T16h, which also drops `is_own_admin` from
+`org-io/tests/absences.rs`'s allowlist):* the method, its error type and
+its reader go; the absence is pinned by `absences.rs`
+`the_handle_offers_none_of_the_removed_methods` and
+`the_handles_production_methods_are_exactly_the_domain_surface`.
+
+*Amended in place 2026-11-09 (change `worktree-org-io-publish-2`, merge
+review round 1, MR1-O5; a wording change):* the deletion note above named
+`org_io_offers_no_own_admin_check`, which task o2 replaced; it now names
+the two `absences.rs` tests that pin the absence.
 
 *Added 2026-10-21 (owner decision of 2026-10-20; consistency pass).*
 LLR-c9fyun (`2026-10-08-org-io.md`) still read "either signatory-set read"
@@ -2323,6 +2380,11 @@ definition, `(controller, Any, 0)`, with the runtime's `Any` index. Every
 reader org-io holds, the production `OnChainSignatorySetReader` and the
 test-support fake, meets it.
 satisfies: REQ-ntkjk6
+retired: 2026-11-03 — owner ruling 6 of 2026-10-16: the SignatorySetReader seam exists only for the own-admin check, removed in plan task T16h of change worktree-org-io-publish-2
+
+*Deleted 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; owner
+ruling 6; plan task T16h):* the seam, the production reader and the
+test-support fake's signatory slots go; their tests go with them.
 
 *Added 2026-10-28 (unmerged draft; round 4 TEST review, finding-1):* see
 LLR-js7wgk's note.
@@ -2346,6 +2408,14 @@ Q4' of 2026-10-16):* `KeptAdmissionRequestSummary` (LLR-dm2h8u) and
 report holds recipients' DevicePublicKeys and outcomes, never an
 acknowledgement's signed bytes.
 
+*Note 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; a
+clarification, the ID is kept; the rule is unchanged):* the methods are now
+LLR-zhdc9f's. `RemovedDevice` and `RemovedDevicesRefused` (LLR-3ydu9e)
+join the list and `HANDLE_RETURN_ALLOWLIST`: MemberIds, DevicePublicKeys,
+an epoch, `NotHeld { org_id }` and org-node's typed refusal, all public;
+`AdminStatus`, `OwnAdminError` and the `signatory` path segment leave the
+allowlist with the own-admin check (plan task T16h).
+
 **LLR-jqb5z7**: org-io's production code reads org-node's stores only
 through the key-free views org-node offers for it (org-node's views:
 `persona_view`, `persona_records`, `provisional_changes`,
@@ -2359,6 +2429,11 @@ and items gated on `test-support` calls `OrgService::list_orgs`
 it could clone or keep. An architecture test (`org-io/tests/absences.rs`)
 checks it.
 satisfies: REQ-v4tfap
+
+*Note 2026-11-03 (change `worktree-org-io-publish-2`, task T13b; a
+clarification, the ID is kept; the rule is unchanged):* org-node's
+`removed_devices` (a key-free view: MemberIds, DevicePublicKeys and signed
+acknowledgements) joins the views org-io reads through (LLR-3ydu9e).
 
 *Added 2026-10-28 (unmerged draft; review round 1 A1 and A9, ARCHITECTURE
 Boundaries 1 and Constraints 1):* org-io's verification, chain write and

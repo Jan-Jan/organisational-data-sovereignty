@@ -3,8 +3,9 @@
 Guidance specific to the `org-io` unit. See `../AGENTS.md` for project-wide
 guidance.
 
-- **org-io does all IO for an Organisation**: the chain (read, write, the
-  own-admin check, through on-chain-client), and from stage S4 the transport
+- **org-io does all IO for an Organisation**: the chain (read and write,
+  through on-chain-client; the own-admin check is removed, owner ruling 6,
+  2026-11-03), and from stage S4 the transport
   and storage file IO. It runs the workflow that joins them.
 - **org-node is IO-free: values in, values out.** org-io reads and parses,
   then hands org-node values; org-node returns values (and, from S4, sealed
@@ -21,7 +22,9 @@ guidance.
   under the `dev-seed` feature; production custody (OS keychain or hardware
   signer) is roadmap stage S8.
 - **Status (2026-10-08):** S2 built the crate: the chain read and write, key
-  custody, the own-admin check, the handle the app uses. Plan:
+  custody, the own-admin check (removed 2026-11-03, owner ruling 6; plan
+  task T16h of `../docs/plans/2026-10-16-org-io-publish-2.md`), the handle
+  the app uses. Plan:
   `../docs/plans/2026-10-06-org-io-create.md`; roadmap:
   `../docs/plans/2026-10-06-org-io-roadmap.md`.
 - Type safety is the project's hard rule: parse at the system's edge

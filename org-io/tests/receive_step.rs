@@ -474,12 +474,14 @@ async fn the_sender_org_node_sees_is_the_handshakes() {
     assert!(matches!(received, Ok(Received::AdmissionRequestKept { from, .. }) if from == bob.device_key), "{received:?}");
 }
 
-// An acknowledgement is settled with no chain read and no store write.
+// An acknowledgement is settled with no chain read and with the one store
+// write org-node returns for it: Bob's Device is held as revoked, so the
+// first acknowledgement from it is kept by org-node.
 // verifies: LLR-kz9hj4
 #[tokio::test(flavor = "multi_thread")]
-async fn an_acknowledgement_is_settled_with_no_chain_read_and_no_store_write() {
+async fn an_acknowledgement_is_settled_with_no_chain_read_and_its_one_store_write() {
     let (_guard, _keychain) = fresh_keychain();
-    let tag = "receive-ack-no-write";
+    let tag = "receive-ack-one-write";
     let admin = receiving_admin(tag).await;
     let bob = journey::invited(&admin, tag, "b", "bob").await;
     journey::admit_over_transport(&admin, &bob).await;
@@ -487,7 +489,7 @@ async fn an_acknowledgement_is_settled_with_no_chain_read_and_no_store_write() {
     let (reads, writes) = (admin.chain.reads(), store_writes_to(&store_dir(tag, "a"), &admin.device_key).len());
     let (received, _) = journey::dialled(&admin.io, &bob.device_key, &body).await;
     assert!(matches!(received, Ok(Received::Acknowledged(_))), "{received:?}");
-    assert_eq!((admin.chain.reads(), store_writes_to(&store_dir(tag, "a"), &admin.device_key).len()), (reads, writes));
+    assert_eq!((admin.chain.reads(), store_writes_to(&store_dir(tag, "a"), &admin.device_key).len()), (reads, writes + 1));
 }
 
 // When the report returns, the store write has

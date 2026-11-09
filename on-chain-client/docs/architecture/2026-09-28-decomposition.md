@@ -780,6 +780,9 @@ route exists for each, and both red this unit's gate.
   *(Note 2026-10-05, review round 3, finding-13: the annotation now reads
   `verifies: REQ-2qa5r5, REQ-54txzh, LLR-xv7auy`; REQ-54txzh supersedes
   REQ-2qa5r5, which the test still verifies under its earlier name.)*
+  *(Note 2026-11-09, change `worktree-org-io-publish-2`, merge review MR1-C1:
+  the annotation now reads `verifies: REQ-54txzh, LLR-xv7auy`; the superseded
+  REQ-2qa5r5 is no longer cited.)*
 
 * **LLR-z8rrkr — "as one value", and the mutation round 4 offered for it was
   the wrong one.** Round 4 re-typed `parse_revive_event` to return

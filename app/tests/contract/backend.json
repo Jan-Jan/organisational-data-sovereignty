@@ -116,6 +116,23 @@
 				}
 			]
 		},
+		"list_removed_devices": {
+			"none": [],
+			"one_unacknowledged": [
+				{
+					"member_id": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+					"device_key": "cececececececececececececececececececececececececececececececece",
+					"acknowledged_epoch": null
+				}
+			],
+			"one_acknowledged": [
+				{
+					"member_id": "0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+					"device_key": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+					"acknowledged_epoch": 4
+				}
+			]
+		},
 		"propose_person": {
 			"provisional": {
 				"device_public_key": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",

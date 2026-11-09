@@ -64,6 +64,7 @@ pub fn run() {
             commands::write_organisation_to_chain,
             commands::verify_organisation,
             commands::list_admission_requests,
+            commands::list_removed_devices,
             commands::list_personas,
             commands::list_orgs,
             commands::connection_status,
