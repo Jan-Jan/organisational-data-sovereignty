@@ -3,6 +3,8 @@
 rust_out
 target
 .claude/worktrees
+.DS_Store
+**/.DS_Store
 
 # Cargo.lock files are TRACKED, deliberately. Two reasons:
 #   1. An application-side workspace pins its dependencies. `apps/desktop/src-tauri` is
