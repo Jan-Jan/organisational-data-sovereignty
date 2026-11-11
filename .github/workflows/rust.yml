@@ -7,12 +7,12 @@
 # "passing" means; person's clippy entry runs verbatim in the `clippy` job
 # (since 2026-10-05), and org-io's (since 2026-10-08). The app unit has THREE verify_commands as of 2026-09-14,
 # and TWO of them run here, in the `app-frontend` job below:
-# `npm --prefix app run check` and `npm --prefix app run test`, each preceded
-# by the `npm --prefix app ci` they need because app/node_modules is
+# `npm --prefix apps/desktop run check` and `npm --prefix apps/desktop run test`, each preceded
+# by the `npm --prefix apps/desktop ci` they need because apps/desktop/node_modules is
 # gitignored.
 #
 # The THIRD — the cargo entry, `cargo test --manifest-path
-# app/src-tauri/Cargo.toml --features test-support --test …` over six targets —
+# apps/desktop/src-tauri/Cargo.toml --features test-support --test …` over six targets —
 # still runs NOWHERE in CI: it needs Tauri's Linux system packages
 # (webkit2gtk, libsoup, …) this workflow does not install, so for that entry
 # the merge gate remains the only gate. That remaining gap is recorded in
@@ -55,7 +55,7 @@ jobs:
       # below stays on `--lib`, which does not compile `test-support`, so this
       # exposure cannot regress the panic-freedom gate.
       - run: |
-          cargo test --manifest-path on-chain-client/Cargo.toml --features test-support --lib \
+          cargo test --manifest-path crates/on-chain-client/Cargo.toml --features test-support --lib \
             --test fuzz_decode_org_state \
             --test fuzz_parse_revive_event \
             --test fuzz_event_round_trip \
@@ -135,19 +135,19 @@ jobs:
   # does not install, so for that entry the merge gate remains the only gate.
   # Recorded in docs/plans/2026-09-05-ratchet-setup.md.
   #
-  # `npm ci` installs from app/package-lock.json and IGNORES app/package.json,
-  # so the lock must carry vitest — measured 2026-09-14: against the lock as
-  # it stood before this change, `npm --prefix app ci` itself failed with
-  # "Missing: vitest@5.0.0 from lock file", before any test could run.
+  # `npm ci` installs from apps/desktop/package-lock.json and IGNORES apps/desktop/package.json,
+  # so the lock must carry vitest: against a lock without it,
+  # `npm --prefix apps/desktop ci` fails with
+  # "Missing: vitest@5.0.0 from lock file", before any test can run.
   app-frontend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
-      - run: npm --prefix app ci
-      - run: npm --prefix app run check
-      - run: npm --prefix app run test
+      - run: npm --prefix apps/desktop ci
+      - run: npm --prefix apps/desktop run check
+      - run: npm --prefix apps/desktop run test
 
   # Lib targets only for org-members and on-chain-client (person, the last
   # step, is --all-targets). Two separate reasons, and only the first is
@@ -156,7 +156,7 @@ jobs:
   # 1. on-chain-client's test code is ALLOWED to panic. Measured today,
   #    `--all-targets -- -D warnings` reports 144 lint errors across 13 test
   #    targets: 123 `expect()` on Result, 18 on Option, and 3 `panic`. The
-  #    project's rule (org-members/AGENTS.md) is "no exceptions in lib code;
+  #    project's rule (crates/org-members/AGENTS.md) is "no exceptions in lib code;
   #    unwrap() is fine in tests", so those are not defects.
   # 2. org-members' test code also fails --all-targets, but on ONE ordinary
   #    lint that has nothing to do with that rule: `manual_contains` in
@@ -175,7 +175,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with: { components: clippy }
       - run: cargo clippy -p org-members --lib -- -D warnings
-      - run: cargo clippy --manifest-path on-chain-client/Cargo.toml --lib -- -D warnings
+      - run: cargo clippy --manifest-path crates/on-chain-client/Cargo.toml --lib -- -D warnings
       # person's verify_commands clippy entry, verbatim. Unlike the two above it
       # covers --all-targets: person inherits the workspace lints, and its test
       # targets allow `expect` by an explicit attribute where they use it.
@@ -190,11 +190,11 @@ jobs:
       - run: cargo clippy -p org-io --all-targets -- -D warnings
       - run: cargo clippy -p org-node --all-targets --features app,test-support -- -D warnings
 
-  # org-members' documented build matrix (org-members/AGENTS.md), and person's
+  # org-members' documented build matrix (crates/org-members/AGENTS.md), and person's
   # wasm32 checks. no_std is a hard requirement for both, but
   # wasm32-unknown-unknown has std, so a wasm32 check proves only that a crate
   # builds for that target, not that it is no_std. For person the no_std proof
-  # is `#![no_std]` in person/src/lib.rs, which the crate-discipline test
+  # is `#![no_std]` in crates/person/src/lib.rs, which the crate-discipline test
   # checks. Compile-check only — it does not prove a crate RUNS under wasm32.
   no-std:
     runs-on: ubuntu-latest

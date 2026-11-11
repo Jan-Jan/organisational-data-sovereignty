@@ -12,9 +12,9 @@ Glossary of the project's ubiquitous language. Definitions only — no
 implementation details, no specs.
 
 **Partial.** These are the terms settled while writing the first requirements
-(`org-members/docs/requirements/`, moved there from `docs/requirements/` on
+(`crates/org-members/docs/requirements/`, moved there from `docs/requirements/` on
 2026-09-05), which is why they cluster around membership. The remaining
-vocabulary — already well developed in `org-members/AGENTS.md`, and the
+vocabulary — already well developed in `crates/org-members/AGENTS.md`, and the
 authority for crate-level terms until then — is migrated at tooth 9 of
 `docs/plans/2026-08-26-ratchet-gap-analysis.md`.
 

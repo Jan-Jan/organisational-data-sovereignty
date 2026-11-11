@@ -95,7 +95,7 @@ ways, and each has real cost:
 - **Robustness testing remains required**, as under B. **Corrected
   2026-09-02:** an earlier revision of this ADR stated that "there is no
   arbitrary-bytes fuzz target for the deserialize path". That is false —
-  `org-node/tests/fuzz_envelope_decode` feeds arbitrary bytes to an envelope
+  `crates/org-node/tests/fuzz_envelope_decode` feeds arbitrary bytes to an envelope
   decode and then to `decode_delta`, which runs the `org-members`
   deserialisation validation. The claim was inherited from tooth 4's
   verification record and repeated here without being checked. The real gap is

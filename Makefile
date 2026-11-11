@@ -1,11 +1,11 @@
 # Guardrails verification targets.
 #
 # `coverage-org-members`, `coverage-on-chain-client` and `coverage-person` are
-# the targets named by `coverage_command` in org-members/.guardrails/config.yaml,
-# on-chain-client/.guardrails/config.yaml and person/.guardrails/config.yaml
+# the targets named by `coverage_command` in crates/org-members/.guardrails/config.yaml,
+# crates/on-chain-client/.guardrails/config.yaml and crates/person/.guardrails/config.yaml
 # (per-unit configs since 2026-09-05; person's since 2026-10-04; `coverage`
 # runs all three and is what CI calls; since 2026-10-08 it runs org-io's
-# `coverage-org-io` too, named by org-io/.guardrails/config.yaml; since
+# `coverage-org-io` too, named by crates/org-io/.guardrails/config.yaml; since
 # 2026-10-25 sparse-merkle-tree's `coverage-sparse-merkle-tree`). Since 2026-10-06 each of those configs
 # also names its `coverage-branch-<unit>` twin, the decision-coverage half, run
 # by `coverage-branch` and CI's job of the same name (nightly; see
@@ -65,10 +65,10 @@
 #
 # The distinction that makes this a re-baselining and not a lowering. Until
 # this change, twenty-three of this crate's tests lived in `#[cfg(test)]`
-# modules INSIDE on-chain-client/src, so llvm-cov counted their bodies as
+# modules INSIDE crates/on-chain-client/src, so llvm-cov counted their bodies as
 # library lines — and, being executed, as 100%-covered library lines. They
 # inflated the numerator and the denominator together. Relocating them into
-# on-chain-client/tests (where this unit's `test_paths` actually is, so that
+# crates/on-chain-client/tests (where this unit's `test_paths` actually is, so that
 # `check-trace.sh` can read their `verifies:` annotations at all) removed 214
 # such lines from the measurement. Netting them out of the old figure, real
 # library coverage ROSE across this change: ~169 covered library lines before,
@@ -81,7 +81,7 @@
 #
 # Measured on the change branch of
 # docs/plans/2026-09-10-on-chain-client-risk-analysis.md, after T3–T7 relocated
-# twenty-three tests out of `#[cfg(test)]` modules in on-chain-client/src and
+# twenty-three tests out of `#[cfg(test)]` modules in crates/on-chain-client/src and
 # T10 added the eight relocated targets to the recipe below:
 #
 #   recipe                                       lines     regions   denominator
@@ -373,7 +373,7 @@ ORG_IO_REGIONS := 82
 # counted. on-chain-client's class C shortfall therefore stands; this floor
 # does not close it. The one uncovered org-members branch is the
 # `!old.is_calculated()` operand of `calculate_delta`'s guard in
-# org-members/src/trie.rs: no test has a calculated `self` with an
+# crates/org-members/src/trie.rs: no test has a calculated `self` with an
 # uncalculated `old`. It predates the absence-proofs change (S1).
 BRANCH_TOOLCHAIN := nightly-2026-10-03
 BRANCH_TARGET_DIR := $(CURDIR)/target/branch-coverage
@@ -513,7 +513,7 @@ coverage-org-members:
 # This floor is LOW, and it is a shortfall rather than a target met:
 # client.rs sits at 16.37% — 281 of its 336 lines unexercised, of the 491 this
 # recipe measures — because it is exercised almost entirely by the
-# chopsticks/anvil integration tests, which need on-chain/scripts/node_modules
+# chopsticks/anvil integration tests, which need contracts/scripts/node_modules
 # and are outside both verify_commands and this measurement. (This note read
 # 12.75% until 2026-09-10; that was the PRE-RELOCATION figure, left in place
 # when the basis changed, and it contradicted the 16.37% in the RESOLVED note
@@ -531,10 +531,10 @@ coverage-org-members:
 # risk analysis; the ninth, `type_widths`, with review round 1's finding 1,
 # which relocated the last two `#[cfg(test)]` tests out of src/types.rs.) They had to move together:
 # docs/plans/2026-09-10-on-chain-client-risk-analysis.md relocated twenty-three
-# tests out of `#[cfg(test)]` modules inside on-chain-client/src, which drops the
+# tests out of `#[cfg(test)]` modules inside crates/on-chain-client/src, which drops the
 # `--lib`-only figure twice over (the relocated bodies were themselves covered
 # library lines, and the branches they exercised stop being reached at all).
-ON_CHAIN_CLIENT_COVERAGE_ARGS := --manifest-path on-chain-client/Cargo.toml \
+ON_CHAIN_CLIENT_COVERAGE_ARGS := --manifest-path crates/on-chain-client/Cargo.toml \
 	--features test-support,write \
 	--lib \
 	--test fuzz_decode_org_state \

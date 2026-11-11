@@ -42,7 +42,7 @@
 # dependency"). org-members exports all twelve of its requirements. org-node
 # has seventeen requirements as of 2026-09-09 — the two original `expects:`
 # items plus the fifteen ordinary ones added by
-# org-node/docs/requirements/2026-09-09-verify-and-commit.md — and not one
+# crates/org-node/docs/requirements/2026-09-09-verify-and-commit.md — and not one
 # carries `exported: yes`; on-chain-client and app have none at all. So all
 # three export surfaces are still empty and every cross-unit reference to
 # them is UNDECLARED- or NON-EXPORTED-REF until one of them writes an
@@ -84,18 +84,16 @@
 # org-members and person depend on it since 2026-10-24.
 
 units:
-  - org-members
-  - on-chain-client
-  - org-node
-  - app
-  - person
-  - org-io
-  - sparse-merkle-tree
+  - crates/org-members
+  - crates/on-chain-client
+  - crates/org-node
+  - apps/desktop
+  - crates/person
+  - crates/org-io
+  - crates/sparse-merkle-tree
 
 not_a_unit:
-  - on-chain          # Foundry contracts (OrgRegistry.sol); separate toolchain — later tooth
-  - spike-common      # Phase 1.d spike, salvage-only (no upstream PRs until value demonstrated)
-  - spike-keyhive     # Phase 1.d spike, salvage-only
-  - spike-p2panda     # Phase 1.d spike, salvage-only
-  - docs              # repository-level: adr, plans, verification records, interface glossary, superpowers specs, phase-1d reports
+  - contracts         # Foundry contracts (OrgRegistry.sol); separate toolchain — later tooth
+  - spikes            # Phase 1.d spikes, salvage-only (no upstream PRs until value demonstrated)
+  - docs              # repository-level: adr, plans, verification records, interface glossary, background, superpowers specs, phase-1d reports
   - .github           # CI definitions

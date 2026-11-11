@@ -5,13 +5,13 @@ target
 .claude/worktrees
 
 # Cargo.lock files are TRACKED, deliberately. Two reasons:
-#   1. An application-side workspace pins its dependencies. `app/src-tauri` is
+#   1. An application-side workspace pins its dependencies. `apps/desktop/src-tauri` is
 #      a shipped binary, not a library, and a shipped binary must build from
 #      the same resolved versions every time.
 #   2. The SOUP inventory of a class C unit cites its lockfile as the evidence
 #      for every version it records (IEC 62304 §8.1.2). An untracked lockfile
 #      makes that evidence unreproducible.
-# See org-members/docs/architecture/soup.md.
+# See crates/org-members/docs/architecture/soup.md.
 
 # Guardrails: worktrees and sed backups (managed by /ratchet)
 .worktrees/

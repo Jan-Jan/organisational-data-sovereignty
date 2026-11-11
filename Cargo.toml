@@ -1,21 +1,21 @@
 [workspace]
 resolver = "2"
 members = [
-    "org-members",
-    "org-io",
-    "org-node",
-    "person",
-    "sparse-merkle-tree",
-    "spike-common",
-    "spike-keyhive",
-    "spike-p2panda",
+    "crates/org-members",
+    "crates/org-io",
+    "crates/org-node",
+    "crates/person",
+    "crates/sparse-merkle-tree",
+    "spikes/common",
+    "spikes/keyhive",
+    "spikes/p2panda",
 ]
-# on-chain-client declares its own [workspace] and is intentionally outside
+# crates/on-chain-client declares its own [workspace] and is intentionally outside
 # this workspace. It is used as a path dependency by org-io. Excluding it
 # here prevents the "multiple workspace roots" error when Cargo traverses the
 # directory tree.
 exclude = [
-    "on-chain-client",
+    "crates/on-chain-client",
 ]
 
 [workspace.package]

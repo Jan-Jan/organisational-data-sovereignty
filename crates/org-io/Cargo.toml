@@ -1,0 +1,255 @@
+[package]
+name = "org-io"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "GPL-3.0-only"
+description = "ODS: all IO for an Organisation — the chain read and write, the user's signatory key"
+publish = false
+
+[features]
+default = []
+# The development-only signing seed (REQ-8zuka3): the one read of
+# ODS_ADMIN_SEED is compiled only with this feature. No release build enables it.
+dev-seed = []
+# Test-only constructors and fakes (`test_support`); never in production builds.
+# Carries org-node's test-only seams with it.
+test-support = ["org-node/test-support", "iroh/test-utils"]
+
+[dependencies]
+# Features mirror on-chain-client's pins so the subxt types unify (the reason
+# org-node's manifest gave for the same line).
+on-chain-client = { path = "../on-chain-client", default-features = false, features = ["dev-rpc", "write"] }
+subxt-signer = { version = "0.50", default-features = false, features = ["sr25519", "subxt"] }
+zeroize = "1.9"
+# The Organisation logic org-io feeds values to and takes values from
+# (docs/adr/2026-10-06-org-io-unit.md), with its `app` feature.
+org-node = { path = "../org-node", features = ["app"] }
+# The chain connection and read (SDD-z85ux9); the same pins as
+# on-chain-client's, so the subxt types unify.
+subxt = { version = "0.50", default-features = false, features = ["native", "jsonrpsee", "reconnecting-rpc-client"] }
+# `sync`: the endpoints' map and their receive channel.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+async-trait = "0.1"
+hex = "0.4"
+# The transport: one endpoint
+# per Persona, bound from its keychain item. `test-support` adds `test-utils`
+# for the in-process relay (`BindPlan::Relay`).
+iroh = "0.98"
+# `getrandom`: `OsRng` is the handle's random source in a production build
+# (`HandleRng`, LLR-4qd5fx), which also names each store file's temporary
+# (LLR-b9bm36).
+rand_core = { version = "0.6", features = ["getrandom"] }
+# The OS keychain: one item per Device key (SDD-4fvypt, REQ-hw82ue; the only
+# unit that names a keychain crate). Platform-native backends only
+# (LLR-36jer8): macOS and iOS through `apple-native`, Windows through
+# `windows-native`, Linux through `sync-secret-service` with `crypto-rust`
+# for an encrypted D-Bus session. No `vendored`, no `linux-native`. Android
+# has no backend in 3.x (the crate falls back to its mock there; org-io
+# refuses there, LLR-8erfbu).
+keyring = { version = "=3.6.3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+
+[dev-dependencies]
+bolero = "0.13"
+# The paused clock of the 90-second write bound's tests (LLR-d3farr;
+# tests/chain_write.rs, tests/verification.rs).
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "test-util"] }
+# `iroh::test_utils::run_relay_server()` for the hermetic Networked test.
+iroh = { version = "0.98", features = ["test-utils"] }
+# `OsRng`, as org-node's and the app's tests use.
+rand = "0.8"
+# Chopsticks test harness (tests/common, used by preflight): chopsticks spawn +
+# subxt client, mirroring on-chain-client's dev-dependencies for the same
+# helpers.
+jsonrpsee = { version = "0.26", default-features = false, features = ["ws-client", "http-client"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+libc = "0.2"
+
+[lints]
+workspace = true
+
+# The operator preflight. No `required-features`: org-io always has the
+# chain.
+[[bin]]
+name = "preflight"
+
+# Chopsticks-only: spawns a fork and needs contracts/scripts/node_modules, so it
+# is not in verify_commands.
+[[test]]
+name = "preflight"
+path = "tests/preflight.rs"
+
+# Chopsticks-only, as `preflight`: the
+# contract test of `test_support::FakeChain`'s writer, run against the
+# production writer on a fork with OrgRegistry deployed; spawns chopsticks
+# and needs contracts/scripts/node_modules and forge, so it is not in
+# verify_commands.
+[[test]]
+name = "chain_writer_contract"
+path = "tests/chain_writer_contract.rs"
+required-features = ["test-support", "dev-seed"]
+
+# The seed and co-signer parse never panics (LLR-4ax2m6, LLR-9fy622) and its
+# errors carry no part of the value (LLR-gc6kwy).
+[[test]]
+name = "fuzz_seed_parse"
+path = "tests/fuzz_seed_parse/fuzz_target.rs"
+harness = false
+
+# The seed and co-signer parse (LLR-4ax2m6, LLR-gc6kwy). Its seed comparison,
+# `SeedBytes::same_bytes_as`, exists only under test-support, so the target
+# declares it: a build with no features skips the target instead of failing
+# to compile it, and both verify lines name the feature.
+[[test]]
+name = "key_custody_config"
+path = "tests/key_custody_config.rs"
+required-features = ["test-support"]
+
+# The development seed read (LLR-rgdx22) mutates the environment; its tests
+# run in their own binary, one at a time under a lock, and only with dev-seed.
+[[test]]
+name = "dev_seed_env"
+path = "tests/dev_seed_env.rs"
+required-features = ["dev-seed"]
+
+# The keychain module (LLR-677fqq, LLR-8erfbu, LLR-kna4zj), over
+# `test_support::MemoryKeychain`: its tests install keyring's process-global
+# default credential builder, so they run in their own binary, one at a time.
+[[test]]
+name = "keychain"
+path = "tests/keychain.rs"
+required-features = ["test-support"]
+
+# The contract test of `test_support::MemoryKeychain` (LLR-36jer8): the same
+# assertions against the fake and, only with ODS_REAL_KEYCHAIN_TESTS=1,
+# against the OS keychain, under a test-named service it cleans up.
+[[test]]
+name = "keychain_contract"
+path = "tests/keychain_contract.rs"
+required-features = ["test-support"]
+
+# These create Personas, whose device secrets go to the keychain: they run
+# only with `test-support`, over `test_support::MemoryKeychain`, so no test
+# build reaches the OS keychain.
+[[test]]
+name = "open"
+path = "tests/open.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "signatory_key"
+path = "tests/signatory_key.rs"
+required-features = ["test-support"]
+
+# The store files (LLR-nt8dja, LLR-b9bm36, LLR-murjr6, LLR-uzax55,
+# LLR-vj2nkb), over `test_support::MemoryKeychain`: each test
+# installs its own, so they run one at a time in their own binary.
+[[test]]
+name = "store_files"
+path = "tests/store_files.rs"
+required-features = ["test-support"]
+
+# The transport: the authenticated endpoint over loopback and over an in-process relay, one
+# endpoint per Persona, and the transport preflight. Every endpoint is bound
+# from a keychain item, `test_support::MemoryKeychain` here.
+[[test]]
+name = "transport_handshake"
+path = "tests/transport_handshake.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "transport_networked"
+path = "tests/transport_networked.rs"
+required-features = ["test-support"]
+
+# The receive step: no lock held while it waits, check then
+# one read then commit and write, and the typed terminal condition. Its tests
+# install their own `test_support::MemoryKeychain` and run one at a time.
+[[test]]
+name = "receive_step"
+path = "tests/receive_step.rs"
+required-features = ["test-support"]
+
+# A revoked Device may connect, for its acknowledgement only; every inbound
+# stream is answered with one verdict byte. Its tests install
+# their own `test_support::MemoryKeychain` and run one at a time.
+[[test]]
+name = "acknowledgement_inbound"
+path = "tests/acknowledgement_inbound.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "endpoints"
+path = "tests/endpoints.rs"
+required-features = ["test-support"]
+
+# The fan-out of an Organisation's epoch and the Loopback address check, over Loopback endpoints and the in-process relay; its tests install
+# their own `test_support::MemoryKeychain`.
+[[test]]
+name = "send_fanout"
+path = "tests/send_fanout.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "preflight_transport"
+path = "tests/preflight_transport.rs"
+required-features = ["test-support"]
+
+# The invitation exchange: an Invite issued, read and answered with an
+# admission request. Every Persona's secret is in the shared
+# `test_support::MemoryKeychain`.
+[[test]]
+name = "invitation_exchange"
+path = "tests/invitation_exchange.rs"
+required-features = ["test-support"]
+
+# The six expectations org-io declared on org-node, shown to hold through the
+# handle (owner ruling 1 of 2026-10-14). Its tests install their
+# own `test_support::MemoryKeychain` and run one at a time.
+[[test]]
+name = "expectations_met"
+path = "tests/expectations_met.rs"
+required-features = ["test-support"]
+
+# The domain surface's targets: the random source, the Person, Persona
+# creation, proposals, the chain write, verification, the kept admission
+# requests and the removal acknowledgements.
+[[test]]
+name = "rng_source"
+path = "tests/rng_source.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "person"
+path = "tests/person.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "persona_creation"
+path = "tests/persona_creation.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "propose"
+path = "tests/propose.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "chain_write"
+path = "tests/chain_write.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "verification"
+path = "tests/verification.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "requests"
+path = "tests/requests.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "acknowledgements"
+path = "tests/acknowledgements.rs"
+required-features = ["test-support"]

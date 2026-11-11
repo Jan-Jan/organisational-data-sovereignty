@@ -1,0 +1,268 @@
+# guardrails configuration for the `app` unit — flat schema only:
+#   `key: value` scalars and two-space `- item` lists, every key at column one,
+#   set once, in its own form (LIST keys: strict_paths, test_paths,
+#   verify_commands, coverage_command, depends_on, segregated_from; everything
+#   else a scalar). The schema is CLOSED and validated before any gate runs;
+#   the full rule list, with the reason each rule exists, is the header of
+#   templates/config.yaml in the guardrails repository this was copied from.
+#
+# This is a UNIT config (.guardrails/units.yaml at the repository root names
+# the units). Every doc_* value and every strict_paths/test_paths entry must
+# sit inside this unit's own directory. The verification record is
+# repository-level: it is the change's signed squash commit message.
+#
+# Scripts run from the repository root, so paths and commands below are
+# repository-relative.
+guardrails_version: 0.5.1
+guardrails_commit: d6e285e71a55a2de7ef342801923ca8ed71f9c76
+
+# IEC 62304 software safety class. C: the app is the shipped product — the
+# surface through which an organisation admits, verifies and revokes members.
+# It is a thin shell over org-node, but the shell is where the user's intent
+# becomes a membership change, and a wrong display or a mis-wired command
+# reaches the same pathway to serious injury the 2026-09-01 ADR names. See
+# docs/adr/2026-09-05-units-and-per-unit-classes.md.
+safety_class: C
+
+id_prefixes: REQ HAZ RC SDD LLR PR ADR
+
+# Canonical document locations. README-only ledgers as of 2026-09-05.
+doc_srs: apps/desktop/docs/requirements
+doc_rmf: apps/desktop/docs/risk
+doc_sad: apps/desktop/docs/architecture
+doc_soup: apps/desktop/docs/architecture/soup.md
+doc_problems: apps/desktop/docs/problems
+
+# Both sides of the IPC boundary, widened 2026-09-14 with the unit's first
+# requirements. The SvelteKit frontend is in scope because six of this unit's
+# requirements were realised there — the pasted-address requirement (retired
+# 2026-10-20), REQ-he8ejb, REQ-a83vqr, REQ-akt4p7, REQ-rq8g2v, REQ-wu6z9p — and
+# FIVE of them there and NOWHERE else: all but the pasted-address one, which
+# also had a Rust half in ipc.rs.
+#
+# Re-measured 2026-09-15 (it read "five ... three of them" until then, measured
+# on 2026-09-14 and overtaken twice). Two things moved it: REQ-wu6z9p was minted
+# by the first independent review and is gated only by apps/desktop/tests, and REQ-he8ejb
+# became frontend-only when its two Rust annotations were retracted as
+# unbearable — the handler's check runs AFTER the command is invoked, and the
+# requirement says "before any command is invoked" (see ipc.rs's own note).
+# The verification row's outcome, the listener teardown, the receiver-error
+# routing and the pre-invocation identifier check are frontend decisions with no
+# Rust half at all.
+strict_paths:
+  - apps/desktop/src-tauri/src
+  - apps/desktop/src
+
+# Both test trees, added 2026-09-14 with the unit's first tests: cargo
+# integration targets under apps/desktop/src-tauri/tests (six then, eight since
+# 2026-10-05; each declared in Cargo.toml with
+# `required-features = ["test-support"]`) and four vitest files under
+# apps/desktop/tests. The placeholder file that used to hold apps/desktop/src-tauri/tests open
+# is deleted — the directory now holds real test targets.
+test_paths:
+  - apps/desktop/src-tauri/tests
+  - apps/desktop/tests
+
+# Measured 2026-09-14 at the end of the app risk analysis change.
+#
+# The cargo entry names all ten targets explicitly because each is declared
+# `required-features = ["test-support"]`: naming a target with the feature off
+# is a cargo ERROR rather than a silent skip, which is what makes this entry
+# fail loudly if the feature or a target is ever dropped. Measured:
+#   startup_policy 12 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 27 + receiver_guard 6 + ipc 9 = 78 tests (2026-09-14).
+# Four of the six rose during the change, each from a gate or review finding:
+# receiver_events 14 -> 27 (REQ-tw4cb5 was verified on one fixture rather than
+# as a property; six more for REQ-kn5rtx; four more when the terminal-error
+# detection turned out never to have fired), org_id_parsing 11 -> 14 and
+# ipc 8 -> 9 (a doubled `0x` prefix was silently normalised at two boundary
+# parsers), and connection_status 8 -> 10 (REQ-bvx4nh's data-directory clause
+# was gated by no test annotated to it).
+# Measured again 2026-10-05 (agent sandbox, CARGO_HOME=/tmp/cargo_home_fuzz),
+# after later changes and the org-node type-safety change added tests:
+#   startup_policy 12 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 28 + receiver_guard 6 + ipc 12 = 82 tests.
+# A seventh target, csp_policy (17 tests), was added 2026-10-05 with the
+# Content-Security-Policy fix (REQ-cj5jmx, owner ruling 4 of
+# docs/plans/2026-10-05-app-architecture.md): 82 + 17 = 99 tests, measured.
+# An eighth target, state_assembly (3 tests), was added 2026-10-05 by task T3
+# of the same plan, with the unit's first low-level requirements; T3 also
+# added tests to four existing targets (startup_policy, receiver_events, ipc,
+# csp_policy). Measured after T3:
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 30 + receiver_guard 6 + ipc 28 + csp_policy 18
+#   + state_assembly 3 = 122 tests.
+# Review round 1 of the same plan (task R1) added tests to two targets:
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 30 + receiver_guard 6 + ipc 33 + csp_policy 24
+#   + state_assembly 3 = 133 tests.
+# Merged 2026-10-06 with worktree-person-shared-types (the switch to person's
+# identity types, trimmed by docs/plans/2026-10-05-switch-trim.md): its
+# receiver_events changes replace tests of refusals org-node no longer raises;
+# Measured 2026-10-06 by that change's final gate: receiver_events 32, so
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 32 + receiver_guard 6 + ipc 33 + csp_policy 24
+#   + state_assembly 3 = 135 tests; vitest 36.
+# 2026-10-06, T14 of docs/plans/2026-10-05-chain-authority.md: a ninth
+# target, submit_flow (5 tests, the submission requirement now split into
+# REQ-3pjmub, REQ-36gxmg, REQ-nactq6), and ipc 33 -> 21 (the twelve
+# tests of the invitation commands are deleted until T15 re-writes them):
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 32 + receiver_guard 6 + ipc 21 + csp_policy 24
+#   + state_assembly 3 + submit_flow 5 = 128 tests; vitest 36.
+# 2026-10-06, T15 of the same plan: a tenth target, invitation (12 tests),
+# and ipc 21 -> 35 (the invitation commands' tests re-written against the
+# app-owned exchange, plus produce_invite_reply's refusal):
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 32 + receiver_guard 6 + ipc 35 + csp_policy 24
+#   + state_assembly 3 + submit_flow 5 + invitation 12 = 154 tests; vitest 36.
+# 2026-10-06, R1c of the same plan (review round 1): invitation 12 -> 16
+# (three for the item now LLR-kna4zj, and the send-failure clause of the item
+# now LLR-zkybw7), vitest 40 -> 43
+# (invite.personas):
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 32 + receiver_guard 6 + ipc 35 + csp_policy 24
+#   + state_assembly 3 + submit_flow 5 + invitation 16 = 158 tests; vitest 43.
+# 2026-10-06, R2a of the same plan (review round 2, finding-1): invitation
+# 16 -> 17 (a reply naming another held Organisation under an outstanding
+# invite id):
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 32 + receiver_guard 6 + ipc 35 + csp_policy 24
+#   + state_assembly 3 + submit_flow 5 + invitation 17 = 159 tests; vitest 43.
+# 2026-10-08, T9 of docs/plans/2026-10-06-org-io-create.md (the app depends
+# on org-io alone): submit_flow 5 -> 2 — the five submission tests moved to
+# org-io's own submit_flow with the code (the submission requirement is
+# org-io's since then; now REQ-3pjmub, REQ-36gxmg, REQ-nactq6);
+# the two recipient tests (the one-send-per-command item's) stay. Measured at T9:
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 35 + receiver_guard 6 + ipc 33 + csp_policy 24
+#   + state_assembly 3 + submit_flow 2 + invitation 17 = 157 tests.
+# 2026-10-13, S4 task T12 of docs/plans/2026-10-06-org-io-transport.md: the
+# submit_flow target leaves (its two recipient tests moved to org-io's
+# submit_flow; their item is retired, superseded by org-io's fan-out), and
+# ipc loses its seven peer-address cases to org-io's peer_addr (the parse
+# moved there). Not re-counted: the app does not compile until S4 task T15.
+# 2026-10-14, S4 task T13 of the same plan: the invitation target leaves (its
+# fourteen exchange tests moved to org-io's invitation_exchange with the
+# exchange; its three Blob-parse tests had left for org-node in T6). Not
+# re-counted, as above.
+# 2026-10-14, S4 task T15 of the same plan: the app compiles against
+# org-io's current API again. state_assembly 3 -> 1 (two tests moved to
+# org-io in T9; the passphrase-refusal test deleted with the behaviour,
+# org-io takes no passphrase), receiver_events 35 -> 37, ipc 28 (the
+# invitation commands' tests rewritten onto org-io's exchange, the manifest
+# scan and the admission's IPC test added). Measured:
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 37 + receiver_guard 6 + ipc 28 + csp_policy 24
+#   + state_assembly 1 = 133 tests; vitest 45.
+# The S3b-io part 1 change (master, merged into S4 2026-10-14) counted on its
+# own branch, before S4's T12-T15:
+# 2026-10-13, T15b of docs/plans/2026-10-08-org-io-publish.md: a new target,
+# reconcile (3: the reconcile command's body over org-io's FakeChain and its
+# IPC shapes); ipc 33 -> 39 (reconcile, list_orgs' verification, the two
+# discard commands). Measured at T15b:
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 35 + receiver_guard 6 + ipc 39 + csp_policy 24
+#   + state_assembly 4 + submit_flow 2 + invitation 17 + reconcile 3
+#   = 167 tests; vitest 44 -> 52 (tests/reconcile.view.test.ts, 8).
+# 2026-10-13, T15d of the same plan (owner ruling of that day, background
+# discard): the two discard commands and the provisional-update listing left
+# the app with their tests; ipc 39 -> 36, vitest 52 -> 50. Re-measured at
+# review round 1 (independent review of the change):
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 35 + receiver_guard 6 + ipc 36 + csp_policy 24
+#   + state_assembly 4 + submit_flow 2 + invitation 17 + reconcile 3
+#   = 164 tests; vitest 50.
+# 2026-10-13, review round 1 fixes (finding-6): vitest 50 -> 51, a test of
+# the Organisation list's reconcile button (tests/reconcile.view.test.ts).
+# 2026-10-14, merge of S3b-io part 1 into S4 (worktree-org-io-transport):
+# the reconcile target joins S4's line; submit_flow and invitation stay gone
+# (S4 tasks T12, T13). Measured after the merge:
+#   startup_policy 13 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 37 + receiver_guard 6 + ipc 31 + csp_policy 24
+#   + state_assembly 1 + reconcile 3 = 139 tests; vitest 52.
+# 2026-10-15, S4 owner ruling of that day: state_assembly's last test
+# (init_opens_the_store_once_even_when_the_connect_is_refused) deleted, no
+# app item stating it; the target leaves Cargo.toml and the line above. The
+# other counts are as S4's earlier tasks left them. Measured:
+#   startup_policy 9 + connection_status 10 + org_id_parsing 14
+#   + receiver_events 41 + receiver_guard 10 + ipc 38 + csp_policy 24
+#   + reconcile 3 = 149 tests.
+#
+# `npm run check` is `svelte-kit sync && svelte-check`; it type-checks apps/desktop/src
+# AND apps/desktop/tests (measured 2026-09-14 — the generated .svelte-kit/tsconfig.json
+# includes ../tests/**). 0 errors, 1 pre-existing @types/node warning.
+#
+# `npm run test` is `svelte-kit sync && vitest run`; the sync is part of the
+# script rather than assumed from the entry above, so the entry does not
+# depend on its neighbour's side effects. 30 tests across four files; 35 after
+# task T3 of docs/plans/2026-10-05-app-architecture.md and 36 after its task
+# T4 (2026-10-05, measured).
+#
+# Both npm entries need apps/desktop/node_modules, which is gitignored: the merging
+# machine must run `npm --prefix apps/desktop ci` first. A fresh worktree does not have
+# it.
+# 2026-10-21, T1 of docs/plans/2026-10-21-org-io-domain-api.md: two empty targets (verification, periodic) registered.
+verify_commands:
+  - cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --features test-support --test startup_policy --test connection_status --test org_id_parsing --test receiver_events --test receiver_guard --test ipc --test csp_policy --test verification --test periodic
+  - npm --prefix apps/desktop run check
+  - npm --prefix apps/desktop run test
+
+# Raised from 30 to 60 on 2026-10-13 by owner ruling (docs/plans/2026-10-08-org-io-publish.md,
+# rulings of 2026-10-13): five app reports (PR-w5dae4, PR-h6xpnh, PR-eecx3y,
+# PR-5mc4d8, PR-j9f6kk) reach 30 days on 2026-10-14 and would otherwise block
+# S3b-io's merge. The same limit org-node was given on 2026-10-08; it is not
+# a ruling not to fix, and it applies to every app report.
+problem_age_days: 60
+# Raised from 10 to 15 on 2026-10-05 by owner ruling 2 of
+# docs/plans/2026-10-05-app-architecture.md: the architecture change books five
+# new reports (PR-8vh53d, PR-cu2h2g, PR-uxj7bg, PR-bu6mau and one since
+# resolved) on top of
+# the five still open from 2026-09-14, 10 open in all. Each is deferred work,
+# not a ruling not to fix. The same limit org-node was given on the same date.
+problem_open_max: 15
+
+# No coverage_command. The first half of this note used to read "nothing to
+# measure until the crate has tests" and is no longer true: as of 2026-09-14 the
+# unit has 78 cargo tests (122 as measured 2026-10-05, after the architecture
+# change) and 30 vitest tests (36 after it). What remains true is the second
+# half — under class C the absence is a gap against a mandatory requirement, and
+# it is recorded in docs/plans/2026-09-05-ratchet-setup.md.
+#
+# Not adding one here was the owner's explicit decision on 2026-09-14: tooth 5
+# sets floors for org-node and app together, on one measurement basis, rather
+# than setting one here in isolation. Nothing in this unit's hazard register
+# rests on a coverage figure, because there is none.
+# coverage_command:
+#   - make coverage-app
+
+expectation_age_days: 90
+expectation_open_max: 10
+
+# Declared 2026-09-06 after the dependency assessment in
+# docs/plans/2026-09-06-dependency-edges.md. Both providers are class C, so
+# the class floor (MISCLASSED-DEPENDENCY) has nothing to convict and no
+# segregated_from: entry is needed.
+#
+# Updated 2026-09-14. This note used to say "the app has no requirements yet, so
+# it records no expects: items". It now has twenty-two, written by the hazard
+# analysis in apps/desktop/docs/risk/, and one expectation: REQ-x3c8n2 expects org-node
+# to distinguish a permanent transport-endpoint failure from a transient one by
+# the error's TYPE, because the receiver loop currently decides by matching a
+# substring of a message org-node formats and no gate in either unit protects.
+# Until org-node defines an exported requirement carrying
+# `satisfies: REQ-x3c8n2`, this unit's run reports UNMET-EXPECTATION and
+# org-node's reports one open expectation standing against it. Due 2026-12-13.
+#
+# Updated 2026-10-08 (change worktree-org-io-create, stage S2, task T9): the
+# app depends on org-io alone. Its edges to org-node and on-chain-client are
+# replaced by one edge to org-io (class C), assessed in
+# docs/plans/2026-10-06-org-io-create.md §5; the app reaches org-node's types
+# through org-io's transitional re-export and the chain only through org-io
+# (crates/org-io/tests/app_boundary.rs). REQ-x3c8n2 is re-addressed to org-io
+# (expects: org-io, same opened date), which returns org-node's receive-path
+# error unchanged and answers it when stage S4 moves the receive loop.
+depends_on:
+  - crates/org-io
+# segregated_from:
+#   - <unit> (RC-xxxxxx)

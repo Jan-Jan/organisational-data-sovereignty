@@ -133,8 +133,8 @@ A project that changes a clause rewrites its reason and examples with it.
    may use a double of the IPC process boundary between the webview and the
    application's own backend when a shared fixture, checked against the real
    commands, pins every answer and event payload the double gives. Today that
-   fixture is `app/tests/contract/backend.json`, checked against the real
-   commands and event mappings by `app/src-tauri/tests/ipc.rs`. The backend's
+   fixture is `apps/desktop/tests/contract/backend.json`, checked against the real
+   commands and event mappings by `apps/desktop/src-tauri/tests/ipc.rs`. The backend's
    normal path then runs for real in that check, and the webview test runs
    against values the backend is shown to give.
 

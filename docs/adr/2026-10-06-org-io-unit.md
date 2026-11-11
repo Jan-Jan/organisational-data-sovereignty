@@ -49,7 +49,7 @@ and storage file IO.
 
 **Two keys, kept apart** (owner, 2026-10-06). The *Organisation key pair* is
 Organisation-wide: the X25519 pair from the key-pair change (merged as
-`1f52c36`; `org-node/docs/requirements/2026-10-07-org-key-pair.md`), held in
+`1f52c36`; `crates/org-node/docs/requirements/2026-10-07-org-key-pair.md`), held in
 org-node's Organisation record, for encryption and key agreement only. It never signs and is outside this
 ADR's custody decision. There is *no Organisation-wide signing key*. On-chain
 authority comes from each admin user's own sr25519 account, one signatory of
@@ -63,19 +63,19 @@ After the chain-authority change (`fdf4e77`), IO is spread across three
 places:
 
 - **org-node** reads the chain. `SubxtChainOps` and `connect_chain_client` are
-  in `org-node/src/service.rs`, and `OnChainReader` and `org_state_from_chain`
-  in `org-node/src/chain_read.rs`. `OrgService` holds a `Box<dyn ChainOps>`
+  in `crates/org-node/src/service.rs`, and `OnChainReader` and `org_state_from_chain`
+  in `crates/org-node/src/chain_read.rs`. `OrgService` holds a `Box<dyn ChainOps>`
   and awaits `read_state` inside `commit_genesis`, `commit_update` and the
   receive path. It also runs the operator preflight
-  (`org-node/src/preflight.rs`, `org-node/src/bin/preflight.rs`). It runs the
-  iroh transport (`org-node/src/transport/`) and writes the encrypted Persona
-  store to disk (`org-node/src/store.rs`). The chain code sits behind the
+  (`crates/org-node/src/preflight.rs`, `crates/org-node/src/bin/preflight.rs`). It runs the
+  iroh transport (`crates/org-node/src/transport/`) and writes the encrypted Persona
+  store to disk (`crates/org-node/src/store.rs`). The chain code sits behind the
   `chain` Cargo feature, which brings in `subxt`, `on-chain-client`, `tokio`,
   `async-trait` and `hex`.
 - **The app** makes the chain write. `ChainWriter`, `OnChainWriter`,
   `found_organisation` and `submit_commit_send` are in
-  `app/src-tauri/src/submit.rs`. The app also holds the user's sr25519 signatory key:
-  `build_chain_ops` and `connect_chain` in `app/src-tauri/src/state.rs` parse
+  `apps/desktop/src-tauri/src/submit.rs`. The app also holds the user's sr25519 signatory key:
+  `build_chain_ops` and `connect_chain` in `apps/desktop/src-tauri/src/state.rs` parse
   `ODS_ADMIN_SEED` into a `subxt_signer::sr25519::Keypair` and keep it in
   `OnChainWriter.signatory` for the life of the process. The app depends on
   org-node, on on-chain-client (with its `write` feature), on subxt and on
@@ -91,7 +91,7 @@ org-node.
 
 Neither the app nor org-node reads anything about the Organisation's multisig.
 The "advisory signatory read" was planned for org-node
-(`org-node/docs/requirements/2026-10-06-chain-authority.md:89-91`, sequencing
+(`crates/org-node/docs/requirements/2026-10-06-chain-authority.md:89-91`, sequencing
 item 4), and the owner has since ruled that admin status is checked on-chain by
 org-io.
 
@@ -125,7 +125,7 @@ How org-io meets org-node was a second choice:
 ## Decision
 
 - **org-io is a new Cargo crate at `org-io/`** and a guardrails unit of safety
-  class C. It has its own ledgers under `org-io/docs/` and its own
+  class C. It has its own ledgers under `crates/org-io/docs/` and its own
   `.guardrails/config.yaml`, and it is listed in `.guardrails/units.yaml`. The
   guardrails skeleton (manifest entry, config, ledger READMEs, SOUP file) is
   created in S2's design phase. The crate lands in S2's develop phase, after
@@ -179,7 +179,7 @@ How org-io meets org-node was a second choice:
   commands use, in one module marked transitional. S4 narrows them as the
   transport and the invitation commands move. *Note 2026-10-08 (task T12):*
   in the code the re-export is the whole crate, `pub use org_node as node;`
-  in `org-io/src/lib.rs`, marked transitional there, rather than a list of
+  in `crates/org-io/src/lib.rs`, marked transitional there, rather than a list of
   the types the commands use. Narrowing it to such a list is S4's work.
 - **Every unit stays class C.** All five are C, so `MISCLASSED-DEPENDENCY`
   has nothing to flag, and no `segregated_from:` is written.
@@ -238,8 +238,8 @@ How org-io meets org-node was a second choice:
     four targets measured by `coverage-on-chain-client`) lands with S2,
     because org-io becomes the writer's consumer.
   - org-io has statement and branch coverage floors from its first merge.
-- **What moves in S4:** the iroh transport (`org-node/src/transport/`), the
-  invitation exchange (`app/src-tauri/src/invitation.rs`), the receiver loop,
+- **What moves in S4:** the iroh transport (`crates/org-node/src/transport/`), the
+  invitation exchange (`apps/desktop/src-tauri/src/invitation.rs`), the receiver loop,
   sending each update to every Device (PR-3ue4va), storage file IO (org-node's
   `PersonaStore` opening and writing files becomes org-io's, holding opaque
   encrypted bytes that org-node seals and opens), and PR-kwwap5. After S4,
@@ -264,7 +264,7 @@ How org-io meets org-node was a second choice:
   so every org-node test that drives them through `MockChainOps` is
   rewritten to pass the state value.
 - **Items change home with their IDs.** Tests move with the behaviour they
-  verify (for example `app/src-tauri/tests/submit_flow.rs` becomes org-io's)
+  verify (for example `apps/desktop/src-tauri/tests/submit_flow.rs` becomes org-io's)
   and their `verifies:` lines are unchanged. Every mention of a moved ID left
   in the source unit (ledgers, source comments, tests that stay) has to be
   rewritten to prose or removed, or the source unit's run fails.

@@ -6,7 +6,7 @@
   serious injury this decision inherits; not superseded)
 - **Decision maker:** Jan-Jan (project owner), interviewed by `/ratchet`
 - **Recorded in:** `.guardrails/units.yaml`; `safety_class: C` in each of
-  `org-members/`, `on-chain-client/`, `org-node/`, `app/` `.guardrails/config.yaml`
+  `crates/org-members/`, `crates/on-chain-client/`, `crates/org-node/`, `apps/desktop/` `.guardrails/config.yaml`
 
 ## Context
 
@@ -91,7 +91,7 @@ segregation argument (D1–D14 in the guardrails plan
 ## Consequences
 
 - **The ledgers moved.** `docs/requirements`, `docs/risk`, `docs/problems`
-  and `docs/architecture` are now `org-members/docs/…`, with history. IDs and
+  and `docs/architecture` are now `crates/org-members/docs/…`, with history. IDs and
   item text are unchanged. Historical records that cite the old paths are
   left as written.
 - **There is no root config.** A bare `check-trace.sh`, `check-ids.sh` or

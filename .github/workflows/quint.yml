@@ -8,18 +8,18 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
       - run: npm i -g @informalsystems/quint
-      - run: quint typecheck org-members/quint/membership_types.qnt
-      - run: quint typecheck org-members/quint/membership.qnt
-      - run: quint typecheck org-members/quint/membership_mbt.qnt
-      - run: quint test org-members/quint/membership.qnt
-      - run: quint run org-members/quint/membership_mbt.qnt --invariant=mbtInv --max-steps=15 --max-samples=1000
-      - run: quint typecheck org-node/quint/protocol.qnt
-      - run: quint typecheck org-node/quint/ods_instances.qnt
-      - run: quint run org-node/quint/protocol.qnt --invariant=forkSafety --max-steps=16 --max-samples=5000
-      - run: quint run org-node/quint/protocol.qnt --invariant=revocationSafety --max-steps=16 --max-samples=5000
-      - run: quint run org-node/quint/protocol.qnt --invariant=revokedExcludedFromOrgSecret --max-steps=16 --max-samples=5000
-      - run: quint run org-node/quint/protocol.qnt --invariant=tauWindow --max-steps=16 --max-samples=5000
-      - run: quint run org-node/quint/protocol.qnt --invariant=convergence --max-steps=16 --max-samples=5000
+      - run: quint typecheck crates/org-members/quint/membership_types.qnt
+      - run: quint typecheck crates/org-members/quint/membership.qnt
+      - run: quint typecheck crates/org-members/quint/membership_mbt.qnt
+      - run: quint test crates/org-members/quint/membership.qnt
+      - run: quint run crates/org-members/quint/membership_mbt.qnt --invariant=mbtInv --max-steps=15 --max-samples=1000
+      - run: quint typecheck crates/org-node/quint/protocol.qnt
+      - run: quint typecheck crates/org-node/quint/ods_instances.qnt
+      - run: quint run crates/org-node/quint/protocol.qnt --invariant=forkSafety --max-steps=16 --max-samples=5000
+      - run: quint run crates/org-node/quint/protocol.qnt --invariant=revocationSafety --max-steps=16 --max-samples=5000
+      - run: quint run crates/org-node/quint/protocol.qnt --invariant=revokedExcludedFromOrgSecret --max-steps=16 --max-samples=5000
+      - run: quint run crates/org-node/quint/protocol.qnt --invariant=tauWindow --max-steps=16 --max-samples=5000
+      - run: quint run crates/org-node/quint/protocol.qnt --invariant=convergence --max-steps=16 --max-samples=5000
   apalache:
     runs-on: ubuntu-latest
     continue-on-error: true   # bounded verify is best-effort (slow, JVM-heavy)
@@ -36,8 +36,8 @@ jobs:
       # (~30-42s each); convergence is heavier (its reachableRoots transitive
       # closure) and verifies at depth 3 (~21s), timing out at 5. The simulator
       # covers greater breadth. See the M3 design spec.
-      - run: quint verify org-node/quint/protocol.qnt --invariant=forkSafety --max-steps=5
-      - run: quint verify org-node/quint/protocol.qnt --invariant=revocationSafety --max-steps=5
-      - run: quint verify org-node/quint/protocol.qnt --invariant=revokedExcludedFromOrgSecret --max-steps=5
-      - run: quint verify org-node/quint/protocol.qnt --invariant=tauWindow --max-steps=5
-      - run: quint verify org-node/quint/protocol.qnt --invariant=convergence --max-steps=3
+      - run: quint verify crates/org-node/quint/protocol.qnt --invariant=forkSafety --max-steps=5
+      - run: quint verify crates/org-node/quint/protocol.qnt --invariant=revocationSafety --max-steps=5
+      - run: quint verify crates/org-node/quint/protocol.qnt --invariant=revokedExcludedFromOrgSecret --max-steps=5
+      - run: quint verify crates/org-node/quint/protocol.qnt --invariant=tauWindow --max-steps=5
+      - run: quint verify crates/org-node/quint/protocol.qnt --invariant=convergence --max-steps=3

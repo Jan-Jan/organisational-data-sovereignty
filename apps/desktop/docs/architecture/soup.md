@@ -1,0 +1,273 @@
+# SOUP Inventory
+
+<!--
+Software Of Unknown Provenance (IEC 62304 §8.1.2): every third-party
+component the software depends on. Keep versions exact; review this file
+whenever a dependency changes. Note functional/performance requirements the
+SOUP must meet and known anomalies relevant to safety.
+-->
+
+## Evidence and provenance
+
+Measured 2026-10-05 on branch `worktree-guardrails-app-arch`, from local
+`master` at `06c357b`, on the host target `aarch64-apple-darwin`. Every cargo
+command ran with `--locked`.
+
+**`apps/desktop/src-tauri` is its own workspace.** Its `Cargo.toml` opens with an empty
+`[workspace]` table, and the root `Cargo.toml` neither lists nor excludes it.
+`cargo locate-project --workspace` run from `apps/desktop/src-tauri` names
+`apps/desktop/src-tauri/Cargo.toml`, so cargo reads **`apps/desktop/src-tauri/Cargo.lock`**. That
+lock is tracked and has 806 package entries. The root `Cargo.lock` does not
+contain the app: there is no `ods-poc` entry in it. This is the same arrangement
+as `on-chain-client`'s and the opposite of `org-node`'s.
+
+**Closure.** The command was:
+
+```
+cargo tree --manifest-path apps/desktop/src-tauri/Cargo.toml -p ods-poc \
+  -e <edges> --prefix none --format '{p}' --locked \
+  | awk '{print $1,$2}' | sort -u | wc -l
+```
+
+It counts unique `name version` pairs only, never whole lines.
+
+| Edge kinds | Host target (`aarch64-apple-darwin`) | `--target all` |
+|---|---|---|
+| `normal` | 499 | 672 |
+| `normal,build,dev` | 525 | 707 |
+
+Four pairs in each list are units of this repository, not SOUP: `ods-poc`
+itself, `org-node`, `org-members` and `on-chain-client` (`person` is not in the
+closure). Subtracting them leaves **495 third-party crates shipped on the host
+target**, and 521 with build and dev edges. The `--target all` figures are the
+raw counts and include the same four units. The difference from the host
+figures is Tauri's platform stacks: webkit2gtk and gtk on Linux, webview2 and
+the `windows-*` crates on Windows. The host figures exclude them.
+
+The `test-support` feature, which the gate builds, gives byte-identical lists.
+`test-support = []` enables nothing in any dependency, unlike org-node's, which
+pulls `iroh/test-utils`.
+
+Against org-node's closure (`cargo tree -p org-node --features app -e normal`
+on the root lock, 387 pairs), the app adds 112 pairs (the Tauri stack). Every
+one of org-node's 387 is in the app closure at the same version, so the two
+locks do not drift on org-node's closure.
+
+**npm.** `apps/desktop/package-lock.json` is tracked (lockfileVersion 3) and holds
+**170 packages**. One is a runtime dependency (`@tauri-apps/api`) and 169 are
+flagged `dev`. *(2026-10-27, change `worktree-org-io-domain-api`, TEST
+review round 1 T-A3: 119 and 118 until then; `@testing-library/svelte` and
+`jsdom` added 51 packages, all flagged `dev`, and moved no package already
+locked.)* **The `dev` flag does not mean unshipped.** The svelte runtime,
+the `@sveltejs/kit` client runtime and their runtime dependencies (`devalue`,
+`esm-env`, `clsx`) are compiled into `build/`, which Tauri embeds in the
+binary. The shipped JS closure is larger than one package. It is best measured
+from the built bundle, and this inventory has not done that.
+
+**Advisory scans.** No `cargo-audit` or `cargo-deny` is installed in this
+toolchain, so no Rust advisory scan was run. That is a gap, not a finding of no
+advisories, and it is the gap org-node's and on-chain-client's inventories
+record. `npm audit --omit=dev --prefix apps/desktop` reports **0** vulnerabilities.
+`npm audit --prefix apps/desktop`, which includes the dev flag, reports **5**: 1 low,
+1 moderate, 3 high, 0 critical. Of those, `devalue` 5.8.1 (high) is a runtime
+dependency of the kit and svelte client code. `--omit=dev` hides it. It was
+not found in the built bundle: after `npm run build` (2026-10-05), none of
+devalue's error strings appears in `build/`. Kit uses it in production only to
+unflatten server data, which this prerendered `ssr = false` app never fetches,
+and to stringify under DEV. It is booked as PR-8vh53d all the same, because no
+gate would notice it entering the bundle. The other four are `@sveltejs/kit` 2.65.1
+(moderate, server-side paths this static `ssr = false` app does not run),
+`cookie` 0.6.0 (low, via kit), and `nanoid` 3.3.12 and `postcss` 8.5.15 (high,
+build tools).
+
+## Rust direct dependencies
+
+Usage is from a grep of `apps/desktop/src-tauri/src`, not from the manifest's comments.
+Requirements are from `apps/desktop/docs/requirements/`.
+
+| Name | Kind | Version | Role in system | Requirements it supports | Risk considerations / known anomalies |
+|---|---|---|---|---|---|
+| `tauri` | normal | 2.11.5 | Desktop shell: webview window, IPC command dispatch, event emission, `app_data_dir` resolution. `lib.rs`, `commands.rs`, `state.rs` | REQ-645jq9, REQ-e4ah9h, REQ-bvx4nh, REQ-affyf5, REQ-kn5rtx, REQ-dp95pv, REQ-tw4cb5, REQ-jfxah3, REQ-rxc8sp, REQ-cj5jmx (RC-mq2365) | Manifest sets `features = []`; resolved defaults include `dynamic-acl`, `wry`, `compression`. See *Tauri configuration* for the IPC exposure. `lib.rs` panics on a failed `AppState::init` and `.expect`s the run. **Carries RC-mq2365 in part:** Tauri injects `app.security.csp` into the webview and appends hashes of the bundle's inline scripts to `script-src` at build time. The gate checks the configured policy, not what Tauri injects. |
+| `tauri-build` | build | 2.6.3 | `tauri_build::build()` in `build.rs`; generates the context and the ACL schemas in `gen/schemas` | — | Called with defaults, so no app ACL manifest is generated for the custom commands. |
+| `serde` | normal | 1.0.229 | Derive layer for IPC payloads and event structs. `commands.rs`, `events.rs`, `policy.rs` | REQ-645jq9, REQ-affyf5, REQ-dp95pv, REQ-tw4cb5, REQ-kn5rtx | Derive-only. |
+| `serde_json` | normal | 1.0.151 | `serde_json::Value` event payloads emitted to the webview. `events.rs` | REQ-affyf5, REQ-dp95pv, REQ-tw4cb5, REQ-kn5rtx, REQ-jfxah3 | `events.rs:180` `.expect`s `to_value`; it relies on every payload being a plain struct of owned scalars. |
+| `tokio` | normal | 1.53.1 | `tokio::sync::Mutex` around the org-io handle (`state.rs`; around `OrgService` until 2026-10-08); `tokio::spawn` of the receiver loop (`commands.rs`, `start_receiver`); `tokio::time::interval_at` with `MissedTickBehavior::Delay` for the periodic verification (`periodic.rs`), spawned from `run`'s setup through `tauri::async_runtime::spawn` onto the same runtime | REQ-3hfggn, REQ-6hgm8r, REQ-jfxah3, REQ-5q7nyg | `sync`, `rt-multi-thread`, `macros`, `time`. The mutex serialises every command's access to the service. The dev build adds `test-util` (tokio's paused clock, for `tests/periodic.rs`). |
+| `hex` | normal | 0.4.3 | Hex encoding and decoding of keys, ids and addresses crossing IPC. `commands.rs`, `parsing.rs`, `state.rs` | REQ-sjkp8z (the peer-address requirement retired 2026-10-20, change `worktree-org-io-domain-api`) | Unlike org-node, the app **parses** hex from untrusted input: `parsing.rs` and the revoke and admit handlers decode strings from the webview, and `state.rs` decodes `ODS_*` environment values. |
+| `tauri` (`test`) | dev | 2.11.5 | `tauri::test::mock_builder`, `mock_context`, `get_ipc_response` in `tests/ipc.rs` | — | Feature unification means a dev build of the lib also sees `test`. |
+| `tempfile` | dev | 3.27.0 | Temporary data directories in `tests/ipc.rs` (`tests/state_assembly.rs`, which also used it, deleted 2026-10-15) | — | Test-only. |
+
+`on-chain-client` (normal, path) selects `dev-rpc` and `write`. *Amended
+2026-10-06 (change `worktree-org-node-chain-authority`): this said it was
+declared only to unify features, with no code reference in
+`apps/desktop/src-tauri/src`. The app now enables on-chain-client's `write` feature and
+is the one build that does — it submits every genesis and update through on-chain-client's chain writer
+(`submit.rs`, `state.rs`; the submission requirement) — and it holds the sr25519 signatory key
+(`subxt-signer`, from `ODS_ADMIN_SEED`) that it passes to the writer on each
+call. The writer stores no key. The `write` feature's two dependencies,
+`subxt-signer` and `blake2`, are recorded in on-chain-client's inventory at
+the app lock's versions (0.50.3, 0.10.6).*
+`on-chain-client`, `org-node` (normal, path) and `org-members` (dev, path) are
+units of this repository with their own ledgers, not SOUP.
+
+*Amended 2026-10-08 (change `worktree-org-io-create`, task T9).* The app
+depends on `org-io` alone (normal, path; and dev, path, with its
+`test-support` feature), a unit of this repository with its own ledgers, not
+SOUP. The rows for `subxt`, `subxt-signer` and `async-trait` are removed,
+with the `on-chain-client`, `org-node` and `org-members` entries: the app
+names none of them, and the chain connection, the chain writer and the
+signatory key are org-io's (`crates/org-io/docs/architecture/soup.md` records
+`subxt`, `subxt-signer`, `zeroize`, `tokio`, `async-trait` and `hex` for
+org-io's use). The paragraph above is history: the app no longer enables
+on-chain-client's `write` feature, holds no signatory key, and submits
+nothing itself; org-io does, and the submission requirement is org-io's. The app's own
+`dev-seed` feature only enables org-io's.
+
+*Amended 2026-10-14 (change `worktree-org-io-transport`, S4 task T15).* The
+rows for `base64`, `postcard` and `iroh` are removed with the dependencies
+(`ipc.rs`, `the_app_manifest_names_no_iroh_base64_or_postcard`). The Base64
+armour and the postcard encoding of the Invite and Invite-reply Blobs are
+org-node's (`crates/org-node/docs/architecture/soup.md`), since S4 task T6. The
+peer-address parse (hex, then postcard of an iroh `EndpointAddr`) and the
+transport are org-io's (`crates/org-io/docs/architecture/soup.md`), since S4 tasks
+T12 and T10. The app names none of them. Its `test-support` feature now
+enables org-io's, for `AppState::for_test` and `for_test_over` (org-io's
+in-memory keychain and substitute chain), so "`test-support = []` enables
+nothing in any dependency" above is history.
+
+*Amended 2026-10-15 (change `worktree-org-io-domain-api`).* The `rand` row
+is marked for removal: org-io now holds its own CSPRNG (`rand_core::OsRng`
+over `getrandom`, recorded in `crates/org-io/docs/architecture/soup.md`), no
+public org-io method takes an rng, and the app passes none
+(LLR-vj5s28). The row is removed when the code task of this change that
+drops `rand = "0.8"` from `apps/desktop/src-tauri/Cargo.toml` and the `OsRng` uses
+from `commands.rs` lands. Until then the manifest still declares `rand` and
+the row stays, so this inventory and the manifest agree at every commit.
+
+*Amended 2026-10-22 (change `worktree-org-io-domain-api`, T46).* The `rand`
+row is removed: `apps/desktop/src-tauri/Cargo.toml` no longer names `rand` and no
+source under `apps/desktop/src-tauri/src` names `OsRng` (LLR-vj5s28, gated by
+`ipc.rs::the_app_manifest_names_no_rand_rand_core_or_getrandom` and
+`ipc.rs::no_app_source_names_a_generator_or_passes_an_rng`).
+
+*Amended 2026-10-20 (change `worktree-org-io-domain-api`; owner ruling Q2
+of 2026-10-16).* The periodic verification (SDD-tgu7dp, REQ-5q7nyg) adds one
+use of `tokio`: `tokio::time::interval`, with the delay policy on missed
+ticks, in `periodic.rs`, spawned with `tokio::spawn` from `run`'s setup. The
+manifest already enables tokio's `time` feature, which the row's Note does
+not list; the row is updated by the code task that adds `periodic.rs`, so
+inventory and manifest agree at every commit. No new crate.
+
+*Amended 2026-10-22 (change `worktree-org-io-domain-api`, T55).* The row
+above now records the periodic verification's use of `tokio`. It is
+spawned with `tauri::async_runtime::spawn`, not `tokio::spawn`: Tauri's
+`setup` closure runs outside a tokio runtime context, where `tokio::spawn`
+panics; Tauri's spawn puts the task on the same tokio runtime. No new crate
+and no new feature of the normal build.
+
+## npm packages
+
+| Name | Locked | Lock flag | Shipped? | Role | Note |
+|---|---|---|---|---|---|
+| `@tauri-apps/api` | 2.11.0 | dependency | yes | Webview-to-Rust IPC: `invoke` and `listen` in `src/lib/api.ts` | The only runtime dependency; it has no dependencies of its own. |
+| `svelte` | 5.56.3 | dev | **yes** (runtime compiled into `build/`) | UI framework for every component | Pulls `esm-env` 1.2.2 and `clsx` 2.1.1 into the bundle. |
+| `@sveltejs/kit` | 2.65.1 | dev | **yes** (client runtime in `build/`) | Router; `ssr = false`, `prerender = true` | Moderate advisories are server-side and not reachable in a static SPA. Its runtime dependency `devalue` 5.8.1 carries a high advisory; not found in today's `build/` (PR-8vh53d). |
+| `@sveltejs/adapter-static` | 3.0.10 | dev | no (build) | Emits the static SPA to `build/` | — |
+| `vite` | 8.0.16 | dev | no (build) | Bundler and dev server on port 5173 | — |
+| `@testing-library/svelte` | 5.4.2 | dev | no (test) | Renders a component into the DOM and queries it by role, label and text (`render`, `screen`, `fireEvent`, `within`); its `svelteTesting()` Vite plugin, in `vitest.config.ts`, resolves Svelte's browser build under Vitest and unmounts each rendered component after its test. Used by `tests/page.ts` and the rendered tests in `tests/notices.admission.test.ts`, `tests/notices.discarded.test.ts`, `tests/invite.confirm.test.ts`, `tests/founding.propose.test.ts` and `tests/verification.view.test.ts` | Known anomalies: none in `npm audit` (2026-10-27). Pulls `@testing-library/svelte-core` 1.1.3 and `@testing-library/dom` 10.4.2. `fireEvent` dispatches a click on a disabled button too, where a user's click does nothing; the rendered tests press a gated button while its gate refuses, so they check the handler's own gate and not only the button's disabled state. |
+| `jsdom` | 30.1.3 | dev | no (test) | The simulated DOM the rendered tests run in: a test file that renders declares `// @vitest-environment jsdom`; every other test file runs in Vitest's default `node` environment, as before (`vitest.config.ts`) | Known anomalies: none in `npm audit` (2026-10-27). It implements no layout, no CSP and no Tauri webview behaviour, so a rendered test is evidence of what the components show and send, not of what WKWebView, WebView2 or WebKitGTK renders (*Platform webview*). Needs Node `^22.22.2 \|\| ^24.15.0 \|\| >=26.0.0`. |
+
+The remaining dev packages (`vitest`, `typescript`, `svelte-check`,
+`@tauri-apps/cli` and their dependencies) are build and test tools and are not
+in the bundle.
+
+*Added 2026-10-27 (change `worktree-org-io-domain-api`, TEST review round 1
+T-A3; owner ruling of 2026-10-27).* `@testing-library/svelte` and `jsdom`
+are new direct dev dependencies, so the webview's feature tests render the
+page and drive it by role, label and visible text instead of matching the
+components' source (`apps/desktop/docs/risk/2026-09-14-app-hazards.md` §8,
+not-minted control 1). Neither is in `build/`. `npm audit --prefix apps/desktop`
+reports 6 today (3 low, 2 moderate, 1 high: `@sveltejs/kit` with
+`@sveltejs/adapter-static` and `cookie`, `vitest` with `@vitest/mocker`, and
+`vite`); none is in a package these two added. The 2026-10-05 figures in
+*Evidence and provenance* are that day's measurement and are not re-stated.
+
+## Platform webview
+
+Added by review round 1 (finding-8). The webview is not in either lock: Tauri
+(through `wry`) uses the one the operating system supplies.
+
+| Name | Supplied by | Version | Role | Requirements it supports | Risk considerations / known anomalies |
+|---|---|---|---|---|---|
+| Platform webview: WKWebView (macOS), WebView2 (Windows), WebKitGTK (Linux) | The operating system | Not pinned; whatever the host has installed | Renders the frontend and **enforces the Content-Security-Policy** Tauri injects | REQ-cj5jmx (RC-mq2365) | RC-mq2365 holds only as far as this webview enforces CSP. Its CSP Level 3 support differs by engine and version, and no gated test runs one. The policy is kept to directives every engine has long supported (LLR-uus6ar). Whether the bundled app loads under the policy is the owner's smoke test. |
+
+## Inherited SOUP
+
+These app direct crates are also in org-node's inventory at the same versions:
+`iroh` 0.98.2, `postcard` 1.1.3, `serde` 1.0.229, `tokio` 1.53.1,
+`async-trait` 0.1.92, `hex` 0.4.3, `subxt` 0.50.3 and `subxt-signer` 0.50.3
+*(since 2026-10-08 `async-trait`, `subxt` and `subxt-signer` are
+no longer direct crates of the app; they reach it through org-io)*.
+*(2026-10-25, change `worktree-org-io-domain-api`, task T61: `rand` 0.8.8,
+listed here until then, is no longer a crate of the app at all since T46
+removed `rand = "0.8"` from `apps/desktop/src-tauri/Cargo.toml`; it stays in the app
+lock only through other crates, and the app's random source is org-io's
+`rand_core` 0.6.4 `OsRng` over `getrandom` 0.2.17, recorded in
+`crates/org-io/docs/architecture/soup.md`.)* The crates the app reaches only through org-node
+(`ed25519-dalek` 2.2.0 and 3.0.0-pre.6, `chacha20poly1305` 0.10.1, `argon2`
+0.5.3, `thiserror` 2.0.20, `rand_core` 0.6.4) are also at org-node's versions.
+*(Amended 2026-10-06, change `worktree-org-node-chain-authority`: `base64` is
+now a direct dependency of the app (row above), and `parity-scale-codec`
+3.7.5 and `blake2` 0.10.6 are reached through on-chain-client's `write`
+feature, not org-node; org-node no longer depends on any of the three.)*
+*(2026-10-14, S4 task T15: `iroh`, `postcard` and `base64` are no longer
+direct crates of the app; they reach it through org-io and org-node.)*
+Their roles and anomalies are in `crates/org-node/docs/architecture/soup.md` and are not
+repeated here. The rows above record only what differs in the app's use.
+
+**Version skew with on-chain-client.** `on-chain-client` has its own lock,
+and its inventory records `subxt` and `subxt-signer` **0.50.1**. When the app
+builds on-chain-client it uses the app lock, so the app ships `subxt` **0.50.3**.
+The same holds for on-chain-client's `tokio` 1.52.3, `serde` 1.0.228 and
+`async-trait` 0.1.89. on-chain-client's inventory therefore does not describe
+the versions the app ships.
+
+**Org-io through the app lock.** *Added 2026-10-08 (change
+`worktree-org-io-create`, task T9).* `apps/desktop/src-tauri` is its own workspace
+with its own lock, so when the app builds org-io, org-io's dependencies
+resolve through the app lock, not the root lock org-io's inventory was
+measured against. Today they agree for the crates org-io's inventory names
+(`subxt` and `subxt-signer` 0.50.3, `zeroize` 1.9.0, `tokio` 1.53.1,
+`async-trait` 0.1.92, `jsonrpsee` 0.24.11 under subxt); a later lock update
+in either workspace can make them drift, as on-chain-client's did.
+
+## Tauri configuration
+
+- **No plugins.** There is no `tauri-plugin-*` crate in the manifest or the
+  lock, and no plugin is registered in `lib.rs`. There is no filesystem, shell,
+  http or dialog access from JavaScript.
+- **`core:default` only.** `capabilities/default.json` grants the `main`
+  window `core:default`, which expands to the default sets of `path`, `event`,
+  `window`, `webview`, `app`, `image`, `resources`, `menu` and `tray`.
+- **The 12 app commands are ungated by any ACL.** `generate_handler!` exposes
+  `create_persona`, `create_organisation`, `export_invite`, `import_invite`,
+  `produce_invite_reply`, `import_invite_reply` (these two replaced the Join
+  request commands, 2026-10-06), `admit_member`,
+  `revoke_member`, `list_personas`, `list_orgs`, `connection_status` and
+  `start_receiver`. `build.rs` calls `tauri_build::build()` with no app
+  manifest, so no capability permission gates them. Any script running in the
+  webview can call all twelve.
+- **A Content-Security-Policy is set.** `app.security.csp` in
+  `tauri.conf.json` is the shipped policy (REQ-cj5jmx, implementing RC-mq2365),
+  and `app.security.devCsp` is the development policy. Tauri injects the policy
+  and appends script hashes at build time; the platform webview enforces it
+  (see *Platform webview*). `apps/desktop/src-tauri/tests/csp_policy.rs` checks both
+  configured values.
+
+## What a reader should check when a dependency changes
+
+1. `subxt` and `subxt-signer` move with org-node's and on-chain-client's pins,
+   and the app lock must be re-checked against both.
+2. A `tauri` bump re-opens the IPC exposure above: check whether the defaults
+   still grant the custom commands without an ACL.
+3. An npm update can change the bundle even when only dev packages move.
+   Re-run `npm audit` **without** `--omit=dev`.

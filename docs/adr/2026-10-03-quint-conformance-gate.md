@@ -11,7 +11,7 @@
 The Quint models sat in a top-level `quint/` directory, disclaimed in
 `.guardrails/units.yaml` as `not_a_unit`. `org-members` already replayed
 simulator traces of `quint/membership_mbt.qnt` against the real `OrgTrie`
-through `quint-connect` 0.1.2 (`org-members/tests/mbt_conformance.rs`), but
+through `quint-connect` 0.1.2 (`crates/org-members/tests/mbt_conformance.rs`), but
 the models themselves were outside every unit: a change to a model ran no
 unit's gate and entered no unit's traceability, and the round-trip law and
 model invariants ran only in CI, never at the merge gate.
@@ -22,12 +22,12 @@ the abstract-root remodel, used exactly one symbol from it: the `Key` record.
 ## Decision
 
 1. **Placement.** `membership.qnt` and `membership_mbt.qnt` move to
-   `org-members/quint/`; `protocol.qnt` and `ods_instances.qnt` move to
-   `org-node/quint/`. `quint` leaves `not_a_unit`; the models fall under the
+   `crates/org-members/quint/`; `protocol.qnt` and `ods_instances.qnt` move to
+   `crates/org-node/quint/`. `quint` leaves `not_a_unit`; the models fall under the
    compliance scope of the unit that implements them.
 2. **Exported Quint interface.** The membership types at the boundary (`Key`,
    `Leaf`, `Snapshot`, `Delta`, `Result`) are split into
-   `org-members/quint/membership_types.qnt`. `membership.qnt` imports it;
+   `crates/org-members/quint/membership_types.qnt`. `membership.qnt` imports it;
    org-node's `protocol.qnt` imports only it. The cross-unit import follows
    the declared `org-node -> org-members` edge. This is a design-level
    interface, not an `exported: yes` requirement.
@@ -50,13 +50,13 @@ the abstract-root remodel, used exactly one symbol from it: the `Key` record.
    candidate has a model action; what the model deliberately omits is listed
    as a declared abstraction boundary. (Amended 2026-10-03, after independent
    review round 2: "spec" replaced by "membership model", the
-   `org-members/docs/CONTEXT.md` term, here and in decision 11; in decision 13,
+   `crates/org-members/docs/CONTEXT.md` term, here and in decision 11; in decision 13,
    where it named `protocol.qnt` and the planned node-level model, by "system
    model" and "model".) (Amended 2026-10-03, after independent review round
    3: (d) is not how the gate is built. Both the named scenarios and the
    random run call `quint_connect::runner::run_test` directly
    (`run_scenario` and `run_conformance` in
-   `org-members/tests/mbt_conformance.rs`), not the `#[quint_test]` and
+   `crates/org-members/tests/mbt_conformance.rs`), not the `#[quint_test]` and
    `#[quint_run]` macros. Decision 8(ii) gives the reason for the random run:
    the macro consumes the driver and offers no end-of-run hook.)
 5. **No new requirements for the gate itself.** These are
@@ -69,7 +69,7 @@ the abstract-root remodel, used exactly one symbol from it: the `Key` record.
    them, keeping the set of failures small — so the fix removes a rejection.
 6. **MSRV 1.85.** quint-connect is edition 2024, so the test build needs Rust
    >= 1.85. `rust-version = "1.85"` in `[workspace.package]`, `org-members`,
-   `org-node` and `app/src-tauri` (matching `on-chain-client`); editions stay
+   `org-node` and `apps/desktop/src-tauri` (matching `on-chain-client`); editions stay
    2021. A CI job runs `cargo +1.85 test -p org-members` so the declared MSRV
    is measured — before this, every job used floating `stable` and the
    declared 1.81 was already false for the test build.
@@ -120,7 +120,7 @@ the abstract-root remodel, used exactly one symbol from it: the `Key` record.
    test in the same gate already depends on the evaluator, so this adds no
    failure mode.) (Amended 2026-10-03, after independent review round 2: only
    `quint test` takes `--backend=typescript`; the `quint typecheck` commands
-   pass no backend flag (`org-members/.guardrails/config.yaml`).)
+   pass no backend flag (`crates/org-members/.guardrails/config.yaml`).)
 10. **The `ApplyDelta` model action.** A `prev` variable holds the previous
     trie; `ApplyDelta` nondeterministically picks an honest delta
     (`calculateDelta(trie, s')`, `s'` one **or two** mutations away — two, so
@@ -140,7 +140,7 @@ the abstract-root remodel, used exactly one symbol from it: the `Key` record.
     `DeviceSlotsFull` is wrong. The model's `applyDelta` keeps a device-cap
     branch, but no delta the driver builds can reach it — the crate's member
     records cannot hold more than `MAX_DEVICES` keys by type, as the model's
-    own `applyDelta` doc comment in `org-members/quint/membership.qnt` records.
+    own `applyDelta` doc comment in `crates/org-members/quint/membership.qnt` records.
     The malformed deltas reach the model tags `StaleRemoval`,
     `RemoveUpsertOverlap`, `NoOpUpsert` and `ConfusableHandle` only;
     `DeviceSlotsFull` is reached through `AddDevice`.)
@@ -156,7 +156,7 @@ the abstract-root remodel, used exactly one symbol from it: the `Key` record.
     over-cap device lists itself; crate `genesis` leaves that to
     `MemberLeaf::new`. (Amended 2026-10-03, after independent review round 2:
     the model state is not `org: Option[Snapshot]`. It is `orgExists: bool`
-    plus `trie: Snapshot` (`org-members/quint/membership_mbt.qnt`); a failed
+    plus `trie: Snapshot` (`crates/org-members/quint/membership_mbt.qnt`); a failed
     genesis sets `orgExists` false and `trie` to the empty map, and the
     distinction from an empty organisation is carried by `orgExists`.)
 12. **Named scenarios (`#[quint_test]`).** A floor fixed by rule: one
@@ -178,7 +178,7 @@ the abstract-root remodel, used exactly one symbol from it: the `Key` record.
     (Amended 2026-10-03, after independent review round 3: the named
     scenarios are not `#[quint_test]` functions. Each scenario test calls
     `quint_connect::runner::run_test` with a `TestConfig` naming its `run`
-    (`run_scenario` in `org-members/tests/mbt_conformance.rs`), as the random
+    (`run_scenario` in `crates/org-members/tests/mbt_conformance.rs`), as the random
     run does with a `RunConfig`; see decision 4's round-3 note and decision
     8(ii) for the macro's limitation.)
 13. **org-node: Quint checks now, conformance later; two parts.**
@@ -190,22 +190,22 @@ the abstract-root remodel, used exactly one symbol from it: the `Key` record.
     false pass. So org-node gets its Quint checks (typecheck plus the
     simulator invariants with explicit `max_steps`) unconditionally, but **no
     conformance test**. A node-level model for the implemented slice
-    (`org-node/quint/node_mbt.qnt`, chain and network as environment actions),
+    (`crates/org-node/quint/node_mbt.qnt`, chain and network as environment actions),
     driven by quint-connect under decisions 4, 8 and 9, is a separate
     follow-up change with its own interview. **Known gap until then: a Rust
     change to org-node is not checked for conformance.**
     Delivery is in two parts, each its own merged change: **part 1** is
     org-members only; **part 2** — every org-node change, including moving
-    `protocol.qnt` and `ods_instances.qnt` into `org-node/quint/` and adding
+    `protocol.qnt` and `ods_instances.qnt` into `crates/org-node/quint/` and adding
     them to org-node's `verify_commands` — starts after part 1 is merged.
     Two boundary items belong to part 1 because part 1 cannot merge true
     without them: `quint/protocol.qnt`'s import is repointed to
     `../org-members/quint/membership_types` (forced by the move; it edits the
     disclaimed `quint/`, not `org-node/`), and the `rust-version` bumps in
-    `org-node/Cargo.toml` and `app/src-tauri/Cargo.toml` land with
+    `crates/org-node/Cargo.toml` and `apps/desktop/src-tauri/Cargo.toml` land with
     org-members' — so every declared MSRV on `master` is true at every commit.
     (Note 2026-10-03, part 2 delivered: `protocol.qnt` and `ods_instances.qnt`
-    are in `org-node/quint/`, the import is
+    are in `crates/org-node/quint/`, the import is
     `../../org-members/quint/membership_types`, `quint` has left
     `not_a_unit`, and org-node's `verify_commands` run both typechecks and the
     five simulator invariants at `--max-steps=16`. Measured with quint 0.33.0
