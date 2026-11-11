@@ -1126,10 +1126,9 @@ none of it.
 
 **SDD-ueh4tm**: the boundary between the five user stories and the chain,
 expressed as a value rather than a trait or a client: the `Option<OrgState>`
-that `verify` takes, read by its caller. It exists so the stories can be
-exercised in full without a chain, and it is the mechanism that makes
-SDD-rx2yvy, SDD-busuj3, SDD-kegag2 and SDD-z4m57w verifiable items instead of parts of the
-I/O shell.
+that `verify` takes, read by its caller. Chain state reaches org-node only as
+this value, so every org-node item is exercised in full without a chain; the
+chain reads, and the tests that need a chain, are org-io's.
 traces: REQ-dwb9bq, REQ-ncv4sc
 
 *Text reconciled 2026-10-30 (change `worktree-org-io-domain-api`, merge

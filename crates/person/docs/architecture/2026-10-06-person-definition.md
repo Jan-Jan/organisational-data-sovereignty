@@ -53,9 +53,10 @@ only path to a `Person`, deserialisation included.
 traces: REQ-ht3x78, REQ-7qgx2q, REQ-7ymek3, REQ-4szc22, REQ-tq4ms4
 
 **LLR-4ku56h**: `Person` holds its device keys as a `DeviceSlots`, so a
-`Person` holds at most `MAX_DEVICES` (4) `DevicePublicKey`s, sorted, with no key
-twice: building the slots from more keys is refused with `DeviceSlotsFull` and
-from a key given twice with `DuplicateDevice` (LLR-xsx6gg), before any `Person`
+`Person` holds at most `MAX_DEVICES` `DevicePublicKey`s, the bound LLR-xsx6gg
+states, sorted, with no key twice: building the slots from more keys is refused
+with `DeviceSlotsFull` and from a key given twice with `DuplicateDevice`
+(LLR-xsx6gg), before any `Person`
 exists, and decoding a `Person` decodes its slots through LLR-sjrh7z.
 satisfies: REQ-4szc22, REQ-tq4ms4
 

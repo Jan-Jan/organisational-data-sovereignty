@@ -94,6 +94,23 @@ verified chain decides. The report of every discarded provisional change is
 org-node's control on a left-out revocation.
 assesses: REQ-7jh4rh, REQ-kh2uth
 
+The owner accepted two residuals for this discard on 2026-10-13. Under
+REQ-7jh4rh, which discards only what the chain has passed by:
+
+- A Persona whose Provisional founding's write failed keeps it, with its
+  Organisation private key, in the encrypted store: the chain holds nothing
+  for that Organisation to pass it by, and only adoption takes a
+  Provisional founding. Accepted only until the user can delete a Persona
+  that is not yet on chain (roadmap row "S4b"), which removes it; that
+  deletion does not exist yet, so the residual and its time limit stand.
+- The second residual, an on-chain slot holding a root and key no node
+  holds, left by a timed-out founding that executed after a later one
+  succeeded, no longer arises: a retried founding founds at its stored
+  proxy (LLR-5tpdxw), and a second founding write is refused while one's
+  outcome is unknown. What remains is a proxy creation that went
+  unanswered, a proxy holding its deposit only (LLR-sq5pbq): availability
+  and cost only, no disclosure or retention.
+
 ### The founding's proxy address
 
 No hazard impact: it is a public chain address, stored so that a founding

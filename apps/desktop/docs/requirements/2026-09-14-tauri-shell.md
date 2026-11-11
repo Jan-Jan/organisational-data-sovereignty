@@ -39,17 +39,11 @@ is `expects:`.
 
 **REQ-645jq9**: The software shall report, in the connection status returned to
 the frontend, which transport mode the running service was configured with.
-implements: RC-8ygnjd
 satisfies: derived
 
-The frontend cannot decide whether a peer address is required without knowing
-the transport mode, and today it cannot ask: `ConnectionStatus` carries
-`chain_configured`, `chain_ws`, `contract_h160` and `data_dir`, and nothing
-about transport. `AppState::init` already computes the mode from
-`ODS_TRANSPORT` and hands it to the service; this requirement is that the value
-be reported rather than discarded. It was the prerequisite for the frontend's
-peer-address precondition (retired 2026-10-20 with the pasted address), and
-it is written separately because it is the backend's obligation.
+`AppState::init` computes the mode from `ODS_TRANSPORT` and hands it to the
+service; this requirement is that the value be reported to the operator
+rather than discarded.
 
 *Checked 2026-10-14 (change `worktree-org-io-transport`, S4 task T15); text
 unchanged.* "The running
@@ -138,12 +132,10 @@ either alone leaves the other.
 identifier is not exactly 64 hexadecimal characters, ignoring surrounding
 whitespace and an optional single `0x` prefix, and shall do so before any
 command is invoked.
-implements: RC-jrkn7w
 satisfies: derived
 
-The abnormal-input half of the same control, and not merely defensive: with
-no peer address asked for (the peer-address precondition was retired on
-2026-10-20), the member identifier is the only field the frontend validates at all. `revoke_member` in Rust
+Not merely defensive: with no peer address asked for (retired on
+2026-10-20), the member identifier is the only field the frontend validates at all. `propose_revocation` in Rust (`parse_member_id`)
 does check the width, so this is a second line rather than the only one — but
 the frontend's check is what produces a message the operator can act on instead
 of an error string surfaced from a hex decoder.
@@ -417,7 +409,6 @@ membership record with it. See HAZ-ny7yvt.
 **REQ-sjkp8z**: The software shall reject an organisation identifier that is not
 exactly 40 hexadecimal characters, optionally preceded by a single `0x` prefix,
 before it is used to address any command.
-implements: RC-8ygnjd
 satisfies: derived
 
 The app's boundary check for every organisation-addressed command.
@@ -427,10 +418,6 @@ implementation detail, and it is the item under which the abnormal-input cases
 class C requires for a boundary parser are gated — the empty string, 39 and 41
 characters, non-hexadecimal characters at each position, an odd-length string,
 and the `0x` prefix that the code strips and the requirement therefore permits.
-
-It implements RC-8ygnjd rather than standing alone because the control is about
-what the backend is willing to act on, and the transport-mode report and the
-identifier check are the two halves of that boundary.
 
 ## What this unit needs from org-node and does not have
 

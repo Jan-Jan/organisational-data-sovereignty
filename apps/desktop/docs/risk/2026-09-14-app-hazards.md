@@ -96,8 +96,8 @@ software got wrong.
 
 **An unreachable action is an absent action.** A safety function that exists in
 the backend and cannot be invoked from the only user interface is not
-implemented. HAZ-n97v5g is that case, and it is graded as though the function
-were missing, because from the operator's side it is.
+implemented, and a hazard of that kind is graded as though the function were
+missing, because from the operator's side it is.
 
 **How the hazards were found.** By reading all 781 lines of Rust and all 1,384
 lines of frontend against four questions — what does this start with, what does
@@ -376,96 +376,6 @@ not have to infer which is which:
 
 ## 4. Hazards
 
-### 4.1 Revocation cannot be submitted through the only user interface
-
-**HAZ-n97v5g**: A user interface precondition that the protocol cannot satisfy,
-where an administrator in the default Networked transport attempts to revoke a
-member and the revoke form refuses to submit because it demands a peer address
-that a Networked join request never carries, so the revocation is never
-submitted and the member retains access to documents identifying sources and
-protected individuals. Severity: S3. Probability: P3.
-
-The sharpest item in this register, and the app's counterpart to the spoofing
-defect `on-chain-client` fixed on 2026-09-11 — not because the mechanism is
-similar but because in both cases a doc-comment described a safety behaviour
-the code did not perform.
-
-`revoke_member` in `commands.rs` documents `peer_addr_blob` as optional, in as
-many words: "leave it empty in Networked mode, where the revoked member is
-reached by EndpointId (derived from its device key in the trie) via iroh
-discovery. It is only needed for same-machine Loopback dialing." The handler
-implements exactly that, mapping an empty string to `None`.
-
-`Revoke.svelte` then refuses to call it:
-
-    if (!peerAddrBlob.trim()) { revokeErr = 'Peer addr blob (hex) is required.'; return; }
-
-And the value it demands cannot be obtained. In Networked transport
-`admit_member`'s own comment records that the blob carries no address —
-"in `Networked` transport the joiner is reached by its `EndpointId` … so the
-blob carries no embedded address" — so `JoinRequestDto.node_addr_blob` is the
-hex encoding of nothing, the empty string. The Admit panel even displays this
-to the operator as "No (no p2p addr)", in amber, and calls it a warning.
-
-So the operator is asked for a value the system has just told them does not
-exist, by a form that will not proceed without it. There is no path through the
-user interface to a Networked revocation.
-
-**Probability P3, and why it is not lower.** This is not a failure mode that
-sometimes occurs. `TransportMode::Networked` is the default — `AppState::init`
-selects it for anything other than the literal `ODS_TRANSPORT=loopback`, and
-its own comment calls it "the right choice for two laptops over the internet on
-live Paseo", which is the deployment. Every revocation attempted in the shipped
-configuration meets this. The only escapes are running the demo transport, or
-an operator typing arbitrary hex into the field to get past the check — which
-would produce a `postcard` decode error one layer down, so it does not escape
-either.
-
-**Severity S3.** Revocation is the safety action of this system. Its absence is
-the exact failure the 2026-09-01 ADR describes: a member whose access should
-have ended and has not.
-
-**RC-8ygnjd**: Report the transport mode the running service was configured
-with in the connection status handed to the frontend, so that a decision
-depending on the transport mode can be made from the reported mode rather than
-guessed.
-mitigates: HAZ-n97v5g
-
-*Checked 2026-10-14 (S4, task T15); text unchanged:* the running service's
-transport is org-io's since S4; the app hands it the mode it reports
-(REQ-645jq9's note).
-
-**RC-jrkn7w**: Derive the revoke form's peer-address precondition from the
-reported transport mode, requiring an address only in Loopback, and validate
-the member identifier the operator does supply.
-mitigates: HAZ-n97v5g
-
-Realised by REQ-645jq9 (the backend reports the mode), REQ-he8ejb (the
-identifier is checked), REQ-sjkp8z (the organisation identifier is checked at
-the backend boundary). The requirement that made the peer-address
-precondition follow the mode was retired on 2026-10-20: no peer address is
-taken anywhere in the app since addresses come with the Invite and the
-requests (owner answer A2, change `worktree-org-io-domain-api`).
-
-**Why two controls and not one.** The obvious fix — delete the check — is
-wrong, because the address genuinely *is* required in Loopback, where discovery
-does not apply and there is nothing to dial without it. Deleting the check
-would move the failure from "cannot revoke in Networked" to "revocation
-silently fails to dial in Loopback", trading a visible block for an invisible
-one, which is the worse of the two. The precondition has to become conditional,
-and to be conditional it needs a fact the frontend did not have. RC-8ygnjd
-supplies the fact; RC-jrkn7w uses it.
-
-**Residual risk: S3 / P1. UNACCEPTABLE.** Probability falls from P3 to P1
-because the blocked path is opened and the Loopback case keeps its check.
-Severity does not move: severity is a property of the harm, not of the control.
-The residual is unacceptable under this project's matrix, as every S3 item is.
-
-What keeps it above zero rather than at zero: the frontend precondition is
-tested as a function, and nothing tests that `Revoke.svelte` calls it
-(not-minted control 1). A future edit could reintroduce the unconditional check
-in the component and no gate would object.
-
 ### 4.2 The verification display cannot report a failure
 
 **HAZ-9fmhm4**: A verification indicator structurally incapable of showing a
@@ -527,7 +437,7 @@ mitigates: HAZ-9fmhm4
 RC-3rddh7 was **not** in the original analysis. It was added on 2026-09-14 after
 the independent review found that RC-6ajdv4 and RC-h7mnfj, as first implemented,
 had created a second instance of this same hazard pointing the other way — see
-§5, which now carries five entries rather than four. Recording it as a control
+§5, which carries an entry for it. Recording it as a control
 on HAZ-9fmhm4 rather than as a new hazard is deliberate: the hazard is *the
 verification display misrepresenting the verification state*, and "cannot show a
 failure" and "shows failures that are not verification verdicts" are two ways for
@@ -985,7 +895,7 @@ reads S3/P1.
 
 ## 5. Hazards introduced by these controls
 
-ISO 14971 requires asking what each control breaks. **Five answers, all real** — and the last to be found was not found by asking. The independent reviewer found it in the implementation, after this section had been written claiming four; it stands fourth below, beside the other display entries.
+ISO 14971 requires asking what each control breaks. **Four answers, all real** — and one was not found by asking: the independent reviewer found it in the implementation, after this section had first been written; it stands fourth below, beside the other display entries.
 
 **Refusing to start is a denial of the safety action.** RC-xt4qr3 and RC-djzms3
 convert two silent degradations into startup failures. An application that will
@@ -1027,7 +937,7 @@ sixteen ways; its *use by `start_receiver`* is gated not at all, because nothing
 in this repository can run the receiver loop.
 
 **Making the failure visible made non-failures look like failures.** Added
-2026-09-14, standing fourth of the five because it belongs beside the other
+2026-09-14, standing fourth because it belongs beside the other
 display entries, and the most instructive one in this document because the
 control and the defect are the same edit.
 
@@ -1059,29 +969,6 @@ is a compile error rather than a silent misfiling.
 control removes a defect this change introduced; it does not reduce the hazard
 below where §4.2 already placed it, and recording an improvement here would be
 recording one that was not measured.
-
-**Relaxing the revoke precondition weakens the Loopback path.** RC-jrkn7w makes
-the peer address optional, and in Loopback it is genuinely required. This is why
-the requirement is conditional on the transport mode rather than a deletion, and
-why RC-8ygnjd exists to supply the mode. If RC-8ygnjd's report is wrong — if the
-status says Networked when the service is in Loopback — the form accepts an
-empty address and the revocation fails to dial, silently.
-
-**That single point is gated on the backend only.** Six tests carry
-`verifies: REQ-645jq9` and all six are Rust — four in `connection_status.rs`
-proving the projection reports the configured mode, two in `ipc.rs` proving it
-crosses the boundary under that field name. **No frontend test verifies
-REQ-645jq9.** What `StatusBar.svelte` and `Revoke.svelte` do with the value they
-receive — the half where a mis-read mode actually produces the silent dial
-failure — is gated by nothing, for the same reason everything else about the
-components is: no test renders one (not-minted control 1).
-
-This paragraph originally claimed the point was gated "on both sides of the IPC
-boundary". It is gated on one, and since this is the argument for accepting a
-hazard that RC-jrkn7w *introduces*, the difference is the difference between an
-accepted risk and an assumed one. The acceptance stands — the backend half is
-where the value is decided, and a wrong value there would fail — but it is
-recorded now as resting on an ungated consumer.
 
 ---
 
@@ -1158,7 +1045,6 @@ remedy.
 
 | Hazard | Before | After | Acceptable? |
 |---|---|---|---|
-| HAZ-n97v5g — revocation unreachable in the default transport | S3 / P3 | S3 / P1 | **No** |
 | HAZ-9fmhm4 — verification display cannot report a failure | S3 / P3 | S3 / P2 | **No** |
 | HAZ-5ha5vv — placeholder values emitted as measured ones | S3 / P2 | S3 / P1 | **No** |
 | HAZ-8ghmhn — key material under a published passphrase | S3 / P3 | S3 / P1 | **No** |
@@ -1177,8 +1063,8 @@ conclusion is a statement that the product is not fit for its intended use
 today, which is true, and the register's job is to say what stands between it
 and fitness rather than to arrive at a comfortable verdict.
 
-Two of the six do not improve in probability at all — HAZ-ny7yvt and
-HAZ-cfp4jb — and both for the same reason: their largest remaining contributor
+Two of the five did not improve in probability at all when this register was
+written — HAZ-ny7yvt and HAZ-cfp4jb — and both for the same reason: their largest remaining contributor
 is state held by `org-node` and not reachable from here. Those two are what
 REQ-x3c8n2 is for, and its deadline of 2026-12-13 is the date by which that
 half has to move.
@@ -1190,8 +1076,8 @@ stop is shown to work. HAZ-ny7yvt's estimate is unchanged.
 **What this change did accomplish, stated separately from the verdict**, since
 an UNACCEPTABLE conclusion can otherwise read as though nothing improved:
 
-- A safety action that could not be invoked at all can now be invoked
-  (HAZ-n97v5g).
+- A safety action that could not be invoked at all can now be invoked: the
+  revoke form no longer demands a peer address.
 - A verification indicator that could not report a failure now can
   (HAZ-9fmhm4).
 - Two sites that fabricated membership data no longer do (HAZ-5ha5vv).
@@ -1216,7 +1102,7 @@ noted.
    Nothing asserts that any component calls the functions this change extracted
    and gated. Needs `@testing-library/svelte` or `vitest-browser-svelte`, a DOM
    environment, and a decision about how much of SvelteKit to stand up.
-   Referenced by the residual of HAZ-n97v5g, HAZ-5ha5vv and §5.
+   Referenced by the residual of HAZ-5ha5vv and §5.
 
    *Note 2026-10-27 (change `worktree-org-io-domain-api`, TEST review
    round 1 T-A3; owner ruling of 2026-10-27).* This change adds the
@@ -1237,7 +1123,7 @@ noted.
    request, and the start-up error labels. Nothing here yet renders
    `Revoke.svelte`, `StatusBar.svelte`, or the receiver half of
    `Membership.svelte` (the verification table and the record-unreadable
-   list), which the residuals of HAZ-n97v5g and HAZ-5ha5vv and §5 name.
+   list), which the residual of HAZ-5ha5vv and §5 name.
    This note mints and closes nothing. Whether the control, or any residual
    that cites it, is re-assessed is the owner's decision.
 
@@ -1289,7 +1175,8 @@ noted.
     register's requirements are all high-level. Tooth 4.
 15. **A second, independent path to revocation** — a command-line tool, or a
     recovery mode — so that a defect in the single user interface cannot remove
-    the safety action entirely, as HAZ-n97v5g showed it can.
+    the safety action entirely, as the revoke form's peer-address precondition
+    once did.
 
 ---
 
@@ -1299,8 +1186,7 @@ noted.
 `satisfies: derived` that this file does not name. All twenty-two requirements
 written by this change are derived; each is assessed below.
 
-**Realising a control named above.** REQ-645jq9, REQ-he8ejb,
-REQ-sjkp8z (RC-8ygnjd, RC-jrkn7w, HAZ-n97v5g); REQ-affyf5, REQ-a83vqr,
+**Realising a control named above.** REQ-affyf5, REQ-a83vqr,
 REQ-akt4p7, REQ-rq8g2v (RC-6ajdv4, RC-h7mnfj, HAZ-9fmhm4); REQ-2k7ys4,
 REQ-dp95pv, REQ-tw4cb5 (RC-2t9sgv, RC-9t3kpm, HAZ-5ha5vv); REQ-7g3k9a,
 REQ-bmk2z2 (RC-xt4qr3, HAZ-8ghmhn); REQ-rxc8sp, REQ-e4ah9h, REQ-bvx4nh
@@ -1318,7 +1204,9 @@ REQ-bvx4nh), stop values being fabricated (REQ-dp95pv, REQ-tw4cb5), tighten
 input checks (REQ-he8ejb, REQ-sjkp8z), make an existing outcome visible
 (REQ-affyf5, REQ-a83vqr, REQ-akt4p7, REQ-jfxah3), preserve a property that
 already held (REQ-6hgm8r), fix a leak (REQ-rq8g2v), or constrain a message's
-content (REQ-bmk2z2).
+content (REQ-bmk2z2). REQ-645jq9, REQ-he8ejb and REQ-sjkp8z realised controls
+on a hazard that the 2026-10-20 removal of the peer address removed by design;
+they stand as a reported fact and two boundary checks, assessed with the rest.
 
 assesses: REQ-7g3k9a, REQ-rxc8sp, REQ-2k7ys4, REQ-3hfggn, REQ-645jq9, REQ-e4ah9h, REQ-bvx4nh, REQ-dp95pv, REQ-tw4cb5, REQ-he8ejb, REQ-sjkp8z, REQ-affyf5, REQ-a83vqr, REQ-akt4p7, REQ-jfxah3, REQ-6hgm8r, REQ-rq8g2v, REQ-bmk2z2
 
