@@ -35,6 +35,10 @@ smoldot = ["client", "subxt/light-client"]
 # `default`: a build without it compiles no code that can sign or submit
 # (LLR-rxs5ec).
 write = ["client", "dep:subxt-signer", "dep:blake2"]
+# Test-only: the targets that spawn a chopsticks fork of Paseo. They need
+# `pnpm --dir contracts/scripts install` and network, are run by hand, and are in
+# no gate and no CI lane; without this feature a plain `cargo test` skips them.
+chopstix-tests = []
 # Exposes crate internals to the annotated integration tests in
 # crates/on-chain-client/tests, which is where this unit's gate reads its evidence
 # (test_paths in crates/on-chain-client/.guardrails/config.yaml). Not part of the
@@ -218,8 +222,48 @@ harness = false
 required-features = ["test-support", "write"]
 
 # Chopsticks: outside every gate, like this unit's other chopsticks targets.
-# Run: cargo test --manifest-path crates/on-chain-client/Cargo.toml --features write
+# Run: cargo test --manifest-path crates/on-chain-client/Cargo.toml --features write,chopstix-tests
 #      --test write_genesis_e2e -- --test-threads=1
 [[test]]
 name = "write_genesis_e2e"
-required-features = ["write"]
+required-features = ["write", "chopstix-tests"]
+
+# The other chopsticks targets: each spawns a fork (and keeps its crate-level
+# `#![cfg(feature = "dev-rpc")]`), so each needs `chopstix-tests`. Run, e.g.:
+#   cargo test --manifest-path crates/on-chain-client/Cargo.toml --features chopstix-tests
+#     --test scenario_a_full -- --test-threads=1
+
+[[test]]
+name = "00_chopsticks_sanity"
+path = "tests/00_chopsticks_sanity.rs"
+required-features = ["chopstix-tests"]
+
+[[test]]
+name = "01_multisig_sanity"
+path = "tests/01_multisig_sanity.rs"
+required-features = ["chopstix-tests"]
+
+[[test]]
+name = "off_chain_genesis_ceremony"
+path = "tests/off_chain_genesis_ceremony.rs"
+required-features = ["chopstix-tests"]
+
+[[test]]
+name = "p_address_is_orgid"
+path = "tests/p_address_is_orgid.rs"
+required-features = ["chopstix-tests"]
+
+[[test]]
+name = "reorg_cancels_proposed"
+path = "tests/reorg_cancels_proposed.rs"
+required-features = ["chopstix-tests"]
+
+[[test]]
+name = "scenario_a_full"
+path = "tests/scenario_a_full.rs"
+required-features = ["chopstix-tests"]
+
+[[test]]
+name = "two_orgs_one_watcher"
+path = "tests/two_orgs_one_watcher.rs"
+required-features = ["chopstix-tests"]

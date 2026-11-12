@@ -13,9 +13,9 @@
 //! Whether subxt delivers the head notifications the decision is made on —
 //! that a depth-1 reorg produces a head whose parent is not the previous
 //! best, and that the discarded hash reaches the consumer — is checked only
-//! by `crates/on-chain-client/tests/reorg_cancels_proposed.rs`, which is
-//! `#![cfg(feature = "dev-rpc")]` against a live chopsticks fork and runs in
-//! no CI lane and no `verify_commands` line in this repository. So the
+//! by `crates/on-chain-client/tests/reorg_cancels_proposed.rs`, which
+//! requires the `chopstix-tests` feature, against a live chopsticks fork, and
+//! runs in no CI lane and no `verify_commands` line in this repository. So the
 //! delivery half of this behaviour has no gated evidence; only the rule does.
 //!
 //! **Two things the rule cannot do**, recorded here because a reader of these
@@ -38,9 +38,8 @@
 //! verifies: REQ-gr2ver, REQ-ntn4ss, REQ-5zux82
 //!
 //! Deliberately carries no `#![cfg(...)]` guard, unlike the chain-dependent
-//! targets beside it (the eight that carry a crate-level `#![cfg(...)]` guard
-//! are exactly the eight that are chain-dependent — seven need a fork,
-//! `smoldot_smoke` live Paseo): the
+//! targets beside it (nine: the eight that need a fork, each requiring the
+//! `chopstix-tests` feature, and `smoldot_smoke`, live Paseo): the
 //! `test-support` feature this target needs is declared as a
 //! `required-features` entry in `Cargo.toml`, so an
 //! explicit `--test best_lane_reorg_rule` with the feature off is refused by

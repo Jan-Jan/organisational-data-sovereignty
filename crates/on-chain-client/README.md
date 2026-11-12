@@ -130,9 +130,11 @@ cargo build --no-default-features
 # smoldot light-client transport (native host — PWA / live smoke):
 cargo build --no-default-features --features smoldot
 
-# Full integration suite (auto-spawns chopsticks; run sequentially because
-# the tests share fixed port 8000 — pkill clears any stale chopsticks first):
-pkill -f "chopsticks.*--config" 2>/dev/null; cargo test --features dev-rpc -- --test-threads=1
+# Full integration suite (auto-spawns chopsticks, so needs
+# `pnpm --dir contracts/scripts install` and network; the fork targets require
+# the `chopstix-tests` feature; run sequentially because the tests share fixed
+# port 8000 — pkill clears any stale chopsticks first):
+pkill -f "chopsticks.*--config" 2>/dev/null; cargo test --features dev-rpc,write,chopstix-tests -- --test-threads=1
 
 # Live-Paseo light-client smoke test (#[ignore]d; needs public internet,
 # verifies the live AH runtime matches the pinned decoder + a finalized
@@ -143,13 +145,13 @@ cargo test --no-default-features --features smoldot --test smoldot_smoke \
 
 ## CI matrix
 
-The jobs run, exactly:
+The jobs run, exactly (the chopsticks line is run by hand, in no job):
 
 ```bash
 cargo build --no-default-features
 cargo build --no-default-features --features smoldot
 cargo clippy --all-features --lib -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::panic
-cargo test --features dev-rpc -- --test-threads=1
+cargo test --features dev-rpc,write,chopstix-tests -- --test-threads=1   # by hand only: chopsticks fork, no CI lane
 cargo test --no-default-features --features smoldot --test smoldot_smoke -- --ignored   # smoke job, allowed-flaky / needs internet
 ```
 

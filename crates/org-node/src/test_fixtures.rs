@@ -102,8 +102,9 @@ pub fn seal_person_plaintext_for_test<R: rand_core::RngCore + rand_core::CryptoR
 
 /// An unbound, proposed Persona record named `persona_id`, handle `alice`,
 /// whose Member seed is 32 bytes of `member` and whose Device is that of
-/// device seed 32 bytes of `device`.
-#[cfg(feature = "app")]
+/// device seed 32 bytes of `device`. Under `test-support` only: it builds
+/// through `PersonaRecordParts`, which exists only there.
+#[cfg(all(feature = "app", feature = "test-support"))]
 pub fn persona_record(persona_id: &str, member: u8, device: u8) -> crate::store::PersonaRecord {
     crate::store::PersonaRecord::from(crate::store::PersonaRecordParts {
         persona_id: crate::types::PersonaId::new(persona_id.to_string()),

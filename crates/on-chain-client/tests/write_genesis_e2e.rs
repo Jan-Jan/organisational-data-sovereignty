@@ -3,7 +3,7 @@
 //! Chopsticks, outside every gate: the chain writer against a Paseo-AH fork.
 //! Ported from the write half of org-node's `single_admin_genesis_e2e`.
 //! Run: pkill -f "chopsticks.*--config"; CARGO_HOME=/tmp/cargo_home_fuzz \
-//!   cargo test --manifest-path crates/on-chain-client/Cargo.toml --features write \
+//!   cargo test --manifest-path crates/on-chain-client/Cargo.toml --features write,chopstix-tests \
 //!   --test write_genesis_e2e -- --test-threads=1 --nocapture
 
 mod common;

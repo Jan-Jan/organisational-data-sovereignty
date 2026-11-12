@@ -112,7 +112,7 @@ required-features = ["test-support"]
 [[test]]
 name = "store_at_rest"
 path = "tests/store_at_rest.rs"
-required-features = ["app"]
+required-features = ["app", "test-support"]
 
 [[test]]
 name = "admission_sender"
@@ -121,10 +121,11 @@ required-features = ["app", "test-support"]
 
 # Golden bytes pinned before the org-node type-safety refactor (LLR-mkvx2k).
 # The store is `app`; the Wire message needs no feature since S4 task T2.
+# `test-support` because `StoreContent` is `Serialize` only under it.
 [[test]]
 name = "encoding_golden"
 path = "tests/encoding_golden.rs"
-required-features = ["app"]
+required-features = ["app", "test-support"]
 
 # org-node's value types (SDD-swtd3w); uses the Display/Copy probe in
 # `test_fixtures`, hence `test-support`. Written as `tests/value_types.rs` by

@@ -71,7 +71,7 @@ impl Drop for ChopsticksHandle {
 #[derive(Debug)]
 pub enum SpawnError {
     /// `../../contracts/scripts/node_modules/.bin/chopsticks` doesn't exist.
-    /// Usually means `npm ci` hasn't been run inside `contracts/scripts/`.
+    /// Usually means `pnpm --dir contracts/scripts install` hasn't been run.
     ChopsticksBinaryMissing(PathBuf),
     /// Something else is already listening on the harness port. Usually
     /// a chopsticks orphan from a prior `cargo test` that didn't reach
@@ -88,7 +88,7 @@ impl std::fmt::Display for SpawnError {
         match self {
             Self::ChopsticksBinaryMissing(p) => write!(
                 f,
-                "chopsticks binary not found at {}; run `npm ci` in contracts/scripts/",
+                "chopsticks binary not found at {}; run `pnpm --dir contracts/scripts install`",
                 p.display()
             ),
             Self::PortAlreadyBound(p) => write!(

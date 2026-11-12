@@ -35,9 +35,8 @@
 //! verifies: REQ-9vwcwc, REQ-nygs7k
 //!
 //! Deliberately carries no `#![cfg(...)]` guard, unlike the chain-dependent
-//! targets beside it (the eight that carry a crate-level `#![cfg(...)]` guard
-//! are exactly the eight that are chain-dependent — seven need a fork,
-//! `smoldot_smoke` live Paseo): the
+//! targets beside it (nine: the eight that need a fork, each requiring the
+//! `chopstix-tests` feature, and `smoldot_smoke`, live Paseo): the
 //! `test-support` feature this target needs is declared as a
 //! `required-features` entry in `Cargo.toml`, so an
 //! explicit `--test log_ownership` with the feature off is refused by cargo

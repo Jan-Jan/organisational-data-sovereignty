@@ -15,6 +15,10 @@ dev-seed = []
 # Test-only constructors and fakes (`test_support`); never in production builds.
 # Carries org-node's test-only seams with it.
 test-support = ["org-node/test-support", "iroh/test-utils"]
+# Test-only: the targets that spawn a chopsticks fork of Paseo. They need
+# `pnpm --dir contracts/scripts install` and network, are run by hand, and are in
+# no gate and no CI lane; without this feature a plain `cargo test` skips them.
+chopstix-tests = []
 
 [dependencies]
 # Features mirror on-chain-client's pins so the subxt types unify (the reason
@@ -74,10 +78,12 @@ workspace = true
 name = "preflight"
 
 # Chopsticks-only: spawns a fork and needs contracts/scripts/node_modules, so it
-# is not in verify_commands.
+# is not in verify_commands. Run:
+#   cargo test -p org-io --features chopstix-tests --test preflight
 [[test]]
 name = "preflight"
 path = "tests/preflight.rs"
+required-features = ["chopstix-tests"]
 
 # Chopsticks-only, as `preflight`: the
 # contract test of `test_support::FakeChain`'s writer, run against the
@@ -87,7 +93,7 @@ path = "tests/preflight.rs"
 [[test]]
 name = "chain_writer_contract"
 path = "tests/chain_writer_contract.rs"
-required-features = ["test-support", "dev-seed"]
+required-features = ["test-support", "dev-seed", "chopstix-tests"]
 
 # The seed and co-signer parse never panics (LLR-4ax2m6, LLR-9fy622) and its
 # errors carry no part of the value (LLR-gc6kwy).

@@ -49,17 +49,23 @@ test_paths:
 # The first line runs the library and every test target over
 # `test_support` (`FakeChain`, `MemoryKeychain`, Loopback endpoints and the
 # in-process relay); the second runs the targets that need `dev-seed` too;
-# then a build, and clippy with both features and with none, so the library
-# and every target that needs no feature are linted as a production build
-# compiles them. The chopsticks-dependent targets `preflight` and
+# the third is the plain `cargo test -p org-io`; then a build, and clippy
+# with every feature (`test-support`, `dev-seed`, `chopstix-tests`) and with
+# none, so the library and every target that needs no feature are linted as
+# a production build compiles them. The chopsticks-dependent targets `preflight` and
 # `chain_writer_contract` are excluded: each spawns a chopsticks fork and
 # needs contracts/scripts/node_modules. `keychain_contract`'s OS-keychain run
 # is `#[ignore]`d and runs only with ODS_REAL_KEYCHAIN_TESTS=1.
+# The third line runs every target a plain `cargo test` runs: both chopsticks targets require `chopstix-tests`, so it starts no
+# fork and needs no contracts/scripts/node_modules. The first clippy line
+# turns `chopstix-tests` on so that those two targets are still compiled and
+# linted by the gate, though run by none.
 verify_commands:
   - cargo test -p org-io --features test-support --lib --test key_custody_config --test fuzz_seed_parse --test signatory_key --test absences --test chain_read_rule --test app_boundary --test open --test keychain --test keychain_contract --test store_files --test transport_handshake --test transport_networked --test endpoints --test preflight_transport --test receive_step --test acknowledgement_inbound --test send_fanout --test invitation_exchange --test expectations_met --test rng_source --test person --test persona_creation --test propose --test chain_write --test verification --test requests --test acknowledgements
   - cargo test -p org-io --features test-support,dev-seed --test key_custody_config --test signatory_key --test dev_seed_env
+  - cargo test -p org-io
   - cargo build -p org-io
-  - cargo clippy -p org-io --all-targets --features test-support,dev-seed -- -D warnings
+  - cargo clippy -p org-io --all-targets --features test-support,dev-seed,chopstix-tests -- -D warnings
   - cargo clippy -p org-io --all-targets -- -D warnings
 
 # 60, by owner ruling 2026-11-03, matching org-node and app.

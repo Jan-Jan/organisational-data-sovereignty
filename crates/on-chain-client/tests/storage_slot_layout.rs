@@ -41,8 +41,8 @@
 //! contract's real storage through this derivation is
 //! `crates/on-chain-client/tests/scenario_a_full.rs`, which asserts `get_org_state`
 //! returns the genesis state written by an actual `OrgRegistry` deployment —
-//! and it is `#![cfg(feature = "dev-rpc")]` against a live chopsticks fork, so
-//! it runs in no CI lane and in no `verify_commands` line here. That target is
+//! and it requires the `chopstix-tests` feature, against a live chopsticks
+//! fork, so it runs in no CI lane and in no `verify_commands` line here. That target is
 //! the one that would catch a layout drift; it is ungated, and the residual
 //! that leaves belongs to HAZ-v2cmtx — the hazard about the Organisation's
 //! slot being computed differently from the one the chain keeps, which is

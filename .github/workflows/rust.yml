@@ -26,8 +26,9 @@ name: rust
 on: [push, pull_request]
 
 jobs:
-  # The cargo test entries of org-members', on-chain-client's, org-node's and
-  # person's verify_commands. The quint typecheck entries are covered by the `quint`
+  # The cargo test entries of org-members', on-chain-client's, org-node's,
+  # person's, sparse-merkle-tree's and org-io's verify_commands, the plain
+  # `cargo test` and `--no-run` entries among them. The quint typecheck entries are covered by the `quint`
   # job in quint.yml.
   #
   # quint is installed because `cargo test -p org-members` includes the
@@ -68,6 +69,9 @@ jobs:
             --test storage_slot_layout \
             --test best_lane_reorg_rule \
             --test type_widths
+      # on-chain-client's plain `cargo test` verify_commands entry: every
+      # chopsticks target requires `chopstix-tests`, so no fork is started.
+      - run: cargo test --manifest-path crates/on-chain-client/Cargo.toml
       # org-node's verify_commands entry. The chopsticks-dependent targets are
       # excluded there too, and the feature flags are required by the targets'
       # `required-features`. Brought back to verbatim 2026-10-14 (S4 task T18):
@@ -87,12 +91,16 @@ jobs:
             --test epoch_store --test person_store --test proposals \
             --test verification --test organisation_request --test own_removal \
             --test fuzz_check_received
+      # org-node's `--features app --no-run` verify_commands entry: every
+      # target builds under `app` without `test-support`, as a plain
+      # `cargo test` at the repository root builds it.
+      - run: cargo test -p org-node --features app --no-run
       # person's verify_commands test entry: every target, none excluded.
       - run: cargo test -p person
       # sparse-merkle-tree's verify_commands test entries.
       - run: cargo test -p sparse-merkle-tree
       - run: cargo test -p sparse-merkle-tree --no-default-features
-      # org-io's two verify_commands test entries (since 2026-10-08). The
+      # org-io's first two verify_commands test entries (since 2026-10-08). The
       # chopsticks-dependent `preflight` target is excluded there too; the
       # second line is the dev-seed build, whose `dev_seed_env` target is its
       # own binary because it sets the environment. Brought back to verbatim
@@ -113,6 +121,9 @@ jobs:
       - run: |
           cargo test -p org-io --features test-support,dev-seed \
             --test key_custody_config --test signatory_key --test dev_seed_env
+      # org-io's plain `cargo test` verify_commands entry: both chopsticks
+      # targets require `chopstix-tests`, so no fork is started.
+      - run: cargo test -p org-io
 
   # The declared MSRV, measured (docs/adr/2026-10-03-quint-conformance-gate.md,
   # decision 6): quint-connect is edition 2024, so the test build needs 1.85.
@@ -184,7 +195,7 @@ jobs:
       - run: cargo clippy -p sparse-merkle-tree --all-targets -- -D warnings
       # org-io's verify_commands clippy entry, verbatim (since 2026-10-08):
       # --all-targets under both features, as person's.
-      - run: cargo clippy -p org-io --all-targets --features test-support,dev-seed -- -D warnings
+      - run: cargo clippy -p org-io --all-targets --features test-support,dev-seed,chopstix-tests -- -D warnings
       # org-io's no-feature clippy entry and org-node's all-targets entry,
       # verbatim (since 2026-10-14, S4 task T18).
       - run: cargo clippy -p org-io --all-targets -- -D warnings

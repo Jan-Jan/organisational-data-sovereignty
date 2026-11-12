@@ -12,9 +12,9 @@
 //! Where no fork can be had (chopsticks not installed, port 8000 taken, `forge` missing or the
 //! deploy failing) each test says so and skips, rather than failing.
 //!
-//! Needs `contracts/scripts/node_modules` (`npm ci` there), Foundry's `forge`, and port 8000
-//! free. Run:
-//!   pkill -f "chopsticks.*--config"; cargo test -p org-io --features test-support,dev-seed \
+//! Needs `contracts/scripts/node_modules` (`pnpm --dir contracts/scripts install`), Foundry's
+//! `forge`, and port 8000 free. Run:
+//!   pkill -f "chopsticks.*--config"; cargo test -p org-io --features test-support,dev-seed,chopstix-tests \
 //!     --test chain_writer_contract -- --test-threads=1 --nocapture
 
 use std::process::Command;
