@@ -295,7 +295,7 @@ endpoints of Personas created since.
 `send::send_committed` (then the fan-out item), and with it
 `TransportError::NoLoopbackAddress`: a Loopback send without an address is
 refused per recipient as `SendError::NoLoopbackAddress`, still before any
-endpoint is bound (the Loopback address check, now LLR-34tfm8).
+endpoint is bound (the Loopback address check, now LLR-2tp7bk).
 
 *Note 2026-10-13 (S4, task T11):* `next_received` (`crates/org-io/src/receiver.rs`)
 replaces `receive_and_verify`. The channel carries `Inbound { sender, body

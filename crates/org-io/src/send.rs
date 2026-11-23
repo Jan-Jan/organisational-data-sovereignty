@@ -2,7 +2,7 @@
 //! sending Persona's endpoint, on a new connection, to a DevicePublicKey, at the
 //! endpoint addresses org-node keeps for that key; one recipient after
 //! another, each reported with the verdict byte it wrote back
-//! (LLR-pxqdy4, LLR-34tfm8, LLR-hx5c2y, LLR-fwz3tb). A send writes no store
+//! (LLR-pxqdy4, LLR-2tp7bk, LLR-hx5c2y, LLR-fwz3tb). A send writes no store
 //! and reads no chain.
 
 use std::net::SocketAddr;
@@ -132,7 +132,7 @@ pub(crate) fn kept_for(service: &OrgService, device_key: &DevicePublicKey, peer:
     service.addresses_for(device_key, peer).ok().flatten().map(|addresses| addresses.as_slice().to_vec())
 }
 
-/// The sockets to dial `recipient` at (LLR-34tfm8): in Networked mode
+/// The sockets to dial `recipient` at (LLR-2tp7bk): in Networked mode
 /// every parsed kept address, as a hint (none is fine: discovery finds the
 /// key); in Loopback mode those whose identity is the recipient's key,
 /// refusing with `NoLoopbackAddress` when none is kept and
@@ -187,7 +187,7 @@ pub(crate) async fn send_one(endpoint: &OrgEndpoint, recipient: &DevicePublicKey
 }
 
 /// Send every message of `outgoing`, in order, from `sender`'s endpoint
-/// (LLR-hx5c2y), each recipient judged on its own addresses (LLR-34tfm8);
+/// (LLR-hx5c2y), each recipient judged on its own addresses (LLR-2tp7bk);
 /// every recipient is attempted whatever happened to the others. When the
 /// endpoint cannot be had, every recipient reports `SenderEndpoint`.
 pub(crate) async fn send_all(endpoints: &Endpoints, sender: DevicePublicKey, outgoing: Vec<Outgoing>) -> SendReport {

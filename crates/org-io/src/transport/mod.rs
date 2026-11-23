@@ -92,14 +92,29 @@ pub const VERDICT_TIME_LIMIT: std::time::Duration = std::time::Duration::from_se
 /// The endpoint identity and socket a kept address names — the form
 /// `OrgEndpoint::addresses` emits (LLR-v9dkrv): the endpoint identity as 64
 /// lower-case hex, `@`, the socket address — or `None` for text of any
-/// other form (the disk and the wire are edges: parsed).
+/// other form (the disk and the wire are edges: parsed), and for a socket
+/// whose IP, read in its canonical form (`::ffff:a.b.c.d` as `a.b.c.d`),
+/// names no single host: unspecified, broadcast or multicast
+/// (LLR-2tp7bk). A dial to an unspecified one fails, and leaves the dialling
+/// iroh endpoint unable to dial the next recipient by its key.
 pub(crate) fn parse_kept_address(text: &str) -> Option<([u8; 32], std::net::SocketAddr)> {
     let (id, socket) = text.split_once('@')?;
     if id.len() != 64 || !id.chars().all(|character| character.is_ascii_digit() || ('a'..='f').contains(&character)) {
         return None;
     }
     let id: [u8; 32] = hex::decode(id).ok()?.try_into().ok()?;
-    Some((id, socket.parse().ok()?))
+    let socket: std::net::SocketAddr = socket.parse().ok()?;
+    if !names_one_host(socket.ip().to_canonical()) {
+        return None;
+    }
+    Some((id, socket))
+}
+
+/// Whether `ip` (canonical) is one host's address: not unspecified, not
+/// broadcast, not multicast.
+fn names_one_host(ip: std::net::IpAddr) -> bool {
+    let broadcast = matches!(ip, std::net::IpAddr::V4(v4) if v4.is_broadcast());
+    !(ip.is_unspecified() || ip.is_multicast() || broadcast)
 }
 
 /// Why the transport did not bind, connect, accept or read. Public data

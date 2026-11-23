@@ -372,7 +372,7 @@ P2: the address is copy-pasted between people, and nothing upstream
 detects the alteration (org-node's open problem report on loopback sends to
 an unchecked address, opened 2026-09-09, which moves here). *(Moved and
 resolved 2026-10-13, S4 task T12, by the address check now stated by
-LLR-34tfm8; reproduced by
+LLR-2tp7bk; reproduced by
 `loopback_to_an_address_of_no_recipient_is_refused_and_sends_nothing`.)*
 
 **RC-d6f25u**: org-io sends in Loopback mode only to an address whose

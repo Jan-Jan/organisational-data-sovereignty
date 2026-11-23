@@ -162,7 +162,7 @@ impl OrgIo {
                 Step::Failed(error) => return Err(error),
                 Step::Answer { org_id, outgoing } => {
                     // From the Persona the request reached, on a new connection, at the
-                    // addresses kept for the requester (LLR-898z24, LLR-34tfm8); never on the
+                    // addresses kept for the requester (LLR-898z24, LLR-2tp7bk); never on the
                     // inbound connection or to its source address.
                     let requester = outgoing.recipient;
                     let mut report = send_all(&self.local.endpoints, receiver, vec![outgoing]).await;

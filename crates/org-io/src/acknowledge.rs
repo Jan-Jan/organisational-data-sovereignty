@@ -473,7 +473,7 @@ async fn accepted(context: &Context, device_key: &DevicePublicKey, recipient: De
 }
 
 /// The dials one delivery to `recipient` makes, each a socket list
-/// (LLR-u2j6u8): each socket the send path's address rule (LLR-34tfm8)
+/// (LLR-u2j6u8): each socket the send path's address rule (LLR-2tp7bk)
 /// gives, alone and in order. With none, Networked mode dials once by the
 /// key alone, an empty socket list, as `send_all` does: discovery finds
 /// the key (REQ-kn8zg6). Loopback mode has no discovery, so it dials

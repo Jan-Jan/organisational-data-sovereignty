@@ -213,7 +213,7 @@ impl OrgEndpoint {
 
     /// The addresses this endpoint holds in `mode`, as the kept address text
     /// `"<64 lower-case hex endpoint id>@<socket>"` (LLR-v9dkrv, LLR-4k43dm,
-    /// LLR-34tfm8): its bound loopback sockets in Loopback mode; in Networked
+    /// LLR-2tp7bk): its bound loopback sockets in Loopback mode; in Networked
     /// mode the direct addresses iroh currently knows for it, possibly none.
     /// The endpoint id is the DevicePublicKey. No relay URL and no iroh type
     /// leaves the transport.

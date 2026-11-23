@@ -371,7 +371,7 @@ satisfies: REQ-ek652a
 *Amended in place 2026-10-22 (unmerged draft; plan detail pass —
 dispatcher decision):* the text form of every endpoint address org-io gives
 org-node, in an Invite or a request, and reads back from what org-node keeps
-(LLR-34tfm8, LLR-qa4nrt), is `<64 lower-case hex endpoint id>@<socket>`.
+(LLR-2tp7bk, LLR-qa4nrt), is `<64 lower-case hex endpoint id>@<socket>`.
 org-node holds it as opaque text within its 256-byte entry bound and reads
 nothing of it.
 
@@ -1217,7 +1217,7 @@ SendRefused>` (no address parameter) takes, under the node's lock,
 org-node's messages for the adopted current epoch (every recipient Device
 and its encoded message, REQ-ttv8k7) and, for each recipient, the endpoint
 addresses org-node keeps for its Device key (REQ-ky5tyd), releases the
-lock, and sends each in org-node's order to those addresses (LLR-34tfm8),
+lock, and sends each in org-node's order to those addresses (LLR-2tp7bk),
 attempting every recipient whatever happened to the others;
 `SendReport::per_device` holds each Device's outcome; the call writes no
 store, starts no later send of its own, and repeated calls send the same
@@ -1229,34 +1229,6 @@ of 2026-10-16, dispatcher's resolution C8):* the `peer_addr` parameter is
 gone; the addresses are those kept per Device key. Send once: org-io
 schedules no retry and the app asks once per adopted epoch this node wrote;
 a Device the send missed pulls the epoch (REQ-z73ctw).
-
-**LLR-34tfm8**: in Networked mode each send dials the recipient by the
-endpoint id equal to its Device key, with the addresses kept for that key
-(or the Invite's, LLR-qa4nrt) as a hint ahead of discovery, and with none
-when none is kept; in Loopback mode a send to a recipient refuses, sending
-nothing to it, with `SendError::NoLoopbackAddress` when no address is kept
-for that recipient and `SendError::AddressNotARecipient` when no kept
-address's endpoint identity is the recipient's Device key, and otherwise
-dials only the kept addresses whose identity is that key; each recipient is
-judged on its own addresses, so one recipient's refusal leaves the others
-attempted. A kept address is read in the text form of LLR-v9dkrv, its
-endpoint identity the 64 hex characters before `@` and its socket the rest;
-an entry of any other form names no identity and is not dialled.
-satisfies: REQ-8trkps
-
-*Amended in place 2026-10-22 (unmerged draft; plan detail pass —
-dispatcher decision):* the identity a kept address names is read from its
-text form, `<64 lower-case hex endpoint id>@<socket>`.
-
-*Amended in place 2026-10-20 (unmerged draft; owner answer A2 of
-2026-10-16):* the address is no longer one the caller passes for one
-addressed recipient, with every other recipient reported
-`NotAttemptedInLoopback`; each recipient has the addresses kept for its key,
-and the identity check applies to each. The variant `NotAttemptedInLoopback`
-is removed. This item now also replaces S4's Loopback dial at the
-caller's full address and its refusal when the caller passes
-none, whose `send_committed` and caller-passed address are
-gone.
 
 **LLR-hx5c2y**: every send is made from the endpoint of the Persona whose
 store the message came from (for `send_organisation` and
@@ -1359,7 +1331,7 @@ if it is not bound, has org-node build an organisation request carrying the
 addresses that endpoint holds in the current mode (as LLR-adgk9z), and
 sends it — for a Persona holding a current record, to each Device that
 record lists other than this node's own, at the addresses org-node keeps
-for each key (LLR-34tfm8); for a Persona holding a provisional Member, to
+for each key (LLR-2tp7bk); for a Persona holding a provisional Member, to
 the one Device its Invite names as issuer, at the Invite's addresses for it
 (LLR-qa4nrt) — one after another whatever happened to the others, reports
 each Device's outcome, writes nothing, and sends again on every call; a
@@ -1510,7 +1482,7 @@ store change keeping the addresses the request carried for that key), the
 receive step writes that store change, then the verdict `0x00` on the
 inbound stream, releases the node's lock and sends the answer through the
 send path on a new connection to that Device key, at the addresses org-node
-keeps for it (LLR-34tfm8: in Loopback mode only an address whose identity
+keeps for it (LLR-2tp7bk: in Loopback mode only an address whose identity
 is that key), and reports `OrganisationRequestAnswered` with the send's
 outcome; the answer is never written on the inbound
 connection and no address is taken from the inbound connection's source. A
@@ -2041,7 +2013,7 @@ addressing.
 module returns or takes an iroh type. The rest of org-io reaches the
 transport through org-io's and org-node's own types: it dials a recipient by
 its `DevicePublicKey` with the endpoint addresses org-node keeps for that
-key, or the Invite's (org-node's `EndpointAddresses`; LLR-34tfm8,
+key, or the Invite's (org-node's `EndpointAddresses`; LLR-2tp7bk,
 LLR-qa4nrt), binds an endpoint by org-io's own bind plan (relayed, or direct
 only, LLR-spckm6), and asks an endpoint for the addresses it holds in the
 current mode as strings (LLR-v9dkrv) and whether it has a relay home, not

@@ -10,7 +10,7 @@
 //! recipient is dialled at the addresses kept for its key: in Loopback mode
 //! only those whose endpoint identity is its key, refused per recipient when
 //! none is kept or none is its own; in Networked mode the key, with its kept
-//! addresses as a hint (LLR-34tfm8). Every send is from the sending
+//! addresses as a hint (LLR-2tp7bk). Every send is from the sending
 //! Persona's endpoint (LLR-hx5c2y), an Organisation no Persona holds is not
 //! held (LLR-zrgj8z), and the verdict byte the recipient writes is mapped to
 //! the delivery (LLR-fwz3tb).
@@ -29,7 +29,7 @@ use std::time::Duration;
 use iroh::address_lookup::MemoryLookup;
 use org_io::send::{Delivery, SendError, SendRefused};
 use org_io::test_support::{FakeChain, Refusal};
-use org_io::transport::{BindPlan, OrgEndpoint, Verdict};
+use org_io::transport::{BindPlan, OrgEndpoint, TransportMode, Verdict};
 use org_io::{HeldTarget, ReceiveError, Received, Verified, WriteReport};
 use org_node::{Epoch, OrgId};
 
@@ -89,7 +89,7 @@ async fn send_organisation_sends_org_nodes_messages_in_order_to_every_recipient_
 // an address whose identity is another Device (Carol's), and a proper one
 // (Dave's, a real receiving handle). The first two are refused with nothing
 // sent to them; Dave is still sent to, and his receive step keeps the epoch.
-// verifies: LLR-34tfm8
+// verifies: LLR-2tp7bk
 #[tokio::test(flavor = "multi_thread")]
 async fn loopback_refuses_no_address_and_no_address_of_the_recipient_per_recipient() {
     let (_guard, _keychain) = fresh_keychain();
@@ -118,7 +118,7 @@ async fn loopback_refuses_no_address_and_no_address_of_the_recipient_per_recipie
 // hex, and one whose identity is too short. Neither names an identity, so
 // neither is dialled: Bob is refused `AddressNotARecipient` and his
 // receiving handle is sent nothing.
-// verifies: LLR-34tfm8
+// verifies: LLR-2tp7bk
 #[tokio::test(flavor = "multi_thread")]
 async fn loopback_dials_no_kept_address_outside_the_lower_case_hex_form() {
     let (_guard, _keychain) = fresh_keychain();
@@ -135,6 +135,31 @@ async fn loopback_dials_no_kept_address_outside_the_lower_case_hex_form() {
     let outcome = &report.per_device.iter().find(|(recipient, _)| *recipient == bob.device_key).unwrap().1;
     assert!(matches!(outcome, Delivery::NotDelivered { reason: SendError::AddressNotARecipient }), "{report:?}");
     assert!(journey::reports_nothing(&bob.io, QUIET).await, "no malformed address was dialled");
+}
+
+// Abnormal, Loopback: the only addresses kept for Bob carry his own identity
+// at sockets that name no single host (unspecified, IPv4-mapped unspecified,
+// broadcast, multicast). None is dialled: Bob is refused
+// `AddressNotARecipient` and his receiving handle is sent nothing.
+// verifies: LLR-2tp7bk
+#[tokio::test(flavor = "multi_thread")]
+async fn loopback_dials_no_kept_address_naming_no_host() {
+    let (_guard, _keychain) = fresh_keychain();
+    let tag = "send-address-no-host";
+    let admin = journey::admin(tag).await;
+    let bob = journey::invited(&admin, tag, "b", "bob").await;
+    bob.io.start_receiving().await.unwrap();
+    let bob_endpoint = endpoint_of(&bob.io).await;
+    let no_host: Vec<String> = ["0.0.0.0", "[::]", "[::ffff:0.0.0.0]", "255.255.255.255", "224.0.0.1", "[ff02::1]"]
+        .into_iter()
+        .flat_map(|ip| own_identity_at(&bob_endpoint, ip))
+        .collect();
+    journey::admit_keeping(&admin, &bob, no_host).await;
+
+    let report = admin.io.send_organisation(admin.org).await.unwrap();
+    let outcome = &report.per_device.iter().find(|(recipient, _)| *recipient == bob.device_key).unwrap().1;
+    assert!(matches!(outcome, Delivery::NotDelivered { reason: SendError::AddressNotARecipient }), "{report:?}");
+    assert!(journey::reports_nothing(&bob.io, QUIET).await, "no address naming no host was dialled");
 }
 
 /// `journey::admit_keeping` for an Admin bound for the in-process relay, whose
@@ -167,14 +192,47 @@ async fn admit_keeping_networked(admin: &journey::Admin, joining: &journey::Join
 // dialled by its Device key and reached; one whose kept addresses are its
 // own is reached with them as the hint. Each recipient's receive step keeps
 // the epoch from the Admin's Device.
-// verifies: LLR-34tfm8
+// verifies: LLR-2tp7bk
 #[tokio::test(flavor = "multi_thread")]
 async fn networked_dials_the_recipients_key_with_its_kept_addresses_as_a_hint() {
     let (_guard, _keychain) = fresh_keychain();
+    networked_fan_out("send-networked", |endpoint| endpoint.addresses(TransportMode::Networked)).await;
+}
+
+// Abnormal, Networked, one send per form: Carol's kept addresses are her own
+// identity at sockets that name no single host — her endpoint's wildcard
+// bind sockets (`0.0.0.0`, `::`), the IPv4-mapped unspecified address, the
+// IPv4 broadcast address, and IPv4 and IPv6 multicast addresses. None is
+// dialled: Carol is dialled by her Device key alone and reached, and Bob,
+// dialled by key in the same call, is reached too. org-node orders the
+// recipients by their random keys, so Bob is dialled after Carol's hint in
+// only some of the five sends; a hint dialled breaks Carol's own delivery in
+// every send, so the test fails either way.
+// verifies: LLR-2tp7bk, LLR-pxqdy4
+#[tokio::test(flavor = "multi_thread")]
+async fn networked_a_kept_address_naming_no_host_is_not_dialled_and_fails_no_recipient() {
+    let (_guard, _keychain) = fresh_keychain();
+    networked_fan_out("send-networked-wildcard", journey::kept_addresses).await;
+    for (form, ip) in [("mapped", "[::ffff:0.0.0.0]"), ("broadcast", "255.255.255.255"), ("multicast4", "224.0.0.1"), ("multicast6", "[ff02::1]")] {
+        networked_fan_out(&format!("send-networked-{form}"), |endpoint| own_identity_at(endpoint, ip)).await;
+    }
+}
+
+/// `endpoint`'s identity at `ip` with each of its bound ports, in the kept
+/// text form.
+fn own_identity_at(endpoint: &OrgEndpoint, ip: &str) -> Vec<String> {
+    let id = hex::encode(endpoint.device_key().as_bytes());
+    endpoint.bound_sockets().iter().map(|socket| format!("{id}@{ip}:{}", socket.port())).collect()
+}
+
+/// Over the in-process relay and address lookup: the Admin admits Bob, who
+/// keeps no address, and Carol, who keeps `carol_kept(her endpoint)`; one
+/// `send_organisation` reports both Delivered, and each receive step keeps
+/// the epoch from the Admin's Device.
+async fn networked_fan_out(tag: &str, carol_kept: impl Fn(&OrgEndpoint) -> Vec<String>) {
     let (relay_map, _relay_url, _relay_server) = iroh::test_utils::run_relay_server().await.unwrap();
     let lookup = MemoryLookup::new();
     let plan = BindPlan::Relay(relay_map, lookup.clone());
-    let tag = "send-networked";
     let chain = FakeChain::new();
     let io = handle(tag, "a", &chain).with_bind_plan_for_test(plan.clone());
     let device_key = journey::propose_founding(&io, "alice").await;
@@ -191,7 +249,7 @@ async fn networked_dials_the_recipients_key_with_its_kept_addresses_as_a_hint() 
     admit_keeping_networked(&admin, &bob, &bob_endpoint, vec![]).await;
     let carol = relayed(journey::invited(&admin, tag, "c", "carol").await, &plan, &lookup).await;
     let carol_endpoint = endpoint_of(&carol.io).await;
-    admit_keeping_networked(&admin, &carol, &carol_endpoint, journey::kept_addresses(&carol_endpoint)).await;
+    admit_keeping_networked(&admin, &carol, &carol_endpoint, carol_kept(&carol_endpoint)).await;
 
     let send = tokio::time::timeout(Duration::from_secs(120), admin.io.send_organisation(admin.org));
     let ((report, at_carol), at_bob) = journey::while_receiving(&bob.io, journey::while_receiving(&carol.io, send)).await;
@@ -201,7 +259,7 @@ async fn networked_dials_the_recipients_key_with_its_kept_addresses_as_a_hint() 
         matches!(reported, [Ok(Received::ProvisionalOrganisationReceived { from, .. })] if *from == admin.device_key)
     };
     assert!(from_admin(&at_bob), "no address kept: dialled by key: {at_bob:?}");
-    assert!(from_admin(&at_carol), "kept addresses as the hint: {at_carol:?}");
+    assert!(from_admin(&at_carol), "Carol, with her kept addresses: {at_carol:?}");
 }
 
 /// `joining`'s handle bound for `plan` and receiving, its endpoint online
@@ -380,7 +438,7 @@ async fn a_failed_send_writes_no_store_and_leaves_the_record() {
 // Each recipient is dialled at the addresses its own key has kept, and only
 // it receives there: each real receiving handle keeps the one message sent
 // to its Device and is sent nothing else.
-// verifies: LLR-34tfm8
+// verifies: LLR-2tp7bk
 #[tokio::test(flavor = "multi_thread")]
 async fn each_recipient_is_dialled_at_the_addresses_kept_for_its_key() {
     let (_guard, _keychain) = fresh_keychain();
